@@ -19,10 +19,10 @@ ICESEE simplifies the implementation of advanced data assimilation workflows—s
 
 To get started with ICESEE:
 
-- [Installation Guide](https://github.com/KYANJO/ICESEE/wiki/1.-Installation)  
-- [Using ICESEE](https:https://github.com/KYANJO/ICESEE/wiki/2.-Usage)  
-- [Build ICESEE as a package](https://github.com/KYANJO/ICESEE/wiki/3.-Build-ICESEE-as-a-package)  
-- [Developmental notes](https://github.com/KYANJO/ICESEE/wiki/4.-Development-Notes)
+- [Installation Guide](https://github.com/ICESEE-project/ICESEE/wiki/1.-Installation)  
+- [Using ICESEE](https:https://github.com/ICESEE-project/ICESEE/wiki/2.-Usage)  
+- [Build ICESEE as a package](https://github.com/ICESEE-project/ICESEE/wiki/3.-Build-ICESEE-as-a-package)  
+- [Developmental notes](https://github.com/ICESEE-project/ICESEE/wiki/4.-Development-Notes)
 
 ---
 
@@ -51,7 +51,7 @@ Explore the Wiki to find:
 - Integration with **AWS** for scalable cloud computing.
 - Incorporation into the **GHUB online ice sheet platform** with enhanced features.
 
-For questions or contributions, please open an issue or pull request on the [GitHub repository](https://github.com/your-repo/ICESEE) or contact me at bkyanjo3@gatech.edu
+For questions or contributions, please open an issue or pull request on the [GitHub repository](https://github.com/ICESEE-project/ICESEE) or contact me at bkyanjo3@gatech.edu
 
 
 
