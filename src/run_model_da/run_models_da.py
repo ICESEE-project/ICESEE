@@ -468,6 +468,7 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
             # print(f"Dim list: {dim_list}")
             if rank_world == 0:
                 print("Generating true state ...")
+                model_kwargs.update({'ens_id': rank_world})
                 # dim_list = np.tile(params["nd"],size_world) # all processors have the same dimension
                 model_kwargs.update({"global_shape": params["nd"], "dim_list": dim_list})
                 statevec_true = np.zeros([params["nd"], model_kwargs.get("nt",params["nt"]) + 1])
@@ -751,7 +752,8 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
         if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
             if rank_world == 0:
                 print("Initializing the ensemble ...")
-                
+                model_kwargs.update({'ens_id': rank_world})
+
                 model_kwargs.update({"statevec_ens":np.zeros([params["nd"], params["Nens"]])})
                 
                 # get the ensemble matrix   
@@ -1247,7 +1249,7 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
                     ens_list = []
                     for round_id in range(rounds):
                         ensemble_id = color + round_id * subcomm_size  # Global ensemble index
-                        model_kwargs.update({'color': ensemble_id})
+                        model_kwargs.update({'ens_id': ensemble_id})
 
                         if ensemble_id < Nens:  # Only process valid ensembles
                             # print(f"Rank {rank_world} processing ensemble {ensemble_id} in round {round_id + 1}/{rounds}")
@@ -1364,6 +1366,8 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
                     # Ensure all ranks in subcomm are in sync 
                     subcomm.Barrier()
                     ens = color # each subcomm has a unique color
+                    model_kwargs.update({'ens_id': ens})
+                    
                     # ---- read from file ----
                     input_file = f"{_modelrun_datasets}/icesee_ensemble_data.h5"
                     with h5py.File(input_file, "r", driver="mpio", comm=subcomm) as f:

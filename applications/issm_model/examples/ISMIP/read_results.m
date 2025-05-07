@@ -19,13 +19,13 @@ plotmodel(md, 'data', md.results.TransientSolution.Vel, 'layer', 5, 'figure', 5)
 
 %% ICESEE results
 % Get the Python version
-pyversion = py.sys.version;
-
-% Add the configuration directory to the Python path
-py.sys.path().append('../../config');
-
-% Import the Python module _utility_imports
-utility_imports = py.importlib.import_module('_utility_imports');
+% pyversion = py.sys.version;
+% 
+% % Add the configuration directory to the Python path
+% py.sys.path().append('../../config');
+% 
+% % Import the Python module _utility_imports
+% utility_imports = py.importlib.import_module('_utility_imports');
 
 % Load the essential data
 results_dir = 'results';

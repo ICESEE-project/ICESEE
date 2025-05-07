@@ -68,6 +68,7 @@ class ParallelManager:
         self.COMM_couple = None  # MPI communicator for coupling filter and model
         self.rank_couple = None  # Rank in COMM_couple
         self.size_couple = None  # Number of PEs in COMM_couple
+        self.ens_id      = None  # Index of ensemble member (1,...,Nens)
 
         # ICESS variables
         self.n_modeltasks = None  # Number of parallel model tasks
@@ -149,8 +150,7 @@ class ParallelManager:
             try:
                 MPI.Init()
             except Exception as e:
-                print(f"Error initializing MPI: {e}")
-                return None
+                raise RuntimeError(f"[ICESEE] MPI failed to initialize: {e}")
 
         self.COMM_WORLD = MPI.COMM_WORLD
         self.size_world = self.COMM_WORLD.Get_size()
@@ -160,7 +160,8 @@ class ParallelManager:
 
         if params.get("sequential_run", False):
             if self.rank_world == 0: print("[ICESEE] Running sequential mode")
-            return self.rank_world, self.size_world, self.COMM_WORLD
+            self.ens_id = None
+            return self.rank_world, self.size_world, self.COMM_WORLD, self.ens_id
         
         if params.get("default_run", False):
             if self.rank_world == 0: print("[ICESEE] Running default parallel mode")
@@ -169,24 +170,31 @@ class ParallelManager:
                 subcomm_size = min(self.size_world, Nens)  # Use at most `Nens` groups
                 self.color = self.rank_world % subcomm_size  # Group ranks into `subcomm_size` subcommunicators
                 self.key = self.rank_world // subcomm_size  # Ordering within each subcommunicator
+                
+                #  here ens_id = number
+                self.ens_id = self.color # only needed for initializations as we will only have color ranks available either way
             else:
                 # More processes than ensembles, map processes to ensembles efficiently
                 self.color = self.rank_world % Nens  
                 self.key = self.rank_world // Nens
+                self.ens_id = self.color
             
             self.comm_sub = self.COMM_WORLD.Split(self.color, self.key)
             self.rank_sub = self.comm_sub.Get_rank()
             self.size_sub = self.comm_sub.Get_size()
-            return self.rank_sub, self.size_sub, self.comm_sub
+
+            return self.rank_sub, self.size_sub, self.comm_sub, self.ens_id
         
         if params.get("even_distribution", False):
             if self.rank_world == 0: print("[ICESEE] Running even distribution mode")
             # split the global communicator into size subcommunicators
-            self.comm_sub = self.COMM_WORLD.Split(self.rank_world % self.size_world)
+            self.color = self.rank_world % self.size_world
+            self.comm_sub = self.COMM_WORLD.Split(self.color)
             self.rank_sub = self.comm_sub.Get_rank()
             self.size_sub = self.comm_sub.Get_size()
-            
-            return self.rank_sub, self.size_sub, self.comm_sub
+            self.ens_id = self.color
+
+            return self.rank_sub, self.size_sub, self.comm_sub, self.ens_id
         
     def icesee_mpi_ens_distribution(self, params):
         """

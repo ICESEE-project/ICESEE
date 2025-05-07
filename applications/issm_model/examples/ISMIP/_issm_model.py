@@ -30,6 +30,7 @@ def initialize_model(physical_params, modeling_params, comm):
 
     icesee_rank = comm.Get_rank()
     icesee_size = comm.Get_size()
+    ens_id      = modeling_params.get('ens_id')
 
     # read the model kwargs from the file
     server      = modeling_params.get('server')
@@ -40,7 +41,17 @@ def initialize_model(physical_params, modeling_params, comm):
     
     # if not result:
     #     sys.exit(1)
-    
+    # -- we would have broadcasted data to the remaining  ranks but now if nprocs > Nens, we need to duplicate data by copying data from ens_id_0000 to ens_id_0001, ens_id_0002, ... ens_id_000Nens
+    if icesee_rank == 0:
+        data_dir = './Models/ens_id_0000'
+        Nens = modeling_params.get('Nens')
+        for ens in range(1, Nens):
+            new_data_dir = f'./Models/ens_id_000{ens}'
+            # if os.path.exists(new_data_dir):
+            #     shutil.rmtree(new_data_dir)
+            shutil.copytree(data_dir, new_data_dir, dirs_exist_ok=True)
+            print(f"[DEBUG] Copied {data_dir} to {new_data_dir}")
+
     # fetch model size from output file
     try: 
         output_filename = f'{icesee_path}/{data_path}/ensemble_init_{icesee_rank}.h5'
@@ -72,12 +83,14 @@ def ISSM_model(**kwargs):
     tinitial = kwargs.get('tinitial')
     tfinal = kwargs.get('tfinal')
     # rank = kwargs.get('rank')
-    color = kwargs.get('color')
+    ens_id = kwargs.get('ens_id')
     comm = kwargs.get('comm')
 
     # get rank
     rank   = comm.Get_rank()
     nprocs = comm.Get_size()
+
+    print(f"[DEBUG] ISSM model {rank} of {nprocs}")
 
     # --- copy run_model.m to the current directory
     shutil.copyfile(os.path.join(os.path.dirname(__file__), 'run_model.m'), 'run_model.m')
@@ -107,7 +120,7 @@ def ISSM_model(**kwargs):
 
         # -------> 
         cmd = (
-            f"run('issm_env'); run_model('{filename}', {rank}, {nprocs}, {k}, {dt}, {tinitial}, {tfinal}); "
+            f"run('issm_env'); run_model('{filename}', {ens_id}, {rank}, {nprocs}, {k}, {dt}, {tinitial}, {tfinal}); "
         )
         if not server.send_command(cmd):
             print(f"[DEBUG] Error sending command: {cmd}")
@@ -145,13 +158,14 @@ def run_model(ensemble, **kwargs):
     # --- filename for data saving
     fname = 'enkf_state.mat'
     kwargs.update({'fname': fname})
+    ens_id = kwargs.get('ens_id')
 
     # try: 
     if True:
         # Generate output filename based on rank
         icesee_path    = kwargs.get('icesee_path')
         data_path      = kwargs.get('data_path')
-        input_filename = f'{icesee_path}/{data_path}/ensemble_output_{rank}.h5'
+        input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
 
         #  write the ensemble to the h5 file
         k = kwargs.get('k')
@@ -187,7 +201,7 @@ def run_model(ensemble, **kwargs):
         #  --- read the output from the h5 file ISSM model ---
         # try:
         if True:
-            output_filename = f'{icesee_path}/{data_path}/ensemble_output_{rank}.h5'
+            output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
             with h5py.File(output_filename, 'r',driver='mpio',comm=comm) as f:
                 return {
                 'Vx': f['Vx'][0],

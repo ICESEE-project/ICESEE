@@ -14,7 +14,7 @@ import numpy as np
 import scipy.io as sio
 
 # --- ICESEE imports ---
-from ICESEE.config._utility_imports import *
+# from ICESEE.config._utility_imports import *
 from ICESEE.config._utility_imports import params, kwargs, modeling_params, enkf_params, physical_params,UtilsFunctions
 from ICESEE.src.run_model_da.run_models_da import icesee_model_data_assimilation
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
@@ -25,7 +25,9 @@ from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import
 from ICESEE.applications.issm_model.issm_utils.matlab2python.server_utils import run_icesee_with_server, setup_server_shutdown
 
 # --- Initialize MPI ---
-icesee_rank, icesee_size, icesee_comm = ParallelManager().icesee_mpi_init(params)
+icesee_rank, icesee_size, icesee_comm, ens_id = ParallelManager().icesee_mpi_init(params)
+
+# print(f"[DEBUG] MPI rank: {icesee_rank}, size: {icesee_size} ens_id: {ens_id}")
 
 # --- get current working directory ---
 icesee_cwd = os.getcwd()
@@ -60,6 +62,7 @@ model_kwargs = {
                 'issm_examples_dir': issm_examples_dir,
                 'rank': icesee_rank,
                 'nprocs': icesee_size,
+                'ens_id': ens_id,
 }
 
 # observation schedule
@@ -80,15 +83,15 @@ shutil.copy(os.path.join(icesee_cwd, 'model_kwargs.mat'), issm_examples_dir)
 os.chdir(issm_examples_dir)
 
 # --- intialize the matlab server ---
-server = MatlabServer(verbose=1)
+server = MatlabServer(color=ens_id, verbose=1)
 server.launch() # start the server
 
 # Set up global shutdown handler
 setup_server_shutdown(server, icesee_comm, verbose=False)
 
 # --- intialize ISSM model ---
-modeling_params.update({'server': server, 
-                        'icesee_path': icesee_cwd,
+modeling_params.update({'server': server, 'Nens': params.get('Nens'),
+                        'icesee_path': icesee_cwd, 'ens_id': ens_id,
                         'data_path': kwargs.get('data_path')})
 # if icesee_rank == 0:
 #     variable_size = initialize_model(physical_params, modeling_params, icesee_comm)
@@ -99,7 +102,15 @@ modeling_params.update({'server': server,
 # icesee_comm.Barrier()
 # variable_size = icesee_comm.bcast(variable_size, root=0)
 
-variable_size = initialize_model(physical_params, modeling_params, icesee_comm)
+if icesee_rank == 0:
+    variable_size = initialize_model(physical_params, modeling_params, icesee_comm)
+else:
+    variable_size = 0.0
+
+# wait for rank 0 to write to file before proceeding
+icesee_comm.Barrier()
+variable_size = icesee_comm.bcast(variable_size, root=0)
+
 params.update({'nd': variable_size*params.get('total_state_param_vars')})
 
 # --- change directory back to the original directory ---
@@ -135,15 +146,15 @@ else:
     #     enkf_params["filter_type"],
     #     **kwargs), server, False,icesee_comm,verbose=False
     # )
-    try:
+    # try:
         icesee_model_data_assimilation(
             enkf_params["model_name"],
             enkf_params["filter_type"],
             **kwargs)
         server.shutdown()
-    except Exception as e:
-        print(f"[run_da_issm] Error running the model: {e}")
-        result = None
+    # except Exception as e:
+    #     print(f"[run_da_issm] Error running the model: {e}")
+    #     result = None
     # server.kill_matlab_processes()
 #     print("Checking stdout:", sys.stdout, file=sys.stderr)  # Use stderr to avoid stdout issues
 # sys.stdout.flush()

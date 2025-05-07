@@ -19,7 +19,7 @@ function initialize_model(rank, nprocs)
 	icesee_path		     = char(kwargs.icesee_path); % path to icesee
 	data_path		     = char(kwargs.data_path); % path to data
 
-	folder = sprintf('./Models/rank_%04d', rank);
+	folder = sprintf('./Models/ens_id_%04d', rank);
 	% Only create if it doesn't exist
 	if ~exist(folder, 'dir')
 		mkdir(folder);

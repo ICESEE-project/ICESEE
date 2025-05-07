@@ -26,8 +26,27 @@ def forecast_step_single(ensemble=None, **kwargs):
     
     kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
 
+    realization = run_model(ensemble, **kwargs)
+
+    # remove the copied directories
+    # if k == 0:
+    #     comm = kwargs.get('comm')
+    #     comm.Barrier()
+    #     rank = comm.Get_rank()
+    #     if rank == 0:
+    #         issm_path = kwargs.get('issm_examples_dir')
+    #         data_dir = './Models/ens_id_0000'
+    #         Nens = kwargs.get('Nens')
+    #         for ens in range(1, Nens):
+    #             new_data_dir = f'{issm_path}/Models/ens_id_000{ens}'
+    #             if os.path.exists(new_data_dir):
+    #                 shutil.rmtree(new_data_dir)
+    #                 print(f"[DEBUG] Removed {new_data_dir}") 
+    #     else:
+    #         pass
+
     #  call the run_model fun to push the state forward in time
-    return run_model(ensemble, **kwargs)
+    return realization
 
 # --- generate true state ---
 def generate_true_state(**kwargs):
@@ -37,11 +56,14 @@ def generate_true_state(**kwargs):
     params = kwargs.get('params')
     time   = kwargs.get('t')
     server = kwargs.get('server')
-    rank   = kwargs.get('rank')
+    
     issm_examples_dir   = kwargs.get('issm_examples_dir')
     icesee_path         = kwargs.get('icesee_path')
     data_path           = kwargs.get('data_path')
     comm                = kwargs.get('comm')
+
+    # get the rank of the current process
+    rank = comm.Get_rank()
 
     #  --- change directory to the issm directory ---
     os.chdir(issm_examples_dir)
@@ -49,6 +71,7 @@ def generate_true_state(**kwargs):
     # --- filename for data saving
     fname = 'true_state.mat'
     kwargs.update({'fname': fname})
+    ens_id = kwargs.get('ens_id')
 
     try:
     # if True:
@@ -60,7 +83,7 @@ def generate_true_state(**kwargs):
 
         # -- fetch data from inital state
         try: 
-            output_filename = f'{icesee_path}/{data_path}/ensemble_init_{rank}.h5'
+            output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
             # print(f"[DEBUG] Attempting to open file: {output_filename}")
             if not os.path.exists(output_filename):
                 print(f"[ERROR] File does not exist: {output_filename}")
@@ -91,7 +114,7 @@ def generate_true_state(**kwargs):
             ISSM_model(**kwargs)
            
             try:
-                output_filename = f'{icesee_path}/{data_path}/ensemble_output_{rank}.h5'
+                output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
                 with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
                     statevec_true[indx_map["Vx"],k+1] = f['Vx'][0]
                     statevec_true[indx_map["Vy"],k+1] = f['Vy'][0]
@@ -124,7 +147,6 @@ def generate_nurged_state(**kwargs):
     params = kwargs.get('params')
     time   = kwargs.get('t')
     server = kwargs.get('server')
-    rank   = kwargs.get('rank')
     issm_examples_dir   = kwargs.get('issm_examples_dir')
     icesee_path         = kwargs.get('icesee_path')
     data_path           = kwargs.get('data_path')
@@ -133,9 +155,13 @@ def generate_nurged_state(**kwargs):
     #  --- change directory to the issm directory ---
     os.chdir(issm_examples_dir)
 
+    # get the rank of the current process
+    rank = comm.Get_rank()
+
     # --- filename for data saving
     fname = 'nurged_state.mat'
     kwargs.update({'fname': fname})
+    ens_id = kwargs.get('ens_id')
 
     try:
     # if True:
@@ -168,7 +194,7 @@ def generate_nurged_state(**kwargs):
             kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
 
             # --- write the state back to h5 file for ISSM model
-            input_filename = f'{icesee_path}/{data_path}/ensemble_output_{rank}.h5'
+            input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
             with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
                 f.create_dataset('Vx', data=statevec_nurged[indx_map["Vx"],k])
                 f.create_dataset('Vy', data=statevec_nurged[indx_map["Vy"],k])
@@ -179,7 +205,7 @@ def generate_nurged_state(**kwargs):
             ISSM_model(**kwargs)
 
             try:
-                output_filename = f'{icesee_path}/{data_path}/ensemble_output_{rank}.h5'
+                output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
                 with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
                     statevec_nurged[indx_map["Vx"],k+1] = f['Vx'][0]
                     statevec_nurged[indx_map["Vy"],k+1] = f['Vy'][0]
@@ -215,7 +241,6 @@ def initialize_ensemble(ens, **kwargs):
     import os, sys
 
     server              = kwargs.get('server')
-    rank                = kwargs.get('rank')
     issm_examples_dir   = kwargs.get('issm_examples_dir')
     icesee_path         = kwargs.get('icesee_path')
     data_path           = kwargs.get('data_path')
@@ -223,10 +248,15 @@ def initialize_ensemble(ens, **kwargs):
 
     #  --- change directory to the issm directory ---
     os.chdir(issm_examples_dir)
+    ens_id = kwargs.get('ens_id')
+
+    # get the rank of the current process
+    rank = comm.Get_rank()
    
     try:
-        output_filename = f'{icesee_path}/{data_path}/ensemble_init_{rank}.h5'
-        with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+        output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
+        # with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+        with h5py.File(output_filename, 'r') as f:
             # --- fetch state variables
             Vx = f['Vx'][0]
             Vy = f['Vy'][0]

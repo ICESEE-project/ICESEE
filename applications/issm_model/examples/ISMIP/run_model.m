@@ -1,4 +1,4 @@
-function run_model(data_fname,rank,nprocs,k,dt,tinitial,tfinal)
+function run_model(data_fname,ens_id,rank,nprocs,k,dt,tinitial,tfinal)
 	% function run_model
 	
 		%  read kwargs from a .mat file
@@ -9,7 +9,7 @@ function run_model(data_fname,rank,nprocs,k,dt,tinitial,tfinal)
 		data_path       = char(kwargs.data_path);
 
 		
-		% fprintf('[MATLAB] Running model with rank: %d, nprocs: %d filename: %s\n', rank, nprocs, data_fname);
+		fprintf('[MATLAB] Running model with rank: %d, nprocs: %d filename: %s\n', rank, nprocs, data_fname);
 
 		
 		
@@ -46,7 +46,7 @@ function run_model(data_fname,rank,nprocs,k,dt,tinitial,tfinal)
 			% plotmodel(md,'data',md.results.StressbalanceSolution.Vel)
 		end
 
-		folder = sprintf('./Models/rank_%04d', rank);
+		folder = sprintf('./Models/ens_id_%04d', ens_id);
 		% Only create if it doesn't exist
 		if ~exist(folder, 'dir')
 			mkdir(folder);
@@ -90,11 +90,11 @@ function run_model(data_fname,rank,nprocs,k,dt,tinitial,tfinal)
 				% save these fields to a file for ensemble use
 				fields = {'Vx', 'Vy', 'Vz', 'Pressure'};
 				result = md.results.TransientSolution(end);
-				filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', rank));
+				filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
 				save_ensemble_hdf5(filename, result, fields);
 				% disp['skipping the first step'];
 			else
-				fprintf('[MATLAB] data_fname received: %s\n', data_fname);
+				
 				% Load previous model
 				% md = loadmodel('./Models/ISMIP.Transient');
 				% filename = sprintf('./Models/ISMIP.Transient_%d.mat', rank);
@@ -103,7 +103,7 @@ function run_model(data_fname,rank,nprocs,k,dt,tinitial,tfinal)
 				md = loadmodel(filename);
 
 				% load from an ensemble_input file
-				filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', rank));
+				filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
 				md.initialization.vx       = h5read(filename, '/Vx');
 				md.initialization.vy       = h5read(filename, '/Vy');
 				md.initialization.vz       = h5read(filename, '/Vz');
@@ -132,7 +132,7 @@ function run_model(data_fname,rank,nprocs,k,dt,tinitial,tfinal)
 				% save these fields to a file for ensemble use
 				fields = {'Vx', 'Vy', 'Vz', 'Pressure'};
 				result = md.results.TransientSolution(end);
-				filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', rank))
+				filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
 				save_ensemble_hdf5(filename, result, fields);
 			end
 	

@@ -18,11 +18,11 @@ import platform
 class MatlabServer:
     """A class to manage a MATLAB server for running ISSM models."""
 
-    def __init__(self, matlab_path="matlab", cmdfile="cmdfile.txt", statusfile="statusfile.txt",verbose=False):
+    def __init__(self,color=0, matlab_path="matlab", cmdfile="cmdfile", statusfile="statusfile",verbose=False):
         """Initialize the MATLAB server configuration."""
         self.matlab_path = matlab_path
-        self.cmdfile = os.path.abspath(cmdfile)
-        self.statusfile = os.path.abspath(statusfile)
+        self.cmdfile = os.path.abspath(f"{cmdfile}_{color}.txt")
+        self.statusfile = os.path.abspath(f"{statusfile}_{color}.txt")
         self.process = None
         self.verbose = verbose
 
