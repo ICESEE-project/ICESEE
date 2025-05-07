@@ -1,0 +1,21 @@
+
+name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+      - name: Set up virtual environment
+        run: ./setup_venv.sh
+      - name: Activate virtual environment
+        run: source venv/bin/activate
+        shell: bash
+      - name: Install ICESEE
+        run: make install
+      - name: Run tests
+        run: python -m ICESEE.applications.icepack.examples.synthetic_flow.synthetic_flow
