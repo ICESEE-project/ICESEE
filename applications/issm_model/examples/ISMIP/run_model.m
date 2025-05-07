@@ -75,7 +75,7 @@ function run_model(data_fname,ens_id,rank,nprocs,k,dt,tinitial,tfinal)
 				% #md.transient
 				%->
 				md.transient.isthermal=0;
-
+				md.miscellaneous.name =  sprintf('color_%d', ens_id);
 				md=solve(md,'Transient');
 				% save the given model
 				%->
@@ -119,6 +119,16 @@ function run_model(data_fname,ens_id,rank,nprocs,k,dt,tinitial,tfinal)
 				md.verbose = verbose('convergence', true);
 				md.transient.isthermal = 0;
 
+				% save ens_id as color to .mat file to be read inside solve function for each rank
+				% color_name = sprintf('color_%d', ens_id);
+				% fid = fopen(color_name, 'w');
+				% fprintf(fid, '%d', ens_id);
+				% fclose(fid);
+
+				% now read the color name inside the solve function
+				% md = loadmodel(color_name);
+
+				md.miscellaneous.name =  sprintf('color_%d', ens_id);
 				% Solve
 				md = solve(md, 'Transient');
 
