@@ -36,25 +36,30 @@ def initialize_model(physical_params, modeling_params, comm):
     server      = modeling_params.get('server')
     icesee_path = modeling_params.get('icesee_path')
     data_path   = modeling_params.get('data_path')
-    issm_cmd = f"run(\'issm_env\'); initialize_model({icesee_rank}, {icesee_size})"
+    issm_cmd = f"run(\'issm_env\'); initialize_model({icesee_rank}, {icesee_size}, {ens_id})"
     result = run_icesee_with_server(lambda: server.send_command(issm_cmd),server,False,comm)
     
     # if not result:
     #     sys.exit(1)
     # -- we would have broadcasted data to the remaining  ranks but now if nprocs > Nens, we need to duplicate data by copying data from ens_id_0000 to ens_id_0001, ens_id_0002, ... ens_id_000Nens
     if icesee_rank == 0:
-        data_dir = './Models/ens_id_0000'
+        data_dir = './Models/ens_id_0'
+        kwargs_data = 'model_kwargs_0.mat'
         Nens = modeling_params.get('Nens')
         for ens in range(1, Nens):
-            new_data_dir = f'./Models/ens_id_000{ens}'
+            new_data_dir = f'./Models/ens_id_{ens}'
+            new_kwargs_data = f'model_kwargs_{ens}.mat'
             # if os.path.exists(new_data_dir):
             #     shutil.rmtree(new_data_dir)
             shutil.copytree(data_dir, new_data_dir, dirs_exist_ok=True)
+            shutil.copyfile(kwargs_data, new_kwargs_data)
             print(f"[DEBUG] Copied {data_dir} to {new_data_dir}")
+            print(f"[DEBUG] Copied {kwargs_data} to {new_kwargs_data}")
+    comm.Barrier()
 
     # fetch model size from output file
     try: 
-        output_filename = f'{icesee_path}/{data_path}/ensemble_init_{icesee_rank}.h5'
+        output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
         # print(f"[DEBUG] Attempting to open file: {output_filename}")
         if not os.path.exists(output_filename):
             print(f"[ERROR] File does not exist: {output_filename}")
@@ -158,6 +163,7 @@ def run_model(ensemble, **kwargs):
     # --- filename for data saving
     fname = 'enkf_state.mat'
     kwargs.update({'fname': fname})
+    
     ens_id = kwargs.get('ens_id')
 
     # try: 
@@ -175,7 +181,8 @@ def run_model(ensemble, **kwargs):
         # print(f"[DEBUG] Ensemble: {ensemble[:5]}")
         vecs, indx_map, _ = icesee_get_index(ensemble, **kwargs)
 
-        if k > 0:
+        # if k > 0:
+        if True:
             # -- create our ensemble for test purposes
             Vx = ensemble[indx_map["Vx"]]
             Vy = ensemble[indx_map["Vy"]]
@@ -202,6 +209,10 @@ def run_model(ensemble, **kwargs):
         # try:
         if True:
             output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+            # check if the file exists
+            if not os.path.exists(output_filename):
+                print(f"[ERROR] File does not exist: {output_filename}")
+                return None
             with h5py.File(output_filename, 'r',driver='mpio',comm=comm) as f:
                 return {
                 'Vx': f['Vx'][0],

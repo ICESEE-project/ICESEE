@@ -71,13 +71,13 @@ model_kwargs["obs_index"] = obs_idx
 params["number_obs_instants"] = num_observations
 
 # --- save model kwargs to file and update Icesee kwargs ---
-sio.savemat('model_kwargs.mat', model_kwargs)
+sio.savemat(f'model_kwargs_{ens_id}.mat', model_kwargs)
 kwargs.update(model_kwargs)
 
 # copy the issm_env.m from icesee_cwd  file to the examples directory             
 shutil.copy(os.path.join(icesee_cwd,'..','..','issm_utils','matlab2python', 'issm_env.m'), issm_examples_dir)
 shutil.copy(os.path.join(icesee_cwd,'..','..','issm_utils','matlab2python', 'matlab_server.m'), issm_examples_dir)
-shutil.copy(os.path.join(icesee_cwd, 'model_kwargs.mat'), issm_examples_dir)
+shutil.copy(os.path.join(icesee_cwd, f'model_kwargs_{ens_id}.mat'), issm_examples_dir)
 
 # --- change directory to the examples directory ---
 os.chdir(issm_examples_dir)
@@ -102,14 +102,14 @@ modeling_params.update({'server': server, 'Nens': params.get('Nens'),
 # icesee_comm.Barrier()
 # variable_size = icesee_comm.bcast(variable_size, root=0)
 
-if icesee_rank == 0:
-    variable_size = initialize_model(physical_params, modeling_params, icesee_comm)
-else:
-    variable_size = 0.0
+# if icesee_rank == 0:
+variable_size = initialize_model(physical_params, modeling_params, icesee_comm)
+# else:
+#     variable_size = 0.0
 
-# wait for rank 0 to write to file before proceeding
-icesee_comm.Barrier()
-variable_size = icesee_comm.bcast(variable_size, root=0)
+# # wait for rank 0 to write to file bls efore proceeding
+# icesee_comm.Barrier()
+# variable_size = icesee_comm.bcast(variable_size, root=0)
 
 params.update({'nd': variable_size*params.get('total_state_param_vars')})
 

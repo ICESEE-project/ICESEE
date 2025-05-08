@@ -753,6 +753,10 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
             if rank_world == 0:
                 print("Initializing the ensemble ...")
                 model_kwargs.update({'ens_id': rank_world})
+                if params["even_distribution"]:
+                    model_kwargs.update({'rank': rank_world, 'color': color, 'comm': comm_world})
+                else:
+                    model_kwargs.update({'rank': sub_rank, 'color': color, 'comm': subcomm})
 
                 model_kwargs.update({"statevec_ens":np.zeros([params["nd"], params["Nens"]])})
                 
@@ -771,6 +775,7 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
 
                 # process_noise = []
                 for ens in range(params["Nens"]):
+                    # model_kwargs.update({"ens_id": ens})
                     data = model_module.initialize_ensemble(ens,**model_kwargs)
                 
                     # iterate over the data and update the ensemble
@@ -825,6 +830,8 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
                 ensemble_vec = np.empty((params["nd"],params["Nens"]),dtype=np.float64)
                 shape_ens = np.empty(2,dtype=np.int32)
                 # pos, gs_model, L_C
+
+            comm_world.Barrier()
 
             if params["even_distribution"]:
                 # Bcast the ensemble
@@ -1249,7 +1256,7 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
                     ens_list = []
                     for round_id in range(rounds):
                         ensemble_id = color + round_id * subcomm_size  # Global ensemble index
-                        model_kwargs.update({'ens_id': ensemble_id})
+                        model_kwargs.update({'ens_id': ensemble_id, 'comm': subcomm})
 
                         if ensemble_id < Nens:  # Only process valid ensembles
                             # print(f"Rank {rank_world} processing ensemble {ensemble_id} in round {round_id + 1}/{rounds}")
@@ -1367,7 +1374,7 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
                     subcomm.Barrier()
                     ens = color # each subcomm has a unique color
                     model_kwargs.update({'ens_id': ens})
-                    
+
                     # ---- read from file ----
                     input_file = f"{_modelrun_datasets}/icesee_ensemble_data.h5"
                     with h5py.File(input_file, "r", driver="mpio", comm=subcomm) as f:

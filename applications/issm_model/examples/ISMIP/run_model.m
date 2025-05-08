@@ -2,7 +2,8 @@ function run_model(data_fname,ens_id,rank,nprocs,k,dt,tinitial,tfinal)
 	% function run_model
 	
 		%  read kwargs from a .mat file
-		kwargs 			= load('model_kwargs.mat');
+		model_kwargs = sprintf('model_kwargs_%d.mat', ens_id);
+		kwargs 			= load(model_kwargs);
 		cluster_name    = char(kwargs.cluster_name);
 		steps 			= double(kwargs.steps);
 		icesee_path     = char(kwargs.icesee_path);
@@ -46,7 +47,7 @@ function run_model(data_fname,ens_id,rank,nprocs,k,dt,tinitial,tfinal)
 			% plotmodel(md,'data',md.results.StressbalanceSolution.Vel)
 		end
 
-		folder = sprintf('./Models/ens_id_%04d', ens_id);
+		folder = sprintf('./Models/ens_id_%d', ens_id);
 		% Only create if it doesn't exist
 		if ~exist(folder, 'dir')
 			mkdir(folder);
