@@ -1,7 +1,8 @@
-function initialize_model(rank, nprocs)
+function initialize_model(rank, nprocs, ens_id)
 
     %  read kwargs from a .mat file
-	kwargs = load('model_kwargs.mat');
+	model_kwargs = sprintf('model_kwargs_%d.mat', ens_id);
+	kwargs 			= load(model_kwargs);
 
 	%  access the values of the dictionary
 	ParamFile 			 = char(kwargs.ParamFile);
@@ -19,7 +20,7 @@ function initialize_model(rank, nprocs)
 	icesee_path		     = char(kwargs.icesee_path); % path to icesee
 	data_path		     = char(kwargs.data_path); % path to data
 
-	folder = sprintf('./Models/rank_%04d', rank);
+	folder = sprintf('./Models/ens_id_%d', ens_id);
 	% Only create if it doesn't exist
 	if ~exist(folder, 'dir')
 		mkdir(folder);
@@ -221,7 +222,7 @@ function initialize_model(rank, nprocs)
 		result = md.initialization(end);
 		
 		% 	% --- fetch and save data for ensemble use
-		filename = fullfile(icesee_path, data_path, sprintf('ensemble_init_%d.h5', rank));
+		filename = fullfile(icesee_path, data_path, sprintf('ensemble_init_%d.h5', ens_id));
 		% Ensure the directory exists
 		[filepath, ~, ~] = fileparts(filename);
 		if ~exist(filepath, 'dir')

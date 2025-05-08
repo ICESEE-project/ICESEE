@@ -1,15 +1,16 @@
-function run_model(data_fname,rank,nprocs,k,dt,tinitial,tfinal)
+function run_model(data_fname,ens_id,rank,nprocs,k,dt,tinitial,tfinal)
 	% function run_model
 	
 		%  read kwargs from a .mat file
-		kwargs 			= load('model_kwargs.mat');
+		model_kwargs = sprintf('model_kwargs_%d.mat', ens_id);
+		kwargs 			= load(model_kwargs);
 		cluster_name    = char(kwargs.cluster_name);
 		steps 			= double(kwargs.steps);
 		icesee_path     = char(kwargs.icesee_path);
 		data_path       = char(kwargs.data_path);
 
 		
-		% fprintf('[MATLAB] Running model with rank: %d, nprocs: %d filename: %s\n', rank, nprocs, data_fname);
+		fprintf('[MATLAB] Running model with rank: %d, nprocs: %d filename: %s\n', rank, nprocs, data_fname);
 
 		
 		
@@ -46,7 +47,7 @@ function run_model(data_fname,rank,nprocs,k,dt,tinitial,tfinal)
 			% plotmodel(md,'data',md.results.StressbalanceSolution.Vel)
 		end
 
-		folder = sprintf('./Models/rank_%04d', rank);
+		folder = sprintf('./Models/ens_id_%d', ens_id);
 		% Only create if it doesn't exist
 		if ~exist(folder, 'dir')
 			mkdir(folder);
@@ -75,7 +76,7 @@ function run_model(data_fname,rank,nprocs,k,dt,tinitial,tfinal)
 				% #md.transient
 				%->
 				md.transient.isthermal=0;
-
+				md.miscellaneous.name =  sprintf('color_%d', ens_id);
 				md=solve(md,'Transient');
 				% save the given model
 				%->
@@ -90,11 +91,11 @@ function run_model(data_fname,rank,nprocs,k,dt,tinitial,tfinal)
 				% save these fields to a file for ensemble use
 				fields = {'Vx', 'Vy', 'Vz', 'Pressure'};
 				result = md.results.TransientSolution(end);
-				filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', rank));
+				filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
 				save_ensemble_hdf5(filename, result, fields);
 				% disp['skipping the first step'];
 			else
-				fprintf('[MATLAB] data_fname received: %s\n', data_fname);
+				
 				% Load previous model
 				% md = loadmodel('./Models/ISMIP.Transient');
 				% filename = sprintf('./Models/ISMIP.Transient_%d.mat', rank);
@@ -103,7 +104,7 @@ function run_model(data_fname,rank,nprocs,k,dt,tinitial,tfinal)
 				md = loadmodel(filename);
 
 				% load from an ensemble_input file
-				filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', rank));
+				filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
 				md.initialization.vx       = h5read(filename, '/Vx');
 				md.initialization.vy       = h5read(filename, '/Vy');
 				md.initialization.vz       = h5read(filename, '/Vz');
@@ -119,6 +120,16 @@ function run_model(data_fname,rank,nprocs,k,dt,tinitial,tfinal)
 				md.verbose = verbose('convergence', true);
 				md.transient.isthermal = 0;
 
+				% save ens_id as color to .mat file to be read inside solve function for each rank
+				% color_name = sprintf('color_%d', ens_id);
+				% fid = fopen(color_name, 'w');
+				% fprintf(fid, '%d', ens_id);
+				% fclose(fid);
+
+				% now read the color name inside the solve function
+				% md = loadmodel(color_name);
+
+				md.miscellaneous.name =  sprintf('color_%d', ens_id);
 				% Solve
 				md = solve(md, 'Transient');
 
@@ -132,7 +143,7 @@ function run_model(data_fname,rank,nprocs,k,dt,tinitial,tfinal)
 				% save these fields to a file for ensemble use
 				fields = {'Vx', 'Vy', 'Vz', 'Pressure'};
 				result = md.results.TransientSolution(end);
-				filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', rank))
+				filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
 				save_ensemble_hdf5(filename, result, fields);
 			end
 	
