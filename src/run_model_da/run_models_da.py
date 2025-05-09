@@ -239,6 +239,11 @@ def generate_pseudo_random_field_2D(N, M, Lx, Ly, rh, grid_extension=2, verbose=
     Returns:
     - q: 2D array of shape (N, M) containing the random field
     """
+
+    import numpy as np
+    from scipy.optimize import brentq
+    import warnings
+
     # Grid spacing
     dx = Lx / N
     dy = Ly / M
@@ -543,6 +548,7 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
 
             if params["default_run"] and size_world > params["Nens"]:
                 model_kwargs.update({'rank': sub_rank, 'color': color, 'comm': subcomm})
+                model_kwargs.update({'ens_id': color}) # Nens = color
                 # gather all the vector dimensions from all processors
                 dim_list = subcomm.allgather(params["nd"])
                 global_shape = sum(dim_list)
@@ -861,6 +867,9 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
                 # debug
                 sub_shape = model_kwargs['dim_list'][sub_rank]
                 model_kwargs.update({"statevec_ens":np.zeros((sub_shape, params["Nens"]))})
+
+                model_kwargs.update({"ens_id": color, "rank": sub_rank, "color": color, "comm": subcomm})
+
                 # ensemble_vec, shape_ens  = model_module.initialize_ensemble_debug(color,**model_kwargs)
                 # ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
                 # parallel_write_full_ensemble_from_root(0, ens_mean, params,ensemble_vec,comm_world)
@@ -891,17 +900,22 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
                             # noise = np.random.normal(0, 0.1, state_block_size)
                             # Q_err = np.eye(state_block_size) * params["sig_Q"] ** 2
                             # Q_err = np.eye(state_block_size) * 0.01 ** 2
-                        Q_err = np.zeros((full_block_size,full_block_size))
-                        for i, sig in enumerate(params["sig_Q"]):
-                            start_idx = i *hdim
-                            end_idx = start_idx + hdim
-                            Q_err[start_idx:end_idx,start_idx:end_idx] = np.eye(hdim) * sig ** 2
+                        if model_kwargs.get("random_fields",False):
+                            Q_err = np.zeros((full_block_size,full_block_size))
+                            for i, sig in enumerate(params["sig_Q"]):
+                                start_idx = i *hdim
+                                end_idx = start_idx + hdim
+                                Q_err[start_idx:end_idx,start_idx:end_idx] = np.eye(hdim) * sig ** 2
 
-                        # noise = multivariate_normal.rvs(mean=np.zeros(state_block_size), cov=Q_err)
-                        noise = compute_noise_random_fields(ens, hdim, pos, gs_model, params["total_state_param_vars"], L_C)
-                        # initial_data[key][:state_block_size] += noise[:state_block_size]
-                        # noise = noise / np.max(np.abs(noise))
-                        initial_data[key] += noise
+                            # noise = multivariate_normal.rvs(mean=np.zeros(state_block_size), cov=Q_err)
+                            noise = compute_noise_random_fields(ens, hdim, pos, gs_model, params["total_state_param_vars"], L_C)
+                            # initial_data[key][:state_block_size] += noise[:state_block_size]
+                            # noise = noise / np.max(np.abs(noise))
+                            initial_data[key] += noise
+                        else:
+                            N_size = params["total_state_param_vars"] * hdim
+                            noise = generate_enkf_field(None,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                            initial_data[key] += noise
                         
                     # stack all variables together into a single array
                     stacked = np.hstack([initial_data[key] for key in initialilaized_state.keys()])
@@ -1373,7 +1387,7 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
                     # Ensure all ranks in subcomm are in sync 
                     subcomm.Barrier()
                     ens = color # each subcomm has a unique color
-                    model_kwargs.update({'ens_id': ens})
+                    model_kwargs.update({'ens_id': ens, 'comm': subcomm})
 
                     # ---- read from file ----
                     input_file = f"{_modelrun_datasets}/icesee_ensemble_data.h5"
@@ -1402,11 +1416,32 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
                                 hdim = global_data[key].shape[0] // params["num_state_vars"]
                             state_block_size = hdim * params["num_state_vars"]  # Compute the state block size
                             # Add process noise to the ensembles variables only
-                            if key in state_keys:
-                                Q_err = Q_err[:state_block_size, :state_block_size]
-                                q0 = multivariate_normal.rvs(np.zeros(state_block_size), Q_err)
-                                # q0 = np.sqrt(model_kwargs.get("dt",params["dt"]))*multivariate_normal.rvs(np.zeros(state_block_size), Q_err)
-                                global_data[key][:state_block_size] = global_data[key][:state_block_size] + q0[:state_block_size]
+                            # if key in state_keys:
+                            #     Q_err = Q_err[:state_block_size, :state_block_size]
+                            #     q0 = multivariate_normal.rvs(np.zeros(state_block_size), Q_err)
+                            #     # q0 = np.sqrt(model_kwargs.get("dt",params["dt"]))*multivariate_normal.rvs(np.zeros(state_block_size), Q_err)
+                            #     global_data[key][:state_block_size] = global_data[key][:state_block_size] + q0[:state_block_size]
+
+                            # use pseudorandom fields 
+                            if k == 0:
+                                N_size = params["total_state_param_vars"] * hdim
+                                noise = generate_enkf_field(ens,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+
+                            noise_all = []
+                            q0 = []
+                            for ii, sig in enumerate(params["sig_Q"]):
+                                if ii <=params["num_state_vars"]:
+                                    # W = np.random.normal(0, 1, hdim)
+                                    # W = generate_pseudo_random_field_1d(hdim,np.sqrt(Lx*Ly), len_scale, verbose=0)
+                                    W = generate_enkf_field(ii,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                                    noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
+                                    q0.append(noise_)
+
+                                    Z = np.sqrt(dt)*sig*rho*noise_
+                                    noise_all.append(Z)
+                            noise_ = np.concatenate(noise_all, axis=0)
+                            global_data[key][:state_block_size] = global_data[key][:state_block_size] + noise_[:state_block_size]
+                            noise = np.concatenate(q0, axis=0)
                             
                         # Stack all variables into a single array
                         stacked = np.hstack([global_data[key] for key in updated_state.keys()])

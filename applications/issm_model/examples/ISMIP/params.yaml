@@ -62,6 +62,7 @@ enkf-parameters:
   parallel_flag: "MPI_model"             # parallel flag: Serial, MPI, MPI_model
   n_modeltasks: 1                     # number of model tasks (for MPI)
   commandlinerun: "True"              # command line run flag: True, False
-  execution_flag: 2                   #`execution flag: 0 ->default, 1 -> sequntial, 2 -> even_distribution_of_problem size, 3 -> even_distribution_of_problem size with load balancing
+  execution_flag: 0                   #`execution flag: 0 ->default, 1 -> sequntial, 2 -> even_distribution_of_problem size, 3 -> even_distribution_of_problem size with load balancing
+  model_nprocs: 2                           # number of processors for Model's MPI
   data_path: _modelrun_datasets
  

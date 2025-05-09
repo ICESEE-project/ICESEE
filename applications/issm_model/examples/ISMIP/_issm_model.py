@@ -29,8 +29,10 @@ def initialize_model(physical_params, modeling_params, comm):
     shutil.copyfile(os.path.join(os.path.dirname(__file__), 'initialize_model.m'), 'initialize_model.m')
 
     icesee_rank = comm.Get_rank()
-    icesee_size = comm.Get_size()
+    # icesee_size = comm.Get_size()
+    icesee_size = modeling_params.get('model_nprocs')
     ens_id      = modeling_params.get('ens_id')
+    
 
     # read the model kwargs from the file
     server      = modeling_params.get('server')
@@ -90,10 +92,12 @@ def ISSM_model(**kwargs):
     # rank = kwargs.get('rank')
     ens_id = kwargs.get('ens_id')
     comm = kwargs.get('comm')
+    params = kwargs.get('params')
 
     # get rank
     rank   = comm.Get_rank()
-    nprocs = comm.Get_size()
+    # nprocs = comm.Get_size()
+    nprocs = params.get('model_nprocs')
 
     print(f"[DEBUG] ISSM model {rank} of {nprocs}")
 

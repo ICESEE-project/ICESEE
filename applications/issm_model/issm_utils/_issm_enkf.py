@@ -85,7 +85,7 @@ def generate_true_state(**kwargs):
         # try: 
         if True:
             output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
-            # print(f"[DEBUG] Attempting to open file: {output_filename}")
+            print(f"[DEBUG-0] Attempting to open file: {output_filename}")
             if not os.path.exists(output_filename):
                 print(f"[ERROR] File does not exist: {output_filename}")
                 return None
@@ -105,6 +105,7 @@ def generate_true_state(**kwargs):
             kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
             # --- write the state back to h5 file for ISSM model
             input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+            print(f"[DEBUG-1] Attempting to open file: {input_filename}")
             with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
                 f.create_dataset('Vx', data=statevec_true[indx_map["Vx"],k])
                 f.create_dataset('Vy', data=statevec_true[indx_map["Vy"],k])
@@ -117,6 +118,7 @@ def generate_true_state(**kwargs):
             # try:
             if True:
                 output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+                print(f"[DEBUG-2] Attempting to open file: {output_filename}")
                 with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
                     statevec_true[indx_map["Vx"],k+1] = f['Vx'][0]
                     statevec_true[indx_map["Vy"],k+1] = f['Vy'][0]

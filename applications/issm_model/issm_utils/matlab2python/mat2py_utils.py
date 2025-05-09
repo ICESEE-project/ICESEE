@@ -15,7 +15,7 @@ import psutil
 import signal
 import platform
 
-class MatlabServer:
+class _MatlabServer:
     """A class to manage a MATLAB server for running ISSM models."""
 
     def __init__(self,color=0, matlab_path="matlab", cmdfile="cmdfile", statusfile="statusfile",verbose=False):
@@ -228,8 +228,58 @@ class MatlabServer:
     #     except subprocess.CalledProcessError:
     #         print("[Launcher] Warning: Failed to reset terminal settings.")
 
-
 #  ---- end of MatlabServer class ----
+
+# Lets use inheritance to create a new class that will manage the matlab server
+class MatlabServer:
+    """A class to manage a MATLAB server for running ISSM models both in parallel and serial."""
+    def __init__(self, color=0, Nens=None, comm=None, matlab_path="matlab", cmdfile="cmdfile", statusfile="statusfile", verbose=False):
+        """Initialize the MATLAB server configuration."""
+        self.comm = comm
+        self.rank = self.comm.Get_rank() if self.comm else 0
+        # self.size = self.comm.Get_size() if self.comm else 1
+        self.Nens = Nens
+        self.color = color
+        self.matlab_path = matlab_path
+        self.cmdfile = cmdfile
+        self.statusfile = statusfile
+        self.verbose = verbose
+        self._server = None
+
+        from mpi4py import MPI
+        self.size = MPI.COMM_WORLD.Get_size() if self.comm else 1
+
+    def _check_conditions(self):
+        """Check if conditions are met to access _MatlabServer."""
+        if self.Nens is None:
+            return False
+        if self.Nens >= self.size:
+            return True
+        if self.Nens < self.size:
+            raise ValueError(
+                f"Nens ({self.Nens}) must be greater than or equal to the size of the MPI communicator ({self.size} set model_nprocs for the remaining resources if you want the coupled model to run in parallel). "
+            )
+        return False
+
+    def __getattr__(self, name):
+        """Delegate method calls to _MatlabServer if conditions are met."""
+        if self._check_conditions():
+            if self._server is None:
+                self._server = _MatlabServer(
+                    color=self.color,
+                    matlab_path=self.matlab_path,
+                    cmdfile=self.cmdfile,
+                    statusfile=self.statusfile,
+                    verbose=self.verbose
+                )
+                #  call the launch method to start the server
+                self._server.launch()
+            return getattr(self._server, name)
+        # else:
+        #     pass
+        raise AttributeError(f"Method '{name}' not available: conditions not met (Nens={self.Nens}, size={self.size}, rank={self.rank})")
+
+# --- Subprocess Command Runner ---
 
 def subprocess_cmd_run(issm_cmd, nprocs: int, verbose: bool = True):
     try:

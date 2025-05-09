@@ -65,10 +65,11 @@ class ParallelManager:
         self.n_filterpes = 1  # Number of parallel filter analysis tasks
 
         # ICESS communicator for coupling filter and model and also for initializations
-        self.COMM_couple = None  # MPI communicator for coupling filter and model
-        self.rank_couple = None  # Rank in COMM_couple
-        self.size_couple = None  # Number of PEs in COMM_couple
-        self.ens_id      = None  # Index of ensemble member (1,...,Nens)
+        self.COMM_couple  = None  # MPI communicator for coupling filter and model
+        self.rank_couple  = None  # Rank in COMM_couple
+        self.size_couple  = None  # Number of PEs in COMM_couple
+        self.ens_id       = None  # Index of ensemble member (1,...,Nens)
+        self.model_nprocs = None  # Number of PEs in the model communicator
 
         # ICESS variables
         self.n_modeltasks = None  # Number of parallel model tasks
@@ -146,6 +147,7 @@ class ParallelManager:
         Initializes MPI in an ICESEE application.
         Ensures MPI is initialized safely and retrieves essential communication parameters.
         """
+        import os, shutil
         if not MPI.Is_initialized():
             try:
                 MPI.Init()
@@ -155,6 +157,19 @@ class ParallelManager:
         self.COMM_WORLD = MPI.COMM_WORLD
         self.size_world = self.COMM_WORLD.Get_size()
         self.rank_world = self.COMM_WORLD.Get_rank()
+
+        # if self.model_nprocs is None: use model_nprocs = size_world or subcomm_size
+        self.model_nprocs = params.get("model_nprocs")
+
+        # remove data file
+        if self.rank_world == 0:
+            if os.path.exists(params.get("data_path")):
+                if os.path.isdir(params.get("data_path")):
+                    shutil.rmtree(params.get("data_path"))
+                else:
+                    os.remove(params.get("data_path"))
+        # Synchronize all ranks
+        self.COMM_WORLD.Barrier()
 
         Nens = params.get("Nens", 1)  # Number of ensemble members
 
