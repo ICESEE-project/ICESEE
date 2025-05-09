@@ -1,9 +1,9 @@
 physical-parameters:
   # Domain parameters
-  Lx: 10e3        # (m) A: 80e3, F: 100e3
-  Ly: 10e3        # (m) A: 80e3, F: 100e3
-  nx: 5         # number of elements in the x-direction A: 20, F: 30
-  ny: 5         # number of elements in the y-direction B: 20, F: 30
+  Lx: 100e3        # (m) A: 80e3, F: 100e3
+  Ly: 100e3        # (m) A: 80e3, F: 100e3
+  nx: 30         # number of elements in the x-direction A: 20, F: 30
+  ny: 30         # number of elements in the y-direction B: 20, F: 30
 
   
 modeling-parameters:
