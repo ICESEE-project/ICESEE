@@ -20,33 +20,14 @@ def forecast_step_single(ensemble=None, **kwargs):
     Returns: ensemble: updated ensemble member
     """
     #  -- control time stepping   
-    # k = kwargs.get('k')
     time = kwargs.get('t')
     k    = kwargs.get('k')
     
     kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
 
-    realization = run_model(ensemble, **kwargs)
-
-    # remove the copied directories
-    # if k == 0:
-    #     comm = kwargs.get('comm')
-    #     comm.Barrier()
-    #     rank = comm.Get_rank()
-    #     if rank == 0:
-    #         issm_path = kwargs.get('issm_examples_dir')
-    #         data_dir = './Models/ens_id_0000'
-    #         Nens = kwargs.get('Nens')
-    #         for ens in range(1, Nens):
-    #             new_data_dir = f'{issm_path}/Models/ens_id_000{ens}'
-    #             if os.path.exists(new_data_dir):
-    #                 shutil.rmtree(new_data_dir)
-    #                 print(f"[DEBUG] Removed {new_data_dir}") 
-    #     else:
-    #         pass
-
     #  call the run_model fun to push the state forward in time
-    return realization
+    return run_model(ensemble, **kwargs)
+
 
 # --- generate true state ---
 def generate_true_state(**kwargs):
@@ -61,9 +42,6 @@ def generate_true_state(**kwargs):
     icesee_path         = kwargs.get('icesee_path')
     data_path           = kwargs.get('data_path')
     comm                = kwargs.get('comm')
-
-    # get the rank of the current process
-    rank = comm.Get_rank()
 
     #  --- change directory to the issm directory ---
     os.chdir(issm_examples_dir)
@@ -82,10 +60,10 @@ def generate_true_state(**kwargs):
         vecs, indx_map, dim_per_proc = icesee_get_index(statevec_true, **kwargs)
 
         # -- fetch data from inital state
-        # try: 
-        if True:
+        try: 
+        # if True:
             output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
-            print(f"[DEBUG-0] Attempting to open file: {output_filename}")
+            # print(f"[DEBUG-0] Attempting to open file: {output_filename}")
             if not os.path.exists(output_filename):
                 print(f"[ERROR] File does not exist: {output_filename}")
                 return None
@@ -95,8 +73,8 @@ def generate_true_state(**kwargs):
                 statevec_true[indx_map["Vy"],0] = f['Vy'][0]
                 statevec_true[indx_map["Vz"],0] = f['Vz'][0]
                 statevec_true[indx_map["Pressure"],0] = f['Pressure'][0]
-        # except Exception as e:
-        #     print(f"[Generate-True-State: read init file] Error reading the file: {e}")
+        except Exception as e:
+            print(f"[Generate-True-State: read init file] Error reading the file: {e}")
                             
         # -- mimic the time integration loop to save vec on every time step
         for k in range(kwargs.get('nt')):
@@ -105,7 +83,7 @@ def generate_true_state(**kwargs):
             kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
             # --- write the state back to h5 file for ISSM model
             input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
-            print(f"[DEBUG-1] Attempting to open file: {input_filename}")
+            # print(f"[DEBUG-1] Attempting to open file: {input_filename}")
             with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
                 f.create_dataset('Vx', data=statevec_true[indx_map["Vx"],k])
                 f.create_dataset('Vy', data=statevec_true[indx_map["Vy"],k])
@@ -118,7 +96,7 @@ def generate_true_state(**kwargs):
             # try:
             if True:
                 output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
-                print(f"[DEBUG-2] Attempting to open file: {output_filename}")
+                # print(f"[DEBUG-2] Attempting to open file: {output_filename}")
                 with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
                     statevec_true[indx_map["Vx"],k+1] = f['Vx'][0]
                     statevec_true[indx_map["Vy"],k+1] = f['Vy'][0]

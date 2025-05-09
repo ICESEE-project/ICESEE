@@ -83,36 +83,22 @@ shutil.copy(os.path.join(icesee_cwd, f'model_kwargs_{ens_id}.mat'), issm_example
 os.chdir(issm_examples_dir)
 
 # --- intialize the matlab server ---
-# server = MatlabServer(color=ens_id, verbose=1)
-server = MatlabServer(color=ens_id,Nens = params['Nens'], comm = icesee_comm, verbose=1) 
-# server.launch() # start the server
+server = MatlabServer(color=ens_id,
+                      Nens = params['Nens'],
+                      comm = icesee_comm,
+                       verbose=params.get('verbose')) 
 
 # Set up global shutdown handler
 setup_server_shutdown(server, icesee_comm, verbose=False)
 
-# --- intialize ISSM model ---
+# --- load the model parameters ---
 modeling_params.update({'server': server, 'Nens': params.get('Nens'),
                         'icesee_path': icesee_cwd, 'ens_id': ens_id,
                         'data_path': kwargs.get('data_path'),
                         'model_nprocs': params.get('model_nprocs'),})
 
-# if icesee_rank == 0:
-#     variable_size = initialize_model(physical_params, modeling_params, icesee_comm)
-# else:
-#     variable_size = 0.0
-
-# # wait for rank 0 to write to file before proceeding
-# icesee_comm.Barrier()
-# variable_size = icesee_comm.bcast(variable_size, root=0)
-
-# if icesee_rank == 0:
+# --- initialize the model ---
 variable_size = initialize_model(physical_params, modeling_params, icesee_comm)
-# else:
-#     variable_size = 0.0
-
-# # wait for rank 0 to write to file bls efore proceeding
-# icesee_comm.Barrier()
-# variable_size = icesee_comm.bcast(variable_size, root=0)
 
 params.update({'nd': variable_size*params.get('total_state_param_vars')})
 
@@ -149,15 +135,14 @@ else:
     #     enkf_params["filter_type"],
     #     **kwargs), server, False,icesee_comm,verbose=False
     # )
-    # try:
+    try:
         icesee_model_data_assimilation(
             enkf_params["model_name"],
             enkf_params["filter_type"],
             **kwargs)
         server.shutdown()
-    # except Exception as e:
-    #     print(f"[run_da_issm] Error running the model: {e}")
-    #     result = None
-    # server.kill_matlab_processes()
+    except Exception as e:
+        print(f"[run_da_issm] Error running the model: {e}")
+        server.kill_matlab_processes()
 #     print("Checking stdout:", sys.stdout, file=sys.stderr)  # Use stderr to avoid stdout issues
 # sys.stdout.flush()

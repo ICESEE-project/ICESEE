@@ -39,7 +39,11 @@ def initialize_model(physical_params, modeling_params, comm):
     icesee_path = modeling_params.get('icesee_path')
     data_path   = modeling_params.get('data_path')
     issm_cmd = f"run(\'issm_env\'); initialize_model({icesee_rank}, {icesee_size}, {ens_id})"
-    result = run_icesee_with_server(lambda: server.send_command(issm_cmd),server,False,comm)
+    # result = run_icesee_with_server(lambda: server.send_command(issm_cmd),server,False,comm)
+    if not server.send_command(issm_cmd):
+        print(f"[DEBUG] Error sending command: {issm_cmd}")
+        server.kill_matlab_processes()
+        sys.exit(1)
     
     # if not result:
     #     sys.exit(1)
@@ -55,8 +59,8 @@ def initialize_model(physical_params, modeling_params, comm):
             #     shutil.rmtree(new_data_dir)
             shutil.copytree(data_dir, new_data_dir, dirs_exist_ok=True)
             shutil.copyfile(kwargs_data, new_kwargs_data)
-            print(f"[DEBUG] Copied {data_dir} to {new_data_dir}")
-            print(f"[DEBUG] Copied {kwargs_data} to {new_kwargs_data}")
+            # print(f"[DEBUG] Copied {data_dir} to {new_data_dir}")
+            # print(f"[DEBUG] Copied {kwargs_data} to {new_kwargs_data}")
     comm.Barrier()
 
     # fetch model size from output file
@@ -99,7 +103,7 @@ def ISSM_model(**kwargs):
     # nprocs = comm.Get_size()
     nprocs = params.get('model_nprocs')
 
-    print(f"[DEBUG] ISSM model {rank} of {nprocs}")
+    # print(f"[DEBUG] ISSM model {rank} of {nprocs}")
 
     # --- copy run_model.m to the current directory
     shutil.copyfile(os.path.join(os.path.dirname(__file__), 'run_model.m'), 'run_model.m')
@@ -111,30 +115,11 @@ def ISSM_model(**kwargs):
     # print(f"file name: {filename}")
 
     try:
-        # cmd = f"run('issm_env'); run_model('{filename}',{rank},{nprocs},{k},{dt},{tinitial},{tfinal})"
-        # result = run_icesee_with_server(lambda: server.send_command(cmd),server,False,comm)
-        # subprocess_cmd_run(cmd, nprocs, verbose=True)
-        # cmd = (
-        #     f"matlab -nodisplay -nosplash -nodesktop "
-        #     f"-r \"try; run('issm_env'); run_model('{filename}',{rank},{nprocs},{k},{dt},{tinitial},{tfinal}); "
-        #     f"catch e; disp(getReport(e)); exit(1); end; exit;\""
-        # )
-        # filename = str(filename).replace("'", "")  
-        # cmd = (
-        #     f"matlab -nodisplay -nosplash -nodesktop "
-        #     f"-r \"try; run('issm_env'); run_model('{filename}', {rank}, {nprocs}, {k}, {dt}, {tinitial}, {tfinal}); "
-        #     f"catch e; disp(getReport(e)); exit(1); end; exit\""
-        # )
-        # subprocess_cmd_run(cmd, nprocs, verbose=True)
-
-        # -------> 
         cmd = (
             f"run('issm_env'); run_model('{filename}', {ens_id}, {rank}, {nprocs}, {k}, {dt}, {tinitial}, {tfinal}); "
         )
         if not server.send_command(cmd):
             print(f"[DEBUG] Error sending command: {cmd}")
-        # <-------
-        #     return None
     except Exception as e:
         print(f"[DEBUG] Error sending command: {e}")
         server.shutdown()
@@ -181,7 +166,7 @@ def run_model(ensemble, **kwargs):
         k = kwargs.get('k')
 
         # -- call the icess_get_index function to get the index of the ensemble
-        print(f"[DEBUG] run_model {rank} of {comm.Get_size()}")
+        # print(f"[DEBUG] run_model {rank} of {comm.Get_size()}")
         # print(f"[DEBUG] Ensemble: {ensemble[:5]}")
         vecs, indx_map, _ = icesee_get_index(ensemble, **kwargs)
 
@@ -210,8 +195,8 @@ def run_model(ensemble, **kwargs):
         os.chdir(icesee_path)
         
         #  --- read the output from the h5 file ISSM model ---
-        # try:
-        if True:
+        try:
+        # if True:
             output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
             # check if the file exists
             if not os.path.exists(output_filename):
@@ -225,15 +210,9 @@ def run_model(ensemble, **kwargs):
                 'Pressure': f['Pressure'][0]
                 }
 
-        # except Exception as e:
-        #     print(f"[Run model] Error reading the file: {e}")
+        except Exception as e:
+            print(f"[Run model] Error reading the file: {e}")
         #     return None
-        
-    # except Exception as e:
-    #     print(f"[Run model] Error sending command: {e}")
-    #     server.shutdown()
-    #     server.reset_terminal()
-    #     sys.exit(1)
     
     # -- change directory back to the original directory
     os.chdir(icesee_path)

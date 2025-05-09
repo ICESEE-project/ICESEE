@@ -87,7 +87,7 @@ class _MatlabServer:
                         if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
                             print(f"Terminated MATLAB process (PID: {proc.info['pid']})")
                     else:
-                        if self.comm is None or self.comm.Get_rank() == 0:
+                        if self.comm is None or self.comm.Get_rank() == 0 and self.verbose:
                             print(f"Skipped GUI MATLAB process (PID: {proc.info['pid']})")
                         
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
@@ -488,7 +488,7 @@ def add_issm_dir_to_sys_path(issm_dir=None):
     for root, dirs, _ in os.walk(issm_dir):
         sys.path.insert(0, root)
 
-    print(f"[ICESEE] Added ISSM directory and subdirectories from path: {issm_dir}")
+    # print(f"[ICESEE] Added ISSM directory and subdirectories from path: {issm_dir}")
 
 
 # --- MATLAB Engine Initialization ---

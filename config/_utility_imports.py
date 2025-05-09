@@ -108,6 +108,7 @@ if not flag_jupyter:
     Nens = int(args.Nens)
     data_path = args.data_path
     model_nprocs = int(args.model_nprocs)
+    _verbose = args.verbose
 
     # Create params dictionary
     params = {
@@ -117,6 +118,7 @@ if not flag_jupyter:
         "even_distribution": args.even_distribution,
         "data_path": args.data_path,
         "model_nprocs": int(args.model_nprocs),
+        "verbose": args.verbose,
     }
 
     # print(f"Execution mode selected: {selected_mode}")
