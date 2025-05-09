@@ -79,6 +79,7 @@ if not flag_jupyter:
     parser.add_argument('--even_distribution', action='store_true', help='even distribution')
     parser.add_argument('--data_path', type=str, required=False, default= '_modelrun_datasets', help='folder to save data for single or multiple runs')
     parser.add_argument('execution_mode', type=int, choices=[0, 1, 2], nargs='?', help='Execution mode: 0=default_run, 1=sequential_run, 2=even_distribution')
+    parser.add_argument('--model_nprocs', type=int, required = False, default=0, help='number of processors for the model')
 
     args = parser.parse_args()
 
@@ -106,6 +107,7 @@ if not flag_jupyter:
     # Explicit use of parameters
     Nens = int(args.Nens)
     data_path = args.data_path
+    model_nprocs = int(args.model_nprocs)
 
     # Create params dictionary
     params = {
@@ -114,6 +116,7 @@ if not flag_jupyter:
         "sequential_run": args.sequential_run,
         "even_distribution": args.even_distribution,
         "data_path": args.data_path,
+        "model_nprocs": int(args.model_nprocs),
     }
 
     # print(f"Execution mode selected: {selected_mode}")
@@ -151,6 +154,9 @@ if not flag_jupyter:
 
     if data_path == '_modelrun_datasets':
         params["data_path"] = enkf_params.get("data_path", "_modelrun_datasets")
+
+    if model_nprocs == 0:
+        params["model_nprocs"] = enkf_params.get("model_nprocs", 1)
     
     if run_flag:
         execution_flag = params.get("execution_flag")

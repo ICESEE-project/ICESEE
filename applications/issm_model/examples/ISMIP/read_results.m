@@ -9,13 +9,15 @@ issm_dir = getenv('ISSM_DIR');  % Retrieve the ISSM_DIR environment variable
 % addpath(genpath(issm_dir));     % Add the ISSM directory and its subdirectories to the MATLAB path
 
 % path to the results
-results_dir = fullfile(issm_dir, 'examples', 'ISMIP', 'Models','rank_0000');  % Path to the results directory
+results_dir = fullfile(issm_dir, 'examples', 'ISMIP', 'Models','ens_id_0');  % Path to the results directory
+forecast_dir = fullfile(issm_dir, 'examples', 'ISMIP', 'Models','ens_id_15')
 
 %% plot surface velocities
 % Load the ISSM results
-md = loadmodel(fullfile(results_dir, 'ISMIP.Transient.mat'));  % Load the ISSM results from a .mat file
-plotmodel(md, 'data', md.results.TransientSolution.Vel, 'layer', 5, 'figure', 5);
-
+md_true = loadmodel(fullfile(results_dir, 'true_state.mat'));  % Load the ISSM results from a .mat file
+md_nurged = loadmodel(fullfile(results_dir, 'enkf_state.mat'));  % Load the ISSM results from a .mat file 
+plotmodel(md_true, 'data', md_true.results.TransientSolution.Vel, 'layer', 5, 'figure', 5);
+plotmodel(md_nurged, 'data', md_nurged.results.TransientSolution.Vel, 'layer', 5, 'figure', 6);
 
 %% ICESEE results
 % Get the Python version

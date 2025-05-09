@@ -83,8 +83,9 @@ shutil.copy(os.path.join(icesee_cwd, f'model_kwargs_{ens_id}.mat'), issm_example
 os.chdir(issm_examples_dir)
 
 # --- intialize the matlab server ---
-server = MatlabServer(color=ens_id, verbose=1)
-server.launch() # start the server
+# server = MatlabServer(color=ens_id, verbose=1)
+server = MatlabServer(color=ens_id,Nens = params['Nens'], comm = icesee_comm, verbose=1) 
+# server.launch() # start the server
 
 # Set up global shutdown handler
 setup_server_shutdown(server, icesee_comm, verbose=False)
@@ -92,7 +93,9 @@ setup_server_shutdown(server, icesee_comm, verbose=False)
 # --- intialize ISSM model ---
 modeling_params.update({'server': server, 'Nens': params.get('Nens'),
                         'icesee_path': icesee_cwd, 'ens_id': ens_id,
-                        'data_path': kwargs.get('data_path')})
+                        'data_path': kwargs.get('data_path'),
+                        'model_nprocs': params.get('model_nprocs'),})
+
 # if icesee_rank == 0:
 #     variable_size = initialize_model(physical_params, modeling_params, icesee_comm)
 # else:

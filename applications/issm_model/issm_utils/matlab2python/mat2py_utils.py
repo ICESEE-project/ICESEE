@@ -4,69 +4,78 @@
 # @date: 2025-04-16
 # ====================================================================
 
-# --- Imports ---
+
 import os
-import sys
-import subprocess
-import numpy as np
 import time
+import subprocess
+import sys
 import signal
 import psutil
-import signal
 import platform
+import threading
+import queue
 
-class MatlabServer:
-    """A class to manage a MATLAB server for running ISSM models."""
+class _MatlabServer:
+    """A class to manage a MATLAB server for running ISSM models.
 
-    def __init__(self,color=0, matlab_path="matlab", cmdfile="cmdfile", statusfile="statusfile",verbose=False):
-        """Initialize the MATLAB server configuration."""
+    This class provides functionality to launch a MATLAB server in non-GUI mode, send commands
+    to it, and capture its output in real-time when verbose mode is enabled. In MPI environments,
+    only the process with rank zero will print to the screen.
+
+    Attributes:
+        matlab_path (str): Path to the MATLAB executable.
+        cmdfile (str): Path to the command file for sending instructions to MATLAB.
+        statusfile (str): Path to the status file indicating MATLAB server readiness.
+        process (subprocess.Popen): The MATLAB server process.
+        verbose (bool): Flag to enable verbose logging.
+        output_queue (queue.Queue): Queue for collecting MATLAB output lines.
+        running (bool): Flag to control output reading threads.
+        comm (mpi4py.MPI.Comm or None): MPI communicator for rank checking.
+    """
+
+    def __init__(self, color=0, matlab_path="matlab", cmdfile="cmdfile", statusfile="statusfile", verbose=False, comm=None):
+        """Initialize the MATLAB server configuration.
+
+        Args:
+            color (int, optional): Identifier for file naming to support multiple instances. Defaults to 0.
+            matlab_path (str, optional): Path to the MATLAB executable. Defaults to "matlab".
+            cmdfile (str, optional): Base name for the command file. Defaults to "cmdfile".
+            statusfile (str, optional): Base name for the status file. Defaults to "statusfile".
+            verbose (bool, optional): Enable verbose logging. Defaults to False.
+            comm (mpi4py.MPI.Comm, optional): MPI communicator for rank checking. Defaults to None.
+        """
         self.matlab_path = matlab_path
         self.cmdfile = os.path.abspath(f"{cmdfile}_{color}.txt")
         self.statusfile = os.path.abspath(f"{statusfile}_{color}.txt")
         self.process = None
         self.verbose = verbose
-
-    # def kill_matlab_processes(self):
-    #     matlab_count = 0
-    #     for proc in psutil.process_iter(['name', 'pid']):
-    #         try:
-    #             # Check for MATLAB processes (name varies by OS)
-    #             if 'matlab' in proc.info['name'].lower() or 'MATLAB' in proc.info['name']:
-    #                 print(f"Found MATLAB process: {proc.info['name']} (PID: {proc.info['pid']})")
-    #                 # Terminate the process
-    #                 if platform.system() == "Windows":
-    #                     proc.terminate()  # Windows uses terminate
-    #                 else:
-    #                     proc.send_signal(signal.SIGTERM)  # Unix uses SIGTERM
-    #                 matlab_count += 1
-    #         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-    #             continue
-    
-    #     if matlab_count == 0:
-    #         print("No MATLAB processes found running.")
-    #     else:
-    #         print(f"Terminated {matlab_count} MATLAB process(es).")
-
+        self.output_queue = queue.Queue()  # Queue for asynchronous output handling
+        self.running = False  # Controls output reading threads
+        self.comm = comm  # MPI communicator
 
     def kill_matlab_processes(self):
-        import psutil
-        import platform
-        import signal
+        """Terminate all non-GUI MATLAB processes.
+
+        Scans running processes to identify and terminate non-GUI MATLAB instances based on
+        command-line flags. GUI instances are skipped to avoid interfering with user sessions.
+        Only rank zero prints output if a communicator is provided.
+
+        Raises:
+            Exception: If an error occurs during process termination, it is caught and logged.
+        """
         matlab_count = 0
         for proc in psutil.process_iter(['name', 'pid', 'cmdline']):
             try:
                 # Check for MATLAB processes (name varies by OS)
                 if 'matlab' in proc.info['name'].lower() or 'MATLAB' in proc.info['name']:
-                    if self.verbose:
+                    if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
                         print(f"Found MATLAB process: {proc.info['name']} (PID: {proc.info['pid']})")
                     
-                    # Get command-line arguments to check for GUI-related flags
+                    # Determine if the process is a GUI instance
                     cmdline = proc.info['cmdline']
-                    is_gui = True  # Assume GUI unless proven otherwise
-                    
-                    # Check command-line arguments for non-GUI flags
+                    is_gui = True  # Assume GUI unless non-GUI flags are present
                     if cmdline and any(flag in cmdline for flag in ['-nodisplay', '-nodesktop']):
-                        is_gui = False  # Non-GUI instance
+                        is_gui = False
                     
                     if not is_gui:
                         # Terminate non-GUI process
@@ -75,42 +84,84 @@ class MatlabServer:
                         else:
                             proc.send_signal(signal.SIGTERM)  # Unix uses SIGTERM
                         matlab_count += 1
-
-                        if self.verbose:
+                        if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
                             print(f"Terminated MATLAB process (PID: {proc.info['pid']})")
                     else:
-                        print(f"Skipped GUI MATLAB process (PID: {proc.info['pid']})")
+                        if self.comm is None or self.comm.Get_rank() == 0:
+                            print(f"Skipped GUI MATLAB process (PID: {proc.info['pid']})")
                         
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                continue
+                continue  # Skip processes that cannot be accessed or are invalid
     
-        if self.verbose:        
+        if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
             if matlab_count == 0:
                 print("No non-GUI MATLAB processes found to terminate.")
             else:
                 print(f"Terminated {matlab_count} non-GUI MATLAB process(es).")
 
+    def _read_stream(self, stream, stream_name):
+        """Read a stream line by line and put lines into the output queue.
+
+        Runs in a separate thread to read MATLAB stdout or stderr in real-time.
+
+        Args:
+            stream (file): The stream to read (e.g., process.stdout or process.stderr).
+            stream_name (str): Name of the stream ("stdout" or "stderr") for logging.
+        """
+        while self.running:
+            try:
+                line = stream.readline().decode('utf-8', errors='ignore').strip()
+                if line:
+                    self.output_queue.put((stream_name, line))
+            except Exception as e:
+                self.output_queue.put((stream_name, f"Error reading {stream_name}: {e}"))
+                break
+            if stream.closed:
+                break
+
+    def _print_output(self):
+        """Print output from the queue when verbose is enabled.
+
+        Runs in a separate thread to process and print output lines from the queue.
+        Only rank zero prints output if a communicator is provided.
+        """
+        while self.running:
+            try:
+                stream_name, line = self.output_queue.get(timeout=0.1)
+                if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
+                    print(f"[MATLAB {stream_name}] {line}")
+            except queue.Empty:
+                continue  # No output available, keep checking
 
     def launch(self):
-        """Launch MATLAB server and wait for it to be ready."""
+        """Launch the MATLAB server and wait for it to be ready.
+
+        Starts the MATLAB server in non-GUI mode, redirects its output, and waits for
+        the status file to indicate readiness. Output is printed in real-time if verbose
+        and only by rank zero if a communicator is provided.
+
+        Raises:
+            SystemExit: If the server fails to start or returns an unexpected status.
+            Exception: General errors during launch are caught and logged.
+        """
         try:
             self.kill_matlab_processes()
         except Exception as e:
-            print(f"An error occurred: {e}")
+            if self.comm is None or self.comm.Get_rank() == 0:
+                print(f"An error occurred: {e}")
             
-        if self.verbose:
+        if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
             print("[Launcher] Starting MATLAB server...")
             print(f"[Launcher] Command file: {self.cmdfile}")
             print(f"[Launcher] Status file: {self.statusfile}")
             
-        # Clean up old files if they exist
+        # Clean up old command and status files
         for f in [self.cmdfile, self.statusfile]:
             if os.path.exists(f):
                 os.remove(f)
         
         try:
-            # Launch MATLAB in background with redirected I/O
-            # matlab_cmd = f"{self.matlab_path} -nodesktop -nosplash -nojvm -r \"matlab_server('{self.cmdfile}', '{self.statusfile}, {int(self.verbose)}')\""
+            # Launch MATLAB with non-GUI flags and redirect I/O
             matlab_cmd = f"{self.matlab_path} -nodesktop -nosplash -nojvm -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
             self.process = subprocess.Popen(
                 matlab_cmd,
@@ -118,118 +169,219 @@ class MatlabServer:
                 stdout=subprocess.PIPE,  # Redirect stdout
                 stderr=subprocess.PIPE,  # Redirect stderr
                 stdin=subprocess.PIPE,   # Redirect stdin
-                preexec_fn=os.setsid    # Create new process group to handle signals
+                preexec_fn=os.setsid    # Create new process group for signal handling
             )
             
-            # Wait for server to signal readiness
+            self.running = True
+
+            # Start threads to handle real-time output
+            stdout_thread = threading.Thread(target=self._read_stream, args=(self.process.stdout, "stdout"))
+            stderr_thread = threading.Thread(target=self._read_stream, args=(self.process.stderr, "stderr"))
+            output_thread = threading.Thread(target=self._print_output)
+
+            stdout_thread.daemon = True
+            stderr_thread.daemon = True
+            output_thread.daemon = True
+
+            stdout_thread.start()
+            stderr_thread.start()
+            output_thread.start()
+            
+            # Wait for server to signal readiness via status file
             timeout = 10  # seconds
             start_time = time.time()
             while not os.path.exists(self.statusfile):
                 if time.time() - start_time > timeout:
-                    print("[Launcher] Error: MATLAB server failed to start within timeout.")
+                    if self.comm is None or self.comm.Get_rank() == 0:
+                        print("[Launcher] Error: MATLAB server failed to start within timeout.")
+                    self.running = False
                     os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
                     sys.exit(1)
                 time.sleep(0.5)
             
+            # Check server status
             with open(self.statusfile, 'r') as f:
                 status = f.read().strip()
             if status != 'ready':
-                print(f"[Launcher] Error: Unexpected status '{status}'.")
+                if self.comm is None or self.comm.Get_rank() == 0:
+                    print(f"[Launcher] Error: Unexpected status '{status}'.")
+                self.running = False
                 os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
                 sys.exit(1)
             
-            if self.verbose:
+            if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
                 print("[Launcher] MATLAB server is ready.")
         except Exception as e:
-            print(f"[Launcher] Error launching MATLAB server: {e}")
+            if self.comm is None or self.comm.Get_rank() == 0:
+                print(f"[Launcher] Error launching MATLAB server: {e}")
+            self.running = False
             if self.process:
                 os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
             sys.exit(1)
-            
 
     def send_command(self, command, timeout=300):
-        """Send a command to MATLAB and wait for it to be processed."""
-        if self.verbose:
+        """Send a command to MATLAB and wait for it to be processed.
+
+        Writes the command to the command file and waits for MATLAB to process it
+        (indicated by the file being deleted). Provides periodic status updates if verbose
+        and only by rank zero if a communicator is provided.
+
+        Args:
+            command (str): The MATLAB command to execute.
+            timeout (int, optional): Maximum time to wait for command processing (seconds). Defaults to 300.
+
+        Returns:
+            bool: True if the command was processed successfully, False if it timed out.
+        """
+        if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
             print(f"[Launcher] Sending command: {command}")
         with open(self.cmdfile, 'w') as f:
             f.write(command)
         
         # Wait for command to be processed (file deleted)
         start_time = time.time()
-        sleep_time = 0.2 # start fast and slow down
-        max_sleep  = 5.0 # don't sleep more than this
+        sleep_time = 0.2  # Initial sleep interval
+        max_sleep = 5.0   # Maximum sleep interval
+        last_verbose_time = start_time  # Track last verbose print
+        verbose_interval = 5.0  # Print status every 5 seconds
         while os.path.exists(self.cmdfile):
             elapsed_time = time.time() - start_time
             if elapsed_time > timeout:
-                print("[Launcher] Error: Command execution timed out.")
+                if self.comm is None or self.comm.Get_rank() == 0:
+                    print("[Launcher] Error: Command execution timed out.")
                 return False
-            # if self.verbose:
-            #     print("[Launcher] Waiting for command to be processed...")
+            
+            # Print periodic status if verbose
+            if self.verbose and (self.comm is None or self.comm.Get_rank() == 0) and (time.time() - last_verbose_time) >= verbose_interval:
+                print(f"[Launcher] Waiting for command to be processed... ({elapsed_time:.1f}s elapsed)")
+                last_verbose_time = time.time()
             
             time.sleep(sleep_time)
-
-            # adjust sleep time to slow down if needed up to max_sleep
-            # sleep_time = min(sleep_time * 1.5, max_sleep)
+            # Gradually increase sleep time to reduce CPU usage
             sleep_time = min(sleep_time + (elapsed_time / 10.0), max_sleep)
             if sleep_time == max_sleep:
-                # step up the sleep time
-                # sleep_time = 0.2
-                print("[Launcher] Warning: Slow command processing detected.")
+                if self.comm is None or self.comm.Get_rank() == 0:
+                    print("[Launcher] Warning: Slow command processing detected.")
         
-        print("[Launcher] Command processed successfully.")
+        if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
+            print("[Launcher] Command processed successfully.")
         return True
 
     def shutdown(self):
-        """Attempt to gracefully shut down the MATLAB server."""
-        if self.verbose:
+        """Attempt to gracefully shut down the MATLAB server.
+
+        Sends an 'exit' command to MATLAB and waits for termination. Captures any
+        remaining output and handles forced termination if necessary. Only rank zero
+        prints output if a communicator is provided.
+
+        Raises:
+            subprocess.TimeoutExpired: If the process does not terminate within the timeout.
+        """
+        if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
             print("[Launcher] Attempting to shut down MATLAB server...")
+
+        self.running = False  # Stop output threads
 
         if self.send_command("exit"):
             try:
-                # Capture output to diagnose issues
+                # Wait for process to terminate and collect remaining output
                 stdout, stderr = self.process.communicate(timeout=5)
-                if self.verbose:
+                if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
                     if stdout:
-                        print("[MATLAB stdout]", stdout.decode())
+                        print("[MATLAB stdout]", stdout.decode('utf-8', errors='ignore'))
                     if stderr:
-                        print("[MATLAB stderr]", stderr.decode())
+                        print("[MATLAB stderr]", stderr.decode('utf-8', errors='ignore'))
                     print("[Launcher] MATLAB server shut down successfully.")
             except subprocess.TimeoutExpired:
-                print("[Launcher] Warning: MATLAB process did not terminate in time, forcing termination.")
+                if self.comm is None or self.comm.Get_rank() == 0:
+                    print("[Launcher] Warning: MATLAB process did not terminate in time, forcing termination.")
                 os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
                 self.process.wait(timeout=5)
-                if self.verbose:
+                if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
                     print("[Launcher] MATLAB server terminated.")
         else:
-            print("[Launcher] Error: Failed to shut down MATLAB server gracefully.")
+            if self.comm is None or self.comm.Get_rank() == 0:
+                print("[Launcher] Error: Failed to shut down MATLAB server gracefully.")
             os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
             self.process.wait(timeout=5)
-            print("[Launcher] MATLAB server terminated.")
-    
+            if self.comm is None or self.comm.Get_rank() == 0:
+                print("[Launcher] MATLAB server terminated.")
+
     def reset_terminal(self):
-        """Reset terminal settings to restore normal behavior, if applicable."""
+        """Reset terminal settings to restore normal behavior, if applicable.
+
+        Skips reset in non-interactive or MPI environments to avoid interference.
+        Uses 'stty sane' to restore terminal settings. Only rank zero prints output
+        if a communicator is provided.
+
+        Raises:
+            subprocess.CalledProcessError: If the terminal reset command fails.
+        """
         if not sys.stdin.isatty() or any(key in os.environ for key in ["MPIEXEC", "OMPI_COMM_WORLD_RANK", "PMI_RANK", "SLURM_JOB_ID"]):
-            if self.verbose:
+            if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
                 print("[Launcher] Skipping terminal reset (non-interactive or MPI environment).", file=sys.stderr, flush=True)
             return
         try:
             subprocess.run(['stty', 'sane'], check=True)
-            if self.verbose:
+            if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
                 print("[Launcher] Terminal settings reset successfully.", file=sys.stderr, flush=True)
         except subprocess.CalledProcessError as e:
-            print(f"[Launcher] Warning: Failed to reset terminal settings: {e}", file=sys.stderr, flush=True)
-
-    # def reset_terminal(self):
-    #     """Reset terminal settings to restore normal behavior."""
-    #     try:
-    #         subprocess.run(['stty', 'sane'], check=True)
-    #         if self.verbose:
-    #             print("[Launcher] Terminal settings reset successfully.")
-    #     except subprocess.CalledProcessError:
-    #         print("[Launcher] Warning: Failed to reset terminal settings.")
-
+            if self.comm is None or self.comm.Get_rank() == 0:
+                print(f"[Launcher] Warning: Failed to reset terminal settings: {e}", file=sys.stderr, flush=True)
 
 #  ---- end of MatlabServer class ----
+
+# Lets use inheritance to create a new class that will manage the matlab server
+class MatlabServer:
+    """A class to manage a MATLAB server for running ISSM models both in parallel and serial."""
+    def __init__(self, color=0, Nens=None, comm=None, matlab_path="matlab", cmdfile="cmdfile", statusfile="statusfile", verbose=False):
+        """Initialize the MATLAB server configuration."""
+        self.comm = comm
+        self.rank = self.comm.Get_rank() if self.comm else 0
+        # self.size = self.comm.Get_size() if self.comm else 1
+        self.Nens = Nens
+        self.color = color
+        self.matlab_path = matlab_path
+        self.cmdfile = cmdfile
+        self.statusfile = statusfile
+        self.verbose = verbose
+        self._server = None
+
+        from mpi4py import MPI
+        self.size = MPI.COMM_WORLD.Get_size() if self.comm else 1
+
+    def _check_conditions(self):
+        """Check if conditions are met to access _MatlabServer."""
+        if self.Nens is None:
+            return False
+        if self.Nens >= self.size:
+            return True
+        if self.Nens < self.size:
+            raise ValueError(
+                f"Nens ({self.Nens}) must be greater than or equal to the size of the MPI communicator ({self.size} set model_nprocs for the remaining resources if you want the coupled model to run in parallel). "
+            )
+        return False
+
+    def __getattr__(self, name):
+        """Delegate method calls to _MatlabServer if conditions are met."""
+        if self._check_conditions():
+            if self._server is None:
+                self._server = _MatlabServer(
+                    color=self.color,
+                    matlab_path=self.matlab_path,
+                    cmdfile=self.cmdfile,
+                    statusfile=self.statusfile,
+                    verbose=self.verbose,
+                    comm=self.comm
+                )
+                #  call the launch method to start the server
+                self._server.launch()
+            return getattr(self._server, name)
+        # else:
+        #     pass
+        raise AttributeError(f"Method '{name}' not available: conditions not met (Nens={self.Nens}, size={self.size}, rank={self.rank})")
+
+# --- Subprocess Command Runner ---
 
 def subprocess_cmd_run(issm_cmd, nprocs: int, verbose: bool = True):
     try:
