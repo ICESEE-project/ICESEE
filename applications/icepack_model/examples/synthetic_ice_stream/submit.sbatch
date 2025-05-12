@@ -1,13 +1,15 @@
 #!/bin/bash
-#SBATCH -JIcepack                   # Job name
-#SBATCH --account=gts-arobel3-atlas     # charge account
-#SBATCH -N2 -n20  # --gres=gpu:V100:1 --ntasks-per-node=2 
-#SBATCH --mem-per-cpu=64G 
-#SBATCH -t 20:00:00          # Duration of the job 
-#SBATCH -qinferno            # QOS Name inferno, embers
-#SBATCH -oEnKf-%j.out        # Combined output and error messages file
-#SBATCH --mail-type=BEGIN,END,FAIL        # Mail preferences
-#SBATCH --mail-user=bkyanjo3@gatech.edu  # E-mail address for notifications
+#SBATCH -J Icepack
+#SBATCH --account=gts-arobel3-atlas
+#SBATCH -N 2
+#SBATCH -n 40
+#SBATCH --ntasks-per-node=20
+#SBATCH --mem-per-cpu=12G
+#SBATCH -t 10:00:00
+#SBATCH -q inferno
+#SBATCH -o EnKf-%j.out
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=bkyanjo3@gatech.edu
 
 # Run code
-srun --mpi=pmi2 apptainer exec icepack_working.sif python3 run_da_icepack.py --Nens=40
+srun -n 40 --mpi=pmi2 apptainer exec icepack_working.sif python3 run_da_icepack.py --Nens=40
