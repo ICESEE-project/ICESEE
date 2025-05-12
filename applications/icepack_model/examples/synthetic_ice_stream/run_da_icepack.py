@@ -24,7 +24,7 @@ from ICESEE.src.run_model_da.run_models_da import icesee_model_data_assimilation
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 
 # --- Initialize MPI ---
-rank, size, comm = ParallelManager().icesee_mpi_init(params)
+rank, size, comm, _ = ParallelManager().icesee_mpi_init(params)
 
 PETSc.Sys.Print("Fetching the model parameters ...")
 
