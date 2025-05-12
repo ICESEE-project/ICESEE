@@ -42,6 +42,7 @@ def generate_true_state(**kwargs):
     icesee_path         = kwargs.get('icesee_path')
     data_path           = kwargs.get('data_path')
     comm                = kwargs.get('comm')
+    vec_inputs          = kwargs.get('vec_inputs')
 
     #  --- change directory to the issm directory ---
     os.chdir(issm_examples_dir)
@@ -69,10 +70,8 @@ def generate_true_state(**kwargs):
                 return None
             with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
                 # -- fetch state variables
-                statevec_true[indx_map["Vx"],0] = f['Vx'][0]
-                statevec_true[indx_map["Vy"],0] = f['Vy'][0]
-                statevec_true[indx_map["Vz"],0] = f['Vz'][0]
-                statevec_true[indx_map["Pressure"],0] = f['Pressure'][0]
+                for key in vec_inputs:
+                    statevec_true[indx_map[key],0] = f[key][0]
         except Exception as e:
             print(f"[Generate-True-State: read init file] Error reading the file: {e}")
                             
@@ -83,12 +82,9 @@ def generate_true_state(**kwargs):
             kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
             # --- write the state back to h5 file for ISSM model
             input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
-            # print(f"[DEBUG-1] Attempting to open file: {input_filename}")
             with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
-                f.create_dataset('Vx', data=statevec_true[indx_map["Vx"],k])
-                f.create_dataset('Vy', data=statevec_true[indx_map["Vy"],k])
-                f.create_dataset('Vz', data=statevec_true[indx_map["Vz"],k])
-                f.create_dataset('Pressure', data=statevec_true[indx_map["Pressure"],k])
+                for key in vec_inputs:
+                    f.create_dataset(key, data=statevec_true[indx_map[key],k])
 
             # -- call the run_model function to push the state forward in time
             ISSM_model(**kwargs)
@@ -96,33 +92,23 @@ def generate_true_state(**kwargs):
             # try:
             if True:
                 output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
-                # print(f"[DEBUG-2] Attempting to open file: {output_filename}")
                 with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
-                    statevec_true[indx_map["Vx"],k+1] = f['Vx'][0]
-                    statevec_true[indx_map["Vy"],k+1] = f['Vy'][0]
-                    statevec_true[indx_map["Vz"],k+1] = f['Vz'][0]
-                    statevec_true[indx_map["Pressure"],k+1] = f['Pressure'][0]
-                    vx = f['Vx'][0]
+                    for key in vec_inputs:
+                        statevec_true[indx_map[key],k+1] = f[key][0]
+                    
             # except Exception as e:
             #     print(f"[Generate-True-State: read output file] Error reading the file: {e}")
                 # return None
-        
-        updated_state = {'Vx': statevec_true[indx_map["Vx"],:],
-                        'Vy': statevec_true[indx_map["Vy"],:],
-                        'Vz': statevec_true[indx_map["Vz"],:],
-                        'Pressure': statevec_true[indx_map["Pressure"],:]}
+    
+        updated_state = {}
+        for key in vec_inputs:
+            updated_state[key] = statevec_true[indx_map[key],:]
 
         #  --- change directory back to the original directory ---
         os.chdir(icesee_path)
         
         return updated_state
-    
-    # except Exception as e:
-    #     print(f"[Generate true state] Error sending command: {e}")
-    #     # Ensure directory is changed back even on error
-    #     os.chdir(icesee_path)
-    #     return None
-    
+
 
 def generate_nurged_state(**kwargs):
     """generate the nurged state of the model"""
@@ -133,6 +119,7 @@ def generate_nurged_state(**kwargs):
     icesee_path         = kwargs.get('icesee_path')
     data_path           = kwargs.get('data_path')
     comm                = kwargs.get('comm')
+    vec_inputs          = kwargs.get('vec_inputs')       
 
     #  --- change directory to the issm directory ---
     os.chdir(issm_examples_dir)
@@ -162,10 +149,9 @@ def generate_nurged_state(**kwargs):
                 return None
             with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
                 # -- fetch state variables
-                statevec_nurged[indx_map["Vx"],0] = f['Vx'][0]
-                statevec_nurged[indx_map["Vy"],0] = f['Vy'][0]
-                statevec_nurged[indx_map["Vz"],0] = f['Vz'][0]
-                statevec_nurged[indx_map["Pressure"],0] = f['Pressure'][0]
+                for key in vec_inputs:
+                    statevec_nurged[indx_map[key],0] = f[key][0]
+
         except Exception as e:
             print(f"[DEBUG] Error reading the file: {e}")
                             
@@ -178,10 +164,8 @@ def generate_nurged_state(**kwargs):
             # --- write the state back to h5 file for ISSM model
             input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
             with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
-                f.create_dataset('Vx', data=statevec_nurged[indx_map["Vx"],k])
-                f.create_dataset('Vy', data=statevec_nurged[indx_map["Vy"],k])
-                f.create_dataset('Vz', data=statevec_nurged[indx_map["Vz"],k])
-                f.create_dataset('Pressure', data=statevec_nurged[indx_map["Pressure"],k])
+                for key in vec_inputs:
+                    f.create_dataset(key, data=statevec_nurged[indx_map[key],k])
 
             # -- call the run_model function to push the state forward in time
             ISSM_model(**kwargs)
@@ -189,10 +173,9 @@ def generate_nurged_state(**kwargs):
             try:
                 output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
                 with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
-                    statevec_nurged[indx_map["Vx"],k+1] = f['Vx'][0]
-                    statevec_nurged[indx_map["Vy"],k+1] = f['Vy'][0]
-                    statevec_nurged[indx_map["Vz"],k+1] = f['Vz'][0]
-                    statevec_nurged[indx_map["Pressure"],k+1] = f['Pressure'][0]
+                    for key in vec_inputs:
+                        statevec_nurged[indx_map[key],k+1] = f[key][0]
+
             except Exception as e:
                 print(f"[DEBUG] Error reading the file: {e}")
                 # return None
@@ -227,6 +210,7 @@ def initialize_ensemble(ens, **kwargs):
     icesee_path         = kwargs.get('icesee_path')
     data_path           = kwargs.get('data_path')
     comm                = kwargs.get('comm')
+    vec_inputs          = kwargs.get('vec_inputs')
 
     #  --- change directory to the issm directory ---
     os.chdir(issm_examples_dir)
@@ -238,28 +222,12 @@ def initialize_ensemble(ens, **kwargs):
     # try:
     if True:
         output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
-        # print(f"[DEBUG] Attempting to open file: {output_filename}")
+        updated_state = {}
         with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
-        # with h5py.File(output_filename, 'r') as f:
-            # --- fetch state variables
-            Vx = f['Vx'][0]
-            Vy = f['Vy'][0]
-            Vz = f['Vz'][0]
-            Pressure = f['Pressure'][0]
-
-        updated_state = {'Vx': Vx,
-                        'Vy': Vy,
-                        'Vz': Vz,
-                        'Pressure': Pressure}
+            for key in vec_inputs:
+                updated_state[key] = f[key][0]
+           
         os.chdir(icesee_path)
 
         return updated_state
         
-    # except Exception as e:
-    #     print(f"[Initialze_ensemble] Error sending command: {e}")
-    #     server.shutdown()
-    #     server.reset_terminal()
-    #     sys.exit(1)
-    
-    # # --- change directory back to the original directory ---
-    # os.chdir(icesee_path)
