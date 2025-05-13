@@ -107,3 +107,4 @@ applications/issm_model/examples/ISMIP/*.h5
 applications/issm_model/examples/ISMIP/*.yaml
 applications/issm_model/examples/ISMIP/model_kwargs.mat
 applications/issm_model/issm_utils/__pycache__/
+applications/issm_model/examples/ISMIP/model_kwargs*
