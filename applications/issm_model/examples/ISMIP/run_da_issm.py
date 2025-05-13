@@ -144,5 +144,6 @@ else:
     except Exception as e:
         print(f"[run_da_issm] Error running the model: {e}")
         server.kill_matlab_processes()
+        exit()
 #     print("Checking stdout:", sys.stdout, file=sys.stderr)  # Use stderr to avoid stdout issues
 # sys.stdout.flush()

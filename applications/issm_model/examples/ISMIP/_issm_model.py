@@ -143,6 +143,7 @@ def run_model(ensemble, **kwargs):
     issm_examples_dir   = kwargs.get('issm_examples_dir')
     icesee_path         = kwargs.get('icesee_path')
     comm                = kwargs.get('comm')
+    vec_inputs          = kwargs.get('vec_inputs')
 
     rank                = comm.Get_rank()
 
@@ -181,11 +182,12 @@ def run_model(ensemble, **kwargs):
             
             # -----
             with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
-                # f.create_dataset('ensemble', data=ensemble)
+                f.create_dataset('ensemble', data=ensemble)
                 f.create_dataset('Vx', data=Vx)
                 f.create_dataset('Vy', data=Vy)
                 f.create_dataset('Vz', data=Vz)
                 f.create_dataset('Pressure', data=Pressure)
+                
             # print(f"[HDF5] Saved: {input_filename}")
 
         # --- call the issm model  to update the state and parameters variables ---

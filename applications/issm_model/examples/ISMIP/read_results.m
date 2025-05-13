@@ -10,7 +10,7 @@ issm_dir = getenv('ISSM_DIR');  % Retrieve the ISSM_DIR environment variable
 
 % path to the results
 results_dir = fullfile(issm_dir, 'examples', 'ISMIP', 'Models','ens_id_0');  % Path to the results directory
-forecast_dir = fullfile(issm_dir, 'examples', 'ISMIP', 'Models','ens_id_15')
+forecast_dir = fullfile(issm_dir, 'examples', 'ISMIP', 'Models','ens_id_0')
 
 %% plot surface velocities
 % Load the ISSM results
