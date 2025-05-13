@@ -1,0 +1,68 @@
+physical-parameters:
+  # Domain parameters
+  Lx: 100e3        # (m) A: 80e3, F: 100e3
+  Ly: 100e3        # (m) A: 80e3, F: 100e3
+  nx: 30         # number of elements in the x-direction A: 20, F: 30
+  ny: 30         # number of elements in the y-direction B: 20, F: 30
+
+  
+modeling-parameters:
+  # Model parameters
+  num_years:  12         # number of years to run the model A: 5, F: 80
+  tinitial: 0.0           # initial time 
+  timesteps_per_year: 2   # number of timesteps per year A: 0.5, F: 4
+
+  example_name: "ISMIP"  # these can be found in the examples folder
+  ParamFile: "IsmipF.par"  # parameter file, A: IsmipA.par, F: IsmipF.Par
+  steps: 8                 # 7 if A, 8 if F
+  verbose: False            # verbosity level
+
+  extrusion_layers: 5     # number of extrusion layers
+  extrusion_exponent: 1 # extrusion exponent
+  flow_model: "HO"      # Higher Order model (HO) 
+  sliding_vx: 0.0       # sliding velocity in x-direction
+  sliding_vy: 0.0       # sliding velocity in y-direction
+
+
+enkf-parameters:
+  # Ensemble Kalman Filter parameters
+  Nens: 16                      # number of ensemble members (now set in the command line)
+  freq_obs: 4              # frequency of observations
+  obs_max_time: 10           # maximum time for observations
+  obs_start_time: 2             # start time for observations
+
+  num_state_vars: 4       # number of state variables  [h,u,v]
+  num_param_vars: 0       # number of parameter variables [smb]
+  vec_inputs: ['Vx','Vy','Vz','Pressure']
+  observed_params: []
+
+  # Statistical parameters (based on the number of state variables)
+  sig_obs: [5,2,2,4]   # observation error standard deviation
+  sig_Q: [3,1.2,0.4,0.4]    # process noise standard deviation
+  length_scale: 15   # length scale for the covariance matrix
+  Q_rho: 0.5         # correlation coefficient for the covariance matrix, we assume blocks are correlated
+
+  seed: 1                 # seed for random number generator
+  inflation_factor: 0.8          # inflation factor
+  localization_flag: False      # localization flag: True, False
+
+  # estimation flags
+  joint_estimation: False # joint estimation flag: True, False
+  parameter_estimation: False # parameter estimation flag: True, False
+
+  # nurged parameters
+  h_nurge_ic: 100         # nurged increment for initial thickness
+  u_nurge_ic: 0         # nurged increment for initial velocity
+  nurged_entries_percentage: 0.10 #%     # percentage of nurged entries in the state vector
+
+  # enkf model parameters
+  model_name: "issm"               # name of the model
+  filter_type: "EnKF"               # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
+  local_analysis: False           # local analysis flag: True, False, global analysis is default
+  parallel_flag: "MPI_model"             # parallel flag: Serial, MPI, MPI_model
+  n_modeltasks: 1                     # number of model tasks (for MPI)
+  commandlinerun: "True"              # command line run flag: True, False
+  execution_flag: 0                   #`execution flag: 0 ->default, 1 -> sequntial, 2 -> even_distribution_of_problem size, 3 -> even_distribution_of_problem size with load balancing
+  model_nprocs: 2                           # number of processors for Model's MPI
+  data_path: _modelrun_datasets
+ 
