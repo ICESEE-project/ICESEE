@@ -107,3 +107,17 @@ applications/issm_model/examples/ISMIP/*.h5
 applications/issm_model/examples/ISMIP/*.yaml
 applications/issm_model/examples/ISMIP/model_kwargs.mat
 applications/issm_model/issm_utils/__pycache__/
+applications/issm_model/examples/ISMIP/model_kwargs*
+applications/issm_model/examples/ISMIP_Choi/_modelrun_datasets
+applications/issm_model/examples/ISMIP_Choi/*.log
+applications/issm_model/examples/ISMIP_Choi/*.out
+applications/issm_model/examples/ISMIP_Choi/*.err
+applications/issm_model/examples/ISMIP_Choi/*.txt
+applications/issm_model/examples/ISMIP_Choi/*.png
+applications/issm_model/examples/ISMIP_Choi/*.pdf
+applications/issm_model/examples/ISMIP_Choi/*.csv
+applications/issm_model/examples/ISMIP_Choi/*.nc
+applications/issm_model/examples/ISMIP_Choi/*.h5
+applications/issm_model/examples/ISMIP_Choi/*.yaml
+applications/issm_model/examples/ISMIP_Choi/model_kwargs*
+applications/issm_model/issm_utils/__pycache__/

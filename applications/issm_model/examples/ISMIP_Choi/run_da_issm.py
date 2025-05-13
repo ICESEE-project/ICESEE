@@ -20,7 +20,7 @@ from ICESEE.src.run_model_da.run_models_da import icesee_model_data_assimilation
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 
 #  model-specific imports
-from ICESEE.applications.issm_model.examples.ISMIP._issm_model import initialize_model
+from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_model import initialize_model
 from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import add_issm_dir_to_sys_path, MatlabServer
 from ICESEE.applications.issm_model.issm_utils.matlab2python.server_utils import run_icesee_with_server, setup_server_shutdown
 

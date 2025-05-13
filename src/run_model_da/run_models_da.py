@@ -424,9 +424,6 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
     nx, ny            = model_kwargs.get("nx",0.2), model_kwargs.get("ny",0.2)
     b_in, b_out       = model_kwargs.get("b_in",0.0), model_kwargs.get("b_out",0.0) 
 
-    # --- call curently supported model Class
-    model_module = SupportedModels(model=model).call_model()
-
     # --- call the ICESEE mpi parallel manager ---
     if re.match(r"\AMPI_model\Z", parallel_flag, re.IGNORECASE):
         from mpi4py import MPI
@@ -444,6 +441,10 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
         # --- icesee mpi parallel manager ---------------------------------------------------
         # --- ensemble load distribution --
         rounds, color, sub_rank, sub_size, subcomm, subcomm_size, rank_world, size_world, comm_world, start, stop = ParallelManager().icesee_mpi_ens_distribution(params)
+
+        # --- call curently supported model Class
+        model_module = SupportedModels(model=model,comm=comm_world,verbose=params.get('verbose')).call_model()
+
 
         # pack the global communicator and the subcommunicator
         model_kwargs.update({"comm_world": comm_world, "subcomm": subcomm})
@@ -991,6 +992,9 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
         
     else:
         parallel_manager = None
+
+        # --- call curently supported model Class
+        model_module = SupportedModels(model=model,verbose=params.get('verbose')).call_model()
 
         # --- get the ensemble size
         nd, Nens = ensemble_vec.shape

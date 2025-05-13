@@ -1,6 +1,6 @@
 # ====================================================================
 # @author: Brian Kyanjo
-# @description: Matlab-python server launcher for ISSM model and other helper functions
+# @description: Matlab-python server launcher utilities for ISSM model and helper functions
 # @date: 2025-04-16
 # ====================================================================
 
@@ -15,8 +15,17 @@ _global_server = None
 _server_shutdown = False
 _signal_handler_set = False  # Track if signal handler is set
 
-def setup_server_shutdown(server,comm,verbose=False):
-    """Set up global server reference and SIGINT handler for cleanup on KeyboardInterrupt."""
+def setup_server_shutdown(server, comm, verbose=False):
+    """Set up global server reference and SIGINT handler for cleanup on KeyboardInterrupt.
+
+    Configures a signal handler for SIGINT to gracefully shut down the MATLAB server.
+    Only rank zero prints messages to stderr when verbose is True, but all ranks log to a file.
+
+    Args:
+        server: The MATLAB server instance to manage.
+        comm (mpi4py.MPI.Comm or None): MPI communicator for rank checking. If None, assumes single process.
+        verbose (bool, optional): If True, enables printing to stderr for rank zero. Defaults to False.
+    """
     global _global_server, _server_shutdown, _signal_handler_set
     if _signal_handler_set:
         logging.debug("Global SIGINT handler already set up")
@@ -26,8 +35,8 @@ def setup_server_shutdown(server,comm,verbose=False):
     _server_shutdown = False
 
     # Configure logging to a file
-    # clean if it exists
-    if os.path.exists("launcher_log.txt"): os.remove("launcher_log.txt")
+    if os.path.exists("launcher_log.txt"):
+        os.remove("launcher_log.txt")
     logging.basicConfig(
         filename="launcher_log.txt",
         level=logging.DEBUG,
@@ -36,13 +45,11 @@ def setup_server_shutdown(server,comm,verbose=False):
     )
 
     def log_message(message):
-        rank = comm.Get_rank() if comm else 0
-        if rank == 0 and verbose:
-            # Only log to stderr if rank is 0
+        """Log a message to file and print to stderr if rank is 0 and verbose is True."""
+        rank = comm.Get_rank() if comm is not None else 0
+        logging.debug(message)  # Always log to file
+        if verbose and rank == 0:
             print(f"[Launcher] {message}", file=sys.stderr, flush=True)
-            logging.debug(message)
-        else:
-            return None
 
     # Signal handler for SIGINT
     def signal_handler(sig, frame):
@@ -70,25 +77,26 @@ def setup_server_shutdown(server,comm,verbose=False):
     _signal_handler_set = True
     log_message("Global SIGINT handler set up for server shutdown")
 
-
-def run_icesee_with_server(callable_func, server,shut_down_server=False,comm=None,verbose=True):
+def run_icesee_with_server(callable_func, server, shut_down_server=False, comm=None, verbose=True):
     """Run the specified callable with the given server, handling errors and cleanup.
-    
+
+    Executes a callable function, manages errors, and optionally shuts down the server.
+    Only rank zero prints messages to stderr when verbose is True, but all ranks log to a file.
+
     Args:
         callable_func: A callable function or lambda to execute with the server.
         server: The MATLAB server instance to interact with.
-        help (bool): If True, returns usage information instead of executing the function. Defaults to False.
-    
+        shut_down_server (bool, optional): If True, shuts down the server after execution. Defaults to False.
+        comm (mpi4py.MPI.Comm or None, optional): MPI communicator for rank checking. Defaults to None.
+        verbose (bool, optional): If True, enables printing to stderr for rank zero. Defaults to True.
+
     Returns:
-        bool: True if the callable executed successfully, False otherwise.
-              If help=True, returns a string with usage information.
-    
+        The result of the callable if successful, False if an error occurs.
+
     Usage:
         - For a MATLAB server method: run_icesee_with_server(lambda: server.send_command('your_command'), server)
         - For a regular function: run_icesee_with_server(function(args), server)
-        - For help: run_icesee_with_server(None, server, help=True)
     """
-
     global _server_shutdown
     # Ensure logging is configured
     logging.basicConfig(
@@ -98,15 +106,12 @@ def run_icesee_with_server(callable_func, server,shut_down_server=False,comm=Non
         force=True
     )
 
-    # Also log to stderr with forced flushing
     def log_message(message):
-        rank = comm.Get_rank() if comm else 0
-        if rank == 0 and verbose:
-            # Only log to stderr if rank is 0
+        """Log a message to file and print to stderr if rank is 0 and verbose is True."""
+        rank = comm.Get_rank() if comm is not None else 0
+        logging.debug(message)  # Always log to file
+        if verbose and rank == 0:
             print(f"[Launcher] {message}", file=sys.stderr, flush=True)
-            logging.debug(message)
-        else:
-            return None
 
     # Ensure Python output is unbuffered
     os.environ["PYTHONUNBUFFERED"] = "1"
@@ -116,14 +121,13 @@ def run_icesee_with_server(callable_func, server,shut_down_server=False,comm=Non
     # Get function name for logging
     func_name = getattr(callable_func, '__name__', 'anonymous_function')
     
-    success = False 
+    success = False
     try:
         log_message(f"Starting {func_name}")
         result = callable_func()
         log_message(f"{func_name} result: {result}")
         if not result:
             raise RuntimeError(f"{func_name} failed.")
-        # return True
         success = True
         return result  # Return the callable's result
 
@@ -145,21 +149,17 @@ def run_icesee_with_server(callable_func, server,shut_down_server=False,comm=Non
             log_message(f"Shutdown decision: should_shutdown={should_shutdown}, success={success}, shut_down_server={shut_down_server}")
 
         if should_shutdown:
-            if verbose:
-                log_message("Attempting to shut down MATLAB server within run_icesee_with_server")
+            log_message("Attempting to shut down MATLAB server within run_icesee_with_server")
             try:
                 server.shutdown()
                 _server_shutdown = True
                 # Skip reset_terminal in non-interactive or MPI environments
                 mpi_env_vars = ["MPIEXEC", "OMPI_COMM_WORLD_RANK", "PMI_RANK", "SLURM_JOB_ID"]
                 if sys.stdin.isatty() and not any(key in os.environ for key in mpi_env_vars):
-                    if verbose:
-                        log_message("Calling reset_terminal within run_icesee_with_server")
+                    log_message("Calling reset_terminal within run_icesee_with_server")
                     server.reset_terminal()
                 else:
-                    if verbose:
-                        log_message("Skipping reset_terminal within run_icesee_with_server (non-interactive or MPI environment)")
+                    log_message("Skipping reset_terminal within run_icesee_with_server (non-interactive or MPI environment)")
             except Exception as shutdown_error:
                 log_message(f"Failed to shutdown MATLAB server within run_icesee_with_server: {shutdown_error}")
-        if verbose:
-            log_message("Exiting run_icesee_with_server")
+        log_message("Exiting run_icesee_with_server")
