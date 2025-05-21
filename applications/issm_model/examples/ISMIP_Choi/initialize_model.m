@@ -1,253 +1,156 @@
-function initialize_model(rank, nprocs, ens_id)
+function variable_size = initialize_model(rank, nprocs, ens_id)
+    % Initialize ISSM model for MISMIP-like experiment
+    % Inputs: rank, nprocs (MPI settings), ens_id (ensemble ID)
+    % Output: variable_size (number of vertices for DART state vector)
 
-    %  read kwargs from a .mat file
-	model_kwargs = sprintf('model_kwargs_%d.mat', ens_id);
-	kwargs 			= load(model_kwargs);
+    % Read kwargs from .mat file
+    model_kwargs = sprintf('model_kwargs_%d.mat', ens_id);
+    kwargs = load(model_kwargs);
+    ParamFile = char(kwargs.ParamFile);
+    Lx = double(kwargs.Lx); % 640000 m
+    Ly = double(kwargs.Ly); % 80000 m
+    cluster_name = char(kwargs.cluster_name);
+    steps = double(kwargs.steps);
+    icesee_path = char(kwargs.icesee_path);
+    data_path = char(kwargs.data_path);
 
-	%  access the values of the dictionary
-	ParamFile 			 = char(kwargs.ParamFile);
-	Lx 					 = double(kwargs.Lx); % length of the domain in x direction
-	Ly 					 = double(kwargs.Ly); % length of the domain in y direction
-	nx 					 = double(kwargs.nx); % number of nodes in x direction
-	ny 					 = double(kwargs.ny); % number of nodes in y direction
-    extrusion_layers     = double(kwargs.extrusion_layers); % number of layers for extrusion
-    extrusion_exponent	 = double(kwargs.extrusion_exponent); % exponent for extrusion
-	flow_model			 = char(kwargs.flow_model); % flow model to use
-	sliding_vx			 = double(kwargs.sliding_vx); % sliding velocity in x
-	sliding_vy			 = double(kwargs.sliding_vy); % sliding velocity in y
-	cluster_name 		 = char(kwargs.cluster_name); % cluster name
-	step_ens  		     = double(kwargs.steps); % step for ensemble 
-	icesee_path		     = char(kwargs.icesee_path); % path to icesee
-	data_path		     = char(kwargs.data_path); % path to data
-
-	folder = sprintf('./Models/ens_id_%d', ens_id);
-	% Only create if it doesn't exist
-	if ~exist(folder, 'dir')
-		mkdir(folder);
-	end
-
-    steps = [1:6]; 
-
-	disp(['[MATLAB] Running model with rank: ', num2str(rank), ', nprocs: ', num2str(nprocs)]);
-
-    % Mesh generation #1
-    if any(steps==1)
-        %initialize md as a new model #help model
-	    %->
-	    md=model();
-	    % generate a squaremesh #help squaremesh
-		md = squaremesh(md,Lx,Ly,nx,ny);
-	   
-	    % save the given model
-	    %->
-		% filename = sprintf('./Models/ISMIP.Mesh_generation_%d.mat', rank);
-		filename = fullfile(folder,'ISMIP.Mesh_generation.mat');
-		save(filename, 'md');
-	    % save ./Models/ISMIP.Mesh_generation md;
+    folder = sprintf('./Models/ens_id_%d', ens_id);
+    if ~exist(folder, 'dir')
+        mkdir(folder);
     end
 
-    % Masks #2
-    if any(steps==2)
-	    % load the preceding step #help loadmodel
-	    % path is given by the organizer with the name of the given step
-	    %->
-	    % md = loadmodel('./Models/ISMIP.Mesh_generation');
-		% filename = sprintf('./Models/ISMIP.Mesh_generation_%d.mat', rank);
-		filename = fullfile(folder,'ISMIP.Mesh_generation.mat');
-		md = loadmodel(filename);
+    disp(['[MATLAB] Initializing model with rank: ', num2str(rank), ', nprocs: ', num2str(nprocs), ', ens_id: ', num2str(ens_id)]);
 
-	    % set the mask #help setmask
-	    % all MISMIP nodes are grounded
-	    %->
-	    md=setmask(md,'','');
-	    % plot the given mask #md.mask to locate the field
+	steps = [1:6]; 
 	
-	    % save the given model
-	    %->
-	    % save ./Models/ISMIP.SetMask md;
-		% filename = sprintf('./Models/ISMIP.SetMask_%d.mat', rank);
-		filename = fullfile(folder,'ISMIP.SetMask.mat');
-		save(filename, 'md');
-	  
-    end
-    
-    %Parameterization #3
-    if any(steps==3)
-	    % load the preceding step #help loadmodel
-	    % path is given by the organizer with the name of the given step
-	    %->
-	    % md = loadmodel('./Models/ISMIP.SetMask');
-		% filename = sprintf('./Models/ISMIP.SetMask_%d.mat', rank);
-		filename = fullfile(folder,'ISMIP.SetMask.mat');
-		md = loadmodel(filename);
-
-	    % parametrize the model # help parameterize
-	    % you will need to fil-up the parameter file defined by the
-	    % ParamFile variable
-	    %->
-	    md=parameterize(md,ParamFile);
-	    % save the given model
-	    %->
-	    % save ./Models/ISMIP.Parameterization md;
-		% filename = sprintf('./Models/ISMIP.Parameterization_%d.mat', rank);
-		filename = fullfile(folder,'ISMIP.Parameterization.mat');
-		save(filename, 'md');
-	    % save ./Models/ISMIP.Parameterization md;
+    % Mesh generation (Step 1)
+    if any(steps == 1)
+        md = model();
+        % Use bamg for variable-resolution mesh (500 m to 10 km)
+        domain = [0, Lx, 0; Lx, Lx, Ly; Lx, 0, Ly; 0, 0, 0]; % Domain outline
+        fid = fopen('Domain.exp', 'w');
+        fprintf(fid, '0\n4\n');
+        for i = 1:4
+            fprintf(fid, '%f %f\n', domain(i, 2), domain(i, 3));
+        end
+        fclose(fid);
+        md = bamg(md, 'domain', 'Domain.exp', 'hmax', 10000, 'hmin', 500, 'splitcorners', 0);
+        % Save mesh
+        filename = fullfile(folder, 'ISMIP.Mesh_generation.mat');
+        save(filename, 'md');
     end
 
-    %Extrusion #4
-    if any(steps==4)
-	    
-	    % load the preceding step #help loadmodel
-	    % path is given by the organizer with the name of the given step
-	    %->
-	    % md = loadmodel('./Models/ISMIP.Parameterization');
-		% filename = sprintf('./Models/ISMIP.Parameterization_%d.mat', rank);
-		filename = fullfile(folder,'ISMIP.Parameterization.mat');
-		md = loadmodel(filename);
-
-	    % vertically extrude the preceding mesh #help extrude
-	    % only 5 layers exponent 1
-	    %->
-	    md=extrude(md,extrusion_layers,extrusion_exponent);
-	    % plot the 3D geometry #plotdoc
-	    %->
-	    % plotmodel(md,'data',md.geometry.base)
-	    % save the given model
-	    %->
-	    % save ./Models/ISMIP.Extrusion md;
-		% filename = sprintf('./Models/ISMIP.Extrusion_%d.mat', rank);
-		filename = fullfile(folder,'ISMIP.Extrusion.mat');
-		save(filename, 'md');
-	    % save ./Models/ISMIP.Extrusion md;
+    % Masks (Step 2)
+    if any(steps == 2)
+        filename = fullfile(folder, 'ISMIP.Mesh_generation.mat');
+        md = loadmodel(filename);
+        md = setmask(md, '', ''); % All grounded, no ice shelves
+        filename = fullfile(folder, 'ISMIP.SetMask.mat');
+        save(filename, 'md');
     end
 
-    %Set the flow computing method #5
-    if any(steps==5)
-    
-	    % load the preceding step #help loadmodel
-	    % path is given by the organizer with the name of the given step
-	    %->
-	    % md = loadmodel('./Models/ISMIP.Extrusion');
-		% filename = sprintf('./Models/ISMIP.Extrusion_%d.mat', rank);
-		filename = fullfile(folder,'ISMIP.Extrusion.mat');
-		md = loadmodel(filename);
-	    % set the approximation for the flow computation #help setflowequation
-	    % We will be using the Higher Order Model (HO)
-	    %->
-	    md=setflowequation(md,flow_model,'all');
-	    % save the given model
-	    %->
-	    % save ./Models/ISMIP.SetFlow md;
-		% filename = sprintf('./Models/ISMIP.SetFlow_%d.mat', rank);
-		filename = fullfile(folder,'ISMIP.SetFlow.mat');
-		save(filename, 'md');
-    end
-    
-    %Set Boundary Conditions #6
-    if any(steps==6)
-    
-	    % load the preceding step #help loadmodel
-	    % path is given by the organizer with the name of the given step
-	    %->
-	    % md = loadmodel('./Models/ISMIP.SetFlow');
-		% filename = sprintf('./Models/ISMIP.SetFlow_%d.mat', rank);
-		filename = fullfile(folder,'ISMIP.SetFlow.mat');
-		md = loadmodel(filename);
-
-	    % dirichlet boundary condition are known as SPCs
-	    % ice frozen to the base, no velocity	#md.stressbalance
-	    % SPCs are initialized at NaN one value per vertex
-	    %->
-	    md.stressbalance.spcvx=NaN*ones(md.mesh.numberofvertices,1);
-	    %->
-	    md.stressbalance.spcvy=NaN*ones(md.mesh.numberofvertices,1);
-	    %->
-	    md.stressbalance.spcvz=NaN*ones(md.mesh.numberofvertices,1);
-	    % extract the nodenumbers at the base #md.mesh.vertexonbase
-	    %->
-	    basalnodes=find(md.mesh.vertexonbase);
-	    % set the sliding to zero on the bed
-	    %->
-	    md.stressbalance.spcvx(basalnodes)=sliding_vx;
-	    %->
-	    md.stressbalance.spcvy(basalnodes)=sliding_vy;
-	    % periodic boundaries have to be fixed on the sides
-	    % Find the indices of the sides of the domain, for x and then for y
-	    % for x
-	    % create maxX, list of indices where x is equal to max of x (use >> help find)
-	    %->
-	    maxX=find(md.mesh.x==max(md.mesh.x));
-	    % create minX, list of indices where x is equal to min of x
-	    %->
-	    minX=find(md.mesh.x==min(md.mesh.x));
-	    % for y
-	    % create maxY, list of indices where y is equal to max of y
-	    %  but not where x is equal to max or min of x
-	    % (i.e, indices in maxX and minX should be excluded from maxY and minY)
-	    %->
-	    maxY=find(md.mesh.y==max(md.mesh.y) & md.mesh.x~=max(md.mesh.x) & md.mesh.x~=min(md.mesh.x));
-	    % create minY, list of indices where y is equal to max of y
-	    % but not where x is equal to max or min of x
-	    %->
-	    minY=find(md.mesh.y==min(md.mesh.y) & md.mesh.x~=max(md.mesh.x) & md.mesh.x~=min(md.mesh.x));
-	    % set the node that should be paired together, minX with maxX and minY with maxY
-	    % #md.stressbalance.vertex_pairing
-	    %->
-	    md.stressbalance.vertex_pairing=[minX,maxX;minY,maxY];
-	    if (ParamFile=='IsmipF.par')
-		    % if we are dealing with IsmipF the solution is in
-		    % masstransport
-		    md.masstransport.vertex_pairing=md.stressbalance.vertex_pairing;
-	    end
-	    % save the given model
-	    %->
-	    % save ./Models/ISMIP.BoundaryCondition md;
-		% filename = sprintf('./Models/ISMIP.BoundaryCondition_%d.mat', rank);
-		filename = fullfile(folder,'ISMIP.BoundaryCondition.mat');
-		save(filename, 'md');
+    % Parameterization (Step 3)
+    if any(steps == 3)
+        filename = fullfile(folder, 'ISMIP.SetMask.mat');
+        md = loadmodel(filename);
+        md = parameterize(md, ParamFile); % Use Mismip2.par
+        % Initialize friction coefficient (Weertman law, reference value)
+        md.friction = frictionweertman();
+        md.friction.coefficient = 2500 * ones(md.mesh.numberofvertices, 1);
+        md.friction.m = 3; % Weertman exponent
+        filename = fullfile(folder, 'ISMIP.Parameterization.mat');
+        save(filename, 'md');
     end
 
-	if step_ens == 8
+    % Set flow equation (Step 4, no extrusion)
+    if any(steps == 4)
+        filename = fullfile(folder, 'ISMIP.Parameterization.mat');
+        md = loadmodel(filename);
+        md = setflowequation(md, 'SSA', 'all'); % Shelfy-stream approximation
+        filename = fullfile(folder, 'ISMIP.SetFlow.mat');
+        save(filename, 'md');
+    end
 
-	% 	% load Boundary conditions from the inital conditions
-		% md = loadmodel('./Models/ISMIP.BoundaryCondition');
-		% filename = sprintf('./Models/ISMIP.BoundaryCondition_%d.mat', rank);
-		filename = fullfile(folder,'ISMIP.BoundaryCondition.mat');
-		md = loadmodel(filename);
-	
-	% 	% save these fields to a file for ensemble use
-		fields = {'vx', 'vy', 'vz', 'pressure'};
-	% 	result = md.results.TransientSolution(end);
-		result = md.initialization(end);
-		
-		% 	% --- fetch and save data for ensemble use
-		filename = fullfile(icesee_path, data_path, sprintf('ensemble_init_%d.h5', ens_id));
-		% Ensure the directory exists
-		[filepath, ~, ~] = fileparts(filename);
-		if ~exist(filepath, 'dir')
-			mkdir(filepath);
-		end
+    % Set boundary conditions (Step 5)
+    if any(steps == 5)
+        filename = fullfile(folder, 'ISMIP.SetFlow.mat');
+        md = loadmodel(filename);
+        % Dirichlet boundary conditions (no-slip at base)
+        md.stressbalance.spcvx = NaN * ones(md.mesh.numberofvertices, 1);
+        md.stressbalance.spcvy = NaN * ones(md.mesh.numberofvertices, 1);
+        basalnodes = find(md.mesh.vertexonbase);
+        md.stressbalance.spcvx(basalnodes) = 0;
+        md.stressbalance.spcvy(basalnodes) = 0;
+        % Periodic boundaries on lateral sides
+        maxX = find(md.mesh.x == max(md.mesh.x));
+        minX = find(md.mesh.x == min(md.mesh.x));
+        maxY = find(md.mesh.y == max(md.mesh.y) & md.mesh.x ~= max(md.mesh.x) & md.mesh.x ~= min(md.mesh.x));
+        minY = find(md.mesh.y == min(md.mesh.y) & md.mesh.x ~= max(md.mesh.x) & md.mesh.x ~= min(md.mesh.x));
+        md.stressbalance.vertex_pairing = [minX, maxX; minY, maxY];
+        md.masstransport.vertex_pairing = md.stressbalance.vertex_pairing;
+        filename = fullfile(folder, 'ISMIP.BoundaryCondition.mat');
+        save(filename, 'md');
+    end
 
-		% Check if the file exists and delete it if it does
-		if isfile(filename)
-			delete(filename);
-		end
+    % Initialize ensemble fields (Step 6, equivalent to notebook's InitEnsemble)
+    if any(steps == 6)
+        filename = fullfile(folder, 'ISMIP.BoundaryCondition.mat');
+        md = loadmodel(filename);
+        % Load ensemble perturbations (from notebook Cell 12)
+        ncfile = fullfile(icesee_path, data_path, sprintf('uncondition_fcoeff_err_ens1000.nc'));
+        fcoeff = h5read(ncfile, '/fcoeff', [ens_id, 1], [1, md.mesh.numberofvertices]);
+        md.friction.coefficient = 2500 + fcoeff';
+        ncfile = fullfile(icesee_path, data_path, sprintf('condition_bed_err_30km_ens1000.nc'));
+        bed_err = h5read(ncfile, '/bed_err', [ens_id, 1], [1, md.mesh.numberofvertices]);
+        md.geometry.bed = md.geometry.bed + bed_err';
+        md.geometry.base = md.geometry.base + bed_err';
+        md.geometry.thickness = md.geometry.surface - md.geometry.base;
+        pos = find(md.geometry.thickness < 1);
+        md.geometry.thickness(pos) = 1;
+        md.geometry.surface = md.geometry.base + md.geometry.thickness;
+        % Hydrostatic adjustment (from notebook Cell 12)
+        di = md.materials.rho_ice / md.materials.rho_water;
+        md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
+        pos = find(md.mask.ocean_levelset < 0);
+        md.geometry.surface(pos) = md.geometry.thickness(pos) * (md.materials.rho_water - md.materials.rho_ice) / md.materials.rho_water;
+        md.geometry.base = md.geometry.surface - md.geometry.thickness;
+        pos = find(md.geometry.base < md.geometry.bed);
+        md.geometry.base(pos) = md.geometry.bed(pos);
+        pos = find(md.mask.ocean_levelset > 0);
+        md.geometry.base(pos) = md.geometry.bed(pos);
+        md.geometry.surface = md.geometry.base + md.geometry.thickness;
+        % Save ensemble initialization
+        fields = {'vx', 'vy', 'thickness', 'surface', 'bed', 'friction.coefficient'};
+        result = struct('vx', md.initialization.vx, 'vy', md.initialization.vy, ...
+                        'thickness', md.geometry.thickness, 'surface', md.geometry.surface, ...
+                        'bed', md.geometry.bed, 'friction_coefficient', md.friction.coefficient);
+        filename = fullfile(icesee_path, data_path, sprintf('ensemble_init_%d.h5', ens_id));
+        save_ensemble_hdf5(filename, result, fields);
+        filename = fullfile(folder, 'ISMIP.EnsembleInit.mat');
+        save(filename, 'md');
+    end
 
-		%  save the fields to the file
-		vx = result.vx;
-		vy = result.vy;
-		vz = result.vz;
-		pressure = result.pressure;
-		h5create(filename, '/Vx', size(vx));
-		h5write(filename, '/Vx', vx);
-		h5create(filename, '/Vy', size(vy));
-		h5write(filename, '/Vy', vy);
-		h5create(filename, '/Vz', size(vz));
-		h5create(filename, '/Pressure', size(pressure));
-		h5write(filename, '/Vz', vz);
-		h5write(filename, '/Pressure', pressure);
-	end
-    
+    variable_size = md.mesh.numberofvertices;
 end
 
+function save_ensemble_hdf5(filename, result, field_names)
+    % Save ensemble initialization to HDF5
+    [filepath, ~, ~] = fileparts(filename);
+    if ~exist(filepath, 'dir')
+        mkdir(filepath);
+    end
+    if isfile(filename)
+        delete(filename);
+    end
+    for i = 1:length(field_names)
+        field = field_names{i};
+        if isfield(result, field)
+            data = result.(field);
+            h5create(filename, ['/' field], size(data));
+            h5write(filename, ['/' field], data);
+        else
+            warning('Field "%s" not found in result. Skipping.', field);
+        end
+    end
+    fprintf('[HDF5] Saved: %s\n', filename);
+end

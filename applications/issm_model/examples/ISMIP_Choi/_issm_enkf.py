@@ -11,7 +11,7 @@ import h5py
 
 
 # --- import utility functions ---
-from ICESEE.applications.issm_model.examples.ISMIP._issm_model import *
+from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_model import *
 from ICESEE.config._utility_imports import icesee_get_index
 
 # --- Forecast step ---

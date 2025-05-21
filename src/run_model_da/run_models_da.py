@@ -428,11 +428,12 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
     if re.match(r"\AMPI_model\Z", parallel_flag, re.IGNORECASE):
         from mpi4py import MPI
         from parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
-        from mpi_analysis_functions import analysis_enkf_update, EnKF_X5, \
+        from mpi_analysis_functions import analysis_enkf_update, EnKF_X5, DEnKF_X5, \
                                             gather_and_broadcast_data_default_run, \
                                             parallel_write_full_ensemble_from_root, \
                                             parallel_write_data_from_root_2D, \
-                                            parallel_write_vector_from_root
+                                            parallel_write_vector_from_root, \
+                                            analysis_Denkf_update
         
 
         # start the timer
@@ -1605,10 +1606,18 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
                                 y_i = np.sum(X5, axis=1)
                                 # ensemble_vec_mean[:,k+1] = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
                                 ens_mean = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
+                            elif DEnKF_flag:
+                                # compute the X5 matrix
+                                X5,X5prime = DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions)
+                                y_i = np.sum(X5, axis=1)
+                                ens_mean = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
+                                analysis_vec_ij = None
                         else:
                             X5 = np.empty((Nens, Nens))
                             analysis_vec_ij = None
                             smb_scale = 0.0
+                            if DEnKF_flag:
+                                X5prime = np.empty((Nens, Nens))
 
                         if model_kwargs.get('local_analysis', False):
                             shape_ens = ensemble_vec.shape
@@ -1640,7 +1649,11 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
                             
 
                         # call the analysis update function
-                        analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, analysis_vec_ij,UtilsFunctions,model_kwargs,smb_scale)
+                        if EnKF_flag:
+                            analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, analysis_vec_ij,UtilsFunctions,model_kwargs,smb_scale)
+                        elif DEnKF_flag:
+                            analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,X5prime,UtilsFunctions,model_kwargs,smb_scale)
+                            # analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, analysis_vec_ij,UtilsFunctions,model_kwargs,smb_scale)
                     
                         # update the observation index
                         km += 1

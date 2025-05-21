@@ -100,6 +100,8 @@ modeling_params.update({'server': server, 'Nens': params.get('Nens'),
 # --- initialize the model ---
 variable_size = initialize_model(physical_params, modeling_params, icesee_comm)
 
+exit()
+
 params.update({'nd': variable_size*params.get('total_state_param_vars')})
 
 # --- change directory back to the original directory ---
@@ -109,41 +111,13 @@ os.chdir(icesee_cwd)
 kwargs.update({'params': params, 
                'server': server})
 
-
-if False:
-    try:
-        result = run_icesee_with_server(
-            icesee_model_data_assimilation(
-            enkf_params["model_name"],
-            enkf_params["filter_type"],
-            **kwargs), server, True,icesee_comm,verbose=True
-        )
-    except Exception as e:
-        print(f"[DEBUG] Error running the model: {e}")
-        result = None
-    finally:
-        try:
-            server.shutdown()
-            server.reset_terminal()
-        except Exception as e:
-            print(f"[DEBUG] Error shutting down server: {e}")
-        sys.exit(1)
-else:
-    # result = run_icesee_with_server(
-    #     icesee_model_data_assimilation(
-    #     enkf_params["model_name"],
-    #     enkf_params["filter_type"],
-    #     **kwargs), server, False,icesee_comm,verbose=False
-    # )
-    try:
-        icesee_model_data_assimilation(
-            enkf_params["model_name"],
-            enkf_params["filter_type"],
-            **kwargs)
-        server.shutdown()
-    except Exception as e:
-        print(f"[run_da_issm] Error running the model: {e}")
-        server.kill_matlab_processes()
-        exit()
-#     print("Checking stdout:", sys.stdout, file=sys.stderr)  # Use stderr to avoid stdout issues
-# sys.stdout.flush()
+try:
+    icesee_model_data_assimilation(
+        enkf_params["model_name"],
+        enkf_params["filter_type"],
+        **kwargs)
+    server.shutdown()
+except Exception as e:
+    print(f"[run_da_issm] Error running the model: {e}")
+    server.kill_matlab_processes()
+    exit()
