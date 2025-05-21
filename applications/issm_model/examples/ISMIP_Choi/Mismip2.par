@@ -1,0 +1,38 @@
+%Parameterization for ISMIP_Choi paper
+
+%Geometry
+disp('   Constructing Geometry');
+
+Lx = 640000;  %m Domain length (along ice flow)
+Ly = 80000;   %m Domain width (across ice flow)
+zb_deep = -720 %m maximum bepth of the bedrock topography
+dc = 500 %m Depth of threb trough compared with the side walls
+wc = 24000 %m half-width of the trough
+fc = 4000 %m Characteristic width of the side walls of the channel
+
+% bedrock topography: zb(x,y) = max[Bx(x) + By(y), zb,deep]
+x = md.mesh.x/1000; % convert to km for the equation
+
+Bx = zeros(size(x));
+for i=1:length(x)
+    if x(i) >= 0 && x(i) <= 350
+        Bx(i)=150 - 3*x(i);
+    elseif x(i) > 350 && x(i) <= 450
+        Bx(i)=-900 + 5*(x(i)-350);
+    elseif x(i) > 450 && x(i) <= (Lx/1000)
+        Bx(i)=-400 - 3*(x(i)-450);
+    end
+end
+% convert to m
+Bx = Bx*1000; % convert to m
+
+y = md.mesh.y;
+By = dc./(1 + exp(-2*(y -Ly/2-wc)/fc)) + dc./(1+ exp(2*(y -Ly/2+wc)/fc));
+
+% combine and apply deep limit
+md.geometry.base = max(Bx + By, zb_deep*ones(size(x)));
+
+% thickness: surface -base
+md.geometry.thickness = md.geometry.surface - md.geometry.base;
+
+plotmodel(md,'data',md.geometry.thickness);

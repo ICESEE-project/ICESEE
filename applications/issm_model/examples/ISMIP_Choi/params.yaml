@@ -1,68 +1,65 @@
 physical-parameters:
   # Domain parameters
-  Lx: 100e3        # (m) A: 80e3, F: 100e3
-  Ly: 100e3        # (m) A: 80e3, F: 100e3
-  nx: 30         # number of elements in the x-direction A: 20, F: 30
-  ny: 30         # number of elements in the y-direction B: 20, F: 30
+  Lx: 640e3      # (m) Domain length along ice flow (640 km from paper)
+  Ly: 80e3       # (m) Domain width across ice flow (80 km from paper)
+  nx: 200        # Number of elements in x-direction (approximates 27,000 elements with varying resolution)
+  ny: 50         # Number of elements in y-direction (adjusted for 500 m to 10 km resolution)
 
-  
 modeling-parameters:
   # Model parameters
-  num_years:  12         # number of years to run the model A: 5, F: 80
-  tinitial: 0.0           # initial time 
-  timesteps_per_year: 2   # number of timesteps per year A: 0.5, F: 4
+  num_years: 30           # Number of years to run the model (30-year assimilation period from paper)
+  tinitial: 0.0           # Initial time
+  timesteps_per_year: 12  # Number of timesteps per year (monthly for stability in SSA)
 
-  example_name: "ISMIP"  # these can be found in the examples folder
-  ParamFile: "IsmipF.par"  # parameter file, A: IsmipA.par, F: IsmipF.Par
-  steps: 8                 # 7 if A, 8 if F
-  verbose: False            # verbosity level
+  example_name: "ISSM_Choi"  # Must have added this to the ISSM directory
+  ParamFile: "ISSM_DART.par" # Parameter file for ISSM-DART setup
+  steps: 10                  # Increased steps for finer time integration
+  verbose: True              # Enable verbosity for debugging
 
-  extrusion_layers: 5     # number of extrusion layers
-  extrusion_exponent: 1 # extrusion exponent
-  flow_model: "HO"      # Higher Order model (HO) 
-  sliding_vx: 0.0       # sliding velocity in x-direction
-  sliding_vy: 0.0       # sliding velocity in y-direction
-
+  extrusion_layers: 5        # Retained as in original
+  extrusion_exponent: 1      # Retained as in original
+  flow_model: "SSA"          # Shelfy-stream approximation (from paper)
+  sliding_vx: 0.0            # Sliding velocity in x-direction
+  sliding_vy: 0.0            # Sliding velocity in y-direction
 
 enkf-parameters:
   # Ensemble Kalman Filter parameters
-  Nens: 16                      # number of ensemble members (now set in the command line)
-  freq_obs: 4              # frequency of observations
-  obs_max_time: 10           # maximum time for observations
-  obs_start_time: 2             # start time for observations
+  Nens: 50                      # Number of ensemble members (paper uses 50)
+  freq_obs: 1                   # Frequency of observations (annual, as per paper)
+  obs_max_time: 30              # Maximum time for observations (30 years)
+  obs_start_time: 0             # Start time for observations (start of simulation)
 
-  num_state_vars: 4       # number of state variables  [h,u,v]
-  num_param_vars: 0       # number of parameter variables [smb]
-  vec_inputs: ['Vx','Vy','Vz','Pressure']
-  observed_params: []
+  num_state_vars: 3             # State variables: ice thickness (H), velocities (u, v)
+  num_param_vars: 2             # Parameter variables: friction coefficient (C), bed topography (B)
+  vec_inputs: ['H', 'Vx', 'Vy','C' ,'B'] # State vector inputs (ice thickness and velocities)
+  observed_params: ['C', 'B']   # Parameters to estimate (friction coefficient, bed topography)
 
-  # Statistical parameters (based on the number of state variables)
-  sig_obs: [5,2,2,4]   # observation error standard deviation
-  sig_Q: [3,1.2,0.4,0.4]    # process noise standard deviation
-  length_scale: 15   # length scale for the covariance matrix
-  Q_rho: 0.5         # correlation coefficient for the covariance matrix, we assume blocks are correlated
+  # Statistical parameters
+  sig_obs: [5, 10, 10]          # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
+  sig_Q: [3, 1.0, 1.0,1.0,1.0]          # Process noise std dev (adjusted for H, Vx, Vy)
+  length_scale: [5,3,2,4,3]               # Length scale for covariance (5 km for friction, per paper)
+  Q_rho: 0.7                    # Correlation coefficient (adjusted based on roughness factor)
 
-  seed: 1                 # seed for random number generator
-  inflation_factor: 0.8          # inflation factor
-  localization_flag: False      # localization flag: True, False
+  seed: 1                       # Seed for random number generator
+  inflation_factor: 1.15        # Inflation factor (optimal range 1.10–1.18 from paper)
+  localization_flag: False       # Enable localization (paper uses 4–8 km radius)
+  localization_radius: 6        # Localization radius in km (midpoint of 4–8 km)
 
-  # estimation flags
-  joint_estimation: False # joint estimation flag: True, False
-  parameter_estimation: False # parameter estimation flag: True, False
+  # Estimation flags
+  joint_estimation: True        # Enable joint state and parameter estimation
+  parameter_estimation: True    # Enable parameter estimation
 
-  # nurged parameters
-  h_nurge_ic: 100         # nurged increment for initial thickness
-  u_nurge_ic: 0         # nurged increment for initial velocity
-  nurged_entries_percentage: 0.10 #%     # percentage of nurged entries in the state vector
+  # Nudged parameters
+  h_nurge_ic: 50                # Nudged increment for initial thickness (reduced for stability)
+  u_nurge_ic: 0                 # Nudged increment for initial velocity
+  nurged_entries_percentage: 0.05 # Percentage of nudged entries (reduced for finer mesh)
 
-  # enkf model parameters
-  model_name: "issm"               # name of the model
-  filter_type: "EnKF"               # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
-  local_analysis: False           # local analysis flag: True, False, global analysis is default
-  parallel_flag: "MPI_model"             # parallel flag: Serial, MPI, MPI_model
-  n_modeltasks: 1                     # number of model tasks (for MPI)
-  commandlinerun: "True"              # command line run flag: True, False
-  execution_flag: 0                   #`execution flag: 0 ->default, 1 -> sequntial, 2 -> even_distribution_of_problem size, 3 -> even_distribution_of_problem size with load balancing
-  model_nprocs: 2                           # number of processors for Model's MPI
+  # EnKF model parameters
+  model_name: "issm"            # Model name
+  filter_type: "EnKF"           # Filter type: EnKF (Ensemble Kalman Filter)
+  parallel_flag: "MPI_model"    # Parallel flag
+  n_modeltasks: 4               # Number of model tasks (increased for larger domain)
+  commandlinerun: "True"        # Command line run flag
+  execution_flag: 2             # Even distribution of problem size
+  model_nprocs: 8               # Number of processors for MPI (increased for efficiency)
   data_path: _modelrun_datasets
- 
