@@ -1609,15 +1609,26 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
                             elif DEnKF_flag:
                                 # compute the X5 matrix
                                 X5,X5prime = DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions)
-                                y_i = np.sum(X5, axis=1)
-                                ens_mean = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
+                                # y_i = np.sum(X5, axis=1)
+                                # ens_mean = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
+                                # H = UtilsFunctions(params, ensemble_vec).JObs_fun(ensemble_vec.shape[0])
+                                # Cov_model = np.cov(ensemble_vec)
+                                # ens_mean = np.mean(ensemble_vec, axis=1)
+                                # diff = (ensemble_vec -np.tile(ens_mean.reshape(-1,1),Nens) )
+                                # Cov_model = 1/(Nens-1) * (diff @ diff.T)
+                                # epsilon = 1e-6
+                                # inv_matrix = np.linalg.pinv(H @ Cov_model @ H.T + Cov_obs + epsilon * np.eye(Cov_obs.shape[0]))
+                                # KalGain = Cov_model @ H.T @ inv_matrix
+                                # X5prime = KalGain@(d - np.dot(H, ens_mean))
+                                # ens_mean = ens_mean + X5prime
+                                # print(f"X5prime shape: {X5prime.shape}")
                                 analysis_vec_ij = None
                         else:
                             X5 = np.empty((Nens, Nens))
                             analysis_vec_ij = None
                             smb_scale = 0.0
                             if DEnKF_flag:
-                                X5prime = np.empty((Nens, Nens))
+                                ens_mean = np.empty((nd, 1))
 
                         if model_kwargs.get('local_analysis', False):
                             shape_ens = ensemble_vec.shape
@@ -1652,7 +1663,8 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
                         if EnKF_flag:
                             analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, analysis_vec_ij,UtilsFunctions,model_kwargs,smb_scale)
                         elif DEnKF_flag:
-                            analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,X5prime,UtilsFunctions,model_kwargs,smb_scale)
+                            model_kwargs.update({"DEnKF_flag": True})
+                            analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,UtilsFunctions,model_kwargs,smb_scale)
                             # analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, analysis_vec_ij,UtilsFunctions,model_kwargs,smb_scale)
                     
                         # update the observation index
