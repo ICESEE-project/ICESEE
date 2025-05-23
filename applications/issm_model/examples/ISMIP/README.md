@@ -49,7 +49,7 @@ Serial execution is ideal for testing EnKF variants, as not all support MPI para
 
 **Command**:
 ```bash
-python run_da_issm.py --parallel=serial
+python run_da_issm.py --Nens=30
 ```
 
 **Configuration**:
