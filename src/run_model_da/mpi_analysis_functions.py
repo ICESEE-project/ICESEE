@@ -65,6 +65,14 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
             ens_mean = f.create_dataset('ensemble_mean', (local_nd, params['nt']+1), dtype=ensemble_chunk.dtype)
             if rank == 0:
                 ens_mean[:,0] = ensemble_mean
+
+            DEnKF_flag = model_kwargs.get("DEnKF_flag",False)
+            if DEnKF_flag:
+                # dset = dset + ensemble_mean
+                comm.barrier() # wait for all processes to reach this point
+                if rank == 0:
+                    ensemble_mean = np.mean(dset[:, :, 0], axis=1)
+                    dset[:,:, 0] = dset[:, :, 0] + ensemble_mean[:,np.newaxis]
     else:
         with h5py.File(output_file, 'a', driver='mpio', comm=comm) as f:
             dset = f['ensemble']
@@ -214,6 +222,14 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
             if rank == 0:
                 ens_mean = f['ensemble_mean']
                 ens_mean[:,timestep] = ensemble_mean
+
+            DEnKF_flag = model_kwargs.get("DEnKF_flag",False)
+            if DEnKF_flag:
+                comm.barrier() # wait for all processes to reach this point
+                if rank == 0:
+                    # dset = dset + ensemble_mean
+                    ensemble_mean = np.mean(dset[:, :, timestep], axis=1)
+                    dset[:,:, timestep] = dset[:, :, timestep] #- ensemble_mean[:,np.newaxis]
 
     comm.Barrier()
 
@@ -846,11 +862,11 @@ def DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
     # print(f"Rank: {rank_world} X4 shape: {X4.shape}")
     # compute X5 = X4 + I
     # X5 = X4 + np.eye(Nens)
-    # X5 = 0.5*(2*np.eye(Nens) + np.dot(one_N, X4) - X4) #TODO check this
-    X5 = 0.5*(2*np.eye(Nens) - X4)
-    # X5prime = one_N + np.dot((np.eye(Nens) - one_N),X4prime) #TODO check this
-    X5prime = (one_N - X4prime) 
-    # X5 = X5 + X5prime
+    X5 = 0.5*(2*np.eye(Nens) + np.dot(one_N, X4) - X4) #TODO check this
+    # X5 = 0.5*(2*np.eye(Nens) - X4)
+    X5prime = one_N + np.dot((np.eye(Nens) - one_N),X4prime) #TODO check this
+    # X5prime = (one_N - X4prime) 
+    X5 =  (np.eye(Nens) - (0.5*(np.dot(np.eye(Nens) - one_N, X4)))) + one_N + np.dot((np.eye(Nens) - one_N),X4prime) 
     # X5 = 0.5*(2*np.eye(Nens) - X4) 
     # sum of each column of X5 should be 1
     if np.sum(X5, axis=0).all() != 1.0:
@@ -868,7 +884,7 @@ def DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
 
     return X5, X5prime
 
-def analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, X5prime,UtilsFunctions,model_kwargs,smb_scale):
+def analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, UtilsFunctions,model_kwargs,smb_scale):
     """
     Function to perform the analysis update using the EnKF
         - broadcast X5 to all processors
@@ -888,7 +904,7 @@ def analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, X5prime,UtilsF
         rank_world = comm_world.Get_rank()
         # broadcast X5 to all processors
         X5 = BM.bcast(X5, comm=comm_world)
-        X5prime = BM.bcast(X5prime, comm=comm_world)
+        # ens_mean = BM.bcast(ens_mean, comm=comm_world)
         # X5_diff = BM.bcast(X5_diff, comm=comm_world)
 
         # initialize the an empty ensemble vector for the rest of the processors
@@ -912,12 +928,12 @@ def analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, X5prime,UtilsF
         #     scatter_ensemble = scatter_ensemble[start_row:end_row, :, k]
         # do the ensemble analysis update: A_j = Fj*X5 
         analysis_vec = np.dot(scatter_ensemble, X5)
-        ens_mean_ = np.dot(scatter_ensemble, X5prime)
+        # ens_mean_ = np.dot(scatter_ensemble, X5prime)
 
         # print(f"Rank: {rank_world} analysis_vec shape: {analysis_vec.shape}, ens_mean shape: {ens_mean.shape}")
 
-        comm_world.Barrier()
-        analysis_vec = analysis_vec + ens_mean_
+        # comm_world.Barrier()
+        # analysis_vec = analysis_vec + ens_mean
 
         # ens_mean = np.mean(analysis_vec, axis=1)
 

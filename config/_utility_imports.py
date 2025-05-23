@@ -247,3 +247,29 @@ if not flag_jupyter:
     kwargs.update({'modeling_params': modeling_params})
     kwargs.update({'enkf_params': enkf_params})
     
+    import re
+
+    # if re.match(r"\AMPI_model\Z", kwargs.get('parallel_flag'), re.IGNORECASE):
+    #     # --- Initialize MPI ---
+    #     from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
+
+    #     icesee_rank, icesee_size, icesee_comm, ens_id = ParallelManager().icesee_mpi_init(params)
+
+    #     # check if _modelrun_datasets exists in path if not create one
+    #     _modelrun_datasets = kwargs.get("data_path",None)
+    #     if icesee_rank == 0 and not os.path.exists(_modelrun_datasets):
+    #         os.makedirs(_modelrun_datasets, exist_ok=True)
+
+    #     #  synchronize the processes
+    #     icesee_comm.Barrier()
+
+    # else:
+    if not re.match(r"\AMPI_model\Z", kwargs.get('parallel_flag'), re.IGNORECASE):
+        icesee_rank = 0
+        icesee_size = 1
+        icesee_comm = None
+
+        # check if _modelrun_datasets exists in path if not create one
+        _modelrun_datasets = kwargs.get("data_path",None)
+        if not os.path.exists(_modelrun_datasets):
+            os.makedirs(_modelrun_datasets, exist_ok=True)

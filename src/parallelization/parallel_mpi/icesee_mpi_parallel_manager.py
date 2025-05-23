@@ -162,12 +162,22 @@ class ParallelManager:
         self.model_nprocs = params.get("model_nprocs")
 
         # remove data file
-        if self.rank_world == 0:
-            if os.path.exists(params.get("data_path")):
-                if os.path.isdir(params.get("data_path")):
-                    shutil.rmtree(params.get("data_path"))
-                else:
-                    os.remove(params.get("data_path"))
+        import re
+        if re.match(r"\AMPI_model\Z", params.get('parallel_flag'), re.IGNORECASE):
+            _modelrun_datasets = params.get("data_path",None)
+            if self.rank_world == 0 and not os.path.exists(_modelrun_datasets):
+                 os.makedirs(_modelrun_datasets, exist_ok=True)
+
+        #     if os.path.exists(params.get("data_path")):
+        #         if os.path.isdir(params.get("data_path")):
+        #             shutil.rmtree(params.get("data_path"))
+        #             # create the directory again
+        #             os.makedirs(params.get("data_path"))
+        #         else:
+        #             os.remove(params.get("data_path"))
+        #             # create the directory again
+        #             os.makedirs(params.get("data_path"))
+
         # Synchronize all ranks
         self.COMM_WORLD.Barrier()
 
