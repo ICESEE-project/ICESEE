@@ -1,7 +1,6 @@
 function variable_size = initialize_model(rank, nprocs, ens_id)
     % Initialize ISSM model for MISMIP-like experiment
     % Inputs: rank, nprocs (MPI settings), ens_id (ensemble ID)
-    % Output: variable_size (number of vertices for DART state vector)
 
     % Read kwargs from .mat file
     model_kwargs = sprintf('model_kwargs_%d.mat', ens_id);
@@ -19,7 +18,7 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
         mkdir(folder);
     end
 
-    disp(['[MATLAB] Initializing model with rank: ', num2str(rank), ', nprocs: ', num2str(nprocs), ', ens_id: ', num2str(ens_id)]);
+    % disp(['[MATLAB] Initializing model with rank: ', num2str(rank), ', nprocs: ', num2str(nprocs), ', ens_id: ', num2str(ens_id)]);
 
 	steps = [1:5]; 
 	
