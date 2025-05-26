@@ -11,16 +11,10 @@ modeling-parameters:
   tinitial: 0.0           # Initial time
   timesteps_per_year: 12  # Number of timesteps per year (monthly for stability in SSA)
 
-  example_name: "ISSM_Choi"  # Must have added this to the ISSM directory
-  ParamFile: "ISSM_DART.par" # Parameter file for ISSM-DART setup
+  example_name: "ISMIP_Choi"  # Must have added this to the ISSM directory
+  ParamFile: "Mismip2.par" # Parameter file for ISSM-DART setup
   steps: 10                  # Increased steps for finer time integration
   verbose: True              # Enable verbosity for debugging
-
-  extrusion_layers: 5        # Retained as in original
-  extrusion_exponent: 1      # Retained as in original
-  flow_model: "SSA"          # Shelfy-stream approximation (from paper)
-  sliding_vx: 0.0            # Sliding velocity in x-direction
-  sliding_vy: 0.0            # Sliding velocity in y-direction
 
 enkf-parameters:
   # Ensemble Kalman Filter parameters
@@ -31,15 +25,14 @@ enkf-parameters:
 
   num_state_vars: 3             # State variables: ice thickness (H), velocities (u, v)
   num_param_vars: 2             # Parameter variables: friction coefficient (C), bed topography (B)
-  vec_inputs: ['H', 'Vx', 'Vy','C' ,'B'] # State vector inputs (ice thickness and velocities)
-  observed_params: ['C', 'B']   # Parameters to estimate (friction coefficient, bed topography)
+  vec_inputs: ['Thickness', 'Vx', 'Vy','Bed','coefficient'] # State vector inputs (ice thickness and velocities)
+  observed_params: ['coefficient']   # Parameters to estimate (friction coefficient, bed topography)
 
   # Statistical parameters
   sig_obs: [5, 10, 10]          # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
   sig_Q: [3, 1.0, 1.0,1.0,1.0]          # Process noise std dev (adjusted for H, Vx, Vy)
   length_scale: [5,3,2,4,3]               # Length scale for covariance (5 km for friction, per paper)
-  Q_rho: 0.7                    # Correlation coefficient (adjusted based on roughness factor)
-
+  
   seed: 1                       # Seed for random number generator
   inflation_factor: 1.15        # Inflation factor (optimal range 1.10–1.18 from paper)
   localization_flag: False       # Enable localization (paper uses 4–8 km radius)
@@ -61,5 +54,5 @@ enkf-parameters:
   n_modeltasks: 4               # Number of model tasks (increased for larger domain)
   commandlinerun: "True"        # Command line run flag
   execution_flag: 2             # Even distribution of problem size
-  model_nprocs: 8               # Number of processors for MPI (increased for efficiency)
+  model_nprocs: 2               # Number of processors for MPI (increased for efficiency)
   data_path: _modelrun_datasets
