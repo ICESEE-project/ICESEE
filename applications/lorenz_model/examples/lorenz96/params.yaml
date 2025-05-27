@@ -10,6 +10,8 @@ modeling-parameters:
   num_years: 10         # number of years to run the model
   timesteps_per_year: 2   # number of timesteps per year
 
+  example_name: "lorenz96"  # example name
+
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 30                   # number of ensemble members
@@ -36,9 +38,9 @@ enkf-parameters:
   localization_flag: False      # localization flag: True, False
 
   # enkf model parameters
-  model_name: "lorenz96"         # name of the model
+  model_name: "lorenz"         # name of the model
   filter_type: "EnKF"           # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
-  parallel_flag: "MPI_model"             # parallel flag: Serial, MPI, MPI_model
+  parallel_flag: "serial"             # parallel flag: Serial, MPI, MPI_model
   n_modeltasks: 1
   commandlinerun: "True"         # command line run flag: True, False
   execution_flag: 0

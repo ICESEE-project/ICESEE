@@ -33,9 +33,9 @@ class SupportedModels:
             "description": "ISSM model",
             "status": "supported",
         },
-        "lorenz96": {
+        "lorenz": {
             "module": "lorenz_model.lorenz_utils._lorenz_enkf",
-            "description": "Lorenz96 model",
+            "description": "Lorenz model",
             "status": "supported",
         },
         "flowline": {

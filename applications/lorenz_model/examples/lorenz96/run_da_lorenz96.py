@@ -19,7 +19,7 @@ from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import 
 from ICESEE.applications.lorenz_model.examples.lorenz96._lorenz96_model import initialize_model
 
 # --- Initialize MPI ---
-rank, size, comm = ParallelManager().icesee_mpi_init(params)
+rank, size, comm, _ = ParallelManager().icesee_mpi_init(params)
 
 # --- Ensemble Parameters ---
 params.update({

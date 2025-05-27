@@ -7,7 +7,7 @@ physical-parameters:
 
 modeling-parameters:
   # Model parameters
-  num_years: 200           # Number of years to run the model (30-year assimilation period from paper)
+  num_years: 50           # Number of years to run the model (30-year assimilation period from paper)
   tinitial: 0.0           # Initial time
   timesteps_per_year: 2 # Number of timesteps per year (monthly for stability in SSA)
 
@@ -29,7 +29,7 @@ enkf-parameters:
   observed_params: ['coefficient']   # Parameters to estimate (friction coefficient, bed topography)
 
   # Statistical parameters
-  sig_obs: [5, 10, 10]          # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
+  sig_obs: [10, 20, 20,20,2]          # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
   sig_Q: [3, 1.0, 1.0,1.0,1.0]          # Process noise std dev (adjusted for H, Vx, Vy)
   length_scale: [5,3,2,4,3]               # Length scale for covariance (5 km for friction, per paper)
   

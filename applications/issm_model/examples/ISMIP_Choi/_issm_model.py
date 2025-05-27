@@ -100,8 +100,7 @@ def ISSM_model(**kwargs):
 
     # get rank
     rank   = comm.Get_rank()
-    # nprocs = comm.Get_size()
-    nprocs = params.get('model_nprocs')
+    nprocs = kwargs.get('model_nprocs')
 
     # print(f"[DEBUG] ISSM model {rank} of {nprocs}")
 
