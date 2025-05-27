@@ -180,10 +180,10 @@ def generate_nurged_state(**kwargs):
                 print(f"[DEBUG] Error reading the file: {e}")
                 # return None
         
-        updated_state = {'Vx': statevec_nurged[indx_map["Vx"],:],
-                        'Vy': statevec_nurged[indx_map["Vy"],:],
-                        'Vz': statevec_nurged[indx_map["Vz"],:],
-                        'Pressure': statevec_nurged[indx_map["Pressure"],:]}
+        # updated_state = {'Vx': statevec_nurged[indx_map["Vx"],:],
+        #                 'Vy': statevec_nurged[indx_map["Vy"],:],
+        #                 'Vz': statevec_nurged[indx_map["Vz"],:],
+        #                 'Pressure': statevec_nurged[indx_map["Pressure"],:]}
 
         #  --- change directory back to the original directory ---
         os.chdir(icesee_path)

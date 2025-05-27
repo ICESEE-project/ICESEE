@@ -129,8 +129,8 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
         fields = {'thickness', 'vx', 'vy', 'bed', 'coefficient'};
 
         result_0 = md.initialization(end);
-        result_1 = md.geometry(end);
-        result_2 = md.friction(end);
+        result_1 = md.geometry;
+        result_2 = md.friction;
 
         % 	% --- fetch and save data for ensemble use
 		filename = fullfile(icesee_path, data_path, sprintf('ensemble_init_%d.h5', ens_id));
@@ -146,22 +146,53 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
 		end
 
         %  save the fields to the file
-        vx = result_0.vx;
-        vy = result_0.vy;
-        thickness = result_1.thickness;
-        bed = result_1.bed;
-        coefficient = result_2.coefficient;
-        h5create(filename, '/Vx', size(vx));
-        h5write(filename, '/Vx', vx);
-        h5create(filename, '/Vy', size(vy));
-        h5write(filename, '/Vy', vy);
-        h5create(filename, '/Thickness', size(thickness));
-        h5write(filename, '/Thickness', thickness);
-        h5create(filename, '/Bed', size(bed));
-        h5write(filename, '/Bed', bed);
-        h5create(filename, '/Coefficient', size(coefficient));
-        h5write(filename, '/Coefficient', coefficient);
+        data = {'Vx', result_0, 'vx';
+                'Vy', result_0, 'vy';
+                'Thickness', result_1, 'thickness';
+                'bed', result_1, 'bed';
+                'coefficient', result_2, 'coefficient'};
+        writeToHDF5(filename, data);
+
+        % vx = result_0.vx;
+        % vy = result_0.vy;
+        % thickness = result_1.thickness;
+        % bed = result_1.bed;
+        % coefficient = result_2.coefficient;
+        % h5create(filename, '/Vx', size(vx));
+        % h5write(filename, '/Vx', vx);
+        % h5create(filename, '/Vy', size(vy));
+        % h5write(filename, '/Vy', vy);
+        % h5create(filename, '/Thickness', size(thickness));
+        % h5write(filename, '/Thickness', thickness);
+        % h5create(filename, '/bed', size(bed));
+        % h5write(filename, '/bed', bed);
+        % h5create(filename, '/coefficient', size(coefficient));
+        % h5write(filename, '/coefficient', coefficient);
        
     end
 
 end
+
+
+function writeToHDF5(filename, data)
+    % WRITETOHDF5 Writes variables to an HDF5 file.
+    % Inputs:
+    %   filename - Name of the HDF5 file
+    %   data - Cell array with columns: {var_name, source_object, field_name}
+
+    [filepath, ~, ~] = fileparts(filename);
+    if ~exist(filepath, 'dir')
+        mkdir(filepath);
+    end
+    if isfile(filename)
+        delete(filename);
+    end
+    
+    for i = 1:size(data, 1)
+        var_name = data{i, 1};
+        var_value = data{i, 2}.(data{i, 3});
+        h5create(filename, ['/' var_name], size(var_value));
+        h5write(filename, ['/' var_name], var_value);
+    end
+end
+

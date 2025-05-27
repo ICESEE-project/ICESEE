@@ -95,8 +95,6 @@ modeling_params.update({'server': server, 'Nens': params.get('Nens'),
 # --- initialize the model ---
 variable_size = initialize_model(physical_params, modeling_params, icesee_comm)
 
-exit()
-
 params.update({'nd': variable_size*params.get('total_state_param_vars')})
 
 # --- change directory back to the original directory ---

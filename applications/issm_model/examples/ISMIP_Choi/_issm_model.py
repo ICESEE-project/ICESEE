@@ -143,6 +143,7 @@ def run_model(ensemble, **kwargs):
     issm_examples_dir   = kwargs.get('issm_examples_dir')
     icesee_path         = kwargs.get('icesee_path')
     comm                = kwargs.get('comm')
+    vec_inputs          = kwargs.get('vec_inputs')
 
     rank                = comm.Get_rank()
 
@@ -173,20 +174,9 @@ def run_model(ensemble, **kwargs):
         # if k > 0:
         if True:
             # -- create our ensemble for test purposes
-            Vx = ensemble[indx_map["Vx"]]
-            Vy = ensemble[indx_map["Vy"]]
-            Vz = ensemble[indx_map["Vz"]]
-            Pressure = ensemble[indx_map["Pressure"]]
-            # -> fetch the vx, vy, vz, and pressure from the ensemble
-            
-            # -----
-            with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
-                # f.create_dataset('ensemble', data=ensemble)
-                f.create_dataset('Vx', data=Vx)
-                f.create_dataset('Vy', data=Vy)
-                f.create_dataset('Vz', data=Vz)
-                f.create_dataset('Pressure', data=Pressure)
-            # print(f"[HDF5] Saved: {input_filename}")
+             with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
+                for key in vec_inputs:
+                    f.create_dataset(key, data=ensemble[indx_map[key]])
 
         # --- call the issm model  to update the state and parameters variables ---
         ISSM_model(**kwargs)
@@ -202,13 +192,10 @@ def run_model(ensemble, **kwargs):
             if not os.path.exists(output_filename):
                 print(f"[ERROR] File does not exist: {output_filename}")
                 return None
+            updated_state = {}
             with h5py.File(output_filename, 'r',driver='mpio',comm=comm) as f:
-                return {
-                'Vx': f['Vx'][0],
-                'Vy': f['Vy'][0],
-                'Vz': f['Vz'][0],
-                'Pressure': f['Pressure'][0]
-                }
+                for key in vec_inputs:
+                    updated_state[key] = f[key][0]
 
         except Exception as e:
             print(f"[Run model] Error reading the file: {e}")
@@ -216,3 +203,4 @@ def run_model(ensemble, **kwargs):
     
     # -- change directory back to the original directory
     os.chdir(icesee_path)
+    return updated_state
