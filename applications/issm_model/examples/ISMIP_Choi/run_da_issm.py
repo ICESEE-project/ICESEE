@@ -45,12 +45,7 @@ model_kwargs = {
                 'nx': int(float(physical_params.get('nx'))), 'ny': int(float(physical_params.get('ny'))),
                 'ParamFile': modeling_params.get('ParamFile'),
                 'cluster_name': socket.gethostname().replace('-', ''),
-                'extrusion_layers': int(float(modeling_params.get('extrusion_layers'))),
-                'extrusion_exponent': int(float(modeling_params.get('extrusion_exponent'))),
                 'steps': int(float(modeling_params.get('steps'))),
-                'flow_model': modeling_params.get('flow_model'),
-                'sliding_vx': float(modeling_params.get('sliding_vx')),
-                'sliding_vy': float(modeling_params.get('sliding_vy')),
                 'dt': float(modeling_params.get('timesteps_per_year')),
                 'tinitial': float(modeling_params.get('tinitial')),
                 'tfinal': float(modeling_params.get('num_years')),
@@ -99,8 +94,6 @@ modeling_params.update({'server': server, 'Nens': params.get('Nens'),
 
 # --- initialize the model ---
 variable_size = initialize_model(physical_params, modeling_params, icesee_comm)
-
-exit()
 
 params.update({'nd': variable_size*params.get('total_state_param_vars')})
 
