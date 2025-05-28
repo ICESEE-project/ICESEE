@@ -246,6 +246,8 @@ if not flag_jupyter:
     kwargs.update({'physical_params': physical_params})
     kwargs.update({'modeling_params': modeling_params})
     kwargs.update({'enkf_params': enkf_params})
+
+    modeling_params.update({'vec_inputs': enkf_params['vec_inputs']})
     
     import re
 
