@@ -9,8 +9,8 @@ issm_dir = getenv('ISSM_DIR');  % Retrieve the ISSM_DIR environment variable
 % addpath(genpath(issm_dir));     % Add the ISSM directory and its subdirectories to the MATLAB path
 
 % path to the results
-results_dir = fullfile(issm_dir, 'examples', 'ISMIP', 'Models','ens_id_0');  % Path to the results directory
-forecast_dir = fullfile(issm_dir, 'examples', 'ISMIP', 'Models','ens_id_0')
+results_dir = fullfile(issm_dir, 'examples', 'ISMIP_Choi', 'Models','ens_id_0');  % Path to the results directory
+forecast_dir = fullfile(issm_dir, 'examples', 'ISMIP_Choi', 'Models','ens_id_0')
 
 %% plot surface velocities
 % Load the ISSM results

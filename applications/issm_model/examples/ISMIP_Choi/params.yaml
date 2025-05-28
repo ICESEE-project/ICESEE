@@ -23,15 +23,15 @@ enkf-parameters:
   obs_max_time: 30              # Maximum time for observations (30 years)
   obs_start_time: 0             # Start time for observations (start of simulation)
 
-  num_state_vars: 3             # State variables: ice thickness (H), velocities (u, v)
+  num_state_vars: 1             # State variables: ice thickness (H), velocities (u, v)
   num_param_vars: 2             # Parameter variables: friction coefficient (C), bed topography (B)
-  vec_inputs: ['Thickness', 'Vx', 'Vy','bed','coefficient'] # State vector inputs (ice thickness and velocities)
-  observed_params: ['coefficient']   # Parameters to estimate (friction coefficient, bed topography)
+  vec_inputs: ['Thickness','bed','coefficient'] # State vector inputs (ice thickness and velocities)
+  observed_params: ['bed','coefficient']   # Parameters to estimate (friction coefficient, bed topography)
 
   # Statistical parameters
-  sig_obs: [10, 20, 20,20,2]          # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
-  sig_Q: [3, 1.0, 1.0,1.0,1.0]          # Process noise std dev (adjusted for H, Vx, Vy)
-  length_scale: [5,3,2,4,3]               # Length scale for covariance (5 km for friction, per paper)
+  sig_obs: [10, 20, 2]          # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
+  sig_Q: [3, 1.0, 1.0]          # Process noise std dev (adjusted for H, Vx, Vy)
+  length_scale: [5,3,2]               # Length scale for covariance (5 km for friction, per paper)
   
   seed: 1                       # Seed for random number generator
   inflation_factor: 1.15        # Inflation factor (optimal range 1.10–1.18 from paper)

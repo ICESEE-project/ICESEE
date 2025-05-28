@@ -38,6 +38,7 @@ def initialize_model(physical_params, modeling_params, comm):
     server      = modeling_params.get('server')
     icesee_path = modeling_params.get('icesee_path')
     data_path   = modeling_params.get('data_path')
+    vec_inputs  = modeling_params.get('vec_inputs')
     issm_cmd = f"run(\'issm_env\'); initialize_model({icesee_rank}, {icesee_size}, {ens_id})"
     # result = run_icesee_with_server(lambda: server.send_command(issm_cmd),server,False,comm)
     if not server.send_command(issm_cmd):
@@ -70,11 +71,10 @@ def initialize_model(physical_params, modeling_params, comm):
         if not os.path.exists(output_filename):
             print(f"[ERROR] File does not exist: {output_filename}")
             return None
+        # --get the size of the state vector from the output file
         with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
-            Vx = f['Vx'][0]
-            # get the size of the Vx variable
-            nd = Vx.shape[0]
-            # print(f"[DEBUG] Vx shape: {Vx.shape}")
+            for key in vec_inputs:
+                nd = f[key][0].shape[0]
             return nd
     except Exception as e:
         print(f"[Initialize-model] Error reading the file: {e}")

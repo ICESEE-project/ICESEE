@@ -126,7 +126,7 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
         filename = fullfile(folder, 'ISMIP.BoundaryCondition.mat');
         md = loadmodel(filename);
 
-        fields = {'thickness', 'vx', 'vy', 'bed', 'coefficient'};
+        fields = {'thickness', 'bed', 'coefficient'};
 
         result_0 = md.initialization(end);
         result_1 = md.geometry;
@@ -146,29 +146,11 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
 		end
 
         %  save the fields to the file
-        data = {'Vx', result_0, 'vx';
-                'Vy', result_0, 'vy';
-                'Thickness', result_1, 'thickness';
+        data = {'Thickness', result_1, 'thickness';
                 'bed', result_1, 'bed';
                 'coefficient', result_2, 'coefficient'};
         writeToHDF5(filename, data);
 
-        % vx = result_0.vx;
-        % vy = result_0.vy;
-        % thickness = result_1.thickness;
-        % bed = result_1.bed;
-        % coefficient = result_2.coefficient;
-        % h5create(filename, '/Vx', size(vx));
-        % h5write(filename, '/Vx', vx);
-        % h5create(filename, '/Vy', size(vy));
-        % h5write(filename, '/Vy', vy);
-        % h5create(filename, '/Thickness', size(thickness));
-        % h5write(filename, '/Thickness', thickness);
-        % h5create(filename, '/bed', size(bed));
-        % h5write(filename, '/bed', bed);
-        % h5create(filename, '/coefficient', size(coefficient));
-        % h5write(filename, '/coefficient', coefficient);
-       
     end
 
 end

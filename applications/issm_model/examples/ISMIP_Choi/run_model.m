@@ -61,16 +61,14 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             save(filename, 'md');
 
             % Save ensemble outputs in HDF5
-            fields = {'Thickness', 'Vx', 'Vy', 'bed', 'coefficient'};
+            fields = {'Thickness', 'bed', 'coefficient'};
             result_0 = md.results.TransientSolution(end);
             result_1 = md.geometry;
             result_2 = md.friction;
 
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
 
-            data = {'Vx', result_0, 'Vx';
-                    'Vy', result_0, 'Vy';
-                    'Thickness', result_0, 'Thickness';
+            data = {'Thickness', result_0, 'Thickness';
                     'bed', result_1, 'bed';
                     'coefficient', result_2, 'coefficient'};
 
@@ -84,8 +82,6 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Load ensemble input from HDF5
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
-            md.initialization.vx = h5read(filename, '/Vx');
-            md.initialization.vy = h5read(filename, '/Vy');
             md.geometry.thickness = h5read(filename, '/Thickness');
             md.geometry.bed = h5read(filename, '/bed');
             md.friction.coefficient = h5read(filename, '/coefficient');
@@ -100,6 +96,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.initialization.pressure = md.results.TransientSolution(end).Pressure;
             md.smb.mass_balance        = md.results.TransientSolution(end).SmbMassBalance;
             md.mask.ocean_levelset     = md.results.TransientSolution(end).MaskOceanLevelset;
+
+            md = transientrestart(md);
 
 
             % pos = find(md.geometry.thickness < 1);
@@ -141,14 +139,12 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % Save ensemble outputs in HDF5
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
 
-            fields = {'Thickness', 'Vx', 'Vy', 'bed', 'coefficient'};
+            fields = {'Thickness', 'bed', 'coefficient'};
             result_0 = md.results.TransientSolution(end);
             result_1 = md.geometry;
             result_2 = md.friction;
 
-            data = {'Vx', result_0, 'Vx';
-                    'Vy', result_0, 'Vy';
-                    'Thickness', result_0, 'Thickness';
+            data = {'Thickness', result_0, 'Thickness';
                     'bed', result_1, 'bed';
                     'coefficient', result_2, 'coefficient'};
 

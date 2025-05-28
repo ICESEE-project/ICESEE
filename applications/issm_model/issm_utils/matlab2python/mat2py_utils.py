@@ -166,8 +166,8 @@ class _MatlabServer:
         
         try:
             # Launch MATLAB with non-GUI flags and redirect I/O
-            matlab_cmd = f"{self.matlab_path} -nodesktop -nodisplay -nosplash -nojvm -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
-            # matlab_cmd = f"{self.matlab_path} -nodesktop -nosplash -nojvm -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
+            # matlab_cmd = f"{self.matlab_path} -nodesktop -nodisplay -nosplash -nojvm -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
+            matlab_cmd = f"{self.matlab_path} -nodesktop -nosplash -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
             self.process = subprocess.Popen(
                 matlab_cmd,
                 shell=True,
@@ -193,7 +193,7 @@ class _MatlabServer:
             output_thread.start()
             
             # Wait for server to signal readiness via status file
-            timeout = 600  # seconds
+            timeout = 1000  # seconds
             start_time = time.time()
             while not os.path.exists(self.statusfile):
                 if time.time() - start_time > timeout:
