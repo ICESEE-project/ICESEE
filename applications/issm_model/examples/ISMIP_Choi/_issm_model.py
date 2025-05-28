@@ -18,7 +18,7 @@ from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import
 from ICESEE.applications.issm_model.issm_utils.matlab2python.server_utils import run_icesee_with_server
 
 # --- model initialization ---
-def initialize_model(physical_params, modeling_params, comm):
+def initialize_model(**kwargs):
     """ des: intialize the issm model
         - calls the issm initalize_model.m matlab function to initialize the model
     """
@@ -28,17 +28,15 @@ def initialize_model(physical_params, modeling_params, comm):
     # --- copy intialize_model.m to the current directory
     shutil.copyfile(os.path.join(os.path.dirname(__file__), 'initialize_model.m'), 'initialize_model.m')
 
+    # -- get parameters from kwargs
+    comm = kwargs.get('icesee_comm')
     icesee_rank = comm.Get_rank()
-    # icesee_size = comm.Get_size()
-    icesee_size = modeling_params.get('model_nprocs')
-    ens_id      = modeling_params.get('ens_id')
-    
-
-    # read the model kwargs from the file
-    server      = modeling_params.get('server')
-    icesee_path = modeling_params.get('icesee_path')
-    data_path   = modeling_params.get('data_path')
-    vec_inputs  = modeling_params.get('vec_inputs')
+    icesee_size = kwargs.get('model_nprocs') 
+    ens_id      = kwargs.get('ens_id')
+    server      = kwargs.get('server')
+    icesee_path = kwargs.get('icesee_path')
+    data_path   = kwargs.get('data_path')
+    vec_inputs  = kwargs.get('vec_inputs')
     issm_cmd = f"run(\'issm_env\'); initialize_model({icesee_rank}, {icesee_size}, {ens_id})"
     # result = run_icesee_with_server(lambda: server.send_command(issm_cmd),server,False,comm)
     if not server.send_command(issm_cmd):
@@ -52,7 +50,7 @@ def initialize_model(physical_params, modeling_params, comm):
     if icesee_rank == 0:
         data_dir = './Models/ens_id_0'
         kwargs_data = 'model_kwargs_0.mat'
-        Nens = modeling_params.get('Nens')
+        Nens = kwargs.get('Nens')
         for ens in range(1, Nens):
             new_data_dir = f'./Models/ens_id_{ens}'
             new_kwargs_data = f'model_kwargs_{ens}.mat'

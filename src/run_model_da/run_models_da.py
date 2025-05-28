@@ -412,10 +412,12 @@ def generate_enkf_field(ii_sig, Lx, hdim, num_vars, rh=None, grid_extension=2, v
         return q0
 
 # ======================== Run model with EnKF ========================
-def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs): 
+def icesee_model_data_assimilation(**model_kwargs): 
     """ General function to run any kind of model with the Ensemble Kalman Filter """
 
     # --- unpack the data assimilation arguments
+    filter_type       = model_kwargs.get("filter_type", "EnKF")      # filter type
+    model             = model_kwargs.get("model_name",None)          # model name
     parallel_flag     = model_kwargs.get("parallel_flag",False)      # parallel flag
     params            = model_kwargs.get("params",None)              # parameters
     Q_err             = model_kwargs.get("Q_err",None)               # process noise

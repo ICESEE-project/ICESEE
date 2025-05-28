@@ -41,8 +41,4 @@ kwargs.update({ "dt":params["dt"], "seed":float(enkf_params["seed"]),
 kwargs.update({'params': params}) # update the kwargs with the parameters
 
 # call ICESEE data assimilation function 
-icesee_model_data_assimilation(
-    enkf_params["model_name"],
-    enkf_params["filter_type"],
-    **kwargs  
-)
+icesee_model_data_assimilation(**kwargs)

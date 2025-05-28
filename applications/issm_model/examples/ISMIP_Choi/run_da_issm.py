@@ -81,19 +81,19 @@ os.chdir(issm_examples_dir)
 server = MatlabServer(color=ens_id,
                       Nens = params['Nens'],
                       comm = icesee_comm,
-                       verbose=params.get('verbose')) 
+                      verbose=params.get('verbose')) 
 
 # Set up global shutdown handler
 setup_server_shutdown(server, icesee_comm, verbose=False)
 
 # --- load the model parameters ---
-modeling_params.update({'server': server, 'Nens': params.get('Nens'),
+kwargs.update({'server': server, 'Nens': params.get('Nens'), 'icesee_comm': icesee_comm,
                         'icesee_path': icesee_cwd, 'ens_id': ens_id,
                         'data_path': kwargs.get('data_path'),
                         'model_nprocs': params.get('model_nprocs'),})
 
 # --- initialize the model ---
-variable_size = initialize_model(physical_params, modeling_params, icesee_comm)
+variable_size = initialize_model(**kwargs)
 
 params.update({'nd': variable_size*params.get('total_state_param_vars')})
 
@@ -105,10 +105,7 @@ kwargs.update({'params': params,
                'server': server})
 
 try:
-    icesee_model_data_assimilation(
-        enkf_params["model_name"],
-        enkf_params["filter_type"],
-        **kwargs)
+    icesee_model_data_assimilation(**kwargs)
     server.shutdown()
 except Exception as e:
     print(f"[run_da_issm] Error running the model: {e}")

@@ -38,7 +38,7 @@ enkf-parameters:
   num_state_vars: 3       # number of state variables  [h,u,v]
   num_param_vars: 1       # number of parameter variables [smb]
   vec_inputs: ['h','u','v','smb']
-  observed_params: ['smb']
+  observed_params: ['smb']  #['smb']
 
   # Statistical parameters (based on the number of state variables)
   sig_model: [0.1,0.1,0.1] # model error standard deviation

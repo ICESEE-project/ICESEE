@@ -36,12 +36,11 @@ params.update({
 
 # --- Model intialization --- 
 PETSc.Sys.Print("Initializing icepack model ...")
-nx,ny,Lx,Ly,x,y,h,u,a,a_p,b,b_in,b_out,h0,u0,solver_weertman,A,C,Q,V = initialize_model(
-    physical_params, modeling_params,comm
-)
+kwargs.update({'comm':comm})
+nx,ny,Lx,Ly,x,y,h,u,a,a_p,b,b_in,b_out,h0,u0,solver_weertman,A,C,Q,V = initialize_model(**kwargs)
 
 # update the parameters
-params["nd"]=  h0.dat.data.size * params["total_state_param_vars"] # get the size of the entire vector
+params["nd"] = h0.dat.data.size * params["total_state_param_vars"] # get the size of the entire vector
 kwargs.update({"a":a, "h0":h0, "u0":u0, "C":C, "A":A,"Q":Q,"V":V, "da":float(modeling_params["da"]),
         "b":b, "dt":params["dt"], "seed":float(enkf_params["seed"]), "x":x, "y":y,
         "Lx":Lx, "Ly":Ly, "nx":nx, "ny":ny, "h_nurge_ic":float(enkf_params["h_nurge_ic"]), 
@@ -61,11 +60,6 @@ kwargs.update({"a_nuged":a_nuged})
 kwargs.update({'params': params}) # update the kwargs with the parameters
 
 PETSc.Sys.Print("Data assimilation with ICESEE ...")
-icesee_model_data_assimilation(
-    enkf_params["model_name"],
-    enkf_params["filter_type"],
-    **kwargs  
-)
-
+icesee_model_data_assimilation(**kwargs)
 
 
