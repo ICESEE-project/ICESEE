@@ -193,7 +193,7 @@ class _MatlabServer:
             output_thread.start()
             
             # Wait for server to signal readiness via status file
-            timeout = 10  # seconds
+            timeout = 600  # seconds
             start_time = time.time()
             while not os.path.exists(self.statusfile):
                 if time.time() - start_time > timeout:
