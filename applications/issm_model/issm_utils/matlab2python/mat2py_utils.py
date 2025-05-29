@@ -129,6 +129,10 @@ class _MatlabServer:
             try:
                 stream_name, line = self.output_queue.get(timeout=0.1)
                 if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
+                # from mpi4py import MPI
+                # comm = MPI.COMM_WORLD
+                # rank = comm.Get_rank()
+                # if (self.comm is None or comm.Get_rank() == 0):
                     print(f"[MATLAB {stream_name}] {line}")
             except queue.Empty:
                 continue  # No output available, keep checking
@@ -162,7 +166,9 @@ class _MatlabServer:
         
         try:
             # Launch MATLAB with non-GUI flags and redirect I/O
-            matlab_cmd = f"{self.matlab_path} -nodesktop -nodisplay -nosplash -nojvm -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
+            # matlab_cmd = f"{self.matlab_path} -nodesktop -nodisplay -nosplash -nojvm -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
+            matlab_cmd = f"{self.matlab_path} -nodesktop -nosplash -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
+
             self.process = subprocess.Popen(
                 matlab_cmd,
                 shell=True,
@@ -188,7 +194,7 @@ class _MatlabServer:
             output_thread.start()
             
             # Wait for server to signal readiness via status file
-            timeout = 10  # seconds
+            timeout = 1000  # seconds
             start_time = time.time()
             while not os.path.exists(self.statusfile):
                 if time.time() - start_time > timeout:
@@ -219,53 +225,148 @@ class _MatlabServer:
                 os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
             sys.exit(1)
 
-    def send_command(self, command, timeout=300):
+    # def send_command(self, command, timeout=3600):
+    #     """Send a command to MATLAB and wait for it to be processed.
+
+    #     Writes the command to the command file and waits for MATLAB to process it
+    #     (indicated by the file being deleted). Provides periodic status updates if verbose
+    #     and only by rank zero if a communicator is provided. The verbose interval scales
+    #     dynamically with the timeout.
+
+    #     Args:
+    #         command (str): The MATLAB command to execute.
+    #         timeout (int, optional): Maximum time to wait for command processing (seconds). Defaults to 3600.
+
+    #     Returns:
+    #         bool: True if the command was processed successfully, False if it timed out.
+    #     """
+    #     # Set dynamic verbose interval: at least 60 seconds, or timeout / 20
+    #     verbose_interval = max(60.0, timeout / 20.0)
+
+    #     if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
+    #         print(f"[Launcher] Sending command: {command}")
+        
+    #     try:
+    #         with open(self.cmdfile, 'w') as f:
+    #             f.write(command)
+    #     except OSError as e:
+    #         if self.comm is None or self.comm.Get_rank() == 0:
+    #             print(f"[Launcher] Error: Failed to write command file: {e}")
+    #         return False
+        
+    #     # Wait for command to be processed (file deleted)
+    #     start_time = time.time()
+    #     sleep_time = 0.2  # Initial sleep interval
+    #     max_sleep = 60.0  # Maximum sleep interval
+    #     last_verbose_time = start_time  # Track last verbose print
+    #     warning_threshold = timeout * 0.8  # Warn at 80% of timeout
+    #     warning_issued = False
+        
+    #     while os.path.exists(self.cmdfile):
+    #         elapsed_time = time.time() - start_time
+    #         if elapsed_time > timeout:
+    #             if self.comm is None or self.comm.Get_rank() == 0:
+    #                 print(f"[Launcher] Error: Command execution timed out after {timeout} seconds.")
+    #             return False
+            
+    #         # Issue warning if approaching timeout
+    #         if not warning_issued and elapsed_time > warning_threshold:
+    #             if self.comm is None or self.comm.Get_rank() == 0:
+    #                 print(f"[Launcher] Warning: Command has been running for {elapsed_time:.1f}s, approaching timeout of {timeout}s.")
+    #             warning_issued = True
+            
+    #         # Print periodic status if verbose
+    #         if self.verbose and (self.comm is None or self.comm.Get_rank() == 0) and (time.time() - last_verbose_time) >= verbose_interval:
+    #             print(f"[Launcher] Waiting for command to be processed... ({elapsed_time:.1f}s elapsed)")
+    #             last_verbose_time = time.time()
+            
+    #         time.sleep(sleep_time)
+    #         # Gradually increase sleep time to reduce CPU usage
+    #         sleep_time = min(sleep_time + (elapsed_time / 20.0), max_sleep)
+    #         if sleep_time == max_sleep and not warning_issued:
+    #             if self.comm is None or self.comm.Get_rank() == 0:
+    #                 print("[Launcher] Warning: Slow command processing detected.")
+        
+    #     if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
+    #         print("[Launcher] Command processed successfully.")
+    #     return True
+
+    def send_command(self, command, timeout=3600):
         """Send a command to MATLAB and wait for it to be processed.
 
         Writes the command to the command file and waits for MATLAB to process it
         (indicated by the file being deleted). Provides periodic status updates if verbose
-        and only by rank zero if a communicator is provided.
+        and only by rank zero if a communicator is provided. The verbose interval scales
+        dynamically with the timeout.
 
         Args:
             command (str): The MATLAB command to execute.
-            timeout (int, optional): Maximum time to wait for command processing (seconds). Defaults to 300.
+            timeout (int, optional): Maximum time to wait for command processing (seconds). Defaults to 3600.
 
         Returns:
             bool: True if the command was processed successfully, False if it timed out.
         """
+        # Set dynamic verbose interval: at least 60 seconds, or timeout / 20
+        verbose_interval = max(60.0, timeout / 20.0)
+
         if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
             print(f"[Launcher] Sending command: {command}")
-        with open(self.cmdfile, 'w') as f:
-            f.write(command)
+        
+        try:
+            with open(self.cmdfile, 'w') as f:
+                f.write(command)
+        except OSError as e:
+            if self.comm is None or self.comm.Get_rank() == 0:
+                print(f"[Launcher] Error: Failed to write command file: {e}")
+            return False
         
         # Wait for command to be processed (file deleted)
         start_time = time.time()
         sleep_time = 0.2  # Initial sleep interval
-        max_sleep = 5.0   # Maximum sleep interval
+        min_sleep = 0.1   # Minimum sleep interval to prevent busy-waiting
+        max_sleep = 60.0  # Maximum sleep interval
         last_verbose_time = start_time  # Track last verbose print
-        verbose_interval = 5.0  # Print status every 5 seconds
+        warning_threshold = timeout * 0.8  # Warn at 80% of timeout
+        warning_issued = False
+        last_loop_start = start_time  # Track start of the current loop iteration
+        
         while os.path.exists(self.cmdfile):
             elapsed_time = time.time() - start_time
             if elapsed_time > timeout:
                 if self.comm is None or self.comm.Get_rank() == 0:
-                    print("[Launcher] Error: Command execution timed out.")
+                    print(f"[Launcher] Error: Command execution timed out after {timeout} seconds.")
                 return False
+            
+            # Issue warning if approaching timeout
+            if not warning_issued and elapsed_time > warning_threshold:
+                if self.comm is None or self.comm.Get_rank() == 0:
+                    print(f"[Launcher] Warning: Command has been running for {elapsed_time:.1f}s, approaching timeout of {timeout}s.")
+                warning_issued = True
             
             # Print periodic status if verbose
             if self.verbose and (self.comm is None or self.comm.Get_rank() == 0) and (time.time() - last_verbose_time) >= verbose_interval:
                 print(f"[Launcher] Waiting for command to be processed... ({elapsed_time:.1f}s elapsed)")
                 last_verbose_time = time.time()
             
+            # Measure the time taken by the previous loop iteration
+            current_time = time.time()
+            loop_duration = current_time - last_loop_start
+            last_loop_start = current_time  # Update for the next iteration
+            
+            # Set sleep_time to the previous loop's duration, bounded by min_sleep and max_sleep
+            sleep_time = min(max(loop_duration, min_sleep), max_sleep)
+            
             time.sleep(sleep_time)
-            # Gradually increase sleep time to reduce CPU usage
-            sleep_time = min(sleep_time + (elapsed_time / 10.0), max_sleep)
-            if sleep_time == max_sleep:
+            
+            # Issue warning if sleep_time reaches max_sleep
+            if sleep_time == max_sleep and not warning_issued:
                 if self.comm is None or self.comm.Get_rank() == 0:
                     print("[Launcher] Warning: Slow command processing detected.")
         
         if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
             print("[Launcher] Command processed successfully.")
         return True
+
 
     def shutdown(self):
         """Attempt to gracefully shut down the MATLAB server.

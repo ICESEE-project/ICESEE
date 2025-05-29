@@ -140,6 +140,8 @@ def generate_nurged_state(**kwargs):
         # -- call the icesee_get_index function to get the index of the state vector
         vecs, indx_map, dim_per_proc = icesee_get_index(statevec_nurged, **kwargs)
 
+        # --- create a bump -1== to 0
+
         # -- fetch data from inital state
         try: 
             output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
@@ -179,11 +181,6 @@ def generate_nurged_state(**kwargs):
             except Exception as e:
                 print(f"[DEBUG] Error reading the file: {e}")
                 # return None
-        
-        # updated_state = {'Vx': statevec_nurged[indx_map["Vx"],:],
-        #                 'Vy': statevec_nurged[indx_map["Vy"],:],
-        #                 'Vz': statevec_nurged[indx_map["Vz"],:],
-        #                 'Pressure': statevec_nurged[indx_map["Pressure"],:]}
 
         #  --- change directory back to the original directory ---
         os.chdir(icesee_path)

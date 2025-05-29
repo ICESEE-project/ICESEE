@@ -11,7 +11,7 @@ import numpy as np
 from ICESEE.config._utility_imports import icesee_get_index
 
 # --- model initialization ---
-def initialize_model(physical_params, modeling_params, comm):
+def initialize_model(**kwargs):
     """des: initialize the icepack model"""
     pass
 

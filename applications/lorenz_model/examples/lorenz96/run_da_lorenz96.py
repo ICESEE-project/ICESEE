@@ -19,7 +19,7 @@ from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import 
 from ICESEE.applications.lorenz_model.examples.lorenz96._lorenz96_model import initialize_model
 
 # --- Initialize MPI ---
-rank, size, comm = ParallelManager().icesee_mpi_init(params)
+rank, size, comm, _ = ParallelManager().icesee_mpi_init(params)
 
 # --- Ensemble Parameters ---
 params.update({
@@ -41,8 +41,4 @@ kwargs.update({ "dt":params["dt"], "seed":float(enkf_params["seed"]),
 kwargs.update({'params': params}) # update the kwargs with the parameters
 
 # call ICESEE data assimilation function 
-icesee_model_data_assimilation(
-    enkf_params["model_name"],
-    enkf_params["filter_type"],
-    **kwargs  
-)
+icesee_model_data_assimilation(**kwargs)

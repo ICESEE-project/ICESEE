@@ -412,10 +412,12 @@ def generate_enkf_field(ii_sig, Lx, hdim, num_vars, rh=None, grid_extension=2, v
         return q0
 
 # ======================== Run model with EnKF ========================
-def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs): 
+def icesee_model_data_assimilation(**model_kwargs): 
     """ General function to run any kind of model with the Ensemble Kalman Filter """
 
     # --- unpack the data assimilation arguments
+    filter_type       = model_kwargs.get("filter_type", "EnKF")      # filter type
+    model             = model_kwargs.get("model_name",None)          # model name
     parallel_flag     = model_kwargs.get("parallel_flag",False)      # parallel flag
     params            = model_kwargs.get("params",None)              # parameters
     Q_err             = model_kwargs.get("Q_err",None)               # process noise
@@ -473,9 +475,14 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
 
             dim_list = comm_world.allgather(params["nd"])
             # print(f"Dim list: {dim_list}")
+            # save model_nprocs before update if rank_world == 0
+            model_nprocs = params.get("model_nprocs", 1)
+            
             if rank_world == 0:
                 print("Generating true state ...")
                 model_kwargs.update({'ens_id': rank_world})
+                model_kwargs.update({'model_nprocs': (model_nprocs * size_world)-1}) # update the model_nprocs to include all processors for the external model run
+                
                 # dim_list = np.tile(params["nd"],size_world) # all processors have the same dimension
                 model_kwargs.update({"global_shape": params["nd"], "dim_list": dim_list})
                 statevec_true = np.zeros([params["nd"], model_kwargs.get("nt",params["nt"]) + 1])
@@ -487,10 +494,6 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
                 ensemble_true_state = np.zeros_like(statevec_true)
                 for key, value in updated_true_state.items():
                     ensemble_true_state[indx_map[key], :] = value
-
-                # -- write data to file
-                # with h5py.File('_modelrun_dataset/icesee_ensemble_data', "w" ) as f:
-                #     f.create_dataset('true_state', data=ensemble_true_state)
 
                 print("Generating nurged state ...")
                 model_kwargs.update({"statevec_nurged": np.zeros([params["nd"], model_kwargs.get("nt",params["nt"]) + 1])})
@@ -507,42 +510,18 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
                 gc.collect()
 
             else:
-                # ensemble_true_state = np.empty((params["nd"],model_kwargs.get("nt",params["nt"])+1),dtype=np.float64)
-                # ensemble_nurged_state = np.empty((params["nd"],model_kwargs.get("nt",params["nt"])+1),dtype=np.float64)
                 pass
-                # dim_list = np.empty(size_world,dtype=np.int32)
+                
             comm_world.Barrier()
-            # Bcast the true and nurged states
-            # comm_world.Bcast(ensemble_true_state, root=0)
-            # comm_world.Bcast(ensemble_nurged_state, root=0)
-            # comm_world.Bcast(dim_list, root=0)
-
+           
             # -- write both the true and nurged states to file --
-            # comm_world.Barrier()
             data_shape = (params["nd"], model_kwargs.get("nt",params["nt"]) + 1)
-            # parallel_write_vector_from_root(ensemble_true_state, comm_world, data_shape, data_name='true_state')
-            # parallel_write_vector_from_root(ensemble_nurged_state, comm_world, data_shape, data_name='nurged_state')
-
-            # --- free memory on rank zero ---
-            # if rank_world == 0:
-            #     del ensemble_true_state
-            #     del ensemble_nurged_state
-            #     gc.collect()
-
+            
             model_kwargs.update({"dim_list": dim_list})
 
-            # # -----debugging code to plot the true state -----
-            # import icepack.plot
-            # import firedrake
-            # vecs, indx_map, dim_per_proc = icesee_get_index(ensemble_true_state, **model_kwargs)
-            # Q = model_kwargs.get("Q")
-            # h = firedrake.Function(Q)
-            # h.dat.data[:] = ensemble_true_state[indx_map["h"],-1]
-            # fig, axes = icepack.plot.subplots()
-            # colors = firedrake.tripcolor(h, axes=axes)
-            # fig.colorbar(colors, label="meters", fraction=0.012, pad=0.04);
-            # fig.savefig(f"h_{rank_world}.png")
-            # exit()
+            # update model_nprocs back to the original value before proceeding to the # next step
+            model_kwargs.update({'model_nprocs': model_nprocs})
+
         else:
             # --- Generate True and Nurged States ---
             if rank_world == 0:
@@ -998,7 +977,75 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
         model_module = SupportedModels(model=model,verbose=params.get('verbose')).call_model()
 
         # --- get the ensemble size
-        nd, Nens = ensemble_vec.shape
+        # nd, Nens = ensemble_vec.shape
+        nd = params["nd"]
+        Nens = params["Nens"]
+        size_world = 1
+        rank_world = 0
+        sub_rank = 0
+        color = 0
+
+        _modelrun_datasets = model_kwargs.get("data_path",None)
+        if rank_world == 0 and not os.path.exists(_modelrun_datasets):
+            # cretate the directory
+            os.makedirs(_modelrun_datasets, exist_ok=True)
+
+        # comm_world.Barrier()
+        # --- file_names
+        _true_nurged   = f'{ _modelrun_datasets}/true_nurged_states.h5'
+        _synthetic_obs = f'{ _modelrun_datasets}/synthetic_obs.h5'
+
+        # -- generate the true and nurged states
+
+
+
+        # --- generate synthetic observations
+
+
+        # --- initialize the ensemble ---
+        if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
+            if rank_world == 0:
+                print("Initializing the ensemble ...")
+                model_kwargs.update({"statevec_ens":np.zeros([params["nd"], params["Nens"]])})
+                
+                # get the ensemble matrix   
+                vecs, indx_map, dim_per_proc = icesee_get_index(model_kwargs["statevec_ens"], **model_kwargs)
+                ensemble_vec = np.zeros_like(model_kwargs["statevec_ens"])
+
+                if model_kwargs["joint_estimation"] or params["localization_flag"]:
+                    hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
+                else:
+                    hdim = ensemble_vec.shape[0] // params["num_state_vars"]
+                state_block_size = hdim * params["num_state_vars"]
+
+                for ens in range(params["Nens"]):
+                    # model_kwargs.update({"ens_id": ens})
+                    data = model_module.initialize_ensemble(ens,**model_kwargs)
+                
+                    # iterate over the data and update the ensemble
+                    for key, value in data.items():
+                        ensemble_vec[indx_map[key],ens] = value
+
+                    N_size = params["total_state_param_vars"] * hdim
+                    noise = generate_enkf_field(None,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                    ensemble_vec[:,ens] += noise
+
+                shape_ens = np.array(ensemble_vec.shape,dtype=np.int32)
+
+            else:
+                ensemble_vec = np.empty((params["nd"],params["Nens"]),dtype=np.float64)
+
+            shape_ens = comm_world.bcast(shape_ens, root=0)
+
+            ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
+            parallel_write_full_ensemble_from_root(0, ens_mean, params,ensemble_vec,comm_world)
+
+
+        
+
+
+
+
 
     # --- hdim based on nd or global_shape ---
     if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
@@ -1767,6 +1814,10 @@ def icesee_model_data_assimilation(model=None, filter_type=None, **model_kwargs)
             # -------------------------------------------------- end of case 4 -------------------------------------------------    
         #  ====== Serial run ======
         else:
+            input_file = f"{_modelrun_datasets}/icesee_ensemble_data.h5"
+            with h5py.File(input_file, "r") as f:
+                ensemble_vec = f["ensemble"][:,:,k]
+
             ensemble_vec = EnKFclass.forecast_step(ensemble_vec, \
                                                model_module.forecast_step_single, \
                                                 Q_err, **model_kwargs)

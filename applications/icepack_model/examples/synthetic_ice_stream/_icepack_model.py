@@ -30,30 +30,33 @@ from icepack.constants import (
 from ICESEE.config._utility_imports import icesee_get_index
 
 # --- model initialization ---
-def initialize_model(physical_params, modeling_params, comm):
+def initialize_model(**kwargs):
     """des: initialize the icepack model"""
+    # --- get the communicator from kwargs
+    comm = kwargs.get('comm')
+
     # get size and rank of the communicator
     size = comm.Get_size()
     rank = comm.Get_rank()
 
     # --- Geometry and Mesh ---
     PETSc.Sys.Print('Setting up mesh across %d processes' % size)
-    Lx, Ly = int(float(physical_params["Lx"])), int(float(physical_params["Ly"]))
-    nx, ny = int(float(physical_params["nx"])), int(float(physical_params["ny"]))
+    Lx, Ly = int(float(kwargs["Lx"])), int(float(kwargs["Ly"]))
+    nx, ny = int(float(kwargs["nx"])), int(float(kwargs["ny"]))
     PETSc.Sys.Print(f"Mesh dimensions: {Lx} x {Ly} with {nx} x {ny} elements")
 
     # --- make the comm object available to the mesh function
     mesh = firedrake.RectangleMesh(nx, ny, Lx, Ly, quadrilateral=True, comm=comm)
 
     # -- get the degree of the finite element space
-    degree = int(float(physical_params["degree"]))
+    degree = int(float(kwargs["degree"]))
     Q = firedrake.FunctionSpace(mesh, "CG",degree)
     V = firedrake.VectorFunctionSpace(mesh, "CG", degree)
     x,y = firedrake.SpatialCoordinate(mesh)
 
     # --- Bedrock and Surface Elevations ---
-    b_in, b_out = (float(physical_params["b_in"])), (float(physical_params["b_out"]))
-    s_in, s_out = (float(physical_params["s_in"])), (float(physical_params["s_out"]))
+    b_in, b_out = (float(kwargs["b_in"])), (float(kwargs["b_out"]))
+    s_in, s_out = (float(kwargs["s_in"])), (float(kwargs["s_out"]))
 
     b = firedrake.interpolate(b_in - (b_in - b_out) * x / Lx, Q)
     s0 = firedrake.interpolate(s_in - (s_in - s_out) * x / Lx, Q)
@@ -66,13 +69,13 @@ def initialize_model(physical_params, modeling_params, comm):
     PETSc.Sys.Print(f"Driving stress = {1000*tau_D} kPa")
 
     # --- Initial Velocity ---
-    u_in, u_out = float(physical_params["u_in"]), float(physical_params["u_out"])
+    u_in, u_out = float(kwargs["u_in"]), float(kwargs["u_out"])
     velocity_x = u_in + (u_out - u_in) * (x / Lx) ** 2
     u0 = firedrake.interpolate(firedrake.as_vector((velocity_x, 0)), V)
 
     # --- Friction Coefficient ---
     PETSc.Sys.Print("Importing icepack ...")
-    T = firedrake.Constant(float(modeling_params["T"]))
+    T = firedrake.Constant(float(kwargs["T"]))
     A = icepack.rate_factor(T)
 
     expr = (0.95 - 0.05 * x / Lx) * tau_D / u_in**(1 / m)
@@ -115,13 +118,13 @@ def initialize_model(physical_params, modeling_params, comm):
     tau_b = firedrake.interpolate(expr, V)
 
     # --- Accumulation ---
-    a_in = firedrake.Constant(float(modeling_params["a_in"]))
-    da   = firedrake.Constant(float(modeling_params["da"]))
+    a_in = firedrake.Constant(float(kwargs["a_in"]))
+    da   = firedrake.Constant(float(kwargs["da"]))
     a    = firedrake.interpolate(a_in + da * x / Lx, Q)
 
     # nurged accumulation
-    a_in_p  = firedrake.Constant(float(modeling_params["a_in_p"]))
-    da_p    = firedrake.Constant(float(modeling_params["da_p"]))
+    a_in_p  = firedrake.Constant(float(kwargs["a_in_p"]))
+    da_p    = firedrake.Constant(float(kwargs["da_p"]))
     a_p     = firedrake.interpolate(a_in_p + da_p * x / Lx, Q)
 
     # --- Update h and u ---
