@@ -1,6 +1,6 @@
 # =============================================================================
 # @author: Brian Kyanjo
-# @date: 2025-03-24
+# @date: 2025-05-26
 # @description: ISSM Model with Data Assimilation using a Python Wrapper.
 #                
 # =============================================================================
@@ -92,13 +92,13 @@ server = MatlabServer(color=ens_id,
 setup_server_shutdown(server, icesee_comm, verbose=False)
 
 # --- load the model parameters ---
-modeling_params.update({'server': server, 'Nens': params.get('Nens'),
+kwargs.update({'server': server, 'Nens': params.get('Nens'), 'icesee_comm': icesee_comm,
                         'icesee_path': icesee_cwd, 'ens_id': ens_id,
                         'data_path': kwargs.get('data_path'),
                         'model_nprocs': params.get('model_nprocs'),})
 
 # --- initialize the model ---
-variable_size = initialize_model(physical_params, modeling_params, icesee_comm)
+variable_size = initialize_model(**kwargs)
 
 params.update({'nd': variable_size*params.get('total_state_param_vars')})
 
@@ -136,10 +136,7 @@ else:
     #     **kwargs), server, False,icesee_comm,verbose=False
     # )
     try:
-        icesee_model_data_assimilation(
-            enkf_params["model_name"],
-            enkf_params["filter_type"],
-            **kwargs)
+        icesee_model_data_assimilation(**kwargs)
         server.shutdown()
     except Exception as e:
         print(f"[run_da_issm] Error running the model: {e}")
