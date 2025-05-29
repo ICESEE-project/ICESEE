@@ -168,6 +168,7 @@ class _MatlabServer:
             # Launch MATLAB with non-GUI flags and redirect I/O
             # matlab_cmd = f"{self.matlab_path} -nodesktop -nodisplay -nosplash -nojvm -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
             matlab_cmd = f"{self.matlab_path} -nodesktop -nosplash -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
+
             self.process = subprocess.Popen(
                 matlab_cmd,
                 shell=True,
