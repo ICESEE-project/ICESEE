@@ -7,7 +7,7 @@ physical-parameters:
 
 modeling-parameters:
   # Model parameters
-  num_years: 50           # Number of years to run the model (30-year assimilation period from paper)
+  num_years: 200           # Number of years to run the model (30-year assimilation period from paper)
   tinitial: 0.0           # Initial time
   timesteps_per_year: 2 # Number of timesteps per year (monthly for stability in SSA)
 
@@ -15,15 +15,18 @@ modeling-parameters:
   ParamFile: "Mismip2.par" # Parameter file for ISSM-DART setup
   devmode: False            # ISSM development mode 
   hpcmode: False          # True - High-performance computing mode, False - local machine
+  use_reference_data: True  # Use reference data for transient steady state
+  reference_data_dir: "data" # Directory for reference data
+  reference_data: "Transient_steadystate2.mat" # Reference data for transient steady state: only used if use_reference_data is True
   steps: 6                 # Increased steps for finer time integration
   verbose: True              # Enable verbosity for debugging
 
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 50                      # Number of ensemble members (paper uses 50)
-  freq_obs: 1                   # Frequency of observations (annual, as per paper)
-  obs_max_time: 30              # Maximum time for observations (30 years)
-  obs_start_time: 0             # Start time for observations (start of simulation)
+  freq_obs: 5                   # Frequency of observations (annual, as per paper)
+  obs_max_time: 85             # Maximum time for observations (30 years)
+  obs_start_time: 8            # Start time for observations (start of simulation)
 
   num_state_vars: 1             # State variables: ice thickness (H), velocities (u, v)
   num_param_vars: 2             # Parameter variables: friction coefficient (C), bed topography (B)

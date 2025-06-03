@@ -30,7 +30,8 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
 
     % disp(['[MATLAB] Initializing model with rank: ', num2str(rank), ', nprocs: ', num2str(nprocs), ', ens_id: ', num2str(ens_id)]);
 
-	steps = [1:5]; 
+	% steps = [1:5]; 
+    steps = [5];
 	
     % Mesh generation (Step 1)
     if any(steps == 1)
@@ -132,6 +133,45 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
 
         % 	% --- fetch and save data for ensemble use
 		filename = fullfile(icesee_path, data_path, sprintf('ensemble_init_%d.h5', ens_id));
+		% Ensure the directory exists
+		[filepath, ~, ~] = fileparts(filename);
+		if ~exist(filepath, 'dir')
+			mkdir(filepath);
+		end
+
+        % Check if the file exists and delete it if it does
+		if isfile(filename)
+			delete(filename);
+		end
+
+        %  save the fields to the file
+        data = {'Thickness', result_1, 'thickness';
+                'bed', result_1, 'bed';
+                'coefficient', result_2, 'coefficient'};
+        writeToHDF5(filename, data);
+
+    end
+
+    %  initialize from the reference simulation (Step 5)
+    if any(steps == 5)
+        reference_data = char(kwargs.reference_data); % Path to reference data
+        folder = sprintf('./Models/ens_id_%d', ens_id);
+        if ~exist(folder, 'dir')
+            mkdir(folder);
+        end
+
+        filename = fullfile(folder,reference_data);
+        md = loadmodel(filename);
+
+        fields = {'thickness', 'bed', 'coefficient'};
+
+        result_0 = md.initialization(end);
+        result_1 = md.geometry;
+        result_2 = md.friction;
+
+        % 	% --- fetch and save data for ensemble use
+		filename = fullfile(icesee_path, data_path, sprintf('ensemble_init_%d.h5', ens_id));
+        
 		% Ensure the directory exists
 		[filepath, ~, ~] = fileparts(filename);
 		if ~exist(filepath, 'dir')

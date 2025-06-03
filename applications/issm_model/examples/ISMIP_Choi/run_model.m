@@ -13,6 +13,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
     hpcmode      = logical(kwargs.hpcmode); % HPC mode flag
     devmode      = logical(kwargs.devmode); % Development mode flag
 
+    reference_data = char(kwargs.reference_data);
+
 
     % get the current working directory
     cwd = pwd;
@@ -34,13 +36,31 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
       
         if k == 0 || isempty(k)
             % Initial run: load boundary conditions
-            filename = fullfile(folder, 'ISMIP.BoundaryCondition.mat');
+            filename = fullfile(folder, reference_data);
             md = loadmodel(filename);
+
+            % md = transientrestart(md);
+             % Update geometry
+             md.geometry.thickness =  md.results.TransientSolution(end).Thickness;
+             md.geometry.surface   =  md.results.TransientSolution(end).Surface;
+             md.geometry.base      =  md.results.TransientSolution(end).Base;
+ 
+             % update other fields
+             md.initialization.vel      = md.results.TransientSolution(end).Vel;
+             md.initialization.pressure = md.results.TransientSolution(end).Pressure;
+             md.smb.mass_balance        = md.results.TransientSolution(end).SmbMassBalance;
+             md.mask.ocean_levelset     = md.results.TransientSolution(end).MaskOceanLevelset;
+
+            % change from adaptive time stepping to fixed time stepping
+            md.timestepping = timestepping();
+
+            % fprintf('[MATLAB] time step: %f, start time: %f, final time: %f\n', md.timestepping.time_step, md.timestepping.start_time, md.timestepping.final_time);
 
             % Set transient parameters
             md.timestepping.time_step  = dt;
             md.timestepping.start_time = tinitial;
             md.timestepping.final_time = tfinal;
+            
 
             % md.transient.requested_outputs = {'Vx', 'Vy', 'Thickness', 'Surface', 'Bed', 'FrictionCoefficient'};
             % md.transient.ismovingfront = 0;
@@ -65,9 +85,17 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                 md.cluster.codepath = [issmroot , '/bin'];
                 md.cluster.login = 'arobel3';
                 % md.cluster.executionpath = [issmroot, '/execution'];
-                md.cluster.executionpath = sprintf('%s/execution/ens_id_%d', issmroot, ens_id);
+                md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
             else
                 md.cluster=generic('name',cluster_name,'np',nprocs);
+                % md.miscellaneous.name =  sprintf('color_%d', ens_id);
+                % make sprintf('%s/execution/color_%d', issmroot, ens_id); a directory
+                % exec_path = sprintf('%s/execution/color_%d', issmroot, ens_id)
+                % if ~exist(exec_path, 'dir')
+                %     rmdir(exec_path, 's'); % Remove if exists
+                %     mkdir(exec_path);
+                % end
+                % md.cluster.executionpath = exec_path;
                 md.miscellaneous.name =  sprintf('color_%d', ens_id);
             end
 
@@ -119,7 +147,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.smb.mass_balance        = md.results.TransientSolution(end).SmbMassBalance;
             md.mask.ocean_levelset     = md.results.TransientSolution(end).MaskOceanLevelset;
 
-            md = transientrestart(md);
+            % md = transientrestart(md);
 
 
             % pos = find(md.geometry.thickness < 1);
@@ -148,10 +176,14 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                 md.cluster.codepath = [issmroot , '/bin'];
                 md.cluster.login = 'arobel3';
                 % md.cluster.executionpath = [issmroot, '/execution'];
-                md.cluster.executionpath = sprintf('%s/execution/ens_id_%d', issmroot, ens_id);
+                if ~exist(sprintf('%s/execution/color_%d', issmroot, ens_id), 'dir')
+                    mkdir(sprintf('%s/execution/color_%d', issmroot, ens_id));
+                end
+                md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
             else
                 md.cluster=generic('name',cluster_name,'np',nprocs);
                 md.miscellaneous.name =  sprintf('color_%d', ens_id);
+                % md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
             end
 
             % Verbose settings

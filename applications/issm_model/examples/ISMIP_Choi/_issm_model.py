@@ -37,12 +37,41 @@ def initialize_model(**kwargs):
     icesee_path = kwargs.get('icesee_path')
     data_path   = kwargs.get('data_path')
     vec_inputs  = kwargs.get('vec_inputs')
+    use_reference_data = kwargs.get('use_reference_data', False)
+    reference_data_dir = kwargs.get('reference_data_dir')
+    reference_data     = kwargs.get('reference_data')
+
+    from mpi4py import MPI
+    comm = MPI.COMM_WORLD
+    size = MPI.COMM_WORLD.Get_size()
+    rank = MPI.COMM_WORLD.Get_rank()
+
+    if use_reference_data and rank == 0:
+        initial_data = os.path.abspath(os.path.join(reference_data_dir, reference_data))
+        for _rank in range(size):
+            rank_data_dir = f'./Models/ens_id_{_rank}'
+            if not os.path.exists(rank_data_dir) or os.path.islink(rank_data_dir):
+                if os.path.islink(rank_data_dir):
+                    os.unlink(rank_data_dir)  # remove the symlink
+                os.makedirs(rank_data_dir, exist_ok=True)
+
+            link_path = os.path.join(rank_data_dir, reference_data)
+
+            if os.path.exists(link_path) or os.path.islink(link_path):
+                os.remove(link_path)
+
+            os.symlink(initial_data, link_path)
+    # Synchronize all ranks to ensure directories are created   
+    comm.Barrier()  # sync all ranks before continuing
+   
+
+    #  call the issm initalize_model.m matlab function to initialize the model
     issm_cmd = f"run(\'issm_env\'); initialize_model({icesee_rank}, {icesee_size}, {ens_id})"
     # result = run_icesee_with_server(lambda: server.send_command(issm_cmd),server,False,comm)
     if not server.send_command(issm_cmd):
         print(f"[DEBUG] Error sending command: {issm_cmd}")
         server.kill_matlab_processes()
-        sys.exit(1)
+        sys.exit(1)       
     
     # if not result:
     #     sys.exit(1)
@@ -64,25 +93,34 @@ def initialize_model(**kwargs):
 
     # use symbolic linking instead of copying files
     # Create symbolic links on root process
-    data_dir = './Models/ens_id_0'
-    kwargs_data = 'model_kwargs_0.mat'
+    # Root directory and parameter file
+    data_dir = os.path.abspath('./Models/ens_id_0')
+    kwargs_data = os.path.abspath('model_kwargs_0.mat')
     Nens = kwargs.get('Nens')
-    if icesee_rank == 0:
-        for ens in range(1, Nens):
-            new_data_dir = f'./Models/ens_id_{ens}'
-            new_kwargs_data = f'model_kwargs_{ens}.mat'
-            # Create symbolic link for directory
-            if not os.path.exists(new_data_dir):
-                os.symlink(data_dir, new_data_dir, target_is_directory=True)
-            else:
-                # force linking if the directory already exists using "ln -sf"
-                os.system(f"ln -sf {data_dir} {new_data_dir}")
-                print(f"[DEBUG] Created symbolic link for {data_dir} to {new_data_dir}")
 
-            # Create symbolic link for parameters file
-            if not os.path.exists(new_kwargs_data):
-                os.symlink(kwargs_data, new_kwargs_data)
-        print(f"Rank 0 created symbolic links for {Nens} ensemble members")
+    if rank == 0:
+        for ens in range(1, Nens):
+            new_data_dir = os.path.abspath(f'./Models/ens_id_{ens}')
+            new_kwargs_data = f'model_kwargs_{ens}.mat'
+
+            # Remove existing directory or symlink
+            if os.path.exists(new_data_dir) or os.path.islink(new_data_dir):
+                if os.path.isdir(new_data_dir) and not os.path.islink(new_data_dir):
+                    shutil.rmtree(new_data_dir)
+                else:
+                    os.remove(new_data_dir)
+
+            # Create symbolic link for directory
+            os.symlink(data_dir, new_data_dir, target_is_directory=True)
+
+            # Remove existing kwargs file or link
+            if os.path.exists(new_kwargs_data) or os.path.islink(new_kwargs_data):
+                os.remove(new_kwargs_data)
+
+            # Create symbolic link for parameter file
+            os.symlink(kwargs_data, new_kwargs_data)
+
+        print(f"[Rank 0] Created symbolic links for {Nens - 1} ensemble members.")
 
     # Synchronize
     comm.Barrier()
