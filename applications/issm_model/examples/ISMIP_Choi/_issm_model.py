@@ -47,19 +47,44 @@ def initialize_model(**kwargs):
     # if not result:
     #     sys.exit(1)
     # -- we would have broadcasted data to the remaining  ranks but now if nprocs > Nens, we need to duplicate data by copying data from ens_id_0000 to ens_id_0001, ens_id_0002, ... ens_id_000Nens
+    # if icesee_rank == 0:
+    #     data_dir = './Models/ens_id_0'
+    #     kwargs_data = 'model_kwargs_0.mat'
+    #     Nens = kwargs.get('Nens')
+    #     for ens in range(1, Nens):
+    #         new_data_dir = f'./Models/ens_id_{ens}'
+    #         new_kwargs_data = f'model_kwargs_{ens}.mat'
+    #         # if os.path.exists(new_data_dir):
+    #         #     shutil.rmtree(new_data_dir)
+    #         shutil.copytree(data_dir, new_data_dir, dirs_exist_ok=True)
+    #         shutil.copyfile(kwargs_data, new_kwargs_data)
+    #         # print(f"[DEBUG] Copied {data_dir} to {new_data_dir}")
+    #         # print(f"[DEBUG] Copied {kwargs_data} to {new_kwargs_data}")
+    # comm.Barrier()
+
+    # use symbolic linking instead of copying files
+    # Create symbolic links on root process
+    data_dir = './Models/ens_id_0'
+    kwargs_data = 'model_kwargs_0.mat'
+    Nens = kwargs.get('Nens')
     if icesee_rank == 0:
-        data_dir = './Models/ens_id_0'
-        kwargs_data = 'model_kwargs_0.mat'
-        Nens = kwargs.get('Nens')
         for ens in range(1, Nens):
             new_data_dir = f'./Models/ens_id_{ens}'
             new_kwargs_data = f'model_kwargs_{ens}.mat'
-            # if os.path.exists(new_data_dir):
-            #     shutil.rmtree(new_data_dir)
-            shutil.copytree(data_dir, new_data_dir, dirs_exist_ok=True)
-            shutil.copyfile(kwargs_data, new_kwargs_data)
-            # print(f"[DEBUG] Copied {data_dir} to {new_data_dir}")
-            # print(f"[DEBUG] Copied {kwargs_data} to {new_kwargs_data}")
+            # Create symbolic link for directory
+            if not os.path.exists(new_data_dir):
+                os.symlink(data_dir, new_data_dir, target_is_directory=True)
+            else:
+                # force linking if the directory already exists using "ln -sf"
+                os.system(f"ln -sf {data_dir} {new_data_dir}")
+                print(f"[DEBUG] Created symbolic link for {data_dir} to {new_data_dir}")
+
+            # Create symbolic link for parameters file
+            if not os.path.exists(new_kwargs_data):
+                os.symlink(kwargs_data, new_kwargs_data)
+        print(f"Rank 0 created symbolic links for {Nens} ensemble members")
+
+    # Synchronize
     comm.Barrier()
 
     # fetch model size from output file

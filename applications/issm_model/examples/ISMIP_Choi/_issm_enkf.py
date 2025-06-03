@@ -76,29 +76,61 @@ def generate_true_state(**kwargs):
             print(f"[Generate-True-State: read init file] Error reading the file: {e}")
                             
         # -- mimic the time integration loop to save vec on every time step
-        for k in range(kwargs.get('nt')):
-            kwargs.update({'k': k})
-            time = kwargs.get('t')
-            kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
-            # --- write the state back to h5 file for ISSM model
-            input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
-            with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
-                for key in vec_inputs:
-                    f.create_dataset(key, data=statevec_true[indx_map[key],k])
+        # for k in range(kwargs.get('nt')):
+        #     kwargs.update({'k': k})
+        #     time = kwargs.get('t')
+        #     kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
+        #     # --- write the state back to h5 file for ISSM model
+        #     input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+        #     with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
+        #         for key in vec_inputs:
+        #             f.create_dataset(key, data=statevec_true[indx_map[key],k])
 
-            # -- call the run_model function to push the state forward in time
-            ISSM_model(**kwargs)
+        #     # -- call the run_model function to push the state forward in time
+        #     ISSM_model(**kwargs)
            
-            # try:
-            if True:
-                output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
-                with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
-                    for key in vec_inputs:
-                        statevec_true[indx_map[key],k+1] = f[key][0]
+        #     # try:
+        #     if True:
+        #         output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+        #         with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+        #             for key in vec_inputs:
+        #                 statevec_true[indx_map[key],k+1] = f[key][0]
                     
-            # except Exception as e:
-            #     print(f"[Generate-True-State: read output file] Error reading the file: {e}")
-                # return None
+        #     # except Exception as e:
+        #     #     print(f"[Generate-True-State: read output file] Error reading the file: {e}")
+        #         # return None
+
+        # Precompute filename
+        output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+
+        # Open HDF5 file once in read/write mode
+        with h5py.File(output_filename, 'a', driver='mpio', comm=comm) as f:
+            # Time integration loop
+            for k in range(kwargs.get('nt')):
+                # Update kwargs with current time step parameters
+                kwargs.update({'k': k, 'tinitial': time[k], 'tfinal': time[k + 1]})
+                
+                # Write current state to HDF5 file
+                try:
+                    for key in vec_inputs:
+                        # Create or overwrite dataset for the current state
+                        if key in f:
+                            del f[key]  # Delete existing dataset if it exists
+                        f.create_dataset(key, data=statevec_true[indx_map[key], k])
+                except Exception as e:
+                    print(f"[Generate-True-State:] Error writing to file at step {k}: {e}")
+                    raise
+                
+                # Run ISSM model to advance state
+                ISSM_model(**kwargs)
+                
+                # Read updated state
+                try:
+                    for key in vec_inputs:
+                        statevec_true[indx_map[key], k + 1] = f[key][0]
+                except Exception as e:
+                    print(f"[Generate-True-State:] Error reading from file at step {k}: {e}")
+                    raise
     
         updated_state = {}
         for key in vec_inputs:
@@ -158,29 +190,61 @@ def generate_nurged_state(**kwargs):
             print(f"[DEBUG] Error reading the file: {e}")
                             
         # -- mimic the time integration loop to save vec on every time step
-        for k in range(kwargs.get('nt')):
-            kwargs.update({'k': k})
-            time = kwargs.get('t')
-            kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
+        # for k in range(kwargs.get('nt')):
+        #     kwargs.update({'k': k})
+        #     time = kwargs.get('t')
+        #     kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
 
-            # --- write the state back to h5 file for ISSM model
-            input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
-            with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
-                for key in vec_inputs:
-                    f.create_dataset(key, data=statevec_nurged[indx_map[key],k])
+        #     # --- write the state back to h5 file for ISSM model
+        #     input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+        #     with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
+        #         for key in vec_inputs:
+        #             f.create_dataset(key, data=statevec_nurged[indx_map[key],k])
 
-            # -- call the run_model function to push the state forward in time
-            ISSM_model(**kwargs)
+        #     # -- call the run_model function to push the state forward in time
+        #     ISSM_model(**kwargs)
 
-            try:
-                output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
-                with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+        #     try:
+        #         output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+        #         with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+        #             for key in vec_inputs:
+        #                 statevec_nurged[indx_map[key],k+1] = f[key][0]
+
+        #     except Exception as e:
+        #         print(f"[DEBUG] Error reading the file: {e}")
+        #         # return None
+
+        # Precompute filename
+        output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+
+        # Open HDF5 file once in read/write mode
+        with h5py.File(output_filename, 'a', driver='mpio', comm=comm) as f:
+            # Time integration loop
+            for k in range(kwargs.get('nt')):
+                # Update kwargs with current time step parameters
+                kwargs.update({'k': k, 'tinitial': time[k], 'tfinal': time[k + 1]})
+                
+                # Write current state to HDF5 file
+                try:
                     for key in vec_inputs:
-                        statevec_nurged[indx_map[key],k+1] = f[key][0]
-
-            except Exception as e:
-                print(f"[DEBUG] Error reading the file: {e}")
-                # return None
+                        # Create or overwrite dataset for the current state
+                        if key in f:
+                            del f[key]  # Delete existing dataset if it exists
+                        f.create_dataset(key, data=statevec_nurged[indx_map[key], k])
+                except Exception as e:
+                    print(f"[nurged state:] Error writing to file at step {k}: {e}")
+                    raise
+                
+                # Run ISSM model to advance state
+                ISSM_model(**kwargs)
+                
+                # Read updated state
+                try:
+                    for key in vec_inputs:
+                        statevec_nurged[indx_map[key], k + 1] = f[key][0]
+                except Exception as e:
+                    print(f"[nurged state:] Error reading from file at step {k}: {e}")
+                    raise
 
         #  --- change directory back to the original directory ---
         os.chdir(icesee_path)

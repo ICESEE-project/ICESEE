@@ -4,14 +4,24 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
 
     % Read kwargs from .mat file
     model_kwargs = sprintf('model_kwargs_%d.mat', ens_id);
-    kwargs = load(model_kwargs);
-    ParamFile = char(kwargs.ParamFile);
-    Lx = double(kwargs.Lx); % 640000 m
-    Ly = double(kwargs.Ly); % 80000 m
+    kwargs       = load(model_kwargs);
+    ParamFile    = char(kwargs.ParamFile);
+    Lx           = double(kwargs.Lx); % 640000 m
+    Ly           = double(kwargs.Ly); % 80000 m
     cluster_name = char(kwargs.cluster_name);
-    steps = double(kwargs.steps);
-    icesee_path = char(kwargs.icesee_path);
-    data_path = char(kwargs.data_path);
+    steps        = double(kwargs.steps);
+    icesee_path  = char(kwargs.icesee_path);
+    data_path    = char(kwargs.data_path);
+    devmode      = logical(kwargs.devmode); % Development mode flag
+
+    % get the current working directory
+    cwd = pwd;
+    [issmroot,~,~]=fileparts(fileparts(cwd));
+    if devmode
+        newpath=fullfile(issmroot,'/src/m/dev');
+        addpath(newpath);
+        devpath;
+    end
 
     folder = sprintf('./Models/ens_id_%d', ens_id);
     if ~exist(folder, 'dir')
@@ -72,21 +82,9 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
         save(filename, 'md');
     end
 
-    % Masks (Step 2)
+    % Parameterization (Step 2)
     if any(steps == 2)
         filename = fullfile(folder, 'ISMIP.Mesh_generation.mat');
-        md = loadmodel(filename);
-        md = setmask(md, '', ''); % All grounded, no ice shelves
-        % plotmodel(md,'data',md.mask.ocean_levelset);
-        filename = fullfile(folder, 'ISMIP.SetMask.mat');
-        save(filename, 'md');
-    end
-
-    % Parameterization (Step 3)
-    % Parameterization (Step 2)
-    if any(steps == 3)
-        filename = fullfile(folder, 'ISMIP.SetMask.mat');
-        % filename = fullfile(folder, 'ISMIP.Mesh_generation.mat');
         md = loadmodel(filename);
         md = setflowequation(md, 'SSA', 'all'); % Shelfy-stream approximation
         ParamFile = 'Mismip2.par'
@@ -105,7 +103,7 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
     end
 
     % Set boundary conditions (Step 5)
-    if any(steps == 4)
+    if any(steps == 3)
         filename = fullfile(folder, 'ISMIP.Parameterization.mat');
         md = loadmodel(filename);
     
@@ -122,7 +120,7 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
     end
 
     % Initialize ensemble fields (Step 6, equivalent to notebook's InitEnsemble)
-    if any(steps == 5)
+    if any(steps == 4)
         filename = fullfile(folder, 'ISMIP.BoundaryCondition.mat');
         md = loadmodel(filename);
 

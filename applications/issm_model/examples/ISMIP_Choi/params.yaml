@@ -13,6 +13,8 @@ modeling-parameters:
 
   example_name: "ISMIP_Choi"  # Must have added this to the ISSM directory
   ParamFile: "Mismip2.par" # Parameter file for ISSM-DART setup
+  devmode: False            # ISSM development mode 
+  hpcmode: False          # True - High-performance computing mode, False - local machine
   steps: 6                 # Increased steps for finer time integration
   verbose: True              # Enable verbosity for debugging
 

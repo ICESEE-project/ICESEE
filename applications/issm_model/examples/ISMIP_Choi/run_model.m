@@ -5,11 +5,23 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
     % Read kwargs from .mat file
     model_kwargs = sprintf('model_kwargs_%d.mat', ens_id);
-    kwargs = load(model_kwargs);
+    kwargs       = load(model_kwargs);
     cluster_name = char(kwargs.cluster_name);
-    steps = double(kwargs.steps);
-    icesee_path = char(kwargs.icesee_path);
-    data_path = char(kwargs.data_path);
+    steps        = double(kwargs.steps);
+    icesee_path  = char(kwargs.icesee_path);
+    data_path    = char(kwargs.data_path);
+    hpcmode      = logical(kwargs.hpcmode); % HPC mode flag
+    devmode      = logical(kwargs.devmode); % Development mode flag
+
+
+    % get the current working directory
+    cwd = pwd;
+    [issmroot,~,~]=fileparts(fileparts(cwd));
+    if devmode
+        newpath=fullfile(issmroot,'/src/m/dev');
+        addpath(newpath);
+        devpath;
+    end
 
     % fprintf('[MATLAB] Running model with ens_id: %d, rank: %d, nprocs: %d, filename: %s\n', ens_id, rank, nprocs, data_fname);
 
@@ -46,14 +58,24 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % md.basalforcings.deepwater_melting_rate = 200; % m/yr
             % md.basalforcings.groundedice_melting_rate = zeros(md.mesh.numberofvertices, 1);
 
-            md.cluster=generic('name',cluster_name,'np',nprocs);
+            % Cluster setup
+            if hpcmode
+                md.settings.waitonlock = 0;
+                md.cluster = generic('name',oshostname(),'np',nprocs);
+                md.cluster.codepath = [issmroot , '/bin'];
+                md.cluster.login = 'arobel3';
+                % md.cluster.executionpath = [issmroot, '/execution'];
+                md.cluster.executionpath = sprintf('%s/execution/ens_id_%d', issmroot, ens_id);
+            else
+                md.cluster=generic('name',cluster_name,'np',nprocs);
+                md.miscellaneous.name =  sprintf('color_%d', ens_id);
+            end
 
             % Verbose settings
             md.verbose = verbose('convergence', false, 'solution', true);
             md.transient.ismovingfront = 0;
             md.transient.isthermal = 0;
-            md.miscellaneous.name =  sprintf('color_%d', ens_id);
-
+           
             md = solve(md, 'Transient');
 
             % Save model
@@ -120,7 +142,17 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % md.transient.requested_outputs = {'Vx', 'Vy', 'Thickness', 'Surface', 'Bed', 'FrictionCoefficient'};
 
             % Cluster setup
-            md.cluster = generic('name', cluster_name, 'np', nprocs);
+            if hpcmode
+                md.settings.waitonlock = 0;
+                md.cluster = generic('name',oshostname(),'np',nprocs);
+                md.cluster.codepath = [issmroot , '/bin'];
+                md.cluster.login = 'arobel3';
+                % md.cluster.executionpath = [issmroot, '/execution'];
+                md.cluster.executionpath = sprintf('%s/execution/ens_id_%d', issmroot, ens_id);
+            else
+                md.cluster=generic('name',cluster_name,'np',nprocs);
+                md.miscellaneous.name =  sprintf('color_%d', ens_id);
+            end
 
             % Verbose settings
             md.verbose = verbose('convergence', false, 'solution', true);
@@ -129,7 +161,6 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.transient.isthermal = 0;
 
             % Solve transient
-            md.miscellaneous.name =  sprintf('color_%d', ens_id);
             md = solve(md, 'Transient');
 
             % Save model
