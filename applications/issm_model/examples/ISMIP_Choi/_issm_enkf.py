@@ -25,6 +25,11 @@ def forecast_step_single(ensemble=None, **kwargs):
     
     kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
 
+    # print(f"[DEBUG] Forecast step: time step {k}, tinitial: {kwargs.get('tinitial')}, tfinal: {kwargs.get('tfinal')}")
+    # if k == 0:
+    #    return run_model(ensemble, **kwargs)
+    # else:
+    #     exit(1)
     #  call the run_model fun to push the state forward in time
     return run_model(ensemble, **kwargs)
 

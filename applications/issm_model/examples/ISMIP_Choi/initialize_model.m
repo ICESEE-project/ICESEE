@@ -30,7 +30,7 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
 
     % disp(['[MATLAB] Initializing model with rank: ', num2str(rank), ', nprocs: ', num2str(nprocs), ', ens_id: ', num2str(ens_id)]);
 
-	% steps = [1:5]; 
+	% steps = [1:4]; 
     steps = [5];
 	
     % Mesh generation (Step 1)
@@ -95,11 +95,11 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
         save(filename, 'md');
 
         % write_netCDF(md, 'ISMIP_Parameterization.nc');
-        filename = fullfile(folder, 'ISMIP_Parameterization.nc');
-        if ens_id == 0
-            disp('[MATLAB] Exporting netCDF file for parameterization...');
-            export_netCDF(md, filename);
-        end
+        % filename = fullfile(folder, 'ISMIP_Parameterization.nc');
+        % if ens_id == 0
+        %     disp('[MATLAB] Exporting netCDF file for parameterization...');
+        %     % export_netCDF(md, filename);
+        % end
        
     end
 

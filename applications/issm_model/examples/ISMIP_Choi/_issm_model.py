@@ -14,7 +14,7 @@ from scipy.stats import multivariate_normal,norm
 
 # --- Utility imports ---
 from ICESEE.config._utility_imports import icesee_get_index
-from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import subprocess_cmd_run
+from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import setup_reference_data, setup_ensemble_data
 from ICESEE.applications.issm_model.issm_utils.matlab2python.server_utils import run_icesee_with_server
 
 # --- model initialization ---
@@ -41,28 +41,33 @@ def initialize_model(**kwargs):
     reference_data_dir = kwargs.get('reference_data_dir')
     reference_data     = kwargs.get('reference_data')
 
-    from mpi4py import MPI
-    comm = MPI.COMM_WORLD
-    size = MPI.COMM_WORLD.Get_size()
-    rank = MPI.COMM_WORLD.Get_rank()
+    # from mpi4py import MPI
+    # comm = MPI.COMM_WORLD
+    # size = MPI.COMM_WORLD.Get_size()
+    # rank = MPI.COMM_WORLD.Get_rank()
 
-    if use_reference_data and rank == 0:
-        initial_data = os.path.abspath(os.path.join(reference_data_dir, reference_data))
-        for _rank in range(size):
-            rank_data_dir = f'./Models/ens_id_{_rank}'
-            if not os.path.exists(rank_data_dir) or os.path.islink(rank_data_dir):
-                if os.path.islink(rank_data_dir):
-                    os.unlink(rank_data_dir)  # remove the symlink
-                os.makedirs(rank_data_dir, exist_ok=True)
+    # if use_reference_data and rank == 0:
+    #     initial_data = os.path.abspath(os.path.join(reference_data_dir, reference_data))
+    #     for _rank in range(size):
+    #         rank_data_dir = f'./Models/ens_id_{_rank}'
+    #         if not os.path.exists(rank_data_dir) or os.path.islink(rank_data_dir):
+    #             if os.path.islink(rank_data_dir):
+    #                 os.unlink(rank_data_dir)  # remove the symlink
+    #             os.makedirs(rank_data_dir, exist_ok=True)
 
-            link_path = os.path.join(rank_data_dir, reference_data)
+    #         link_path = os.path.join(rank_data_dir, reference_data)
 
-            if os.path.exists(link_path) or os.path.islink(link_path):
-                os.remove(link_path)
+    #         if os.path.exists(link_path) or os.path.islink(link_path):
+    #             os.remove(link_path)
 
-            os.symlink(initial_data, link_path)
-    # Synchronize all ranks to ensure directories are created   
-    comm.Barrier()  # sync all ranks before continuing
+    #         os.symlink(initial_data, link_path)
+    # # Synchronize all ranks to ensure directories are created   
+    # comm.Barrier()  # sync all ranks before continuing
+    rank_data_dir, rank_data_file = setup_reference_data(reference_data_dir, reference_data, use_reference_data)
+    # if rank_data_dir and rank_data_file:
+    #     # Use rank_data_dir and rank_data_file in your code
+    #     print(f"[Rank {MPI.COMM_WORLD.Get_rank()}] Processing {rank_data_file} in {rank_data_dir}")
+
    
 
     #  call the issm initalize_model.m matlab function to initialize the model
@@ -94,36 +99,37 @@ def initialize_model(**kwargs):
     # use symbolic linking instead of copying files
     # Create symbolic links on root process
     # Root directory and parameter file
-    data_dir = os.path.abspath('./Models/ens_id_0')
-    kwargs_data = os.path.abspath('model_kwargs_0.mat')
+    # data_dir = os.path.abspath('./Models/ens_id_0')
+    # kwargs_data = os.path.abspath('model_kwargs_0.mat')
     Nens = kwargs.get('Nens')
 
-    if rank == 0:
-        for ens in range(1, Nens):
-            new_data_dir = os.path.abspath(f'./Models/ens_id_{ens}')
-            new_kwargs_data = f'model_kwargs_{ens}.mat'
+    # if rank == 0:
+    #     for ens in range(1, Nens):
+    #         new_data_dir = os.path.abspath(f'./Models/ens_id_{ens}')
+    #         new_kwargs_data = f'model_kwargs_{ens}.mat'
 
-            # Remove existing directory or symlink
-            if os.path.exists(new_data_dir) or os.path.islink(new_data_dir):
-                if os.path.isdir(new_data_dir) and not os.path.islink(new_data_dir):
-                    shutil.rmtree(new_data_dir)
-                else:
-                    os.remove(new_data_dir)
+    #         # Remove existing directory or symlink
+    #         if os.path.exists(new_data_dir) or os.path.islink(new_data_dir):
+    #             if os.path.isdir(new_data_dir) and not os.path.islink(new_data_dir):
+    #                 shutil.rmtree(new_data_dir)
+    #             else:
+    #                 os.remove(new_data_dir)
 
-            # Create symbolic link for directory
-            os.symlink(data_dir, new_data_dir, target_is_directory=True)
+    #         # Create symbolic link for directory
+    #         os.symlink(data_dir, new_data_dir, target_is_directory=True)
 
-            # Remove existing kwargs file or link
-            if os.path.exists(new_kwargs_data) or os.path.islink(new_kwargs_data):
-                os.remove(new_kwargs_data)
+    #         # Remove existing kwargs file or link
+    #         if os.path.exists(new_kwargs_data) or os.path.islink(new_kwargs_data):
+    #             os.remove(new_kwargs_data)
 
-            # Create symbolic link for parameter file
-            os.symlink(kwargs_data, new_kwargs_data)
+    #         # Create symbolic link for parameter file
+    #         os.symlink(kwargs_data, new_kwargs_data)
 
-        print(f"[Rank 0] Created symbolic links for {Nens - 1} ensemble members.")
+    #     print(f"[Rank 0] Created symbolic links for {Nens - 1} ensemble members.")
 
-    # Synchronize
-    comm.Barrier()
+    # # Synchronize
+    # comm.Barrier()
+    ensemble_dir, ensemble_kwargs = setup_ensemble_data(Nens)
 
     # fetch model size from output file
     try: 
@@ -157,7 +163,6 @@ def ISSM_model(**kwargs):
     # rank = kwargs.get('rank')
     ens_id = kwargs.get('ens_id')
     comm = kwargs.get('comm')
-    params = kwargs.get('params')
 
     # get rank
     rank   = comm.Get_rank()
@@ -189,78 +194,82 @@ def ISSM_model(**kwargs):
 
 # ---- Run model for ISSM ----
 def run_model(ensemble, **kwargs):
-    """ des: run the issm model with ensemble matrix from ICESEE
-        returns: dictionary of the output from the issm model
+    """
+    Run the ISSM model with an ensemble matrix from ICESEE.
+
+    Args:
+        ensemble: Ensemble matrix for the model.
+        **kwargs: Additional parameters including:
+            - nprocs: Number of processors.
+            - server: Server information.
+            - issm_examples_dir: Directory for ISSM examples.
+            - icesee_path: Path to ICESEE directory.
+            - comm: MPI communicator object.
+            - vec_inputs: List of input vector keys.
+            - ens_id: Ensemble ID.
+            - data_path: Path to data directory.
+            - k: timestep index.
+
+    Returns:
+        dict: Dictionary containing the output from the ISSM model, or None if an error occurs.
     """
     import h5py
     import numpy as np
     import os
 
-    # --- get the number of processors ---
+    # Extract keyword arguments
     nprocs = kwargs.get('nprocs')
-    server              = kwargs.get('server')
-    # rank                = kwargs.get('rank')
-    issm_examples_dir   = kwargs.get('issm_examples_dir')
-    icesee_path         = kwargs.get('icesee_path')
-    comm                = kwargs.get('comm')
-    vec_inputs          = kwargs.get('vec_inputs')
+    server = kwargs.get('server')
+    issm_examples_dir = kwargs.get('issm_examples_dir')
+    icesee_path = kwargs.get('icesee_path')
+    comm = kwargs.get('comm')
+    vec_inputs = kwargs.get('vec_inputs')
+    ens_id = kwargs.get('ens_id')
+    data_path = kwargs.get('data_path')
+    k = kwargs.get('k')
 
-    rank                = comm.Get_rank()
+    # Get MPI rank
+    rank = comm.Get_rank()
 
-    #  --- change directory to the issm directory ---
+    # Change to ISSM examples directory
     os.chdir(issm_examples_dir)
 
-    # --- filename for data saving
+    # Define filename for data saving
     fname = 'enkf_state.mat'
     kwargs.update({'fname': fname})
-    
-    ens_id = kwargs.get('ens_id')
 
-    # try: 
-    if True:
-        # Generate output filename based on rank
-        icesee_path    = kwargs.get('icesee_path')
-        data_path      = kwargs.get('data_path')
+    try:
+        # Generate output filename based on ensemble ID
         input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
 
-        #  write the ensemble to the h5 file
-        k = kwargs.get('k')
-
-        # -- call the icess_get_index function to get the index of the ensemble
-        # print(f"[DEBUG] run_model {rank} of {comm.Get_size()}")
-        # print(f"[DEBUG] Ensemble: {ensemble[:5]}")
+        # Get ensemble indices
         vecs, indx_map, _ = icesee_get_index(ensemble, **kwargs)
 
-        # if k > 0:
-        if True:
-            # -- create our ensemble for test purposes
-             with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
-                for key in vec_inputs:
-                    f.create_dataset(key, data=ensemble[indx_map[key]])
+        # Write ensemble data to HDF5 file
+        with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
+            for key in vec_inputs:
+                f.create_dataset(key, data=ensemble[indx_map[key]])
 
-        # --- call the issm model  to update the state and parameters variables ---
+        # Run ISSM model to update state and parameters
         ISSM_model(**kwargs)
 
-        # -- change directory back to the original directory
-        os.chdir(icesee_path)
-        
-        #  --- read the output from the h5 file ISSM model ---
-        try:
-        # if True:
-            output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
-            # check if the file exists
-            if not os.path.exists(output_filename):
-                print(f"[ERROR] File does not exist: {output_filename}")
-                return None
-            updated_state = {}
-            with h5py.File(output_filename, 'r',driver='mpio',comm=comm) as f:
-                for key in vec_inputs:
-                    updated_state[key] = f[key][0]
+        # Read output from HDF5 file
+        output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+        if not os.path.exists(output_filename):
+            print(f"[run_model Error] File does not exist: {output_filename}")
+            return None
 
-        except Exception as e:
-            print(f"[Run model] Error reading the file: {e}")
-        #     return None
-    
-    # -- change directory back to the original directory
-    os.chdir(icesee_path)
+        updated_state = {}
+        with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+            for key in vec_inputs:
+                updated_state[key] = f[key][0]
+
+    except Exception as e:
+        print(f"[run_model] Error running the model: {e}")
+        updated_state = None
+
+    finally:
+        # Return to original directory
+        os.chdir(icesee_path)
+
     return updated_state

@@ -53,16 +53,16 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
     output_file = os.path.join(model_kwargs.get('data_path'), output_file)
 
     # Open file in parallel mode
-    if timestep == 0:
+    if timestep == 0.0:
         with h5py.File(output_file, 'w', driver='mpio', comm=comm) as f:
             # Create dataset with total dimensions
-            dset = f.create_dataset('ensemble', (nd_total, Nens, params['nt']+1), dtype=ensemble_chunk.dtype)
+            dset = f.create_dataset('ensemble', (nd_total, Nens, model_kwargs.get('nt', params['nt']) +1), dtype=ensemble_chunk.dtype)
             
             # Each rank writes its chunk
             dset[offset:offset + local_nd, :,0] = ensemble_chunk
 
             # ens_mean 
-            ens_mean = f.create_dataset('ensemble_mean', (local_nd, params['nt']+1), dtype=ensemble_chunk.dtype)
+            ens_mean = f.create_dataset('ensemble_mean', (local_nd, model_kwargs.get('nt', params['nt']) +1), dtype=ensemble_chunk.dtype)
             if rank == 0:
                 ens_mean[:,0] = ensemble_mean
 
@@ -340,7 +340,7 @@ def parallel_write_vector_from_root(full_ensemble=None, comm=None, data_shape=No
 
 
     
-def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, params,full_ensemble=None, comm=None, output_file="icesee_ensemble_data.h5"):
+def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, model_kwargs,full_ensemble=None, comm=None, output_file="icesee_ensemble_data.h5"):
     """
     Append ensemble data in parallel where the full matrix exists on rank 0.
     Each call appends a new time step, resulting in a dataset of shape (nd, Nens, nt).
@@ -349,6 +349,8 @@ def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, params,full_
     comm: MPI communicator
     output_file: Name of the output HDF5 file
     """
+    params = model_kwargs.get("params")
+
     # MPI setup
     rank = comm.Get_rank()
     size = comm.Get_size()
@@ -387,13 +389,13 @@ def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, params,full_
     if timestep == 0:
         with h5py.File(output_file, 'w', driver='mpio', comm=comm) as f:
             # Create dataset with total dimensions
-            dset = f.create_dataset('ensemble', (nd, Nens, params['nt']+1), dtype=dtype)
+            dset = f.create_dataset('ensemble', (nd, Nens, model_kwargs.get('nt', params['nt'])+1), dtype=dtype)
             
             # Each rank writes its chunk
             dset[offset:offset + local_nd, :,0] = local_chunk
 
             # ens_mean 
-            ens_mean = f.create_dataset('ensemble_mean', (nd, params['nt']+1), dtype=dtype)
+            ens_mean = f.create_dataset('ensemble_mean', (nd, model_kwargs.get('nt', params['nt'])+1), dtype=dtype)
             if rank == 0:
                 ens_mean[:,0] = ensemble_mean
     else:

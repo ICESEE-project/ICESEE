@@ -479,34 +479,42 @@ def icesee_model_data_assimilation(**model_kwargs):
             model_nprocs = params.get("model_nprocs", 1)
             
             if rank_world == 0:
-                print("Generating true state ...")
+                
                 model_kwargs.update({'ens_id': rank_world})
                 model_kwargs.update({'model_nprocs': (model_nprocs * size_world)-1}) # update the model_nprocs to include all processors for the external model run
-                
-                # dim_list = np.tile(params["nd"],size_world) # all processors have the same dimension
-                model_kwargs.update({"global_shape": params["nd"], "dim_list": dim_list})
-                statevec_true = np.zeros([params["nd"], model_kwargs.get("nt",params["nt"]) + 1])
-                model_kwargs.update({"statevec_true": statevec_true})
-                updated_true_state = model_module.generate_true_state(**model_kwargs)
 
-                # unpack the dictionaery
-                vecs, indx_map, dim_per_proc = icesee_get_index(statevec_true, **model_kwargs)
-                ensemble_true_state = np.zeros_like(statevec_true)
-                for key, value in updated_true_state.items():
-                    ensemble_true_state[indx_map[key], :] = value
+                if model_kwargs.get("generate_true_state", True):
+                    print("Generating true state ...")
+                    # dim_list = np.tile(params["nd"],size_world) # all processors have the same dimension
+                    model_kwargs.update({"global_shape": params["nd"], "dim_list": dim_list})
+                    statevec_true = np.zeros([params["nd"], model_kwargs.get("nt",params["nt"]) + 1])
+                    model_kwargs.update({"statevec_true": statevec_true})
+                    updated_true_state = model_module.generate_true_state(**model_kwargs)
 
-                print("Generating nurged state ...")
-                model_kwargs.update({"statevec_nurged": np.zeros([params["nd"], model_kwargs.get("nt",params["nt"]) + 1])})
-                ensemble_nurged_state = model_module.generate_nurged_state(**model_kwargs)
+                    # unpack the dictionaery
+                    vecs, indx_map, dim_per_proc = icesee_get_index(statevec_true, **model_kwargs)
+                    ensemble_true_state = np.zeros_like(statevec_true)
+                    for key, value in updated_true_state.items():
+                        ensemble_true_state[indx_map[key], :] = value
 
-                # -- write data to file
-                with h5py.File(_true_nurged, "w") as f:
-                    f.create_dataset("true_state", data=ensemble_true_state)
-                    f.create_dataset("nurged_state", data=ensemble_nurged_state)
+                if model_kwargs.get("generate_nurged_state",True):
+                    print("Generating nurged state ...")
+                    model_kwargs.update({"statevec_nurged": np.zeros([params["nd"], model_kwargs.get("nt",params["nt"]) + 1])})
+                    ensemble_nurged_state = model_module.generate_nurged_state(**model_kwargs)
+
+                # Write data to file
+                if model_kwargs.get("generate_true_state",True) or model_kwargs.get("generate_nurged_state",True):
+                    with h5py.File(_true_nurged, "w") as f:
+                        if model_kwargs.get("generate_true_state"):
+                            f.create_dataset("true_state", data=ensemble_true_state)
+                        if model_kwargs.get("generate_nurged_state"):
+                            f.create_dataset("nurged_state", data=ensemble_nurged_state)
 
                 # clean memory 
-                del ensemble_true_state
-                del ensemble_nurged_state
+                if model_kwargs.get("generate_true_state",True):
+                    del updated_true_state
+                if model_kwargs.get("generate_nurged_state",True):
+                    del ensemble_nurged_state
                 gc.collect()
 
             else:
@@ -524,8 +532,6 @@ def icesee_model_data_assimilation(**model_kwargs):
 
         else:
             # --- Generate True and Nurged States ---
-            if rank_world == 0:
-                print("Generating true and nurged states ...  ")
 
             if params["default_run"] and size_world > params["Nens"]:
                 model_kwargs.update({'rank': sub_rank, 'color': color, 'comm': subcomm})
@@ -534,45 +540,72 @@ def icesee_model_data_assimilation(**model_kwargs):
                 dim_list = subcomm.allgather(params["nd"])
                 global_shape = sum(dim_list)
                 model_kwargs.update({"global_shape": global_shape, "dim_list": dim_list})
-                # statevec_true = np.zeros([model_kwargs['dim_list'][sub_rank], model_kwargs.get("nt",params["nt"]) + 1])
-                statevec_true = np.zeros([global_shape, model_kwargs.get("nt",params["nt"]) + 1])
-                model_kwargs.update({"statevec_true": statevec_true})
-                # generate the true state
-                updated_true_state = model_module.generate_true_state(**model_kwargs)
-                # ensemble_true_state = gather_and_broadcast_data_default_run(updated_true_state, subcomm, sub_rank, comm_world, rank_world, params)
-                global_data = {key: subcomm.gather(data, root=0) for key, data in updated_true_state.items()}
 
-                if sub_rank == 0:
-                    for key in global_data:
-                        # print(f"Key: {key}, shape: {[arr.shape for arr in global_data[key]]}")
-                        global_data[key] = np.vstack(global_data[key])
+                if model_kwargs.get("generate_true_state", True):
+                    if rank_world == 0:
+                        print("Generating true state ...  ")
+                    # statevec_true = np.zeros([model_kwargs['dim_list'][sub_rank], model_kwargs.get("nt",params["nt"]) + 1])
+                    statevec_true = np.zeros([global_shape, model_kwargs.get("nt",params["nt"]) + 1])
+                    model_kwargs.update({"statevec_true": statevec_true})
+                    # generate the true state
+                    updated_true_state = model_module.generate_true_state(**model_kwargs)
+                    # ensemble_true_state = gather_and_broadcast_data_default_run(updated_true_state, subcomm, sub_rank, comm_world, rank_world, params)
+                    global_data = {key: subcomm.gather(data, root=0) for key, data in updated_true_state.items()}
 
-                    # stack all variables together into a single array
-                    stacked = np.vstack([global_data[key] for key in updated_true_state.keys()])
-                    shape_ = np.array(stacked.shape,dtype=np.int32)
-                    hdim = stacked.shape[0] // params["total_state_param_vars"]
-                    # print(f"Shape of the true state: {stacked.shape} min ensemble true: {np.min(stacked[hdim,:])}, max ensemble true: {np.max(stacked[hdim,:])}")
+                    if sub_rank == 0:
+                        for key in global_data:
+                            # print(f"Key: {key}, shape: {[arr.shape for arr in global_data[key]]}")
+                            global_data[key] = np.vstack(global_data[key])
 
-                else:
-                    shape_ = np.empty(2,dtype=np.int32)
+                        # stack all variables together into a single array
+                        stacked = np.vstack([global_data[key] for key in updated_true_state.keys()])
+                        shape_ = np.array(stacked.shape,dtype=np.int32)
+                        hdim = stacked.shape[0] // params["total_state_param_vars"]
+                        # print(f"Shape of the true state: {stacked.shape} min ensemble true: {np.min(stacked[hdim,:])}, max ensemble true: {np.max(stacked[hdim,:])}")
+                        if model_kwargs.get("generate_true_state"):
+                            # write data to the file
+                            with h5py.File(_true_nurged, "w", driver='mpio', comm=subcomm) as f:
+                                f.create_dataset("true_state", data=stacked)
+                            
+                        hdim = stacked.shape[0] // params["total_state_param_vars"]
 
-                # broadcast the shape of the true state
-                shape_ = comm_world.bcast(shape_, root=0)
+                    else:
+                        shape_ = np.empty(2,dtype=np.int32)
+                        hdim = 0
 
-                if sub_rank != 0:
-                    stacked = np.empty(shape_,dtype=np.float64)
+                    # broadcast the shape of the true state
+                    shape_ = comm_world.bcast(shape_, root=0)
+                    hdim   = comm_world.bcast(hdim, root=0)
 
-                # write data to the file instead for memory management
-
-
-                # broadcast the true state
-                ensemble_true_state = comm_world.bcast(stacked, root=0)
-                hdim = ensemble_true_state.shape[0] // params["total_state_param_vars"]
+                    if sub_rank != 0:
+                        stacked = np.empty(shape_,dtype=np.float64)
                 
-                # # generate the nurged state
-                statevec_nurged = np.zeros([model_kwargs["global_shape"], model_kwargs.get("nt",params["nt"]) + 1])
-                model_kwargs.update({"statevec_nurged": statevec_nurged})
-                ensemble_nurged_state = model_module.generate_nurged_state(**model_kwargs)
+
+                    # write data to the file instead for memory management
+
+
+
+                    # broadcast the true state
+                    # ensemble_true_state = comm_world.bcast(stacked, root=0)
+                    # hdim = ensemble_true_state.shape[0] // params["total_state_param_vars"]
+                
+                if model_kwargs.get("generate_nurged_state", True):
+                    if rank_world == 0:
+                        print("Generating nurged state ... ")
+                    # statevec_nurged = np.zeros([model_kwargs['dim_list'][sub_rank], model_kwargs.get("nt",params["nt"]) + 1])
+                    statevec_nurged = np.zeros([global_shape, model_kwargs.get("nt",params["nt"]) + 1])
+                    model_kwargs.update({"statevec_nurged": statevec_nurged})
+                    ensemble_nurged_state = model_module.generate_nurged_state(**model_kwargs)
+
+                    with h5py.File(_true_nurged, "a", driver='mpio', comm=comm_world) as f:
+                        f.create_dataset("nurged_state", data=ensemble_nurged_state)
+                    del ensemble_nurged_state 
+
+                comm_world.Barrier()
+                # clean memory
+                if model_kwargs.get("generate_true_state"):
+                    del updated_true_state
+                gc.collect()
 
                 # exit()
             elif params["sequential_run"]:
@@ -593,63 +626,14 @@ def icesee_model_data_assimilation(**model_kwargs):
         # --- Generate the Observations ---------------------------------------------------
             
         # --- Synthetic Observations ---
-        if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
-            if rank_world == 0:
-                # --- Synthetic Observations ---
-                print("Generating synthetic observations ...")
-                with h5py.File(_true_nurged, "r") as f:
-                    ensemble_true_state = f['true_state'][:]
+        if model_kwargs.get("generate_synthetic_obs", True):   
+            if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
+                if rank_world == 0:
+                    # --- Synthetic Observations ---
+                    print("Generating synthetic observations ...")
+                    with h5py.File(_true_nurged, "r") as f:
+                        ensemble_true_state = f['true_state'][:]
 
-                utils_funs = UtilsFunctions(params, ensemble_true_state)
-                model_kwargs.update({"statevec_true": ensemble_true_state})
-                hu_obs, error_R = utils_funs._create_synthetic_observations(**model_kwargs)
-
-                # observe or don't observe parameters.
-                vecs, indx_map,_ = icesee_get_index(hu_obs, **model_kwargs)
-                # check if model_kwargs['observe_params'] is empty
-                if len(model_kwargs['observed_params']) == 0:
-                    for key in model_kwargs['params_vec']:
-                        hu_obs[indx_map[key],:] = 0.0 
-                        error_R[:,indx_map[key]] = 0.0
-                else: 
-                    for key in model_kwargs['params_vec']:
-                        if key not in model_kwargs['observed_params']:
-                            hu_obs[indx_map[key],:] = 0.0
-                            error_R[:,indx_map[key]] = 0.0
-
-                # -- write data to file
-                with h5py.File(_synthetic_obs, 'w') as f:
-                    f.create_dataset("hu_obs", data=hu_obs)
-                    f.create_dataset("R", data=error_R)
-
-                # --- clear memory
-                del hu_obs
-                del error_R
-                gc.collect()
-
-            else:
-                pass
-                # hu_obs = np.empty((params["nd"],params["number_obs_instants"]),dtype=np.float64)
-                # error_R = np.empty((params["number_obs_instants"], params["nd"]),dtype=np.float64)
-
-            if params["even_distribution"]:
-                # Bcast the observations
-                comm_world.Bcast(hu_obs, root=0)
-            else:
-                pass
-                # hu_obs = comm_world.bcast(hu_obs, root=0)
-                # error_R = comm_world.bcast(error_R, root=0)
-                # *--- write observations to file ---
-                # parallel_write_data_from_root_2D(full_ensemble=hu_obs, comm=comm_world, data_name='hu_obs', output_file="icesee_ensemble_data.h5")
-        else:
-            # --- Synthetic Observations ---
-            if rank_world == 0:
-                print("Generating synthetic observations ...")
-
-            if params["default_run"] and size_world > params["Nens"]:
-                subcomm.Barrier()
-                # comm_world.Bcast(hu_obs, root=0)
-                if sub_rank == 0:
                     utils_funs = UtilsFunctions(params, ensemble_true_state)
                     model_kwargs.update({"statevec_true": ensemble_true_state})
                     hu_obs, error_R = utils_funs._create_synthetic_observations(**model_kwargs)
@@ -659,7 +643,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                     # check if model_kwargs['observe_params'] is empty
                     if len(model_kwargs['observed_params']) == 0:
                         for key in model_kwargs['params_vec']:
-                            hu_obs[indx_map[key],:] = 0.0 
+                            hu_obs[indx_map[key],:] = 0.0
                             error_R[:,indx_map[key]] = 0.0
                     else: 
                         for key in model_kwargs['params_vec']:
@@ -667,66 +651,121 @@ def icesee_model_data_assimilation(**model_kwargs):
                                 hu_obs[indx_map[key],:] = 0.0
                                 error_R[:,indx_map[key]] = 0.0
 
-                    shape_ = np.array(hu_obs.shape,dtype=np.int32)
-                    shape_R = np.array(error_R.shape,dtype=np.int32)
+                    # -- write data to file
+                    with h5py.File(_synthetic_obs, 'w') as f:
+                        f.create_dataset("hu_obs", data=hu_obs)
+                        f.create_dataset("R", data=error_R)
+
+                    # --- clear memory
+                    del hu_obs
+                    del error_R
+                    gc.collect()
+
                 else:
-                    shape_ = np.empty(2,dtype=np.int32)
-                    shape_R = np.empty(2,dtype=np.int32)
+                    pass
+                    # hu_obs = np.empty((params["nd"],params["number_obs_instants"]),dtype=np.float64)
+                    # error_R = np.empty((params["number_obs_instants"], params["nd"]),dtype=np.float64)
 
-                subcomm.Bcast(shape_, root=0)
-                subcomm.Bcast(shape_R, root=0)
-                if sub_rank != 0:
-                    hu_obs = np.empty(shape_,dtype=np.float64)
-                    error_R = np.empty(shape_R,dtype=np.float64)
-
-
-                # bcast the synthetic observations
-                subcomm.Bcast(hu_obs, root=0)
-                subcomm.Bcast(error_R, root=0)
-                #- write observations to file
-                # parallel_write_data_from_root_2D(full_ensemble=hu_obs, comm=subcomm, data_name='hu_obs', output_file="icesee_ensemble_data.h5")
-
-
-                # broadcast to the global communicator
-                # comm_world.Bcast(hu_obs, root=0)
-                # print(f"rank {rank_world} Shape of the observations: {hu_obs.shape}")
-                # exit()    
-            elif params["sequential_run"]:
-                comm_world.Barrier()
-                # g_shape = model_kwargs['dim_list'][rank_world]
-                # utils_funs = UtilsFunctions(params, ensemble_true_state)
-                # model_kwargs.update({"statevec_true": ensemble_true_state})
-                # hu_obs = utils_funs._create_synthetic_observations(**model_kwargs)
-                # # gather from every rank to rank 0
-                # gathered_obs = comm_world.gather(hu_obs[:g_shape,:], root=0)
-                # if rank_world == 0:
-                #     print(f"{[arr.shape for arr in gathered_obs]}")
-                #     hu_obs = np.vstack(gathered_obs)
-                # else:
-                #     hu_obs = np.empty((model_kwargs["global_shape"],params["number_obs_instants"]),dtype=np.float64)
-                
-                # comm_world.Bcast(hu_obs, root=0)
+                if params["even_distribution"]:
+                    # Bcast the observations
+                    comm_world.Bcast(hu_obs, root=0)
+                else:
+                    pass
+                    # hu_obs = comm_world.bcast(hu_obs, root=0)
+                    # error_R = comm_world.bcast(error_R, root=0)
+                    # *--- write observations to file ---
+                    # parallel_write_data_from_root_2D(full_ensemble=hu_obs, comm=comm_world, data_name='hu_obs', output_file="icesee_ensemble_data.h5")
+            else:
+                # --- Synthetic Observations ---
                 if rank_world == 0:
-                    utils_funs = UtilsFunctions(params, ensemble_true_state)
-                    model_kwargs.update({"statevec_true": ensemble_true_state})
-                    hu_obs, error_R = utils_funs._create_synthetic_observations(**model_kwargs)
-                    shape_ = np.array(hu_obs.shape,dtype=np.int32)
-                    shape_R = np.array(error_R.shape,dtype=np.int32)
-                else:
-                    shape_ = np.empty(2,dtype=np.int32)
-                    shape_R = np.empty(2,dtype=np.int32)
+                    print("Generating synthetic observations ...")
 
-                comm_world.Bcast(shape_, root=0)
-                comm_world.Bcast(shape_R, root=0)
+                if params["default_run"] and size_world > params["Nens"]:
+                    subcomm.Barrier()
+                    # comm_world.Bcast(hu_obs, root=0)
+                    if sub_rank == 0:
+                        utils_funs = UtilsFunctions(params, ensemble_true_state)
+                        model_kwargs.update({"statevec_true": ensemble_true_state})
+                        hu_obs, error_R = utils_funs._create_synthetic_observations(**model_kwargs)
 
-                if rank_world != 0:
-                    hu_obs = np.empty(shape_,dtype=np.float64)
-                    error_R = np.empty(shape_R,dtype=np.float64)
+                        # observe or don't observe parameters.
+                        vecs, indx_map,_ = icesee_get_index(hu_obs, **model_kwargs)
+                        # check if model_kwargs['observe_params'] is empty
+                        if len(model_kwargs['observed_params']) == 0:
+                            for key in model_kwargs['params_vec']:
+                                hu_obs[indx_map[key],:] = 0.0 
+                                error_R[:,indx_map[key]] = 0.0
+                        else: 
+                            for key in model_kwargs['params_vec']:
+                                if key not in model_kwargs['observed_params']:
+                                    hu_obs[indx_map[key],:] = 0.0
+                                    error_R[:,indx_map[key]] = 0.0
 
-                # bcast the synthetic observations
-                comm_world.Bcast(hu_obs, root=0)
-                comm_world.Bcast(error_R, root=0)
-                
+                        shape_ = np.array(hu_obs.shape,dtype=np.int32)
+                        shape_R = np.array(error_R.shape,dtype=np.int32)
+
+                        # write data to the file
+                        with h5py.File(_synthetic_obs, 'w', driver='mpio', comm=subcomm) as f:
+                            f.create_dataset("hu_obs", data=hu_obs)
+                            f.create_dataset("R", data=error_R)
+                    else:
+                        shape_ = np.empty(2,dtype=np.int32)
+                        shape_R = np.empty(2,dtype=np.int32)
+
+                    subcomm.Bcast(shape_, root=0)
+                    subcomm.Bcast(shape_R, root=0)
+                    if sub_rank != 0:
+                        hu_obs = np.empty(shape_,dtype=np.float64)
+                        error_R = np.empty(shape_R,dtype=np.float64)
+
+
+                    # bcast the synthetic observations
+                    # subcomm.Bcast(hu_obs, root=0)
+                    # subcomm.Bcast(error_R, root=0)
+                    #- write observations to file
+                    # parallel_write_data_from_root_2D(full_ensemble=hu_obs, comm=subcomm, data_name='hu_obs', output_file="icesee_ensemble_data.h5")
+
+
+                    # broadcast to the global communicator
+                    # comm_world.Bcast(hu_obs, root=0)
+                    # print(f"rank {rank_world} Shape of the observations: {hu_obs.shape}")
+                    # exit()    
+                elif params["sequential_run"]:
+                    comm_world.Barrier()
+                    # g_shape = model_kwargs['dim_list'][rank_world]
+                    # utils_funs = UtilsFunctions(params, ensemble_true_state)
+                    # model_kwargs.update({"statevec_true": ensemble_true_state})
+                    # hu_obs = utils_funs._create_synthetic_observations(**model_kwargs)
+                    # # gather from every rank to rank 0
+                    # gathered_obs = comm_world.gather(hu_obs[:g_shape,:], root=0)
+                    # if rank_world == 0:
+                    #     print(f"{[arr.shape for arr in gathered_obs]}")
+                    #     hu_obs = np.vstack(gathered_obs)
+                    # else:
+                    #     hu_obs = np.empty((model_kwargs["global_shape"],params["number_obs_instants"]),dtype=np.float64)
+                    
+                    # comm_world.Bcast(hu_obs, root=0)
+                    if rank_world == 0:
+                        utils_funs = UtilsFunctions(params, ensemble_true_state)
+                        model_kwargs.update({"statevec_true": ensemble_true_state})
+                        hu_obs, error_R = utils_funs._create_synthetic_observations(**model_kwargs)
+                        shape_ = np.array(hu_obs.shape,dtype=np.int32)
+                        shape_R = np.array(error_R.shape,dtype=np.int32)
+                    else:
+                        shape_ = np.empty(2,dtype=np.int32)
+                        shape_R = np.empty(2,dtype=np.int32)
+
+                    comm_world.Bcast(shape_, root=0)
+                    comm_world.Bcast(shape_R, root=0)
+
+                    if rank_world != 0:
+                        hu_obs = np.empty(shape_,dtype=np.float64)
+                        error_R = np.empty(shape_R,dtype=np.float64)
+
+                    # bcast the synthetic observations
+                    comm_world.Bcast(hu_obs, root=0)
+                    comm_world.Bcast(error_R, root=0)
+                    
         # --- Initialize the ensemble ---------------------------------------------------
         comm_world.Barrier()
         Q_rho     = model_kwargs.get("Q_rho")
@@ -834,7 +873,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                 shape_ens = comm_world.bcast(shape_ens, root=0)
                 # write the ensemble to the file
                 ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
-                parallel_write_full_ensemble_from_root(0, ens_mean, params,ensemble_vec,comm_world)
+                parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
 
             # comm_world.Bcast(ensemble_vec, root=0)
             # hdim = params["nd"] // params["total_state_param_vars"]
@@ -920,7 +959,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                     ensemble_vec = np.empty((model_kwargs["global_shape"],params["Nens"]),dtype=np.float64)
                 
                 ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
-                parallel_write_full_ensemble_from_root(0, ens_mean, params,ensemble_vec,comm_world)
+                parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
                 
             elif params["sequential_run"]:
                 comm_world.Barrier()
@@ -1038,13 +1077,7 @@ def icesee_model_data_assimilation(**model_kwargs):
             shape_ens = comm_world.bcast(shape_ens, root=0)
 
             ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
-            parallel_write_full_ensemble_from_root(0, ens_mean, params,ensemble_vec,comm_world)
-
-
-        
-
-
-
+            parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
 
 
     # --- hdim based on nd or global_shape ---
@@ -1680,7 +1713,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                         if model_kwargs.get('local_analysis', False):
                             shape_ens = ensemble_vec.shape
                             ens_mean = ParallelManager().compute_mean_matrix_from_root(analysis_vec_ij, shape_ens[0], params['Nens'], comm_world, root=0)
-                            parallel_write_full_ensemble_from_root(k+1,ens_mean, params,analysis_vec_ij,comm_world)
+                            parallel_write_full_ensemble_from_root(k+1,ens_mean, model_kwargs,analysis_vec_ij,comm_world)
                         
                         # smb_scale = comm_world.bcast(smb_scale, root=0)
                         smb_scale = 1.0
@@ -1723,7 +1756,7 @@ def icesee_model_data_assimilation(**model_kwargs):
 
                     else: 
                         # if Nens < size_world:
-                        parallel_write_full_ensemble_from_root(k+1,ens_mean, params,ensemble_vec,comm_world)
+                        parallel_write_full_ensemble_from_root(k+1,ens_mean, model_kwargs,ensemble_vec,comm_world)
                             # parallel_write_full_ensemble_from_root(ensemble_vec,ensemble_vec_full,comm_world,k)
 
                 # ======= Local analyais step =======

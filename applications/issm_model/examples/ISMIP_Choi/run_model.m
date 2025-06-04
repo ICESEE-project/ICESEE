@@ -40,6 +40,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md = loadmodel(filename);
 
             % md = transientrestart(md);
+            % md.results = [];
+            md=setflowequation(md,'SSA','all');
+            
              % Update geometry
              md.geometry.thickness =  md.results.TransientSolution(end).Thickness;
              md.geometry.surface   =  md.results.TransientSolution(end).Surface;
@@ -47,36 +50,32 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
  
              % update other fields
              md.initialization.vel      = md.results.TransientSolution(end).Vel;
+             md.initialization.vx        = md.results.TransientSolution(end).Vx;
+             md.initialization.vy        = md.results.TransientSolution(end).Vy;
              md.initialization.pressure = md.results.TransientSolution(end).Pressure;
              md.smb.mass_balance        = md.results.TransientSolution(end).SmbMassBalance;
              md.mask.ocean_levelset     = md.results.TransientSolution(end).MaskOceanLevelset;
 
-            % change from adaptive time stepping to fixed time stepping
+
+            md.smb.mass_balance = -0.3 * ones(md.mesh.numberofvertices, 1); % m/yr
+            
+            md.basalforcings = linearbasalforcings();
+            md.basalforcings.deepwater_melting_rate = 200; % m/yr
+            md.basalforcings.groundedice_melting_rate = zeros(md.mesh.numberofvertices, 1);
+
+            md.transient.ismovingfront=0;   
+
+
+            % change from adaptive time stepping to fixed time stepping (must be done after model update)
             md.timestepping = timestepping();
-
-            % fprintf('[MATLAB] time step: %f, start time: %f, final time: %f\n', md.timestepping.time_step, md.timestepping.start_time, md.timestepping.final_time);
-
-            % Set transient parameters
             md.timestepping.time_step  = dt;
             md.timestepping.start_time = tinitial;
             md.timestepping.final_time = tfinal;
-            
-
-            % md.transient.requested_outputs = {'Vx', 'Vy', 'Thickness', 'Surface', 'Bed', 'FrictionCoefficient'};
-            % md.transient.ismovingfront = 0;
-            % md.transient.isthermal = 0;
-            % md.transient.isstressbalance = 1;
-            % md.transient.ismasstransport = 1;
-            % md.transient.isgroundingline = 1;
-            % md.groundingline.migration = 'SubelementMigration';
-            % md.groundingline.friction_interpolation = 'SubelementFriction1';
-            % md.groundingline.melt_interpolation = 'NoMeltOnPartiallyFloating';
-
-            % % Set forcings (from notebook Cell 11)
-            % md.smb.mass_balance = -0.3 * ones(md.mesh.numberofvertices, 1); % m/yr
-            % md.basalforcings = linearbasalforcings();
-            % md.basalforcings.deepwater_melting_rate = 200; % m/yr
-            % md.basalforcings.groundedice_melting_rate = zeros(md.mesh.numberofvertices, 1);
+            md.settings.output_frequency = 10;
+            md.stressbalance.maxiter = 100;
+            md.stressbalance.restol = 1;
+            md.stressbalance.reltol = 0.001;
+            md.stressbalance.abstol = NaN;
 
             % Cluster setup
             if hpcmode
@@ -88,21 +87,13 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                 md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
             else
                 md.cluster=generic('name',cluster_name,'np',nprocs);
-                % md.miscellaneous.name =  sprintf('color_%d', ens_id);
-                % make sprintf('%s/execution/color_%d', issmroot, ens_id); a directory
-                % exec_path = sprintf('%s/execution/color_%d', issmroot, ens_id)
-                % if ~exist(exec_path, 'dir')
-                %     rmdir(exec_path, 's'); % Remove if exists
-                %     mkdir(exec_path);
-                % end
-                % md.cluster.executionpath = exec_path;
+                md.settings.waitonlock = 1;
                 md.miscellaneous.name =  sprintf('color_%d', ens_id);
+                % md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
             end
 
             % Verbose settings
             md.verbose = verbose('convergence', false, 'solution', true);
-            md.transient.ismovingfront = 0;
-            md.transient.isthermal = 0;
            
             md = solve(md, 'Transient');
 
@@ -129,6 +120,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % Subsequent time steps: load previous transient state
             filename = fullfile(folder, data_fname);
             md = loadmodel(filename);
+            % md = transientrestart(md);
+            md=setflowequation(md,'SSA','all');
 
             % Load ensemble input from HDF5
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
@@ -137,7 +130,6 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.friction.coefficient = h5read(filename, '/coefficient');
 
             % Update geometry
-            md.geometry.thickness =  md.results.TransientSolution(end).Thickness;
             md.geometry.surface   =  md.results.TransientSolution(end).Surface;
             md.geometry.base      =  md.results.TransientSolution(end).Base;
 
@@ -146,22 +138,6 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.initialization.pressure = md.results.TransientSolution(end).Pressure;
             md.smb.mass_balance        = md.results.TransientSolution(end).SmbMassBalance;
             md.mask.ocean_levelset     = md.results.TransientSolution(end).MaskOceanLevelset;
-
-            % md = transientrestart(md);
-
-
-            % pos = find(md.geometry.thickness < 1);
-            % md.geometry.thickness(pos) = 1;
-            % di = md.materials.rho_ice / md.materials.rho_water;
-            % md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
-            % pos = find(md.mask.ocean_levelset < 0);
-            % md.geometry.surface(pos) = md.geometry.thickness(pos) * (md.materials.rho_water - md.materials.rho_ice) / md.materials.rho_water;
-            % md.geometry.base = md.geometry.surface - md.geometry.thickness;
-            % pos = find(md.geometry.base < md.geometry.bed);
-            % md.geometry.base(pos) = md.geometry.bed(pos);
-            % pos = find(md.mask.ocean_levelset > 0);
-            % md.geometry.base(pos) = md.geometry.bed(pos);
-            % md.geometry.surface = md.geometry.base + md.geometry.thickness;
 
             % Time stepping
             md.timestepping.time_step = dt;
@@ -182,15 +158,14 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                 md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
             else
                 md.cluster=generic('name',cluster_name,'np',nprocs);
+                md.settings.waitonlock = 1;
                 md.miscellaneous.name =  sprintf('color_%d', ens_id);
+                % md=loadresultsfromcluster(md);
                 % md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
             end
 
             % Verbose settings
             md.verbose = verbose('convergence', false, 'solution', true);
-
-            md.transient.ismovingfront = 0;
-            md.transient.isthermal = 0;
 
             % Solve transient
             md = solve(md, 'Transient');
