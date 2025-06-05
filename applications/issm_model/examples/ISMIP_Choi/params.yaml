@@ -26,10 +26,10 @@ enkf-parameters:
   Nens: 50                      # Number of ensemble members (paper uses 50)
   freq_obs: 0.5                 # Frequency of observations (annual, as per paper)
   obs_max_time: 2             # Maximum time for observations (30 years)
-  obs_start_time: 0.2            # Start time for observations (start of simulation)
+  obs_start_time: 0.4            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state:    1  # Generate true state for synthetic observations
+  generate_true_state:    0  # Generate true state for synthetic observations
   generate_nurged_state:  0  # Generate nudged state for synthetic observations
 
   num_state_vars: 1             # State variables: ice thickness (H), velocities (u, v)
@@ -40,7 +40,7 @@ enkf-parameters:
   # Statistical parameters
   sig_obs: [4, 5, 2]          # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
   sig_Q: [2, 1.0, 1.0]          # Process noise std dev (adjusted for H, Vx, Vy)
-  length_scale: [6000,6000,6000]               # Length scale for covariance (5 km for friction, per paper)
+  length_scale: [30,30,30]               # Length scale for covariance (5 km for friction, per paper)
   
   seed: 1                       # Seed for random number generator
   inflation_factor: 1.10        # Inflation factor (optimal range 1.10–1.18 from paper)

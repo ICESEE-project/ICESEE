@@ -153,7 +153,9 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
     end
 
     %  initialize from the reference simulation (Step 5)
+    use_reference_data = true; % Flag to use reference data
     if any(steps == 5)
+    % if use_reference_data
         reference_data = char(kwargs.reference_data); % Path to reference data
         folder = sprintf('./Models/ens_id_%d', ens_id);
         if ~exist(folder, 'dir')
@@ -165,7 +167,8 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
 
         fields = {'thickness', 'bed', 'coefficient'};
 
-        result_0 = md.initialization(end);
+        % result_0 = md.initialization(end);
+        result_0 = md.results.TransientSolution(end);
         result_1 = md.geometry;
         result_2 = md.friction;
 
@@ -184,7 +187,7 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
 		end
 
         %  save the fields to the file
-        data = {'Thickness', result_1, 'thickness';
+        data = {'Thickness', result_0, 'Thickness';
                 'bed', result_1, 'bed';
                 'coefficient', result_2, 'coefficient'};
         writeToHDF5(filename, data);
