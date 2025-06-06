@@ -58,6 +58,11 @@ model_kwargs = {
                 'rank': icesee_rank,
                 'nprocs': icesee_size,
                 'ens_id': ens_id,
+                'hpcmode': modeling_params.get('hpcmode', False),
+                'devmode': modeling_params.get('devmode', False),
+                'use_reference_data': modeling_params.get('use_reference_data', False),
+                'reference_data_dir': modeling_params.get('reference_data_dir', 'data'),
+                'reference_data' : modeling_params.get('reference_data'),
 }
 
 # observation schedule

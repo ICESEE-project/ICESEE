@@ -99,6 +99,40 @@ def generate_true_state(**kwargs):
             # except Exception as e:
             #     print(f"[Generate-True-State: read output file] Error reading the file: {e}")
                 # return None
+
+        # Precompute filename
+        # output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+
+        # # Open HDF5 file once in read/write mode
+        # with h5py.File(output_filename, 'a', driver='mpio', comm=comm) as f:
+        #     # Time integration loop
+        #     for k in range(kwargs.get('nt')):
+        #         # Update kwargs with current time step parameters
+        #         kwargs.update({'k': k, 'tinitial': time[k], 'tfinal': time[k + 1]})
+
+        #         print(f"[Generate-True-State:] time step {k} , tinitial: {kwargs.get('tinitial')}, tfinal: {kwargs.get('tfinal')}")
+                
+        #         # Write current state to HDF5 file
+        #         try:
+        #             for key in vec_inputs:
+        #                 # Create or overwrite dataset for the current state
+        #                 if key in f:
+        #                     del f[key]  # Delete existing dataset if it exists
+        #                 f.create_dataset(key, data=statevec_true[indx_map[key], k])
+        #         except Exception as e:
+        #             print(f"[Generate-True-State:] Error writing to file at step {k}: {e}")
+        #             raise
+                
+        #         # Run ISSM model to advance state
+        #         ISSM_model(**kwargs)
+                
+        #         # Read updated state
+        #         try:
+        #             for key in vec_inputs:
+        #                 statevec_true[indx_map[key], k + 1] = f[key][0]
+        #         except Exception as e:
+        #             print(f"[Generate-True-State:] Error reading from file at step {k}: {e}")
+        #             raise
     
         updated_state = {}
         for key in vec_inputs:
@@ -182,6 +216,38 @@ def generate_nurged_state(**kwargs):
                 print(f"[DEBUG] Error reading the file: {e}")
                 # return None
 
+        # Precompute filename
+        # output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+
+        # # Open HDF5 file once in read/write mode
+        # with h5py.File(output_filename, 'a', driver='mpio', comm=comm) as f:
+        #     # Time integration loop
+        #     for k in range(kwargs.get('nt')):
+        #         # Update kwargs with current time step parameters
+        #         kwargs.update({'k': k, 'tinitial': time[k], 'tfinal': time[k + 1]})
+                
+        #         # Write current state to HDF5 file
+        #         try:
+        #             for key in vec_inputs:
+        #                 # Create or overwrite dataset for the current state
+        #                 if key in f:
+        #                     del f[key]  # Delete existing dataset if it exists
+        #                 f.create_dataset(key, data=statevec_nurged[indx_map[key], k])
+        #         except Exception as e:
+        #             print(f"[nurged state:] Error writing to file at step {k}: {e}")
+        #             raise
+                
+        #         # Run ISSM model to advance state
+        #         ISSM_model(**kwargs)
+                
+        #         # Read updated state
+        #         try:
+        #             for key in vec_inputs:
+        #                 statevec_nurged[indx_map[key], k + 1] = f[key][0]
+        #         except Exception as e:
+        #             print(f"[nurged state:] Error reading from file at step {k}: {e}")
+        #             raise
+
         #  --- change directory back to the original directory ---
         os.chdir(icesee_path)
         
@@ -213,18 +279,34 @@ def initialize_ensemble(ens, **kwargs):
     os.chdir(issm_examples_dir)
     ens_id = kwargs.get('ens_id')
 
-    # get the rank of the current process
-    rank = comm.Get_rank()
+    #  -- control time stepping
+    kwargs.update({'k':0}) 
+    kwargs.update({'tinitial': 0, 'tfinal': 0.2})
+
+
+    # --- filename for data saving
+    fname = 'initialize_ensemble.mat'
+    kwargs.update({'fname': fname})
+
+    try:
+        # -- call the run_model function to initialize the ensemble members
+        ISSM_model(**kwargs)
+    except Exception as e:
+        print(f"[Initialize ensemble]] Error initializing ensemble: {e}")
+        server.kill_matlab_processes()
    
-    # try:
-    if True:
+    try:
+        #  -- Read data from the ISSM side to be accessed by ICESEE on the python side
         output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
         updated_state = {}
         with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
             for key in vec_inputs:
                 updated_state[key] = f[key][0]
-           
-        os.chdir(icesee_path)
+    except Exception as e:
+        print(f"[Initialize ensemble] Error reading the file: {e}")
+        server.kill_matlab_processes()
 
-        return updated_state
+    os.chdir(icesee_path)
+
+    return updated_state
         

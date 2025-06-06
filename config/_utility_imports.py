@@ -207,6 +207,9 @@ if not flag_jupyter:
         'example_name': modeling_params.get('example_name', params.get('model_name')),
         'length_scale': enkf_params.get("length_scale", []),
         'Q_rho': enkf_params.get("Q_rho", 1.0),
+        'generate_synthetic_obs': enkf_params.get("generate_synthetic_obs", True),
+        'generate_true_state': enkf_params.get("generate_true_state", True),
+        'generate_nurged_state': enkf_params.get("generate_nurged_state", True),
     }
 
 

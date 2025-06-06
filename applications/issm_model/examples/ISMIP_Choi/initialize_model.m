@@ -4,14 +4,24 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
 
     % Read kwargs from .mat file
     model_kwargs = sprintf('model_kwargs_%d.mat', ens_id);
-    kwargs = load(model_kwargs);
-    ParamFile = char(kwargs.ParamFile);
-    Lx = double(kwargs.Lx); % 640000 m
-    Ly = double(kwargs.Ly); % 80000 m
+    kwargs       = load(model_kwargs);
+    ParamFile    = char(kwargs.ParamFile);
+    Lx           = double(kwargs.Lx); % 640000 m
+    Ly           = double(kwargs.Ly); % 80000 m
     cluster_name = char(kwargs.cluster_name);
-    steps = double(kwargs.steps);
-    icesee_path = char(kwargs.icesee_path);
-    data_path = char(kwargs.data_path);
+    steps        = double(kwargs.steps);
+    icesee_path  = char(kwargs.icesee_path);
+    data_path    = char(kwargs.data_path);
+    devmode      = logical(kwargs.devmode); % Development mode flag
+
+    % get the current working directory
+    cwd = pwd;
+    [issmroot,~,~]=fileparts(fileparts(cwd));
+    if devmode
+        newpath=fullfile(issmroot,'/src/m/dev');
+        addpath(newpath);
+        devpath;
+    end
 
     folder = sprintf('./Models/ens_id_%d', ens_id);
     if ~exist(folder, 'dir')
@@ -20,7 +30,8 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
 
     % disp(['[MATLAB] Initializing model with rank: ', num2str(rank), ', nprocs: ', num2str(nprocs), ', ens_id: ', num2str(ens_id)]);
 
-	steps = [1:5]; 
+	% steps = [1:4]; 
+    steps = [5];
 	
     % Mesh generation (Step 1)
     if any(steps == 1)
@@ -72,21 +83,9 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
         save(filename, 'md');
     end
 
-    % Masks (Step 2)
+    % Parameterization (Step 2)
     if any(steps == 2)
         filename = fullfile(folder, 'ISMIP.Mesh_generation.mat');
-        md = loadmodel(filename);
-        md = setmask(md, '', ''); % All grounded, no ice shelves
-        % plotmodel(md,'data',md.mask.ocean_levelset);
-        filename = fullfile(folder, 'ISMIP.SetMask.mat');
-        save(filename, 'md');
-    end
-
-    % Parameterization (Step 3)
-    % Parameterization (Step 2)
-    if any(steps == 3)
-        filename = fullfile(folder, 'ISMIP.SetMask.mat');
-        % filename = fullfile(folder, 'ISMIP.Mesh_generation.mat');
         md = loadmodel(filename);
         md = setflowequation(md, 'SSA', 'all'); % Shelfy-stream approximation
         ParamFile = 'Mismip2.par'
@@ -96,16 +95,16 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
         save(filename, 'md');
 
         % write_netCDF(md, 'ISMIP_Parameterization.nc');
-        filename = fullfile(folder, 'ISMIP_Parameterization.nc');
-        if ens_id == 0
-            disp('[MATLAB] Exporting netCDF file for parameterization...');
-            export_netCDF(md, filename);
-        end
+        % filename = fullfile(folder, 'ISMIP_Parameterization.nc');
+        % if ens_id == 0
+        %     disp('[MATLAB] Exporting netCDF file for parameterization...');
+        %     % export_netCDF(md, filename);
+        % end
        
     end
 
     % Set boundary conditions (Step 5)
-    if any(steps == 4)
+    if any(steps == 3)
         filename = fullfile(folder, 'ISMIP.Parameterization.mat');
         md = loadmodel(filename);
     
@@ -122,7 +121,7 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
     end
 
     % Initialize ensemble fields (Step 6, equivalent to notebook's InitEnsemble)
-    if any(steps == 5)
+    if any(steps == 4)
         filename = fullfile(folder, 'ISMIP.BoundaryCondition.mat');
         md = loadmodel(filename);
 
@@ -147,6 +146,49 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
 
         %  save the fields to the file
         data = {'Thickness', result_1, 'thickness';
+                'bed', result_1, 'bed';
+                'coefficient', result_2, 'coefficient'};
+        writeToHDF5(filename, data);
+
+    end
+
+    %  initialize from the reference simulation (Step 5)
+    use_reference_data = true; % Flag to use reference data
+    if any(steps == 5)
+    % if use_reference_data
+        reference_data = char(kwargs.reference_data); % Path to reference data
+        folder = sprintf('./Models/ens_id_%d', ens_id);
+        if ~exist(folder, 'dir')
+            mkdir(folder);
+        end
+
+        filename = fullfile(folder,reference_data);
+        md = loadmodel(filename);
+
+        fields = {'thickness', 'bed', 'coefficient'};
+
+        % result_0 = md.initialization(end);
+        result_0 = md.results.TransientSolution(end);
+        result_1 = md.geometry;
+        result_2 = md.friction;
+
+        % 	% --- fetch and save data for ensemble use
+		filename = fullfile(icesee_path, data_path, sprintf('ensemble_init_%d.h5', ens_id));
+        
+		% Ensure the directory exists
+		[filepath, ~, ~] = fileparts(filename);
+		if ~exist(filepath, 'dir')
+			mkdir(filepath);
+		end
+
+        % Check if the file exists and delete it if it does
+		if isfile(filename)
+			delete(filename);
+		end
+
+        %  save the fields to the file
+        data = {'Thickness', result_0, 'Thickness';
+                % 'Surface', result_0, 'Surface';
                 'bed', result_1, 'bed';
                 'coefficient', result_2, 'coefficient'};
         writeToHDF5(filename, data);
