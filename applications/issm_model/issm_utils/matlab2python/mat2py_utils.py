@@ -68,8 +68,8 @@ class _MatlabServer:
             try:
                 # Check for MATLAB processes (name varies by OS)
                 if 'matlab' in proc.info['name'].lower() or 'MATLAB' in proc.info['name']:
-                    if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-                        print(f"Found MATLAB process: {proc.info['name']} (PID: {proc.info['pid']})")
+                    # if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
+                    #     print(f"Found MATLAB process: {proc.info['name']} (PID: {proc.info['pid']})")
                     
                     # Determine if the process is a GUI instance
                     cmdline = proc.info['cmdline']
@@ -84,20 +84,21 @@ class _MatlabServer:
                         else:
                             proc.send_signal(signal.SIGTERM)  # Unix uses SIGTERM
                         matlab_count += 1
-                        if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-                            print(f"Terminated MATLAB process (PID: {proc.info['pid']})")
+                        # if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
+                        #     print(f"Terminated MATLAB process (PID: {proc.info['pid']})")
                     else:
                         if self.comm is None or self.comm.Get_rank() == 0 and self.verbose:
-                            print(f"Skipped GUI MATLAB process (PID: {proc.info['pid']})")
+                            # print(f"Skipped GUI MATLAB process (PID: {proc.info['pid']})")
+                            pass
                         
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue  # Skip processes that cannot be accessed or are invalid
     
-        if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-            if matlab_count == 0:
-                print("No non-GUI MATLAB processes found to terminate.")
-            else:
-                print(f"Terminated {matlab_count} non-GUI MATLAB process(es).")
+        # if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
+        #     if matlab_count == 0:
+        #         print("No non-GUI MATLAB processes found to terminate.")
+        #     else:
+        #         print(f"Terminated {matlab_count} non-GUI MATLAB process(es).")
 
     def _read_stream(self, stream, stream_name):
         """Read a stream line by line and put lines into the output queue.
@@ -154,10 +155,10 @@ class _MatlabServer:
             if self.comm is None or self.comm.Get_rank() == 0:
                 print(f"An error occurred: {e}")
             
-        if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-            print("[Launcher] Starting MATLAB server...")
-            print(f"[Launcher] Command file: {self.cmdfile}")
-            print(f"[Launcher] Status file: {self.statusfile}")
+        # if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
+        #     print("[Launcher] Starting MATLAB server...")
+        #     print(f"[Launcher] Command file: {self.cmdfile}")
+        #     print(f"[Launcher] Status file: {self.statusfile}")
             
         # Clean up old command and status files
         for f in [self.cmdfile, self.statusfile]:
@@ -397,7 +398,7 @@ class _MatlabServer:
                 if self.comm is None or self.comm.Get_rank() == 0:
                     print("[Launcher] Warning: MATLAB process did not terminate in time, forcing termination.")
                 os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-                self.process.wait(timeout=5)
+                self.process.wait(timeout=300)
                 if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
                     print("[Launcher] MATLAB server terminated.")
         else:
