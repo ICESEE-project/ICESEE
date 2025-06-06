@@ -29,7 +29,7 @@ enkf-parameters:
   obs_start_time: 0.4            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state:    0  # Generate true state for synthetic observations
+  generate_true_state:    1  # Generate true state for synthetic observations
   generate_nurged_state:  0  # Generate nudged state for synthetic observations
 
   num_state_vars: 1             # State variables: ice thickness (H), velocities (u, v)

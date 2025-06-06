@@ -188,6 +188,7 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
 
         %  save the fields to the file
         data = {'Thickness', result_0, 'Thickness';
+                % 'Surface', result_0, 'Surface';
                 'bed', result_1, 'bed';
                 'coefficient', result_2, 'coefficient'};
         writeToHDF5(filename, data);

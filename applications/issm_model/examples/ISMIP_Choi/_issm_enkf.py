@@ -25,11 +25,6 @@ def forecast_step_single(ensemble=None, **kwargs):
     
     kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
 
-    # print(f"[DEBUG] Forecast step: time step {k}, tinitial: {kwargs.get('tinitial')}, tfinal: {kwargs.get('tfinal')}")
-    # if k == 0:
-    #    return run_model(ensemble, **kwargs)
-    # else:
-    #     exit(1)
     #  call the run_model fun to push the state forward in time
     return run_model(ensemble, **kwargs)
 
@@ -284,18 +279,34 @@ def initialize_ensemble(ens, **kwargs):
     os.chdir(issm_examples_dir)
     ens_id = kwargs.get('ens_id')
 
-    # get the rank of the current process
-    rank = comm.Get_rank()
+    #  -- control time stepping
+    kwargs.update({'k':0}) 
+    kwargs.update({'tinitial': 0, 'tfinal': 0.2})
+
+
+    # --- filename for data saving
+    fname = 'initialize_ensemble.mat'
+    kwargs.update({'fname': fname})
+
+    try:
+        # -- call the run_model function to initialize the ensemble members
+        ISSM_model(**kwargs)
+    except Exception as e:
+        print(f"[Initialize ensemble]] Error initializing ensemble: {e}")
+        server.kill_matlab_processes()
    
-    # try:
-    if True:
+    try:
+        #  -- Read data from the ISSM side to be accessed by ICESEE on the python side
         output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
         updated_state = {}
         with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
             for key in vec_inputs:
                 updated_state[key] = f[key][0]
-           
-        os.chdir(icesee_path)
+    except Exception as e:
+        print(f"[Initialize ensemble] Error reading the file: {e}")
+        server.kill_matlab_processes()
 
-        return updated_state
+    os.chdir(icesee_path)
+
+    return updated_state
         

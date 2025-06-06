@@ -226,10 +226,6 @@ def run_model(ensemble, **kwargs):
     vec_inputs = kwargs.get('vec_inputs')
     ens_id = kwargs.get('ens_id')
     data_path = kwargs.get('data_path')
-    k = kwargs.get('k')
-
-    # Get MPI rank
-    rank = comm.Get_rank()
 
     # Change to ISSM examples directory
     os.chdir(issm_examples_dir)
@@ -245,7 +241,7 @@ def run_model(ensemble, **kwargs):
         # Get ensemble indices
         vecs, indx_map, _ = icesee_get_index(ensemble, **kwargs)
 
-        # Write ensemble data to HDF5 file
+        # Write ensemble data to HDF5 file to be accessed by ISSM on the Matlab side
         with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
             for key in vec_inputs:
                 f.create_dataset(key, data=ensemble[indx_map[key]])
@@ -253,7 +249,7 @@ def run_model(ensemble, **kwargs):
         # Run ISSM model to update state and parameters
         ISSM_model(**kwargs)
 
-        # Read output from HDF5 file
+        # Read output from HDF5 file to be accessed by ICESEE on the Python side
         output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
         if not os.path.exists(output_filename):
             print(f"[run_model Error] File does not exist: {output_filename}")
