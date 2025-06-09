@@ -210,6 +210,7 @@ if not flag_jupyter:
         'generate_synthetic_obs': enkf_params.get("generate_synthetic_obs", True),
         'generate_true_state': enkf_params.get("generate_true_state", True),
         'generate_nurged_state': enkf_params.get("generate_nurged_state", True),
+        'use_ensemble_pertubations': enkf_params.get("use_ensemble_pertubations", True),
     }
 
 

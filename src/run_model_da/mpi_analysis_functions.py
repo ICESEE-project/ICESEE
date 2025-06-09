@@ -477,18 +477,49 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
     """
     params = model_kwargs.get("params")
     comm_world = model_kwargs.get("comm_world")
+    generate_enkf_field = model_kwargs.get("generate_enkf_field", False)
+
     H = UtilsFunctions(params, ensemble_vec).JObs_fun(ensemble_vec.shape[0]) # mxNens, observation operator
 
     # -- get ensemble pertubations
-    ensemble_perturbations = ensemble_vec - np.mean(ensemble_vec, axis=1).reshape(-1,1)
-    
+    use_ensemble_pertubations = model_kwargs.get("use_ensemble_pertubations", True)
+
+    if use_ensemble_pertubations:
+        ensemble_perturbations = ensemble_vec - np.mean(ensemble_vec, axis=1).reshape(-1,1) # ensure mean is zero
+        Eta = np.dot(H, ensemble_perturbations) # mxNens, ensemble pertubations
+    else: #or use ensembles of perturbations
+        # generate ensemble of perturbations # mxNens o---->
+        if model_kwargs["joint_estimation"] or params["localization_flag"]:
+            hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
+        else:
+            hdim = ensemble_vec.shape[0] // params["num_state_vars"]
+            
+        Lx, Ly = model_kwargs.get("Lx"), model_kwargs.get("Ly")
+        len_scale =  model_kwargs.get("length_scale")  # Length scale for localization
+        
+        # ensure mean of noise is zero
+        q0 = []
+        for ens in range(Nens):
+            noise_all = []
+            for ii, sig in enumerate(params["sig_Q"]):
+                W = generate_enkf_field(ii,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                nosie = sig*W
+                noise_all.append(nosie)
+                
+            noise = np.concatenate(noise_all, axis=0)  # Concatenate noise for all parameters
+            q0.append(noise)
+        q0 = np.array(q0).T  # Convert to shape (nd, Nens)
+        q0 = q0 - np.mean(q0, axis=1).reshape(-1, 1)  # Ensure mean is zero
+        Eta = np.dot(H, q0)  # mxNens, ensemble perturbations
+        # o--->
+
     # ----parallelize this step
-    Eta = np.zeros((d.shape[0], Nens)) # mxNens, ensemble pertubations
-    Eta = np.dot(H, ensemble_perturbations) # mxNens, ensemble pertubations
-    D   = np.zeros_like(Eta) # mxNens #virtual observations
+    # Eta = np.zeros((d.shape[0], Nens)) # mxNens, ensemble pertubations
+    
+    D   = np.zeros((d.shape[0], Nens)) # mxNens #virtual observations
     HA  = np.zeros_like(D)
     for ens in range(Nens):
-        # Eta[:,ens] = np.random.multivariate_normal(mean=np.zeros(d.shape[0]), cov=Cov_obs) 
+        
         D[:,ens] = d + Eta[:,ens]
         HA[:,ens] = np.dot(H, ensemble_vec[:,ens])
     # ---------------------------------------

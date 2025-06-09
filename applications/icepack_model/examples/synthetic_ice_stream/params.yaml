@@ -40,11 +40,16 @@ enkf-parameters:
   vec_inputs: ['h','u','v','smb']
   observed_params: ['smb']  #['smb']
 
+  generate_synthetic_obs: 1  # Generate synthetic observations for testing
+  generate_true_state:    0  # Generate true state for synthetic observations
+  generate_nurged_state:  0  # Generate nudged state for synthetic observations
+  use_ensemble_pertubations: 1 # Use ensemble perturbations for ensemble state
+
   # Statistical parameters (based on the number of state variables)
   sig_model: [0.1,0.1,0.1] # model error standard deviation
   sig_obs: [5,0.5,0.1,0.1]   # observation error standard deviation
   sig_Q: [0.8,0.4,0.01,0.08]    # process noise standard deviation
-  length_scale: [96,96,96,75] #[150, 150, 150, 150]   # length scale for the covariance matrix, can be a list
+  length_scale: [96,96,90,75] #[150, 150, 150, 150]   # length scale for the covariance matrix, can be a list
 
   Q_rho: 0.95 
 

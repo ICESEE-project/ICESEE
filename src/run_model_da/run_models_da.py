@@ -1195,7 +1195,8 @@ def icesee_model_data_assimilation(**model_kwargs):
     km = 0
     for k in range(model_kwargs.get("nt",params["nt"])):
 
-        model_kwargs.update({"k": k}) # store the time index
+        model_kwargs.update({"k": k, "km":km}) # store the time index
+        model_kwargs.update({"generate_enkf_field": generate_enkf_field}) #save the function to generate the enkf field
 
         # background step
         # ensemble_bg = model_module.background_step(k,ensemble_bg, hdim, **model_kwargs)
@@ -1432,6 +1433,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                             noise_ = np.concatenate(noise_all, axis=0)
                             ensemble_vec[:state_block_size] = ensemble_vec[:state_block_size] + noise_[:state_block_size]
                             noise = np.concatenate(q0, axis=0)
+                            
                             # =====
                             # pack
                            
@@ -1527,6 +1529,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                             noise_ = np.concatenate(noise_all, axis=0)
                             global_data[key][:state_block_size] = global_data[key][:state_block_size] + noise_[:state_block_size]
                             noise = np.concatenate(q0, axis=0)
+                           
                             
                         # Stack all variables into a single array
                         stacked = np.hstack([global_data[key] for key in updated_state.keys()])
@@ -1668,9 +1671,11 @@ def icesee_model_data_assimilation(**model_kwargs):
                             with h5py.File(_synthetic_obs, 'r') as f:
                                 hu_obs  = f['hu_obs'][:]
                                 error_R = f['R'][:]
-                                Cov_obs = np.cov(error_R)
+                                # Cov_obs = np.cov(error_R)
+                                Cov_obs = np.zeros(error_R.shape)
 
                             d = UtilsFunctions(params, ensemble_vec).Obs_fun(hu_obs[:,km])
+                            model_kwargs.update({"error_R": error_R}) # store the error covariance matrix
                             #  -------------
 
                             # get parameter
