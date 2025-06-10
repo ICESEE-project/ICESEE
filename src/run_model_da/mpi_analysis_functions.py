@@ -493,24 +493,41 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
             hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
         else:
             hdim = ensemble_vec.shape[0] // params["num_state_vars"]
-            
+
         Lx, Ly = model_kwargs.get("Lx"), model_kwargs.get("Ly")
         len_scale =  model_kwargs.get("length_scale")  # Length scale for localization
+        alpha = model_kwargs.get("alpha", 1.0)  # Mixing parameter for noise generation
+        rho = model_kwargs.get("rho", 1.0)  # Correlation coefficient for noise generation
+        dt = model_kwargs.get("dt", 1.0)  # Time step size
+        noise = model_kwargs.get("noise", None)  # Noise vector, should be provided
         
         # ensure mean of noise is zero
-        q0 = []
+        _eta = []
         for ens in range(Nens):
             noise_all = []
-            for ii, sig in enumerate(params["sig_Q"]):
+            q0 = []
+            for ii, sig in enumerate(params["sig_obs"]):
                 W = generate_enkf_field(ii,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
-                nosie = sig*W
-                noise_all.append(nosie)
+                noise_ = sig*W
+                # noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
+                # q0.append(noise_)
+
+                # Z = np.sqrt(dt)*sig*rho*noise_
+                # Z = np.sqrt(dt)*noise_
+                Z = noise_
+                noise_all.append(Z)
                 
-            noise = np.concatenate(noise_all, axis=0)  # Concatenate noise for all parameters
-            q0.append(noise)
-        q0 = np.array(q0).T  # Convert to shape (nd, Nens)
-        q0 = q0 - np.mean(q0, axis=1).reshape(-1, 1)  # Ensure mean is zero
-        Eta = np.dot(H, q0)  # mxNens, ensemble perturbations
+            noise_ = np.concatenate(noise_all, axis=0)  # Concatenate noise for all parameters
+            # q0.append(noise)
+            # noise = np.concatenate(q0, axis=0)  #update noise
+            _eta.append(noise_)
+        # q0 = np.array(q0).T  # Convert to shape (nd, Nens)
+        # q0 = q0 - np.mean(q0, axis=1).reshape(-1, 1)  # Ensure mean is zero
+        # Eta = np.dot(H, q0)  # mxNens, ensemble perturbations
+        _eta= np.array(_eta).T  # Convert to shape (nd, Nens)
+        
+        _eta -= np.mean(_eta, axis=1).reshape(-1, 1)  # Ensure mean is zero
+        Eta = np.dot(H, _eta)  # mxNens, ensemble perturbations
         # o--->
 
     # ----parallelize this step

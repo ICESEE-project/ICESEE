@@ -1195,7 +1195,7 @@ def icesee_model_data_assimilation(**model_kwargs):
     km = 0
     for k in range(model_kwargs.get("nt",params["nt"])):
 
-        model_kwargs.update({"k": k, "km":km}) # store the time index
+        model_kwargs.update({"k": k, "km":km, "alpha": alpha, "rho": rho, "tau": tau, "dt": dt,"n": n})
         model_kwargs.update({"generate_enkf_field": generate_enkf_field}) #save the function to generate the enkf field
 
         # background step
@@ -1433,6 +1433,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                             noise_ = np.concatenate(noise_all, axis=0)
                             ensemble_vec[:state_block_size] = ensemble_vec[:state_block_size] + noise_[:state_block_size]
                             noise = np.concatenate(q0, axis=0)
+                            model_kwargs.update({"noise": noise})  # save the noise to the model_kwargs dictionary
                             
                             # =====
                             # pack
