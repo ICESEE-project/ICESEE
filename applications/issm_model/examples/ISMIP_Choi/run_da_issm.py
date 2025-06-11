@@ -109,6 +109,7 @@ os.chdir(icesee_cwd)
 kwargs.update({'params': params, 
                'server': server})
 
+
 try:
     icesee_model_data_assimilation(**kwargs)
     server.shutdown()

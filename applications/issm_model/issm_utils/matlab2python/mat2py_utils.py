@@ -819,3 +819,59 @@ def setup_reference_data(reference_data_dir, reference_data, use_reference_data=
             raise FileNotFoundError(f"[Rank {rank}] Cannot access {rank_data_dir} or {rank_data_file}")
         return rank_data_dir, rank_data_file
     return None, None
+
+
+# make data available in all ensemble directories
+def setup_ensemble_intial_data(Nens, reference_data_dir, reference_data):
+    """
+    Create ensemble directories with hard-linked reference data file for read-only access.
+    
+    Parameters:
+    - reference_data_dir: Directory containing the reference data file.
+    - reference_data: Name of the reference data file.
+    - use_reference_data: Flag to enable/disable reference data setup.
+    
+    Returns:
+    - rank_data_dir: Path to the rank's ensemble directory (e.g., './Models/ens_id_X').
+    - rank_data_file: Path to the rank's reference data file.
+    """
+    from mpi4py import MPI
+    import os
+    import shutil
+
+    comm = MPI.COMM_WORLD
+    size = comm.Get_size()
+    rank = comm.Get_rank()
+
+    initial_data = os.path.abspath(os.path.join(reference_data_dir, reference_data))
+    rank_data_dir = os.path.abspath(f'./Models/ens_id_{rank}')
+    rank_data_file = os.path.join(rank_data_dir, reference_data)
+
+    if rank == 0:
+        # Verify reference data exists
+        if not os.path.isfile(initial_data):
+            raise FileNotFoundError(f"[Rank {rank}] Reference data {initial_data} not found")
+
+        # Create directories and hard link the reference file
+        for ens in range(Nens):
+
+            # skip ens_id_0 (base directory)
+            if ens == 0:
+                continue
+
+            rank_data_dir = os.path.abspath(f'./Models/ens_id_{ens}')
+            link_path = os.path.join(rank_data_dir, reference_data)
+
+            # Hard link the reference file
+            if os.path.exists(link_path):
+                os.remove(link_path)
+            try:
+                os.link(initial_data, link_path)
+            except OSError as e:
+                raise RuntimeError(f"[Rank {rank}] Failed to create hard link {link_path} -> {initial_data}: {e}")
+
+
+
+
+
+           

@@ -13,6 +13,7 @@ import h5py
 # --- import utility functions ---
 from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_model import *
 from ICESEE.config._utility_imports import icesee_get_index
+from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import setup_ensemble_intial_data
 
 # --- Forecast step ---
 def forecast_step_single(ensemble=None, **kwargs):
@@ -294,10 +295,18 @@ def initialize_ensemble(ens, **kwargs):
     except Exception as e:
         print(f"[Initialize ensemble]] Error initializing ensemble: {e}")
         server.kill_matlab_processes()
+
+    # if nprocs <= Nens then make fname available to all processes
+    Nens = kwargs.get('Nens')
+    size_world = kwargs.get('size_world', 1)
+    if size_world <= Nens:
+        data_dir = f'{issm_examples_dir}/Models/ens_id_0'
+        setup_ensemble_intial_data(Nens, data_dir, fname)
+
    
     try:
         #  -- Read data from the ISSM side to be accessed by ICESEE on the python side
-        output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
+        output_filename = f'{icesee_path}/{data_path}/ensemble_out_{ens_id}.h5'
         updated_state = {}
         with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
             for key in vec_inputs:

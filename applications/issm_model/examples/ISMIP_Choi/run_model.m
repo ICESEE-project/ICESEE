@@ -49,6 +49,41 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             md.transient.ismovingfront = 0;   
 
+            % friction coefficient
+            Cx = 0.02 + 0.005 * sin((1/40) * 2 * pi * (md.mesh.x - 640000) / 640000) .* ...
+                sin(10 * 2*pi * md.mesh.x / 600000);
+            Cy = sin(pi * (md.mesh.y - 80000) / 80000) + 2;
+            md.friction.coefficient = sqrt((Cx .* Cy) * 10^6 * (md.constants.yts)^(1/3));
+
+            % --time stepping
+            % Time stepping
+            md.timestepping = timestepping();
+            md.timestepping.time_step = 0.1;
+            md.timestepping.start_time = 0;
+            md.timestepping.final_time = 0.5;
+
+            % Cluster setup
+            if hpcmode
+                md.settings.waitonlock = 0;
+                md.cluster = generic('name', oshostname(), 'np', nprocs);
+                md.cluster.codepath = [issmroot , '/bin'];
+                md.cluster.login = 'arobel3';
+                if ~exist(sprintf('%s/execution/color_%d', issmroot, ens_id), 'dir')
+                    mkdir(sprintf('%s/execution/color_%d', issmroot, ens_id));
+                end
+                md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
+            else
+                md.cluster = generic('name', cluster_name, 'np', nprocs);
+                md.settings.waitonlock = 1;
+                md.miscellaneous.name = sprintf('color_%d', ens_id);
+            end
+
+            % Verbose settings
+            md.verbose = verbose('convergence', false, 'solution', true);
+
+            % Solve transient
+            md = solve(md, 'Transient');
+
             filename = fullfile(folder, data_fname);
             save(filename, 'md');
         end
@@ -68,8 +103,44 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.basalforcings.deepwater_melting_rate = 200; % m/yr
             md.basalforcings.groundedice_melting_rate = zeros(md.mesh.numberofvertices, 1);
 
-            md.transient.ismovingfront = 0;   
+            md.transient.ismovingfront = 0; 
 
+            % set wrong bed
+            friction_ref = 2500 * ones(md.mesh.numberofvertices, 1);
+            thk_ref = md.geometry.thickness;
+            bed_ref = md.geometry.bed;
+            base_ref = md.geometry.base;
+
+            md.inversion.iscontrol=0;
+
+            % --time stepping
+            md.timestepping = timestepping();
+            md.timestepping.time_step = 0.1;
+            md.timestepping.start_time = 0;
+            md.timestepping.final_time = 0.5;
+
+            % Cluster setup
+            if hpcmode
+                md.settings.waitonlock = 0;
+                md.cluster = generic('name', oshostname(), 'np', nprocs);
+                md.cluster.codepath = [issmroot , '/bin'];
+                md.cluster.login = 'arobel3';
+                if ~exist(sprintf('%s/execution/color_%d', issmroot, ens_id), 'dir')
+                    mkdir(sprintf('%s/execution/color_%d', issmroot, ens_id));
+                end
+                md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
+            else
+                md.cluster = generic('name', cluster_name, 'np', nprocs);
+                md.settings.waitonlock = 1;
+                md.miscellaneous.name = sprintf('color_%d', ens_id);
+            end
+
+            % Verbose settings
+            md.verbose = verbose('convergence', false, 'solution', true);
+
+            % Solve transient
+            md = solve(md, 'Transient');
+              
             filename = fullfile(folder, data_fname);
             save(filename, 'md');
         end
@@ -175,7 +246,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             result_1 = md.geometry;
             result_2 = md.friction;
 
-            filename = fullfile(icesee_path, data_path, sprintf('ensemble_init_%d.h5', ens_id));
+            filename = fullfile(icesee_path, data_path, sprintf('ensemble_out_%d.h5', ens_id));
 
             data = {'Thickness', result_0, 'Thickness';
                     'Surface', result_0, 'Surface';
@@ -192,8 +263,21 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % Special case for ensemble assimilation
         if k == 0 || isempty(k)
             % Initial run: load boundary conditions
-            filename = fullfile(folder, reference_data);
+            % filename = fullfile(folder, reference_data);
+            filename = fullfile(folder, 'initialize_ensemble.mat');
             md = loadmodel(filename);
+            md = transientrestart(md);
+
+            % must load from the ensemble initialization at t = 0   
+            % filename = fullfile(icesee_path, data_path, sprintf('ensemble_out_%d.h5', ens_id));
+
+            % md.geometry.thickness = h5read(filename, '/Thickness');
+            % % md.geometry.surface   = h5read(filename, '/Surface');
+            % md.geometry.bed = h5read(filename, '/bed');
+            % md.friction.coefficient = h5read(filename, '/coefficient');
+
+            % i
+            % md = transientrestart(md);
 
             md = setflowequation(md,'SSA','all');
 
@@ -220,7 +304,38 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             md.initialization.pressure = zeros(md.mesh.numberofvertices,1);
             md.masstransport.spcthickness = NaN*ones(md.mesh.numberofvertices,1);
-    
+
+
+            % --time stepping
+            % Time stepping
+            md.timestepping = timestepping();
+            md.timestepping.time_step = 0.1;
+            md.timestepping.start_time = 0;
+            md.timestepping.final_time = 2;
+
+            % Cluster setup
+            if hpcmode
+                md.settings.waitonlock = 0;
+                md.cluster = generic('name', oshostname(), 'np', nprocs);
+                md.cluster.codepath = [issmroot , '/bin'];
+                md.cluster.login = 'arobel3';
+                if ~exist(sprintf('%s/execution/color_%d', issmroot, ens_id), 'dir')
+                    mkdir(sprintf('%s/execution/color_%d', issmroot, ens_id));
+                end
+                md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
+            else
+                md.cluster = generic('name', cluster_name, 'np', nprocs);
+                md.settings.waitonlock = 1;
+                md.miscellaneous.name = sprintf('color_%d', ens_id);
+            end
+
+            % Verbose settings
+            md.verbose = verbose('convergence', false, 'solution', true);
+
+            % Solve transient
+            md = solve(md, 'Transient');
+
+            % Save model
             filename = fullfile(folder, data_fname);
             save(filename, 'md');
 

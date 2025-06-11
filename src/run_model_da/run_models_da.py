@@ -444,6 +444,7 @@ def icesee_model_data_assimilation(**model_kwargs):
         # --- icesee mpi parallel manager ---------------------------------------------------
         # --- ensemble load distribution --
         rounds, color, sub_rank, sub_size, subcomm, subcomm_size, rank_world, size_world, comm_world, start, stop = ParallelManager().icesee_mpi_ens_distribution(params)
+        model_kwargs.update({'size_world': size_world, 'comm_world': comm_world})
 
         # --- call curently supported model Class
         model_module = SupportedModels(model=model,comm=comm_world,verbose=params.get('verbose')).call_model()
