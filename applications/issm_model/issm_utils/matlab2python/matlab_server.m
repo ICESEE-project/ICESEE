@@ -8,21 +8,21 @@ function matlab_server(cmdfile, statusfile)
     % cmdfile: File where commands are written by Python
     % statusfile: File to signal server status to Python
     
-    disp('[MATLAB] Server starting...');
-    disp(['[MATLAB] Command file: ', cmdfile]);
-    disp(['[MATLAB] Status file: ', statusfile]);
+    disp('Server starting...');
+    disp(['Command file: ', cmdfile]);
+    disp(['Status file: ', statusfile]);
     
     % Write "ready" to statusfile to signal Python that server is up
     fid = fopen(statusfile, 'w');
     fprintf(fid, 'ready');
     fclose(fid);
-    disp('[MATLAB] Server initialized and ready.');
+    disp(' Server initialized and ready.');
     
     % Main loop
     while true
         pause(0.1);  % Reduced pause for responsiveness
         if isfile(cmdfile)
-            disp('[MATLAB] Detected command file.');
+            disp('Server Detected command file.');
             try
                 % Read command
                 fid = fopen(cmdfile, 'r');
@@ -30,22 +30,22 @@ function matlab_server(cmdfile, statusfile)
                 fclose(fid);
                 
                 if isempty(command)
-                    disp('[MATLAB] Empty command, skipping.');
+                    disp('Empty command, skipping.');
                     delete(cmdfile);
                     continue;
                 end
                 
                 if strcmp(command, 'exit')
-                    disp('[MATLAB] Received exit command.');
+                    disp(' Received exit command.');
                     delete(cmdfile);
                     delete(statusfile);
-                    disp('[MATLAB] Server shutting down.');
+                    disp('Server shutting down.');
                     break;
                 end
                 
-                disp(['[MATLAB] Executing: ', command]);
+                disp(['Executing: ', command]);
                 evalin('base', command);  % Execute in base workspace
-                disp('[MATLAB] Command completed.');
+                disp('Command completed.');
                 delete(cmdfile);  % Clean up
                 
             catch ME
