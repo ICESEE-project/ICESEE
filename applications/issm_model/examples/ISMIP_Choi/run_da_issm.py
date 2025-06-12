@@ -109,11 +109,11 @@ os.chdir(icesee_cwd)
 kwargs.update({'params': params, 
                'server': server})
 
-icesee_model_data_assimilation(**kwargs)
-# try:
-#     icesee_model_data_assimilation(**kwargs)
-#     server.shutdown()
-# except Exception as e:
-#     print(f"[run_da_issm] Error running the model: {e}")
-#     server.kill_matlab_processes()
-#     exit()
+# icesee_model_data_assimilation(**kwargs)
+try:
+    icesee_model_data_assimilation(**kwargs)
+    server.shutdown()
+except Exception as e:
+    print(f"[run_da_issm] Error running the model: {e}")
+    server.kill_matlab_processes()
+    exit()

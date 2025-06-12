@@ -145,8 +145,8 @@ def generate_pseudo_random_field_1d(N, Lx, rh, grid_extension=2, verbose=False):
     fb = covariance_eq(b)
     
     if verbose:
-        print(f"covariance_eq at sigma={a}: {fa}")
-        print(f"covariance_eq at sigma={b}: {fb}")
+        print(f"[ICESEE] covariance_eq at sigma={a}: {fa}")
+        print(f"[ICESEE] covariance_eq at sigma={b}: {fb}")
     
     # Try expanding the interval if signs are the same
     if fa * fb > 0:
@@ -155,9 +155,9 @@ def generate_pseudo_random_field_1d(N, Lx, rh, grid_extension=2, verbose=False):
         f_values = [covariance_eq(s) for s in sigma_values]
         
         if verbose:
-            print("Testing sigma values:")
+            print("[ICESEE] Testing sigma values:")
             for s, f in zip(sigma_values, f_values):
-                print(f"sigma={s:.2e}, covariance_eq={f:.2e}")
+                print(f"[ICESEE] sigma={s:.2e}, covariance_eq={f:.2e}")
         
         # Find a sign change
         for i in range(len(f_values) - 1):
@@ -170,18 +170,18 @@ def generate_pseudo_random_field_1d(N, Lx, rh, grid_extension=2, verbose=False):
             warnings.warn("Could not find a bracketing interval. Using heuristic sigma based on rh.")
             sigma = 2 / rh  # Heuristic: sigma ~ 2/rh
             if verbose:
-                print(f"Fallback sigma: {sigma}")
+                print(f"[ICESEE] Fallback sigma: {sigma}")
     else:
         # Solve for sigma
         try:
             sigma = brentq(covariance_eq, a, b, rtol=1e-6)
             if verbose:
-                print(f"Solved sigma: {sigma}")
+                print(f"[ICESEE] Solved sigma: {sigma}")
         except ValueError as e:
             warnings.warn(f"brentq failed: {str(e)}. Using heuristic sigma.")
             sigma = 2 / rh  # Fallback
             if verbose:
-                print(f"Fallback sigma: {sigma}")
+                print(f"[ICESEE] Fallback sigma: {sigma}")
     
     # Compute c from variance condition
     k2 = kx**2
@@ -190,7 +190,7 @@ def generate_pseudo_random_field_1d(N, Lx, rh, grid_extension=2, verbose=False):
     c = np.sqrt(c2)
     
     if verbose:
-        print(f"Computed c: {c}")
+        print(f"[ICESEE] Computed c: {c}")
     
     # Compute amplitude
     A = c * np.sqrt(dk) * np.exp(-k2 / sigma**2)
@@ -219,8 +219,8 @@ def generate_pseudo_random_field_1d(N, Lx, rh, grid_extension=2, verbose=False):
     q = q / np.std(q) * 1.0
     
     if verbose:
-        print(f"Field variance: {np.var(q)}")
-        print(f"Field mean: {np.mean(q)}")
+        print(f"[ICESEE] Field variance: {np.var(q)}")
+        print(f"[ICESEE] Field mean: {np.mean(q)}")
     
     return q
 
@@ -279,8 +279,8 @@ def generate_pseudo_random_field_2D(N, M, Lx, Ly, rh, grid_extension=2, verbose=
     fb = covariance_eq(b)
     
     if verbose:
-        print(f"covariance_eq at sigma={a}: {fa}")
-        print(f"covariance_eq at sigma={b}: {fb}")
+        print(f"[ICESEE] covariance_eq at sigma={a}: {fa}")
+        print(f"[ICESEE] covariance_eq at sigma={b}: {fb}")
     
     # Try expanding the interval if signs are the same
     if fa * fb > 0:
@@ -289,9 +289,9 @@ def generate_pseudo_random_field_2D(N, M, Lx, Ly, rh, grid_extension=2, verbose=
         f_values = [covariance_eq(s) for s in sigma_values]
         
         if verbose:
-            print("Testing sigma values:")
+            print("[ICESEE] Testing sigma values:")
             for s, f in zip(sigma_values, f_values):
-                print(f"sigma={s:.2e}, covariance_eq={f:.2e}")
+                print(f"[ICESEE] sigma={s:.2e}, covariance_eq={f:.2e}")
         
         # Find a sign change
         for i in range(len(f_values) - 1):
@@ -304,18 +304,18 @@ def generate_pseudo_random_field_2D(N, M, Lx, Ly, rh, grid_extension=2, verbose=
             warnings.warn("Could not find a bracketing interval. Using heuristic sigma based on rh.")
             sigma = 2 / rh  # Heuristic: sigma ~ 2/rh from Gaussian covariance approximation
             if verbose:
-                print(f"Fallback sigma: {sigma}")
+                print(f"[ICESEE] Fallback sigma: {sigma}")
     else:
         # Solve for sigma
         try:
             sigma = brentq(covariance_eq, a, b, rtol=1e-6)
             if verbose:
-                print(f"Solved sigma: {sigma}")
+                print(f"[ICESEE] Solved sigma: {sigma}")
         except ValueError as e:
             warnings.warn(f"brentq failed: {str(e)}. Using heuristic sigma.")
             sigma = 2 / rh  # Fallback
             if verbose:
-                print(f"Fallback sigma: {sigma}")
+                print(f"[ICESEE] Fallback sigma: {sigma}")
     
     # Compute c from variance condition
     k2 = KX**2 + KY**2
@@ -324,7 +324,7 @@ def generate_pseudo_random_field_2D(N, M, Lx, Ly, rh, grid_extension=2, verbose=
     c = np.sqrt(c2)
     
     if verbose:
-        print(f"Computed c: {c}")
+        print(f"[ICESEE] Computed c: {c}")
     
     # Compute amplitude
     A = c * np.sqrt(dk) * np.exp(-k2 / sigma**2)
@@ -354,8 +354,8 @@ def generate_pseudo_random_field_2D(N, M, Lx, Ly, rh, grid_extension=2, verbose=
     q = q / np.std(q) * 1.0
     
     if verbose:
-        print(f"Field variance: {np.var(q)}")
-        print(f"Field mean: {np.mean(q)}")
+        print(f"[ICESEE] Field variance: {np.var(q)}")
+        print(f"[ICESEE] Field mean: {np.mean(q)}")
     
     return q
 
@@ -408,7 +408,7 @@ def generate_enkf_field(ii_sig, Lx, hdim, num_vars, rh=None, grid_extension=2, v
             q0 = generate_pseudo_random_field_1d(
                 N=hdim, Lx=Lx, rh=rh, grid_extension=grid_extension, verbose=verbose
             )
-        # print(f"Field shape: {q0.shape}")
+        # print(f"[ICESEE] Field shape: {q0.shape}")
         return q0
 
 # ======================== Run model with EnKF ========================
@@ -475,7 +475,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                 model_kwargs.update({'rank': sub_rank, 'color': color, 'comm': subcomm})
 
             dim_list = comm_world.allgather(params["nd"])
-            # print(f"Dim list: {dim_list}")
+            # print(f"[ICESEE] Dim list: {dim_list}")
             # save model_nprocs before update if rank_world == 0
             model_nprocs = params.get("model_nprocs", 1)
             
@@ -485,7 +485,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                 model_kwargs.update({'model_nprocs': (model_nprocs * size_world)-1}) # update the model_nprocs to include all processors for the external model run
 
                 if model_kwargs.get("generate_true_state", True):
-                    print("Generating true state ...")
+                    print("[ICESEE] Generating true state ...")
                     # dim_list = np.tile(params["nd"],size_world) # all processors have the same dimension
                     model_kwargs.update({"global_shape": params["nd"], "dim_list": dim_list})
                     statevec_true = np.zeros([params["nd"], model_kwargs.get("nt",params["nt"]) + 1])
@@ -499,7 +499,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                         ensemble_true_state[indx_map[key], :] = value
 
                 if model_kwargs.get("generate_nurged_state",True):
-                    print("Generating nurged state ...")
+                    print("[ICESEE] Generating nurged state ...")
                     model_kwargs.update({"statevec_nurged": np.zeros([params["nd"], model_kwargs.get("nt",params["nt"]) + 1])})
                     ensemble_nurged_state = model_module.generate_nurged_state(**model_kwargs)
 
@@ -544,7 +544,7 @@ def icesee_model_data_assimilation(**model_kwargs):
 
                 if model_kwargs.get("generate_true_state", True):
                     if rank_world == 0:
-                        print("Generating true state ...  ")
+                        print("[ICESEE] Generating true state ...  ")
                     # statevec_true = np.zeros([model_kwargs['dim_list'][sub_rank], model_kwargs.get("nt",params["nt"]) + 1])
                     statevec_true = np.zeros([global_shape, model_kwargs.get("nt",params["nt"]) + 1])
                     model_kwargs.update({"statevec_true": statevec_true})
@@ -555,14 +555,14 @@ def icesee_model_data_assimilation(**model_kwargs):
 
                     if sub_rank == 0:
                         for key in global_data:
-                            # print(f"Key: {key}, shape: {[arr.shape for arr in global_data[key]]}")
+                            # print(f"[ICESEE] Key: {key}, shape: {[arr.shape for arr in global_data[key]]}")
                             global_data[key] = np.vstack(global_data[key])
 
                         # stack all variables together into a single array
                         stacked = np.vstack([global_data[key] for key in updated_true_state.keys()])
                         shape_ = np.array(stacked.shape,dtype=np.int32)
                         hdim = stacked.shape[0] // params["total_state_param_vars"]
-                        # print(f"Shape of the true state: {stacked.shape} min ensemble true: {np.min(stacked[hdim,:])}, max ensemble true: {np.max(stacked[hdim,:])}")
+                        # print(f"[ICESEE] Shape of the true state: {stacked.shape} min ensemble true: {np.min(stacked[hdim,:])}, max ensemble true: {np.max(stacked[hdim,:])}")
                         if model_kwargs.get("generate_true_state"):
                             # write data to the file
                             with h5py.File(_true_nurged, "w", driver='mpio', comm=subcomm) as f:
@@ -592,7 +592,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                 
                 if model_kwargs.get("generate_nurged_state", True):
                     if rank_world == 0:
-                        print("Generating nurged state ... ")
+                        print("[ICESEE] Generating nurged state ... ")
                     # statevec_nurged = np.zeros([model_kwargs['dim_list'][sub_rank], model_kwargs.get("nt",params["nt"]) + 1])
                     statevec_nurged = np.zeros([global_shape, model_kwargs.get("nt",params["nt"]) + 1])
                     model_kwargs.update({"statevec_nurged": statevec_nurged})
@@ -631,7 +631,7 @@ def icesee_model_data_assimilation(**model_kwargs):
             if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
                 if rank_world == 0:
                     # --- Synthetic Observations ---
-                    print("Generating synthetic observations ...")
+                    print("[ICESEE] Generating synthetic observations ...")
                     with h5py.File(_true_nurged, "r") as f:
                         ensemble_true_state = f['true_state'][:]
 
@@ -679,7 +679,7 @@ def icesee_model_data_assimilation(**model_kwargs):
             else:
                 # --- Synthetic Observations ---
                 if rank_world == 0:
-                    print("Generating synthetic observations ...")
+                    print("[ICESEE] Generating synthetic observations ...")
 
                 if params["default_run"] and size_world > params["Nens"]:
                     subcomm.Barrier()
@@ -729,7 +729,7 @@ def icesee_model_data_assimilation(**model_kwargs):
 
                     # broadcast to the global communicator
                     # comm_world.Bcast(hu_obs, root=0)
-                    # print(f"rank {rank_world} Shape of the observations: {hu_obs.shape}")
+                    # print(f"[ICESEE] rank {rank_world} Shape of the observations: {hu_obs.shape}")
                     # exit()    
                 elif params["sequential_run"]:
                     comm_world.Barrier()
@@ -740,7 +740,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                     # # gather from every rank to rank 0
                     # gathered_obs = comm_world.gather(hu_obs[:g_shape,:], root=0)
                     # if rank_world == 0:
-                    #     print(f"{[arr.shape for arr in gathered_obs]}")
+                    #     print(f"[ICESEE] {[arr.shape for arr in gathered_obs]}")
                     #     hu_obs = np.vstack(gathered_obs)
                     # else:
                     #     hu_obs = np.empty((model_kwargs["global_shape"],params["number_obs_instants"]),dtype=np.float64)
@@ -778,7 +778,7 @@ def icesee_model_data_assimilation(**model_kwargs):
 
         if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
             if rank_world == 0:
-                print("Initializing the ensemble ...")
+                print("[ICESEE] Initializing the ensemble ...")
                 model_kwargs.update({'ens_id': rank_world})
                 if params["even_distribution"]:
                     model_kwargs.update({'rank': rank_world, 'color': color, 'comm': comm_world})
@@ -834,14 +834,14 @@ def icesee_model_data_assimilation(**model_kwargs):
                     #     end_idx = start_idx + hdim
                     #     Q_err[start_idx:end_idx,start_idx:end_idx] = np.eye(hdim) * sig ** 2
 
-                    # # print(f"[Q_err] Q_err shape: {Q_err.shape}, Q_err: {Q_err[:10,:10]}")
+                    # # print(f"[ICESEE] [Q_err] Q_err shape: {Q_err.shape}, Q_err: {Q_err[:10,:10]}")
 
 
                     # # noise = multivariate_normal.rvs(mean=np.zeros(state_block_size), cov=Q_err[:state_block_size,:state_block_size])
                     # noise = multivariate_normal.rvs(mean=np.zeros(full_block_size), cov=Q_err)
                     # ensemble_vec[:,ens] += noise
 
-                    # # print(f"[Debug] Ensemble vector shape: {ensemble_vec.shape}, noise shape: {noise.shape}")
+                    # # print(f"[ICESEE] [Debug] Ensemble vector shape: {ensemble_vec.shape}, noise shape: {noise.shape}")
                     # ------------------------------
 
                     # add a spread to the smb
@@ -878,11 +878,11 @@ def icesee_model_data_assimilation(**model_kwargs):
 
             # comm_world.Bcast(ensemble_vec, root=0)
             # hdim = params["nd"] // params["total_state_param_vars"]
-            # print(f"Rank: {rank_world}, min ensemble: {np.min(ensemble_vec[hdim,:])}, max ensemble: {np.max(ensemble_vec[hdim,:])}")
+            # print(f"[ICESEE] Rank: {rank_world}, min ensemble: {np.min(ensemble_vec[hdim,:])}, max ensemble: {np.max(ensemble_vec[hdim,:])}")
             # exit()
         else:
             if rank_world == 0:
-                print("Initializing the ensemble ...")
+                print("[ICESEE] Initializing the ensemble ...")
             
             if params["default_run"] and size_world > params["Nens"]:
                 # debug
@@ -955,7 +955,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                 if rank_world == 0:
                     all_init = [arr for arr in all_init if isinstance(arr, np.ndarray)]
                     ensemble_vec = np.column_stack(all_init)
-                    # print(f"Shape of the ensemble: {ensemble_vec.shape}")
+                    # print(f"[ICESEE] Shape of the ensemble: {ensemble_vec.shape}")
                 else:
                     ensemble_vec = np.empty((model_kwargs["global_shape"],params["Nens"]),dtype=np.float64)
                 
@@ -975,7 +975,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                 gathered_ensemble = comm_world.gather(ensemble_vec[:sub_shape,:], root=0)
                 if rank_world == 0:
                     ensemble_vec = np.vstack(gathered_ensemble)
-                    print(f"Shape of the ensemble: {ensemble_vec.shape}")
+                    print(f"[ICESEE] Shape of the ensemble: {ensemble_vec.shape}")
                     ensemble_vec_mean[:,0] = np.mean(ensemble_vec, axis=1)
                     ensemble_vec_full[:,:,0] = ensemble_vec
                 else:
@@ -996,7 +996,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                 comm_world.Bcast(ensemble_vec_full, root=0)
 
                 # hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
-                # print(f"rank: {rank_world}, subrank: {sub_rank}, min ensemble: {np.min(ensemble_vec[hdim,:])}, max ensemble: {np.max(ensemble_vec[hdim,:])}")
+                # print(f"[ICESEE] rank: {rank_world}, subrank: {sub_rank}, min ensemble: {np.min(ensemble_vec[hdim,:])}, max ensemble: {np.max(ensemble_vec[hdim,:])}")
 
         # exit()
         # --- get the ensemble size
@@ -1045,7 +1045,7 @@ def icesee_model_data_assimilation(**model_kwargs):
         # --- initialize the ensemble ---
         if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
             if rank_world == 0:
-                print("Initializing the ensemble ...")
+                print("[ICESEE] Initializing the ensemble ...")
                 model_kwargs.update({"statevec_ens":np.zeros([params["nd"], params["Nens"]])})
                 
                 # get the ensemble matrix   
@@ -1221,15 +1221,15 @@ def icesee_model_data_assimilation(**model_kwargs):
                     # gather the ensemble from all processors to rank 0
                     gathered_ensemble = ParallelManager().gather_data(comm_world, ensemble_vec, root=0)
                     if rank_world == 0:
-                        # print(f"[Rank {rank_world}] Gathered shapes: {[arr.shape for arr in ens_all]}")
+                        # print(f"[ICESEE] [Rank {rank_world}] Gathered shapes: {[arr.shape for arr in ens_all]}")
                         ensemble_stack = np.hstack(gathered_ensemble)
-                        # print(f"Ensemble stack shape: {ensemble_stack.shape}")
+                        # print(f"[ICESEE] Ensemble stack shape: {ensemble_stack.shape}")
                         ensemble_col_stack.append(ensemble_stack)
                 
                 # transpose the ensemble column
                 if rank_world == 0:
                     ens_T = np.array(ensemble_col_stack).T
-                    print(f"Ensemble column shape: {ens_T.shape}")
+                    print(f"[ICESEE] Ensemble column shape: {ens_T.shape}")
                     shape_ens = np.array(ens_T.shape, dtype=np.int32) # send shape info
                 else:
                     shape_ens = np.empty(2, dtype=np.int32)
@@ -1243,14 +1243,14 @@ def icesee_model_data_assimilation(**model_kwargs):
 
                 # broadcast the ensemble to all processors
                 comm_world.Bcast([ens_T, MPI.DOUBLE], root=0)
-                # print(f"Rank: {rank_world}, Ensemble shape: {ens_T.shape}")
+                # print(f"[ICESEE] Rank: {rank_world}, Ensemble shape: {ens_T.shape}")
 
                 # compute the ensemble mean
                 # if k == 0: # only do this at the first time step
                 #     # gather from all processors ensemble_vec_mean[:,k+1]
                 #     gathered_ensemble_vec_mean = comm_world.allgather(ensemble_vec_mean[:,k])
                 #     if rank_world == 0:
-                #         # print(f"Ensemble mean shape: {[arr.shape for arr in gathered_ensemble_vec_mean]}")
+                #         # print(f"[ICESEE] Ensemble mean shape: {[arr.shape for arr in gathered_ensemble_vec_mean]}")
                 #         stack_ensemble_vec_mean = np.hstack(gathered_ensemble_vec_mean)
                 #         ensemble_vec_mean = np.empty((shape_ens[0],model_kwargs.get("nt",params["nt"])+1), dtype=np.float64)
                 #         ensemble_vec_mean[:,k] = np.mean(stack_ensemble_vec_mean, axis=1)
@@ -1259,7 +1259,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                     
                 #     # broadcast the ensemble mean to all processors
                 #     comm_world.Bcast([ensemble_vec_mean, MPI.DOUBLE], root=0)
-                #     print(f"Rank: {rank_world}, Ensemble mean shape: {ensemble_vec_mean.shape}") 
+                #     print(f"[ICESEE] Rank: {rank_world}, Ensemble mean shape: {ensemble_vec_mean.shape}") 
 
                 ensemble_vec_mean[:,k+1] = np.mean(ens_T[:nd,:], axis=1)
                 # ensemble_vec_mean[:,k+1] = ParallelManager().compute_mean(ens_T[:nd,:], comm_world)
@@ -1333,10 +1333,10 @@ def icesee_model_data_assimilation(**model_kwargs):
                     gathered_ens_vec_mean = comm_world.allgather(ensemble_vec_mean)
                     gathered_ens_vec_full = comm_world.allgather(ensemble_vec_full)
                     if rank_world == 0:
-                        # print(f"Ensemble mean shape: {[arr.shape for arr in gathered_ens_vec_mean]}")
+                        # print(f"[ICESEE] Ensemble mean shape: {[arr.shape for arr in gathered_ens_vec_mean]}")
                         ensemble_vec_mean = np.vstack(gathered_ens_vec_mean)
                         ensemble_vec_full = np.vstack(gathered_ens_vec_full)
-                        print(f"Ensemble mean shape: {ensemble_vec_mean.shape}")
+                        print(f"[ICESEE] Ensemble mean shape: {ensemble_vec_mean.shape}")
                     else:
                         ensemble_vec_mean = np.empty((shape_ens[0],model_kwargs.get("nt",params["nt"])+1), dtype=np.float64)
                         ensemble_vec_full = np.empty((shape_ens[0],Nens,model_kwargs.get("nt",params["nt"])+1), dtype=np.float64)
@@ -1360,7 +1360,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                         model_kwargs.update({'ens_id': ensemble_id, 'comm': subcomm})
 
                         if ensemble_id < Nens:  # Only process valid ensembles
-                            # print(f"Rank {rank_world} processing ensemble {ensemble_id} in round {round_id + 1}/{rounds}")
+                            # print(f"[ICESEE] Rank {rank_world} processing ensemble {ensemble_id} in round {round_id + 1}/{rounds}")
 
                             # Ensure all ranks in the subcommunicator are synchronized before running
                             subcomm.Barrier()
@@ -1373,7 +1373,7 @@ def icesee_model_data_assimilation(**model_kwargs):
 
                             # Call the forecast step function
                             # hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
-                            # print(f"Rank: {rank_world}, min ensemble: {np.min(ensemble_vec[:hdim])}, max ensemble: {np.max(ensemble_vec[:hdim])}")
+                            # print(f"[ICESEE] Rank: {rank_world}, min ensemble: {np.min(ensemble_vec[:hdim])}, max ensemble: {np.max(ensemble_vec[:hdim])}")
 
                             updated_state = model_module.forecast_step_single(ensemble=ensemble_vec,**model_kwargs)
 
@@ -1708,7 +1708,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                                 # KalGain = Cov_model @ H.T @ inv_matrix
                                 # X5prime = KalGain@(d - np.dot(H, ens_mean))
                                 # ens_mean = ens_mean + X5prime
-                                # print(f"X5prime shape: {X5prime.shape}")
+                                # print(f"[ICESEE] X5prime shape: {X5prime.shape}")
                                 analysis_vec_ij = None
                         else:
                             X5 = np.empty((Nens, Nens))
@@ -1959,7 +1959,7 @@ def icesee_model_data_assimilation(**model_kwargs):
     # comm_world.Barrier()
 
     # ====== load data to be written to file ======
-    # print("Saving data ...")
+    # print("[ICESEE] Saving data ...")
     if params["even_distribution"]:
         save_all_data(
             enkf_params=enkf_params,

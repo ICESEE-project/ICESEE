@@ -130,13 +130,13 @@ class _MatlabServer:
             try:
                 stream_name, line = self.output_queue.get(timeout=0.1)
                 if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-                    print(f"[ICESEE ⇄ MATLAB {stream_name}] {line}")
+                    print(f"[ICESEE::MATLAB] {stream_name}: {line}")
                 else:
                     from mpi4py import MPI
                     comm = MPI.COMM_WORLD
                     rank = comm.Get_rank()
                     if (self.comm is None or comm.Get_rank() == 0):
-                        print(f"[ICESEE ⇄ MATLAB {stream_name}] {line}")
+                        print(f"[ICESEE::MATLAB] {stream_name}: {line}")
             except queue.Empty:
                 continue  # No output available, keep checking
 
@@ -158,9 +158,9 @@ class _MatlabServer:
                 print(f"An error occurred: {e}")
             
         # if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-        #     print("[ICESEE ⇄ Launcher] Starting MATLAB server...")
-        #     print(f"[ICESEE ⇄ Launcher] Command file: {self.cmdfile}")
-        #     print(f"[ICESEE ⇄ Launcher] Status file: {self.statusfile}")
+        #     print("[ICESEE::Launcher] Starting MATLAB server...")
+        #     print(f"[ICESEE::Launcher] Command file: {self.cmdfile}")
+        #     print(f"[ICESEE::Launcher] Status file: {self.statusfile}")
             
         # Clean up old command and status files
         for f in [self.cmdfile, self.statusfile]:
@@ -202,7 +202,7 @@ class _MatlabServer:
             while not os.path.exists(self.statusfile):
                 if time.time() - start_time > timeout:
                     if self.comm is None or self.comm.Get_rank() == 0:
-                        print("[ICESEE ⇄ Launcher] Error: MATLAB server failed to start within timeout.")
+                        print("[ICESEE::Launcher] Error: MATLAB server failed to start within timeout.")
                     self.running = False
                     os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
                     sys.exit(1)
@@ -213,16 +213,16 @@ class _MatlabServer:
                 status = f.read().strip()
             if status != 'ready':
                 if self.comm is None or self.comm.Get_rank() == 0:
-                    print(f"[ICESEE ⇄ Launcher] Error: Unexpected status '{status}'.")
+                    print(f"[ICESEE::Launcher] Error: Unexpected status '{status}'.")
                 self.running = False
                 os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
                 sys.exit(1)
             
             if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-                print("[ICESEE ⇄ Launcher] MATLAB server is ready.")
+                print("[ICESEE::Launcher] MATLAB server is ready.")
         except Exception as e:
             if self.comm is None or self.comm.Get_rank() == 0:
-                print(f"[ICESEE ⇄ Launcher] Error launching MATLAB server: {e}")
+                print(f"[ICESEE::Launcher] Error launching MATLAB server: {e}")
             self.running = False
             if self.process:
                 os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
@@ -247,14 +247,14 @@ class _MatlabServer:
     #     verbose_interval = max(60.0, timeout / 20.0)
 
     #     if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-    #         print(f"[ICESEE ⇄ Launcher] Sending command: {command}")
+    #         print(f"[ICESEE::Launcher] Sending command: {command}")
         
     #     try:
     #         with open(self.cmdfile, 'w') as f:
     #             f.write(command)
     #     except OSError as e:
     #         if self.comm is None or self.comm.Get_rank() == 0:
-    #             print(f"[ICESEE ⇄ Launcher] Error: Failed to write command file: {e}")
+    #             print(f"[ICESEE::Launcher] Error: Failed to write command file: {e}")
     #         return False
         
     #     # Wait for command to be processed (file deleted)
@@ -269,18 +269,18 @@ class _MatlabServer:
     #         elapsed_time = time.time() - start_time
     #         if elapsed_time > timeout:
     #             if self.comm is None or self.comm.Get_rank() == 0:
-    #                 print(f"[ICESEE ⇄ Launcher] Error: Command execution timed out after {timeout} seconds.")
+    #                 print(f"[ICESEE::Launcher] Error: Command execution timed out after {timeout} seconds.")
     #             return False
             
     #         # Issue warning if approaching timeout
     #         if not warning_issued and elapsed_time > warning_threshold:
     #             if self.comm is None or self.comm.Get_rank() == 0:
-    #                 print(f"[ICESEE ⇄ Launcher] Warning: Command has been running for {elapsed_time:.1f}s, approaching timeout of {timeout}s.")
+    #                 print(f"[ICESEE::Launcher] Warning: Command has been running for {elapsed_time:.1f}s, approaching timeout of {timeout}s.")
     #             warning_issued = True
             
     #         # Print periodic status if verbose
     #         if self.verbose and (self.comm is None or self.comm.Get_rank() == 0) and (time.time() - last_verbose_time) >= verbose_interval:
-    #             print(f"[ICESEE ⇄ Launcher] Waiting for command to be processed... ({elapsed_time:.1f}s elapsed)")
+    #             print(f"[ICESEE::Launcher] Waiting for command to be processed... ({elapsed_time:.1f}s elapsed)")
     #             last_verbose_time = time.time()
             
     #         time.sleep(sleep_time)
@@ -288,10 +288,10 @@ class _MatlabServer:
     #         sleep_time = min(sleep_time + (elapsed_time / 20.0), max_sleep)
     #         if sleep_time == max_sleep and not warning_issued:
     #             if self.comm is None or self.comm.Get_rank() == 0:
-    #                 print("[ICESEE ⇄ Launcher] Warning: Slow command processing detected.")
+    #                 print("[ICESEE::Launcher] Warning: Slow command processing detected.")
         
     #     if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-    #         print("[ICESEE ⇄ Launcher] Command processed successfully.")
+    #         print("[ICESEE::Launcher] Command processed successfully.")
     #     return True
 
     def send_command(self, command, timeout=3600):
@@ -313,14 +313,14 @@ class _MatlabServer:
         verbose_interval = max(60.0, timeout / 20.0)
 
         if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-            print(f"[ICESEE ⇄ Launcher] Sending command: {command}")
+            print(f"[ICESEE::Launcher] Sending command: {command}")
         
         try:
             with open(self.cmdfile, 'w') as f:
                 f.write(command)
         except OSError as e:
             if self.comm is None or self.comm.Get_rank() == 0:
-                print(f"[ICESEE ⇄ Launcher] Error: Failed to write command file: {e}")
+                print(f"[ICESEE::Launcher] Error: Failed to write command file: {e}")
             return False
         
         # Wait for command to be processed (file deleted)
@@ -337,18 +337,18 @@ class _MatlabServer:
             elapsed_time = time.time() - start_time
             if elapsed_time > timeout:
                 if self.comm is None or self.comm.Get_rank() == 0:
-                    print(f"[ICESEE ⇄ Launcher] Error: Command execution timed out after {timeout} seconds.")
+                    print(f"[ICESEE::Launcher] Error: Command execution timed out after {timeout} seconds.")
                 return False
             
             # Issue warning if approaching timeout
             if not warning_issued and elapsed_time > warning_threshold:
                 if self.comm is None or self.comm.Get_rank() == 0:
-                    print(f"[ICESEE ⇄ Launcher] Warning: Command has been running for {elapsed_time:.1f}s, approaching timeout of {timeout}s.")
+                    print(f"[ICESEE::Launcher] Warning: Command has been running for {elapsed_time:.1f}s, approaching timeout of {timeout}s.")
                 warning_issued = True
             
             # Print periodic status if verbose
             if self.verbose and (self.comm is None or self.comm.Get_rank() == 0) and (time.time() - last_verbose_time) >= verbose_interval:
-                print(f"[ICESEE ⇄ Launcher] Waiting for command to be processed... ({elapsed_time:.1f}s elapsed)")
+                print(f"[ICESEE::Launcher] Waiting for command to be processed... ({elapsed_time:.1f}s elapsed)")
                 last_verbose_time = time.time()
             
             # Measure the time taken by the previous loop iteration
@@ -364,10 +364,10 @@ class _MatlabServer:
             # Issue warning if sleep_time reaches max_sleep
             if sleep_time == max_sleep and not warning_issued:
                 if self.comm is None or self.comm.Get_rank() == 0:
-                    print("[ICESEE ⇄ Launcher] Warning: Slow command processing detected.")
+                    print("[ICESEE::Launcher] Warning: Slow command processing detected.")
         
         if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-            print("[ICESEE ⇄ Launcher] Command processed successfully.")
+            print("[ICESEE::Launcher] Command processed successfully.")
         return True
 
 
@@ -382,7 +382,7 @@ class _MatlabServer:
             subprocess.TimeoutExpired: If the process does not terminate within the timeout.
         """
         if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-            print("[ICESEE ⇄ Launcher] Attempting to shut down MATLAB server...")
+            print("[ICESEE::Launcher] Attempting to shut down MATLAB server...")
 
         self.running = False  # Stop output threads
 
@@ -392,24 +392,24 @@ class _MatlabServer:
                 stdout, stderr = self.process.communicate(timeout=5)
                 if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
                     if stdout:
-                        print("[ICESEE⇄MATLAB]", stdout.decode('utf-8', errors='ignore'))
+                        print("[ICESEE::MATLAB]", stdout.decode('utf-8', errors='ignore'))
                     if stderr:
-                        print("[ICESEE⇄MATLAB]", stderr.decode('utf-8', errors='ignore'))
-                    print("[ICESEE ⇄ Launcher] MATLAB server shut down successfully.")
+                        print("[ICESEE::MATLAB]", stderr.decode('utf-8', errors='ignore'))
+                    print("[ICESEE::Launcher] MATLAB server shut down successfully.")
             except subprocess.TimeoutExpired:
                 if self.comm is None or self.comm.Get_rank() == 0:
-                    print("[ICESEE ⇄ Launcher] Warning: MATLAB process did not terminate in time, forcing termination.")
+                    print("[ICESEE::Launcher] Warning: MATLAB process did not terminate in time, forcing termination.")
                 os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
                 self.process.wait(timeout=300)
                 if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-                    print("[ICESEE ⇄ Launcher] MATLAB server terminated.")
+                    print("[ICESEE::Launcher] MATLAB server terminated.")
         else:
             if self.comm is None or self.comm.Get_rank() == 0:
-                print("[ICESEE ⇄ Launcher] Error: Failed to shut down MATLAB server gracefully.")
+                print("[ICESEE::Launcher] Error: Failed to shut down MATLAB server gracefully.")
             os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
             self.process.wait(timeout=5)
             if self.comm is None or self.comm.Get_rank() == 0:
-                print("[ICESEE ⇄ Launcher] MATLAB server terminated.")
+                print("[ICESEE::Launcher] MATLAB server terminated.")
 
     def reset_terminal(self):
         """Reset terminal settings to restore normal behavior, if applicable.
@@ -423,15 +423,15 @@ class _MatlabServer:
         """
         if not sys.stdin.isatty() or any(key in os.environ for key in ["MPIEXEC", "OMPI_COMM_WORLD_RANK", "PMI_RANK", "SLURM_JOB_ID"]):
             if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-                print("[ICESEE ⇄ Launcher] Skipping terminal reset (non-interactive or MPI environment).", file=sys.stderr, flush=True)
+                print("[ICESEE::Launcher] Skipping terminal reset (non-interactive or MPI environment).", file=sys.stderr, flush=True)
             return
         try:
             subprocess.run(['stty', 'sane'], check=True)
             if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-                print("[ICESEE ⇄ Launcher] Terminal settings reset successfully.", file=sys.stderr, flush=True)
+                print("[ICESEE::Launcher] Terminal settings reset successfully.", file=sys.stderr, flush=True)
         except subprocess.CalledProcessError as e:
             if self.comm is None or self.comm.Get_rank() == 0:
-                print(f"[ICESEE ⇄ Launcher] Warning: Failed to reset terminal settings: {e}", file=sys.stderr, flush=True)
+                print(f"[ICESEE::Launcher] Warning: Failed to reset terminal settings: {e}", file=sys.stderr, flush=True)
 
 #  ---- end of MatlabServer class ----
 
@@ -503,11 +503,11 @@ def subprocess_cmd_run(issm_cmd, nprocs: int, verbose: bool = True):
             stdout_lines = stdout.splitlines()
             trimmed_stdout = "\n".join(stdout_lines[9:])
             print(f"\n[ICESEE] ➤ Running ISSM with {nprocs} processors")
-            print("------ ICESEE⇄MATLAB ------")
+            print("------ ICESEE::MATLAB ------")
             print(trimmed_stdout.strip())
 
             if stderr.strip():
-                print("------ ICESEE⇄MATLAB ------")
+                print("------ ICESEE::MATLAB ------")
                 print(stderr.strip())
 
         if process.returncode != 0:
@@ -544,11 +544,11 @@ def subprocess_cmd_run(issm_cmd, nprocs: int, verbose: bool = True):
 #             stdout_lines = stdout.splitlines()
 #             trimmed_stdout = "\n".join(stdout_lines[9:])  # Skip banner
 #             print(f"\n[ICESEE] ➤ Running ISSM with {nprocs} processors")
-#             print("------ ICESEE⇄MATLAB ------")
+#             print("------ ICESEE::MATLAB ------")
 #             print(trimmed_stdout.strip())
 
 #             if stderr.strip():  # Only print stderr if there's content
-#                 print("------ ICESEE⇄MATLAB ------")
+#                 print("------ ICESEE::MATLAB ------")
 #                 print(stderr.strip())
 
 #         if process.returncode != 0:

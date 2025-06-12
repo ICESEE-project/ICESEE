@@ -55,7 +55,7 @@ from config_loader import load_yaml_to_dict, get_section
 # Check if running in Jupyter notebook (for visualization)
 flag_jupyter = False
 if 'ipykernel' in sys.modules:
-    print("Running in Jupyter - disabling command line arguments")
+    print("[ICESEE] Running in Jupyter - disabling command line arguments")
     # leave entire routine
     flag_jupyter = True
 

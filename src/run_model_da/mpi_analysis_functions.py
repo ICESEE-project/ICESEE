@@ -592,22 +592,22 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
     X2 = np.dot(X1, Dprime)
     # del Cov_obs, sig, X1, Dprime; gc.collect()
     
-    # print(f"Rank: {rank_world} X2 shape: {X2.shape}")
+    # print(f"[ICESEE] Rank: {rank_world} X2 shape: {X2.shape}")
     #  compute X3 = U*X2 # m_obs x Nens
     X3 = np.dot(U, X2)
 
-    # print(f"Rank: {rank_world} X3 shape: {X3.shape}")
+    # print(f"[ICESEE] Rank: {rank_world} X3 shape: {X3.shape}")
     # compute X4 = (HAprime.T)*X3 # Nens x Nens
     X4 = np.dot(HAprime.T, X3)
     del X2, X3, U, HAprime; gc.collect()
     
-    # print(f"Rank: {rank_world} X4 shape: {X4.shape}")
+    # print(f"[ICESEE] Rank: {rank_world} X4 shape: {X4.shape}")
     # compute X5 = X4 + I
     X5 = X4 + np.eye(Nens)
     # sum of each column of X5 should be 1
     if np.sum(X5, axis=0).all() != 1.0:
-        print(f"Sum of each X5 column is not 1.0: {np.sum(X5, axis=0)}")
-    # print(f"Rank: {comm_world.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
+        print(f"[ICESEE] Sum of each X5 column is not 1.0: {np.sum(X5, axis=0)}")
+    # print(f"[ICESEE] Rank: {comm_world.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
     del X4; gc.collect()
 
     # ===local computation
@@ -638,7 +638,7 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
                     idx = var*dim + ij
                     # nearrest observations indices 
                     idx_obs_loc = var*dim + nearest_indices
-                    print(f"nearest_indices: {nearest_indices} idx_obs_loc: {idx_obs_loc}")
+                    print(f"[ICESEE] nearest_indices: {nearest_indices} idx_obs_loc: {idx_obs_loc}")
                     # d_loc = d[idx]
                     d_loc = d[idx_obs_loc]
                     # Cov_obs_loc = Cov_obs[idx,idx]
@@ -764,9 +764,9 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, analysis_vec_ij
         # dynamical model for parameters: from https://doi.org/10.1002/qj.3257
         # obs_index = model_kwargs.get("obs_index")
         # # #  check if k equals to the first observation index
-        # # print(f"Rank: {rank_world} km: {km} obs_index: {obs_index}")
+        # # print(f"[ICESEE] Rank: {rank_world} km: {km} obs_index: {obs_index}")
         # if  (k+1 == obs_index[0]):
-        # #     print(f"[Debug] Rank: {rank_world} k: {km} obs_index: {obs_index}")
+        # #     print(f"[ICESEE] [Debug] Rank: {rank_world} k: {km} obs_index: {obs_index}")
         #     params_analysis_0 = analysis_vec[state_block_size:, :]
         
         # # size of parameters
@@ -898,18 +898,18 @@ def DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
     wprime = d - np.dot(H, ens_mean)
     X2prime = np.dot(X1, wprime) # Nens x Nens
     
-    # print(f"Rank: {rank_world} X2 shape: {X2.shape}")
+    # print(f"[ICESEE] Rank: {rank_world} X2 shape: {X2.shape}")
     #  compute X3 = U*X2 # m_obs x Nens
     X3 = np.dot(U, X2)
     X3prime = np.dot(U, X2prime) # m_obs x Nens
 
-    # print(f"Rank: {rank_world} X3 shape: {X3.shape}")
+    # print(f"[ICESEE] Rank: {rank_world} X3 shape: {X3.shape}")
     # compute X4 = (HAprime.T)*X3 # Nens x Nens
     X4 = np.dot(HAprime.T, X3)
     X4prime = np.dot(HAprime.T, X3prime) # Nens x Nens
     del X2, X3, U, HAprime; gc.collect()
     
-    # print(f"Rank: {rank_world} X4 shape: {X4.shape}")
+    # print(f"[ICESEE] Rank: {rank_world} X4 shape: {X4.shape}")
     # compute X5 = X4 + I
     # X5 = X4 + np.eye(Nens)
     X5 = 0.5*(2*np.eye(Nens) + np.dot(one_N, X4) - X4) #TODO check this
@@ -920,8 +920,8 @@ def DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
     # X5 = 0.5*(2*np.eye(Nens) - X4) 
     # sum of each column of X5 should be 1
     if np.sum(X5, axis=0).all() != 1.0:
-        print(f"Sum of each X5 column is not 1.0: {np.sum(X5, axis=0)}")
-    # print(f"Rank: {comm_world.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
+        print(f"[ICESEE] Sum of each X5 column is not 1.0: {np.sum(X5, axis=0)}")
+    # print(f"[ICESEE] Rank: {comm_world.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
     del X4; gc.collect()
 
     # ===local computation
@@ -980,7 +980,7 @@ def analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, UtilsFunctions
         analysis_vec = np.dot(scatter_ensemble, X5)
         # ens_mean_ = np.dot(scatter_ensemble, X5prime)
 
-        # print(f"Rank: {rank_world} analysis_vec shape: {analysis_vec.shape}, ens_mean shape: {ens_mean.shape}")
+        # print(f"[ICESEE] Rank: {rank_world} analysis_vec shape: {analysis_vec.shape}, ens_mean shape: {ens_mean.shape}")
 
         # comm_world.Barrier()
         # analysis_vec = analysis_vec + ens_mean
@@ -1014,9 +1014,9 @@ def analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, UtilsFunctions
         # dynamical model for parameters: from https://doi.org/10.1002/qj.3257
         # obs_index = model_kwargs.get("obs_index")
         # # #  check if k equals to the first observation index
-        # # print(f"Rank: {rank_world} km: {km} obs_index: {obs_index}")
+        # # print(f"[ICESEE] Rank: {rank_world} km: {km} obs_index: {obs_index}")
         # if  (k+1 == obs_index[0]):
-        # #     print(f"[Debug] Rank: {rank_world} k: {km} obs_index: {obs_index}")
+        # #     print(f"[ICESEE] [Debug] Rank: {rank_world} k: {km} obs_index: {obs_index}")
         #     params_analysis_0 = analysis_vec[state_block_size:, :]
         
         # # size of parameters

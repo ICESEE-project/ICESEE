@@ -60,7 +60,7 @@ def generate_true_state(**kwargs):
         kwargs.update({'k': 0})  # Set the initial time step
         ISSM_model(**kwargs)
     except Exception as e:
-        print(f"[Generate-True-State] Error generating true state: {e}")
+        print(f"[ICESEE Generate-True-State] Error generating true state: {e}")
         server.kill_matlab_processes()
         return None
     
@@ -83,7 +83,7 @@ def generate_true_state(**kwargs):
                 statevec_true[indx_map['coefficient'], k-1] = f['coefficient'][0]
 
     except Exception as e:
-        print(f"[Generate-True-State: read output file] Error reading the file: {e}")
+        print(f"[ICESEE Generate-True-State: read output file] Error reading the file: {e}")
         return None
     
     updated_state = {}
@@ -138,9 +138,9 @@ def generate_nurged_state(**kwargs):
                     statevec_nurged[indx_map['Thickness'], k-1] = f[key][0]
                     statevec_nurged[indx_map['bed'], k-1] = f['bed'][0]
                     statevec_nurged[indx_map['coefficient'], k-1] = f['coefficient'][0]
-                    
+
         except Exception as e:
-            print(f"[Generate-Nurged-State: read output file] Error reading the file: {e}")
+            print(f"[ICESEE Generate-Nurged-State: read output file] Error reading the file: {e}")
             return None
         
         #  --- change directory back to the original directory ---
@@ -150,7 +150,7 @@ def generate_nurged_state(**kwargs):
         return statevec_nurged
     
     except Exception as e:
-        print(f"[DEBUG] Error sending command: {e}")
+        print(f"[ICESEE DEBUG] Error sending command: {e}")
         # Ensure directory is changed back even on error
         os.chdir(icesee_path)
         return None
@@ -187,7 +187,7 @@ def initialize_ensemble(ens, **kwargs):
         # -- call the run_model function to initialize the ensemble members
         ISSM_model(**kwargs)
     except Exception as e:
-        print(f"[Initialize ensemble]] Error initializing ensemble: {e}")
+        print(f"[ICESEE Initialize ensemble]] Error initializing ensemble: {e}")
         server.kill_matlab_processes()
 
     # if nprocs <= Nens then make fname available to all processes
@@ -206,7 +206,7 @@ def initialize_ensemble(ens, **kwargs):
             for key in vec_inputs:
                 updated_state[key] = f[key][0]
     except Exception as e:
-        print(f"[Initialize ensemble] Error reading the file: {e}")
+        print(f"[ICESEE Initialize ensemble] Error reading the file: {e}")
         server.kill_matlab_processes()
 
     os.chdir(icesee_path)
