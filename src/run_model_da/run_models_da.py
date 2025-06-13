@@ -476,7 +476,7 @@ def icesee_model_data_assimilation(**model_kwargs):
             if rank_world == 0:
                 
                 model_kwargs.update({'ens_id': rank_world})
-                model_kwargs.update({'model_nprocs': (model_nprocs * size_world)-1}) # update the model_nprocs to include all processors for the external model run
+                model_kwargs.update({'model_nprocs': (model_nprocs * size_world) - size_world}) # update the model_nprocs to include all processors for the external model run
 
                 if model_kwargs.get("generate_true_state", True):
                     print("[ICESEE] Generating true state ...")

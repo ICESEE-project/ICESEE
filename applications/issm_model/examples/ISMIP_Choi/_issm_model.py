@@ -241,10 +241,25 @@ def run_model(ensemble, **kwargs):
         # Get ensemble indices
         vecs, indx_map, _ = icesee_get_index(ensemble, **kwargs)
 
+        #  --- Joint Estimations ---
+        if kwargs["joint_estimation"]:
+            bed = ensemble[indx_map['bed']]
+            coefficient = ensemble[indx_map['coefficient']]
+        else:
+            k = kwargs.get('k', 0) 
+            if k == 0:
+                bed_int = ensemble[indx_map['bed']]
+                coefficient_int = ensemble[indx_map['coefficient']]
+            bed = bed_int
+            coefficient = coefficient_int
+
         # Write ensemble data to HDF5 file to be accessed by ISSM on the Matlab side
         with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
-            for key in vec_inputs:
-                f.create_dataset(key, data=ensemble[indx_map[key]])
+            # for key in vec_inputs:
+            #     f.create_dataset(key, data=ensemble[indx_map[key]])
+            f.create_dataset('Thickness', data=ensemble[indx_map['Thickness']])
+            f.create_dataset('bed', data=bed)
+            f.create_dataset('coefficient', data=coefficient)
 
         # Run ISSM model to update state and parameters
         ISSM_model(**kwargs)
@@ -254,11 +269,22 @@ def run_model(ensemble, **kwargs):
         if not os.path.exists(output_filename):
             print("[ICESEE run_model Error] File does not exist: {output_filename}")
             return None
-
+        
         updated_state = {}
         with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
-            for key in vec_inputs:
-                updated_state[key] = f[key][0]
+            updated_state['Thickness'] = f['Thickness'][0]
+            # --Joint Estimations--
+            if kwargs["joint_estimation"]:
+                updated_state['bed'] = f['bed'][0]
+                updated_state['coefficient'] = f['coefficient'][0]
+            else:
+                bed_int = bed
+                coefficient_int = coefficient
+            
+        # updated_state = {}
+        # with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+        #     for key in vec_inputs:
+        #         updated_state[key] = f[key][0]
 
     except Exception as e:
         print("[ICESEE run_model] Error running the model: {e}")

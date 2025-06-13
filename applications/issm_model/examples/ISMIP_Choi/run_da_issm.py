@@ -63,6 +63,13 @@ model_kwargs = {
                 'use_reference_data': modeling_params.get('use_reference_data', False),
                 'reference_data_dir': modeling_params.get('reference_data_dir', 'data'),
                 'reference_data' : modeling_params.get('reference_data'),
+                'sill_friction': enkf_params.get('sill_friction', 90000),
+                'range_friction': enkf_params.get('range_friction', 5000),
+                'mean_friction': enkf_params.get('mean_friction', 2500),
+                'nugget_friction': enkf_params.get('nugget_friction', 0),
+                'sill_bed': enkf_params.get('sill_bed', 4000),
+                'range_bed': enkf_params.get('range_bed', 50000),
+                'nugget_bed': enkf_params.get('nugget_bed', 200),      
 }
 
 # observation schedule

@@ -7,7 +7,7 @@ physical-parameters:
 
 modeling-parameters:
   # Model parameters
-  num_years: 20          # Number of years to run the model (30-year assimilation period from paper)
+  num_years: 500          # Number of years to run the model (30-year assimilation period from paper)
   tinitial: 0.0           # Initial time
   timesteps_per_year: 0.1 # Number of timesteps per year (monthly for stability in SSA)
 
@@ -30,7 +30,7 @@ enkf-parameters:
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state:    1  # Generate true state for synthetic observations
-  generate_nurged_state:  0  # Generate nudged state for synthetic observations
+  generate_nurged_state:  1  # Generate nudged state for synthetic observations
 
   num_state_vars: 1             # State variables: ice thickness (H), velocities (u, v)
   num_param_vars: 2             # Parameter variables: friction coefficient (C), bed topography (B)
@@ -52,10 +52,14 @@ enkf-parameters:
   parameter_estimation: True    # Enable parameter estimation
 
   # Nudged parameters
-  h_nurge_ic: 50                # Nudged increment for initial thickness (reduced for stability)
-  u_nurge_ic: 0                 # Nudged increment for initial velocity
-  nurged_entries_percentage: 0.05 # Percentage of nudged entries (reduced for finer mesh)
-
+  sill_friction: 90000      # Sill friction coefficient (90000 Pa s/m from paper)
+  range_friction: 5000      # Range friction coefficient (5000 Pa s/m from paper)
+  mean_friction: 2500       # Mean friction coefficient (2500 Pa s/m from paper)
+  nugget_friction: 0        # Nugget effect for friction (0 Pa s/m from paper)
+  sill_bed: 4000            # Sill bedrock elevation (4000 m from paper)
+  range_bed: 50000          # Range bedrock elevation (50000 m from paper)
+  nugget_bed: 200           # Nugget effect for bedrock elevation (200 m from paper)
+ 
   # EnKF model parameters
   model_name: "issm"            # Model name
   filter_type: "EnKF"           # Filter type: EnKF (Ensemble Kalman Filter)

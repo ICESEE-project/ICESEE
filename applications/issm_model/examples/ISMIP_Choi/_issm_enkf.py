@@ -8,12 +8,14 @@
 import os
 import numpy as np
 import h5py
-
+import gstools as gs
 
 # --- import utility functions ---
 from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_model import *
 from ICESEE.config._utility_imports import icesee_get_index
 from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import setup_ensemble_intial_data
+from ICESEE.src.run_model_da.run_models_da import generate_enkf_field, generate_pseudo_random_field_1d
+
 
 # --- Forecast step ---
 def forecast_step_single(ensemble=None, **kwargs):
@@ -117,6 +119,9 @@ def generate_nurged_state(**kwargs):
     fname = 'nurged_state.mat'
     kwargs.update({'fname': fname})
     ens_id = kwargs.get('ens_id')
+    params = kwargs.get('params', {})
+
+    nd = params.get('nd', 0)
 
     try:
         # --- fetch treu state vector
@@ -125,29 +130,51 @@ def generate_nurged_state(**kwargs):
         # -- call the icesee_get_index function to get the index of the state vector
         vecs, indx_map, dim_per_proc = icesee_get_index(statevec_nurged, **kwargs)
 
+        # -- friction
+        sill_friction = kwargs.get('sill_friction')
+        range_friction = kwargs.get('range_friction')
+        mean_friction  = kwargs.get('mean_friction')
+        nugget_friction = kwargs.get('nugget_friction')
+        friction_model = gs.Gaussian(dim=1, var=sill_friction, len_scale=range_friction, nugget=nugget_friction)
+        friction_srf = gs.SRF(friction_model, mean=mean_friction, seed=kwargs.get('seed', 42))
+        fdim = nd//params.get('total_state_param_vars', 1)
+        x = np.linspace(0, range_friction*2, fdim)
+        friction_field = friction_srf.structured([x])
+
+        # --bed
+        sill_bed = kwargs.get('sill_bed')
+        range_bed = kwargs.get('range_bed')
+        nugget_bed = kwargs.get('nugget_bed')
+        bed_model = gs.Exponential(dim=1, var=sill_bed-nugget_bed, len_scale=range_bed, nugget=nugget_bed)
+        bed_srf = gs.SRF(bed_model, mean=0, seed=kwargs.get('seed', 42))
+        x = np.linspace(0, range_bed*2, fdim)
+        bed_field = bed_srf.structured([x])
+
+        # write the wrong states to a .h5 file to be read by the ISSM model before nurging
+        friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
+        try:
+            with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
+                # -- write the friction field
+                f.create_dataset('coefficient', data=friction_field)
+                # -- write the bed field
+                f.create_dataset('bed', data=bed_field)
+        except Exception as e:
+            print(f"[ICESEE Generate-Nurged-State: write output file] Error writing the file: {e}")
+            return None
+
         # -- call the run_model function to generate the nurged state
         kwargs.update({'k': 0})  # Set the initial time step
         ISSM_model(**kwargs)
         # -- fetch the nurged state vector
         nurged_filename = f'{icesee_path}/{data_path}/ensemble_nurged_state_{ens_id}.h5'
-
-        # -- friction
-        sill_friction = 90000
-        range_friction = 5000
-        mean_friction  = 2500
-
-        # --bed
-        sill_bed = 4000
-        range_bed = 50000
-        nugget_bed = 200
         try:
             with h5py.File(nurged_filename, 'r', driver='mpio', comm=comm) as f:
                 # -- fetch state variables
                 for k in range(1, kwargs.get('nt') + 1):
                     key = f'Thickness_{k}'
                     statevec_nurged[indx_map['Thickness'], k-1] = f[key][0]
-                    statevec_nurged[indx_map['bed'], k-1] = f['bed'][0]*np.sqrt(sill_bed + range_bed * np.random.rand()) + nugget_bed
-                    statevec_nurged[indx_map['coefficient'], k-1] = f['coefficient'][0]*np.sqrt(sill_friction + range_friction * np.random.rand()) + mean_friction
+                    statevec_nurged[indx_map['bed'], k-1] = f['bed'][0]
+                    statevec_nurged[indx_map['coefficient'], k-1] = f['coefficient'][0]
 
         except Exception as e:
             print(f"[ICESEE Generate-Nurged-State: read output file] Error reading the file: {e}")
@@ -207,7 +234,6 @@ def initialize_ensemble(ens, **kwargs):
         data_dir = f'{issm_examples_dir}/Models/ens_id_0'
         setup_ensemble_intial_data(Nens, data_dir, fname)
 
-   
     try:
         #  -- Read data from the ISSM side to be accessed by ICESEE on the python side
         output_filename = f'{icesee_path}/{data_path}/ensemble_out_{ens_id}.h5'
