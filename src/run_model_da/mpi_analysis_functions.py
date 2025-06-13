@@ -477,18 +477,66 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
     """
     params = model_kwargs.get("params")
     comm_world = model_kwargs.get("comm_world")
+    generate_enkf_field = model_kwargs.get("generate_enkf_field", False)
+
     H = UtilsFunctions(params, ensemble_vec).JObs_fun(ensemble_vec.shape[0]) # mxNens, observation operator
 
     # -- get ensemble pertubations
-    ensemble_perturbations = ensemble_vec - np.mean(ensemble_vec, axis=1).reshape(-1,1)
-    
+    use_ensemble_pertubations = model_kwargs.get("use_ensemble_pertubations", True)
+
+    if use_ensemble_pertubations:
+        ensemble_perturbations = ensemble_vec - np.mean(ensemble_vec, axis=1).reshape(-1,1) # ensure mean is zero
+        Eta = np.dot(H, ensemble_perturbations) # mxNens, ensemble pertubations
+    else: #or use ensembles of perturbations
+        # generate ensemble of perturbations # mxNens o---->
+        if model_kwargs["joint_estimation"] or params["localization_flag"]:
+            hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
+        else:
+            hdim = ensemble_vec.shape[0] // params["num_state_vars"]
+
+        Lx, Ly = model_kwargs.get("Lx"), model_kwargs.get("Ly")
+        len_scale =  model_kwargs.get("length_scale")  # Length scale for localization
+        alpha = model_kwargs.get("alpha", 1.0)  # Mixing parameter for noise generation
+        rho = model_kwargs.get("rho", 1.0)  # Correlation coefficient for noise generation
+        dt = model_kwargs.get("dt", 1.0)  # Time step size
+        noise = model_kwargs.get("noise", None)  # Noise vector, should be provided
+        
+        # ensure mean of noise is zero
+        _eta = []
+        for ens in range(Nens):
+            noise_all = []
+            q0 = []
+            for ii, sig in enumerate(params["sig_obs"]):
+                W = generate_enkf_field(ii,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                noise_ = sig*W
+                # noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
+                # q0.append(noise_)
+
+                # Z = np.sqrt(dt)*sig*rho*noise_
+                # Z = np.sqrt(dt)*noise_
+                Z = noise_
+                noise_all.append(Z)
+                
+            noise_ = np.concatenate(noise_all, axis=0)  # Concatenate noise for all parameters
+            # q0.append(noise)
+            # noise = np.concatenate(q0, axis=0)  #update noise
+            _eta.append(noise_)
+        # q0 = np.array(q0).T  # Convert to shape (nd, Nens)
+        # q0 = q0 - np.mean(q0, axis=1).reshape(-1, 1)  # Ensure mean is zero
+        # Eta = np.dot(H, q0)  # mxNens, ensemble perturbations
+        _eta= np.array(_eta).T  # Convert to shape (nd, Nens)
+        
+        _eta -= np.mean(_eta, axis=1).reshape(-1, 1)  # Ensure mean is zero
+        Eta = np.dot(H, _eta)  # mxNens, ensemble perturbations
+        # o--->
+
     # ----parallelize this step
-    Eta = np.zeros((d.shape[0], Nens)) # mxNens, ensemble pertubations
-    Eta = np.dot(H, ensemble_perturbations) # mxNens, ensemble pertubations
-    D   = np.zeros_like(Eta) # mxNens #virtual observations
+    # Eta = np.zeros((d.shape[0], Nens)) # mxNens, ensemble pertubations
+    
+    D   = np.zeros((d.shape[0], Nens)) # mxNens #virtual observations
     HA  = np.zeros_like(D)
     for ens in range(Nens):
-        # Eta[:,ens] = np.random.multivariate_normal(mean=np.zeros(d.shape[0]), cov=Cov_obs) 
+        
         D[:,ens] = d + Eta[:,ens]
         HA[:,ens] = np.dot(H, ensemble_vec[:,ens])
     # ---------------------------------------
@@ -544,22 +592,22 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
     X2 = np.dot(X1, Dprime)
     # del Cov_obs, sig, X1, Dprime; gc.collect()
     
-    # print(f"Rank: {rank_world} X2 shape: {X2.shape}")
+    # print(f"[ICESEE] Rank: {rank_world} X2 shape: {X2.shape}")
     #  compute X3 = U*X2 # m_obs x Nens
     X3 = np.dot(U, X2)
 
-    # print(f"Rank: {rank_world} X3 shape: {X3.shape}")
+    # print(f"[ICESEE] Rank: {rank_world} X3 shape: {X3.shape}")
     # compute X4 = (HAprime.T)*X3 # Nens x Nens
     X4 = np.dot(HAprime.T, X3)
     del X2, X3, U, HAprime; gc.collect()
     
-    # print(f"Rank: {rank_world} X4 shape: {X4.shape}")
+    # print(f"[ICESEE] Rank: {rank_world} X4 shape: {X4.shape}")
     # compute X5 = X4 + I
     X5 = X4 + np.eye(Nens)
     # sum of each column of X5 should be 1
     if np.sum(X5, axis=0).all() != 1.0:
-        print(f"Sum of each X5 column is not 1.0: {np.sum(X5, axis=0)}")
-    # print(f"Rank: {comm_world.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
+        print(f"[ICESEE] Sum of each X5 column is not 1.0: {np.sum(X5, axis=0)}")
+    # print(f"[ICESEE] Rank: {comm_world.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
     del X4; gc.collect()
 
     # ===local computation
@@ -590,7 +638,7 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
                     idx = var*dim + ij
                     # nearrest observations indices 
                     idx_obs_loc = var*dim + nearest_indices
-                    print(f"nearest_indices: {nearest_indices} idx_obs_loc: {idx_obs_loc}")
+                    print(f"[ICESEE] nearest_indices: {nearest_indices} idx_obs_loc: {idx_obs_loc}")
                     # d_loc = d[idx]
                     d_loc = d[idx_obs_loc]
                     # Cov_obs_loc = Cov_obs[idx,idx]
@@ -716,9 +764,9 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, analysis_vec_ij
         # dynamical model for parameters: from https://doi.org/10.1002/qj.3257
         # obs_index = model_kwargs.get("obs_index")
         # # #  check if k equals to the first observation index
-        # # print(f"Rank: {rank_world} km: {km} obs_index: {obs_index}")
+        # # print(f"[ICESEE] Rank: {rank_world} km: {km} obs_index: {obs_index}")
         # if  (k+1 == obs_index[0]):
-        # #     print(f"[Debug] Rank: {rank_world} k: {km} obs_index: {obs_index}")
+        # #     print(f"[ICESEE] [Debug] Rank: {rank_world} k: {km} obs_index: {obs_index}")
         #     params_analysis_0 = analysis_vec[state_block_size:, :]
         
         # # size of parameters
@@ -850,18 +898,18 @@ def DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
     wprime = d - np.dot(H, ens_mean)
     X2prime = np.dot(X1, wprime) # Nens x Nens
     
-    # print(f"Rank: {rank_world} X2 shape: {X2.shape}")
+    # print(f"[ICESEE] Rank: {rank_world} X2 shape: {X2.shape}")
     #  compute X3 = U*X2 # m_obs x Nens
     X3 = np.dot(U, X2)
     X3prime = np.dot(U, X2prime) # m_obs x Nens
 
-    # print(f"Rank: {rank_world} X3 shape: {X3.shape}")
+    # print(f"[ICESEE] Rank: {rank_world} X3 shape: {X3.shape}")
     # compute X4 = (HAprime.T)*X3 # Nens x Nens
     X4 = np.dot(HAprime.T, X3)
     X4prime = np.dot(HAprime.T, X3prime) # Nens x Nens
     del X2, X3, U, HAprime; gc.collect()
     
-    # print(f"Rank: {rank_world} X4 shape: {X4.shape}")
+    # print(f"[ICESEE] Rank: {rank_world} X4 shape: {X4.shape}")
     # compute X5 = X4 + I
     # X5 = X4 + np.eye(Nens)
     X5 = 0.5*(2*np.eye(Nens) + np.dot(one_N, X4) - X4) #TODO check this
@@ -872,8 +920,8 @@ def DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
     # X5 = 0.5*(2*np.eye(Nens) - X4) 
     # sum of each column of X5 should be 1
     if np.sum(X5, axis=0).all() != 1.0:
-        print(f"Sum of each X5 column is not 1.0: {np.sum(X5, axis=0)}")
-    # print(f"Rank: {comm_world.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
+        print(f"[ICESEE] Sum of each X5 column is not 1.0: {np.sum(X5, axis=0)}")
+    # print(f"[ICESEE] Rank: {comm_world.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
     del X4; gc.collect()
 
     # ===local computation
@@ -932,7 +980,7 @@ def analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, UtilsFunctions
         analysis_vec = np.dot(scatter_ensemble, X5)
         # ens_mean_ = np.dot(scatter_ensemble, X5prime)
 
-        # print(f"Rank: {rank_world} analysis_vec shape: {analysis_vec.shape}, ens_mean shape: {ens_mean.shape}")
+        # print(f"[ICESEE] Rank: {rank_world} analysis_vec shape: {analysis_vec.shape}, ens_mean shape: {ens_mean.shape}")
 
         # comm_world.Barrier()
         # analysis_vec = analysis_vec + ens_mean
@@ -966,9 +1014,9 @@ def analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, UtilsFunctions
         # dynamical model for parameters: from https://doi.org/10.1002/qj.3257
         # obs_index = model_kwargs.get("obs_index")
         # # #  check if k equals to the first observation index
-        # # print(f"Rank: {rank_world} km: {km} obs_index: {obs_index}")
+        # # print(f"[ICESEE] Rank: {rank_world} km: {km} obs_index: {obs_index}")
         # if  (k+1 == obs_index[0]):
-        # #     print(f"[Debug] Rank: {rank_world} k: {km} obs_index: {obs_index}")
+        # #     print(f"[ICESEE] [Debug] Rank: {rank_world} k: {km} obs_index: {obs_index}")
         #     params_analysis_0 = analysis_vec[state_block_size:, :]
         
         # # size of parameters

@@ -23,7 +23,7 @@ def safe_chdir(main_directory,target_directory):
     if target_path.startswith(main_directory):
         os.chdir(target_directory)
     # else:
-    #     print(f"Error: Attempted to leave the main directory '{main_directory}'.")
+    #     print(f"[ICESEE] Error: Attempted to leave the main directory '{main_directory}'.")
 
 
 def install_requirements(force_install=False, verbose=False):
@@ -33,22 +33,22 @@ def install_requirements(force_install=False, verbose=False):
     """
     # Check if the `.installed` file exists to determine if installation is needed
     if os.path.exists(".installed") and not force_install:
-        print("Dependencies are already installed. Skipping installation.")
+        print("[ICESEE] Dependencies are already installed. Skipping installation.")
         return
     
     try:
         # Run the command to install the requirements from requirements.txt
-        print("Installing dependencies from requirements.txt...")
+        print("[ICESEE] Installing dependencies from requirements.txt...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "../requirements.txt"])
         
         # Create a `.installed` marker file to indicate successful installation
         with open(".installed", "w") as f:
             f.write("Dependencies installed successfully.\n")
 
-        print("All dependencies are installed and verified.")
+        print("[ICESEE] All dependencies are installed and verified.")
     except subprocess.CalledProcessError as e:
         # Print the error and raise a more meaningful exception
-        print(f"Error occurred while installing dependencies: {e}")
+        print(f"[ICESEE] Error occurred while installing dependencies: {e}")
         raise RuntimeError("Failed to install dependencies from requirements.txt. Please check the file and try again.")
 
 # ==== saves arrays to h5 file
@@ -73,21 +73,21 @@ def save_arrays_to_h5(filter_type=None, model=None, parallel_flag=None, commandl
         # Create the results folder if it doesn't exist
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
-            print("Creating results folder")
+            print("[ICESEE] Creating results folder")
 
         # Remove the existing file, if any
         if os.path.exists(output_file):
             os.remove(output_file)
-            print(f"Existing file {output_file} removed.")
+            print(f"[ICESEE] Existing file {output_file} removed.")
 
-        print(f"Writing data to {output_file}")
+        print(f"[ICESEE] Writing data to {output_file}")
         with h5py.File(output_file, "w") as f:
             for name, data in datasets.items():
                 f.create_dataset(name, data=data, compression="gzip")
-                print(f"Dataset '{name}' written to file")
-        print(f"Data successfully written to {output_file}")
+                print(f"[ICESEE] Dataset '{name}' written to file")
+        print(f"[ICESEE] Data successfully written to {output_file}")
     else:
-        print("Non-MPI or non-commandline run. Returning datasets.")
+        print("[ICESEE] Non-MPI or non-commandline run. Returning datasets.")
         return datasets
 
 # Routine extracts datasets from a .h5 file
@@ -108,7 +108,7 @@ def extract_datasets_from_h5(file_path):
         raise FileNotFoundError(f"The file '{file_path}' does not exist.")
 
     datasets = {}
-    print(f"Reading data from {file_path}...")
+    print(f"[ICESEE] Reading data from {file_path}...")
 
     with h5py.File(file_path, "r") as f:
         def extract_group(group, datasets):
@@ -116,13 +116,13 @@ def extract_datasets_from_h5(file_path):
                 item = group[key]
                 if isinstance(item, h5py.Dataset):
                     datasets[key] = np.array(item)
-                    print(f"Dataset '{key}' extracted with shape {item.shape}")
+                    print(f"[ICESEE] Dataset '{key}' extracted with shape {item.shape}")
                 elif isinstance(item, h5py.Group):
                     extract_group(item, datasets)
 
         extract_group(f, datasets)
 
-    print("Data extraction complete.")
+    print("[ICESEE] Data extraction complete.")
     return datasets
 
 # --- best for saving all data to h5 file in parallel environment
@@ -187,7 +187,7 @@ def icesee_get_index(vec, **kwargs):
     # get size of input vector based on user inputs
     len_vec = params["total_state_param_vars"]
 
-    # print(f"dim_list: {kwargs['dim_list']}")
+    # print(f"[ICESEE] dim_list: {kwargs['dim_list']}")
     dim_list_param = np.array(kwargs.get('dim_list', None)) // len_vec  # Get the size of each variable slice
     hdim = vec.shape[0] // len_vec  # Compute the size of each variable in vec_inputs
 

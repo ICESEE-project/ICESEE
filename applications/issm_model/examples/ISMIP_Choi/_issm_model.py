@@ -66,7 +66,7 @@ def initialize_model(**kwargs):
     rank_data_dir, rank_data_file = setup_reference_data(reference_data_dir, reference_data, use_reference_data)
     # if rank_data_dir and rank_data_file:
     #     # Use rank_data_dir and rank_data_file in your code
-    #     print(f"[Rank {MPI.COMM_WORLD.Get_rank()}] Processing {rank_data_file} in {rank_data_dir}")
+    #     print("[ICESEE Rank {MPI.COMM_WORLD.Get_rank()}] Processing {rank_data_file} in {rank_data_dir}")
 
    
 
@@ -74,7 +74,7 @@ def initialize_model(**kwargs):
     issm_cmd = f"run(\'issm_env\'); initialize_model({icesee_rank}, {icesee_size}, {ens_id})"
     # result = run_icesee_with_server(lambda: server.send_command(issm_cmd),server,False,comm)
     if not server.send_command(issm_cmd):
-        print(f"[DEBUG] Error sending command: {issm_cmd}")
+        print("[ICESEE DEBUG] Error sending command: {issm_cmd}")
         server.kill_matlab_processes()
         sys.exit(1)       
     
@@ -92,8 +92,8 @@ def initialize_model(**kwargs):
     #         #     shutil.rmtree(new_data_dir)
     #         shutil.copytree(data_dir, new_data_dir, dirs_exist_ok=True)
     #         shutil.copyfile(kwargs_data, new_kwargs_data)
-    #         # print(f"[DEBUG] Copied {data_dir} to {new_data_dir}")
-    #         # print(f"[DEBUG] Copied {kwargs_data} to {new_kwargs_data}")
+    #         # print("[ICESEE DEBUG] Copied {data_dir} to {new_data_dir}")
+    #         # print("[ICESEE DEBUG] Copied {kwargs_data} to {new_kwargs_data}")
     # comm.Barrier()
 
     # use symbolic linking instead of copying files
@@ -125,7 +125,7 @@ def initialize_model(**kwargs):
     #         # Create symbolic link for parameter file
     #         os.symlink(kwargs_data, new_kwargs_data)
 
-    #     print(f"[Rank 0] Created symbolic links for {Nens - 1} ensemble members.")
+    #     print("[ICESEE Rank 0] Created symbolic links for {Nens - 1} ensemble members.")
 
     # # Synchronize
     # comm.Barrier()
@@ -134,9 +134,9 @@ def initialize_model(**kwargs):
     # fetch model size from output file
     try: 
         output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
-        # print(f"[DEBUG] Attempting to open file: {output_filename}")
+        # print("[ICESEE DEBUG] Attempting to open file: {output_filename}")
         if not os.path.exists(output_filename):
-            print(f"[ERROR] File does not exist: {output_filename}")
+            print("[ICESEE ERROR] File does not exist: {output_filename}")
             return None
         # --get the size of the state vector from the output file
         with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
@@ -144,7 +144,7 @@ def initialize_model(**kwargs):
                 nd = f[key][0].shape[0]
             return nd
     except Exception as e:
-        print(f"[Initialize-model] Error reading the file: {e}")
+        print("[ICESEE Initialize-model] Error reading the file: {e}")
 
         
     
@@ -168,7 +168,7 @@ def ISSM_model(**kwargs):
     rank   = comm.Get_rank()
     nprocs = kwargs.get('model_nprocs')
 
-    # print(f"[DEBUG] ISSM model {rank} of {nprocs}")
+    # print("[ICESEE DEBUG] ISSM model {rank} of {nprocs}")
 
     # --- copy run_model.m to the current directory
     shutil.copyfile(os.path.join(os.path.dirname(__file__), 'run_model.m'), 'run_model.m')
@@ -184,9 +184,9 @@ def ISSM_model(**kwargs):
             f"run('issm_env'); run_model('{filename}', {ens_id}, {rank}, {nprocs}, {k}, {dt}, {tinitial}, {tfinal}); "
         )
         if not server.send_command(cmd):
-            print(f"[DEBUG] Error sending command: {cmd}")
+            print("[ICESEE DEBUG] Error sending command: {cmd}")
     except Exception as e:
-        print(f"[DEBUG] Error sending command: {e}")
+        print("[ICESEE DEBUG] Error sending command: {e}")
         server.shutdown()
         server.reset_terminal()
         sys.exit(1)
@@ -252,7 +252,7 @@ def run_model(ensemble, **kwargs):
         # Read output from HDF5 file to be accessed by ICESEE on the Python side
         output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
         if not os.path.exists(output_filename):
-            print(f"[run_model Error] File does not exist: {output_filename}")
+            print("[ICESEE run_model Error] File does not exist: {output_filename}")
             return None
 
         updated_state = {}
@@ -261,7 +261,7 @@ def run_model(ensemble, **kwargs):
                 updated_state[key] = f[key][0]
 
     except Exception as e:
-        print(f"[run_model] Error running the model: {e}")
+        print("[ICESEE run_model] Error running the model: {e}")
         updated_state = None
 
     finally:

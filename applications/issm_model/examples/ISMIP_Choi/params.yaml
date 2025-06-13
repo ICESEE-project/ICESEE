@@ -7,7 +7,7 @@ physical-parameters:
 
 modeling-parameters:
   # Model parameters
-  num_years: 2          # Number of years to run the model (30-year assimilation period from paper)
+  num_years: 20          # Number of years to run the model (30-year assimilation period from paper)
   tinitial: 0.0           # Initial time
   timesteps_per_year: 0.1 # Number of timesteps per year (monthly for stability in SSA)
 
@@ -17,7 +17,7 @@ modeling-parameters:
   hpcmode: False          # True - High-performance computing mode, False - local machine
   use_reference_data: True  # Use reference data for transient steady state
   reference_data_dir: "data" # Directory for reference data
-  reference_data: "Transient_steadystate2.mat" # Reference data for transient steady state: only used if use_reference_data is True
+  reference_data: "Transient_steadystate5.mat" # Reference data for transient steady state: only used if use_reference_data is True
   steps: 6                 # Increased steps for finer time integration
   verbose: True              # Enable verbosity for debugging
 

@@ -55,7 +55,7 @@ from config_loader import load_yaml_to_dict, get_section
 # Check if running in Jupyter notebook (for visualization)
 flag_jupyter = False
 if 'ipykernel' in sys.modules:
-    print("Running in Jupyter - disabling command line arguments")
+    print("[ICESEE] Running in Jupyter - disabling command line arguments")
     # leave entire routine
     flag_jupyter = True
 
@@ -210,6 +210,7 @@ if not flag_jupyter:
         'generate_synthetic_obs': enkf_params.get("generate_synthetic_obs", True),
         'generate_true_state': enkf_params.get("generate_true_state", True),
         'generate_nurged_state': enkf_params.get("generate_nurged_state", True),
+        'use_ensemble_pertubations': enkf_params.get("use_ensemble_pertubations", True),
     }
 
 
