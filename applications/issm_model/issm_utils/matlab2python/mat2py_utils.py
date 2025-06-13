@@ -130,13 +130,13 @@ class _MatlabServer:
             try:
                 stream_name, line = self.output_queue.get(timeout=0.1)
                 if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-                    print(f"[ICESEE::MATLAB] {stream_name}: {line}")
+                    print(f"[ICESEE ⇆ ISSM] {stream_name}: {line}")
                 else:
                     from mpi4py import MPI
                     comm = MPI.COMM_WORLD
                     rank = comm.Get_rank()
                     if (self.comm is None or comm.Get_rank() == 0):
-                        print(f"[ICESEE::MATLAB] {stream_name}: {line}")
+                        print(f"[ICESEE ⇆ ISSM] {stream_name}: {line}")
             except queue.Empty:
                 continue  # No output available, keep checking
 
@@ -392,9 +392,9 @@ class _MatlabServer:
                 stdout, stderr = self.process.communicate(timeout=5)
                 if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
                     if stdout:
-                        print("[ICESEE::MATLAB]", stdout.decode('utf-8', errors='ignore'))
+                        print("[ICESEE ⇆ ISSM]", stdout.decode('utf-8', errors='ignore'))
                     if stderr:
-                        print("[ICESEE::MATLAB]", stderr.decode('utf-8', errors='ignore'))
+                        print("[ICESEE ⇆ ISSM]", stderr.decode('utf-8', errors='ignore'))
                     print("[ICESEE::Launcher] MATLAB server shut down successfully.")
             except subprocess.TimeoutExpired:
                 if self.comm is None or self.comm.Get_rank() == 0:
@@ -503,11 +503,11 @@ def subprocess_cmd_run(issm_cmd, nprocs: int, verbose: bool = True):
             stdout_lines = stdout.splitlines()
             trimmed_stdout = "\n".join(stdout_lines[9:])
             print(f"\n[ICESEE] ➤ Running ISSM with {nprocs} processors")
-            print("------ ICESEE::MATLAB ------")
+            print("------ ICESEE ⇆ ISSM ------")
             print(trimmed_stdout.strip())
 
             if stderr.strip():
-                print("------ ICESEE::MATLAB ------")
+                print("------ ICESEE ⇆ ISSM ------")
                 print(stderr.strip())
 
         if process.returncode != 0:
@@ -544,11 +544,11 @@ def subprocess_cmd_run(issm_cmd, nprocs: int, verbose: bool = True):
 #             stdout_lines = stdout.splitlines()
 #             trimmed_stdout = "\n".join(stdout_lines[9:])  # Skip banner
 #             print(f"\n[ICESEE] ➤ Running ISSM with {nprocs} processors")
-#             print("------ ICESEE::MATLAB ------")
+#             print("------ ICESEE ⇆ ISSM ------")
 #             print(trimmed_stdout.strip())
 
 #             if stderr.strip():  # Only print stderr if there's content
-#                 print("------ ICESEE::MATLAB ------")
+#                 print("------ ICESEE ⇆ ISSM ------")
 #                 print(stderr.strip())
 
 #         if process.returncode != 0:

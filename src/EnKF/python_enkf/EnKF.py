@@ -14,9 +14,11 @@ import numpy as np
 import scipy
 from scipy.stats import multivariate_normal
 
-from _utility_imports import *
-src_dir = os.path.join(project_root, 'src', 'parallelization')
-sys.path.insert(0, src_dir)
+# from _utility_imports import *
+# src_dir = os.path.join(project_root, 'src', 'parallelization')
+# sys.path.insert(0, src_dir)
+from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
+
 
 # Move `worker` to global scope
 def worker(args):

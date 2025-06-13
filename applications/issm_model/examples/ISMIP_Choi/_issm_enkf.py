@@ -130,14 +130,24 @@ def generate_nurged_state(**kwargs):
         ISSM_model(**kwargs)
         # -- fetch the nurged state vector
         nurged_filename = f'{icesee_path}/{data_path}/ensemble_nurged_state_{ens_id}.h5'
+
+        # -- friction
+        sill_friction = 90000
+        range_friction = 5000
+        mean_friction  = 2500
+
+        # --bed
+        sill_bed = 4000
+        range_bed = 50000
+        nugget_bed = 200
         try:
             with h5py.File(nurged_filename, 'r', driver='mpio', comm=comm) as f:
                 # -- fetch state variables
                 for k in range(1, kwargs.get('nt') + 1):
                     key = f'Thickness_{k}'
                     statevec_nurged[indx_map['Thickness'], k-1] = f[key][0]
-                    statevec_nurged[indx_map['bed'], k-1] = f['bed'][0]
-                    statevec_nurged[indx_map['coefficient'], k-1] = f['coefficient'][0]
+                    statevec_nurged[indx_map['bed'], k-1] = f['bed'][0]*np.sqrt(sill_bed + range_bed * np.random.rand()) + nugget_bed
+                    statevec_nurged[indx_map['coefficient'], k-1] = f['coefficient'][0]*np.sqrt(sill_friction + range_friction * np.random.rand()) + mean_friction
 
         except Exception as e:
             print(f"[ICESEE Generate-Nurged-State: read output file] Error reading the file: {e}")

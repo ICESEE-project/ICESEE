@@ -6,35 +6,29 @@
 # ==============================================================================
     
 # --- Imports ---
-from _utility_imports import *
-from tqdm import tqdm 
-import h5py
-from scipy.sparse import csr_matrix
-from scipy.sparse import block_diag
-from scipy.stats import multivariate_normal
-from scipy.spatial import distance_matrix
-import bigmpi4py as BM # BigMPI for large data transfer and communication
+import os
+import sys
 import gc # garbage collector to free up memory
 import copy
 import re
 import time
-# import numexpr as ne # for fast numerical computations
+import h5py
+import numpy as np
+from tqdm import tqdm 
+import bigmpi4py as BM # BigMPI for large data transfer and communication
+from scipy.sparse import csr_matrix
+from scipy.sparse import block_diag
+from scipy.stats import multivariate_normal
+from scipy.spatial import distance_matrix
 
-
-# --- Add required paths ---
-src_dir             = os.path.join(project_root, 'src')               # source files directory
-applications_dir    = os.path.join(project_root, 'applications')      # applications directory
-parallelization_dir = os.path.join(project_root, 'parallelization')   # parallelization directory
-sys.path.insert(0, src_dir)                  # add the source directory to the path
-sys.path.insert(0, applications_dir)         # add the applications directory to the path
-sys.path.insert(0, parallelization_dir)      # add the parallelization directory to the path
-
-# class instance of the observation operator and its Jacobian
-from utils import *                                                # utility functions for the model
-from EnKF.python_enkf.EnKF import EnsembleKalmanFilter as EnKF     # Ensemble Kalman Filter
-from supported_models import SupportedModels                       # supported models for data assimilation routine
-from localization_func import localization                         # localization function for EnKF
-from tools import icesee_get_index, display_timing
+# --- ICESEE utility imports ---
+from ICESEE.src.utils import tools, utils                                     # utility functions for the model 
+from ICESEE.src.utils.utils import UtilsFunctions
+from ICESEE.src.EnKF.python_enkf.EnKF import EnsembleKalmanFilter as EnKF     # Ensemble Kalman Filter
+from ICESEE.applications.supported_models import SupportedModels              # supported models for data assimilation routine
+from ICESEE.src.run_model_da.localization_func import localization            # localization function for EnKF
+from ICESEE.src.utils.tools import icesee_get_index, display_timing, \
+                                save_all_data
 
 # ---- Run model with EnKF ----
 def gaspari_cohn(r):
@@ -826,6 +820,13 @@ def icesee_model_data_assimilation(**model_kwargs):
                     # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=True)
                     noise = generate_enkf_field(None,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                     ensemble_vec[:,ens] += noise
+                    # for ii, sig in enumerate(params["sig_Q"]):
+                    #     if ii <=params["num_state_vars"]:
+                    #         start_idx = ii * hdim
+                    #         end_idx = start_idx + hdim
+                    #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
+
+
                     # -----------------------------
                     # full_block_size = hdim * params["total_state_param_vars"]
                     # Q_err = np.zeros((full_block_size,full_block_size))
@@ -937,6 +938,10 @@ def icesee_model_data_assimilation(**model_kwargs):
                             N_size = params["total_state_param_vars"] * hdim
                             noise = generate_enkf_field(None,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                             initial_data[key] += noise
+                            # for ii, sig in enumerate(params["sig_Q"]):
+                            #     start_idx = ii *hdim
+                            #     end_idx = start_idx + hdim
+                            #     initial_data[key][start_idx:end_idx] += noise[start_idx:end_idx]*sig
                         
                     # stack all variables together into a single array
                     stacked = np.hstack([initial_data[key] for key in initialilaized_state.keys()])
@@ -1068,6 +1073,12 @@ def icesee_model_data_assimilation(**model_kwargs):
 
                     N_size = params["total_state_param_vars"] * hdim
                     noise = generate_enkf_field(None,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+
+                    # for ii, sig in enumerate(params["sig_Q"]):
+                    #     start_idx = ii *hdim
+                    #     end_idx = start_idx + hdim
+                    #     ensemble_vec[start_idx:end_idx,ens] += noise[start_idx:end_idx]*sig
+
                     ensemble_vec[:,ens] += noise
 
                 shape_ens = np.array(ensemble_vec.shape,dtype=np.int32)
@@ -1187,7 +1198,6 @@ def icesee_model_data_assimilation(**model_kwargs):
     # make sure  0=<alpha<1
     if alpha <= 0 or alpha > 1:
         alpha = 0.5
-
 
     n = model_kwargs.get("nt",params["nt"])
     # rho = np.sqrt((1-alpha**2)/(dt*(n - 2*alpha - n*alpha**2 + 2*alpha**(n+1))))
@@ -1962,35 +1972,35 @@ def icesee_model_data_assimilation(**model_kwargs):
     # print("[ICESEE] Saving data ...")
     if params["even_distribution"]:
         save_all_data(
-            enkf_params=enkf_params,
+            enkf_params=model_kwargs['enkf_params'],
             nofilter=True,
-            t=kwargs["t"], b_io=np.array([b_in,b_out]),
+            t=model_kwargs["t"], b_io=np.array([b_in,b_out]),
             Lxy=np.array([Lx,Ly]),nxy=np.array([nx,ny]),
             ensemble_true_state=ensemble_true_state,
             ensemble_nurged_state=ensemble_nurged_state, 
             obs_max_time=np.array([params["obs_max_time"]]),
-            obs_index=kwargs["obs_index"],
+            obs_index=model_kwargs["obs_index"],
             w=hu_obs,
             run_mode= np.array([params["execution_flag"]])
         )
 
         # --- Save final data ---
         save_all_data(
-            enkf_params=enkf_params,
+            enkf_params=model_kwargs['enkf_params'],
             ensemble_vec_full=ensemble_vec_full,
             ensemble_vec_mean=ensemble_vec_mean,
             ensemble_bg=ensemble_bg
         )
     else:
         save_all_data(
-            enkf_params=enkf_params,
+            enkf_params=model_kwargs['enkf_params'],
             nofilter=True,
-            t=kwargs["t"], b_io=np.array([b_in,b_out]),
+            t=model_kwargs["t"], b_io=np.array([b_in,b_out]),
             Lxy=np.array([Lx,Ly]),nxy=np.array([nx,ny]),
             # ensemble_true_state=ensemble_true_state,
             # ensemble_nurged_state=ensemble_nurged_state, 
             obs_max_time=np.array([params["obs_max_time"]]),
-            obs_index=kwargs["obs_index"],
+            obs_index=model_kwargs["obs_index"],
             # w=hu_obs,
             run_mode= np.array([params["execution_flag"]])
         )

@@ -13,7 +13,10 @@ from collections.abc import Iterable
 from scipy.stats import norm
 from scipy.interpolate import interp1d
 from scipy.spatial.distance import cdist
-from tools import icesee_get_index
+
+
+# import utility functions
+from ICESEE.src.utils.tools import icesee_get_index
 
 
 # --- helper functions ---
