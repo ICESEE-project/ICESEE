@@ -294,7 +294,7 @@ class _MatlabServer:
     #         print("[ICESEE::Launcher] Command processed successfully.")
     #     return True
 
-    def send_command(self, command, timeout=3600):
+    def send_command(self, command, timeout=12960000*1000):
         """Send a command to MATLAB and wait for it to be processed.
 
         Writes the command to the command file and waits for MATLAB to process it
@@ -310,7 +310,7 @@ class _MatlabServer:
             bool: True if the command was processed successfully, False if it timed out.
         """
         # Set dynamic verbose interval: at least 60 seconds, or timeout / 20
-        verbose_interval = max(60.0, timeout / 20.0)
+        verbose_interval = max(3600.0, timeout / 1000.0)
 
         if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
             print(f"[ICESEE::Launcher] Sending command: {command}")
@@ -325,11 +325,11 @@ class _MatlabServer:
         
         # Wait for command to be processed (file deleted)
         start_time = time.time()
-        sleep_time = 0.2  # Initial sleep interval
-        min_sleep = 0.1   # Minimum sleep interval to prevent busy-waiting
-        max_sleep = 60.0  # Maximum sleep interval
+        sleep_time = 1.0  # Initial sleep interval
+        min_sleep = 0.5   # Minimum sleep interval to prevent busy-waiting
+        max_sleep = 3600.0  # Maximum sleep interval
         last_verbose_time = start_time  # Track last verbose print
-        warning_threshold = timeout * 0.8  # Warn at 80% of timeout
+        warning_threshold = timeout * 0.5  # Warn at 50% of timeout
         warning_issued = False
         last_loop_start = start_time  # Track start of the current loop iteration
         
