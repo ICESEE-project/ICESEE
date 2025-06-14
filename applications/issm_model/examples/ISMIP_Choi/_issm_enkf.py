@@ -75,19 +75,14 @@ def generate_true_state(**kwargs):
 
     # get the data extracted from the matlab output file
     input_filename = f'{icesee_path}/{data_path}/ensemble_true_state_{ens_id}.h5'
-    try:
-        with h5py.File(input_filename, 'r', driver='mpio', comm=comm) as f:
-            # -- fetch state variables
-            for k in range(1, kwargs.get('nt') + 1):
-                key = f'Thickness_{k}'
-                statevec_true[indx_map['Thickness'], k-1] = f[key][0]
-                statevec_true[indx_map['bed'], k-1] = f['bed'][0]
-                statevec_true[indx_map['coefficient'], k-1] = f['coefficient'][0]
+    with h5py.File(input_filename, 'r', driver='mpio', comm=comm) as f:
+        # -- fetch state variables
+        for k in range(1, kwargs.get('nt') + 1):
+            key = f'Thickness_{k}'
+            statevec_true[indx_map['Thickness'], k-1] = f[key][0]
+            statevec_true[indx_map['bed'], k-1] = f['bed'][0]
+            statevec_true[indx_map['coefficient'], k-1] = f['coefficient'][0]
 
-    except Exception as e:
-        print(f"[ICESEE Generate-True-State: read output file] Error reading the file: {e}")
-        return None
-    
     updated_state = {}
     for key in vec_inputs:
         updated_state[key] = statevec_true[indx_map[key],:]
@@ -123,74 +118,64 @@ def generate_nurged_state(**kwargs):
 
     nd = params.get('nd', 0)
 
+    # --- fetch treu state vector
+    statevec_nurged = kwargs.get('statevec_nurged')
+
+    # -- call the icesee_get_index function to get the index of the state vector
+    vecs, indx_map, dim_per_proc = icesee_get_index(statevec_nurged, **kwargs)
+
+    # -- friction
+    sill_friction = kwargs.get('sill_friction')
+    range_friction = kwargs.get('range_friction')
+    mean_friction  = kwargs.get('mean_friction')
+    nugget_friction = kwargs.get('nugget_friction')
+    friction_model = gs.Gaussian(dim=1, var=sill_friction, len_scale=range_friction, nugget=nugget_friction)
+    friction_srf = gs.SRF(friction_model, mean=mean_friction, seed=kwargs.get('seed', 42))
+    fdim = nd//params.get('total_state_param_vars', 1)
+    x = np.linspace(0, range_friction*2, fdim)
+    friction_field = friction_srf.structured([x])
+
+    # --bed
+    sill_bed = kwargs.get('sill_bed')
+    range_bed = kwargs.get('range_bed')
+    nugget_bed = kwargs.get('nugget_bed')
+    bed_model = gs.Exponential(dim=1, var=sill_bed-nugget_bed, len_scale=range_bed, nugget=nugget_bed)
+    bed_srf = gs.SRF(bed_model, mean=0, seed=kwargs.get('seed', 42))
+    x = np.linspace(0, range_bed*2, fdim)
+    bed_field = bed_srf.structured([x])
+
+    # write the wrong states to a .h5 file to be read by the ISSM model before nurging
+    friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
+    with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
+        # -- write the friction field
+        f.create_dataset('coefficient', data=friction_field)
+        # -- write the bed field
+        f.create_dataset('bed', data=bed_field)
+
+    # -- call the run_model function to generate the nurged state
     try:
-        # --- fetch treu state vector
-        statevec_nurged = kwargs.get('statevec_nurged')
-
-        # -- call the icesee_get_index function to get the index of the state vector
-        vecs, indx_map, dim_per_proc = icesee_get_index(statevec_nurged, **kwargs)
-
-        # -- friction
-        sill_friction = kwargs.get('sill_friction')
-        range_friction = kwargs.get('range_friction')
-        mean_friction  = kwargs.get('mean_friction')
-        nugget_friction = kwargs.get('nugget_friction')
-        friction_model = gs.Gaussian(dim=1, var=sill_friction, len_scale=range_friction, nugget=nugget_friction)
-        friction_srf = gs.SRF(friction_model, mean=mean_friction, seed=kwargs.get('seed', 42))
-        fdim = nd//params.get('total_state_param_vars', 1)
-        x = np.linspace(0, range_friction*2, fdim)
-        friction_field = friction_srf.structured([x])
-
-        # --bed
-        sill_bed = kwargs.get('sill_bed')
-        range_bed = kwargs.get('range_bed')
-        nugget_bed = kwargs.get('nugget_bed')
-        bed_model = gs.Exponential(dim=1, var=sill_bed-nugget_bed, len_scale=range_bed, nugget=nugget_bed)
-        bed_srf = gs.SRF(bed_model, mean=0, seed=kwargs.get('seed', 42))
-        x = np.linspace(0, range_bed*2, fdim)
-        bed_field = bed_srf.structured([x])
-
-        # write the wrong states to a .h5 file to be read by the ISSM model before nurging
-        friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
-        try:
-            with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
-                # -- write the friction field
-                f.create_dataset('coefficient', data=friction_field)
-                # -- write the bed field
-                f.create_dataset('bed', data=bed_field)
-        except Exception as e:
-            print(f"[ICESEE Generate-Nurged-State: write output file] Error writing the file: {e}")
-            return None
-
-        # -- call the run_model function to generate the nurged state
         kwargs.update({'k': 0})  # Set the initial time step
         ISSM_model(**kwargs)
-        # -- fetch the nurged state vector
-        nurged_filename = f'{icesee_path}/{data_path}/ensemble_nurged_state_{ens_id}.h5'
-        try:
-            with h5py.File(nurged_filename, 'r', driver='mpio', comm=comm) as f:
-                # -- fetch state variables
-                for k in range(1, kwargs.get('nt') + 1):
-                    key = f'Thickness_{k}'
-                    statevec_nurged[indx_map['Thickness'], k-1] = f[key][0]
-                    statevec_nurged[indx_map['bed'], k-1] = f['bed'][0]
-                    statevec_nurged[indx_map['coefficient'], k-1] = f['coefficient'][0]
-
-        except Exception as e:
-            print(f"[ICESEE Generate-Nurged-State: read output file] Error reading the file: {e}")
-            return None
-        
-        #  --- change directory back to the original directory ---
-        os.chdir(icesee_path)
-        
-        # return updated_state
-        return statevec_nurged
-    
     except Exception as e:
-        print(f"[ICESEE DEBUG] Error sending command: {e}")
-        # Ensure directory is changed back even on error
-        os.chdir(icesee_path)
-        return None
+        print(f"[ICESEE Generate-Nurged-State] Error generating nurged state: {e}")
+        server.kill_matlab_processes()
+
+    # -- fetch the nurged state vector
+    nurged_filename = f'{icesee_path}/{data_path}/ensemble_nurged_state_{ens_id}.h5'
+    with h5py.File(nurged_filename, 'r', driver='mpio', comm=comm) as f:
+        # -- fetch state variables
+        for k in range(1, kwargs.get('nt') + 1):
+            key = f'Thickness_{k}'
+            statevec_nurged[indx_map['Thickness'], k-1] = f[key][0]
+            statevec_nurged[indx_map['bed'], k-1] = f['bed'][0]
+            statevec_nurged[indx_map['coefficient'], k-1] = f['coefficient'][0]
+
+    #  --- change directory back to the original directory ---
+    os.chdir(icesee_path)
+    
+    # return updated_state
+    return statevec_nurged
+
         
 #  --- initialize ensemble members ---
 def initialize_ensemble(ens, **kwargs):
@@ -234,16 +219,12 @@ def initialize_ensemble(ens, **kwargs):
         data_dir = f'{issm_examples_dir}/Models/ens_id_0'
         setup_ensemble_intial_data(Nens, data_dir, fname)
 
-    try:
-        #  -- Read data from the ISSM side to be accessed by ICESEE on the python side
-        output_filename = f'{icesee_path}/{data_path}/ensemble_out_{ens_id}.h5'
-        updated_state = {}
-        with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
-            for key in vec_inputs:
-                updated_state[key] = f[key][0]
-    except Exception as e:
-        print(f"[ICESEE Initialize ensemble] Error reading the file: {e}")
-        server.kill_matlab_processes()
+    #  -- Read data from the ISSM side to be accessed by ICESEE on the python side
+    output_filename = f'{icesee_path}/{data_path}/ensemble_out_{ens_id}.h5'
+    updated_state = {}
+    with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+        for key in vec_inputs:
+            updated_state[key] = f[key][0]
 
     os.chdir(icesee_path)
 

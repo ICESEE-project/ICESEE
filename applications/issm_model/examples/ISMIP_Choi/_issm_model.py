@@ -41,35 +41,9 @@ def initialize_model(**kwargs):
     reference_data_dir = kwargs.get('reference_data_dir')
     reference_data     = kwargs.get('reference_data')
 
-    # from mpi4py import MPI
-    # comm = MPI.COMM_WORLD
-    # size = MPI.COMM_WORLD.Get_size()
-    # rank = MPI.COMM_WORLD.Get_rank()
-
-    # if use_reference_data and rank == 0:
-    #     initial_data = os.path.abspath(os.path.join(reference_data_dir, reference_data))
-    #     for _rank in range(size):
-    #         rank_data_dir = f'./Models/ens_id_{_rank}'
-    #         if not os.path.exists(rank_data_dir) or os.path.islink(rank_data_dir):
-    #             if os.path.islink(rank_data_dir):
-    #                 os.unlink(rank_data_dir)  # remove the symlink
-    #             os.makedirs(rank_data_dir, exist_ok=True)
-
-    #         link_path = os.path.join(rank_data_dir, reference_data)
-
-    #         if os.path.exists(link_path) or os.path.islink(link_path):
-    #             os.remove(link_path)
-
-    #         os.symlink(initial_data, link_path)
-    # # Synchronize all ranks to ensure directories are created   
-    # comm.Barrier()  # sync all ranks before continuing
+    # --- prepare the reference data if use_reference_data is True ---
     rank_data_dir, rank_data_file = setup_reference_data(reference_data_dir, reference_data, use_reference_data)
-    # if rank_data_dir and rank_data_file:
-    #     # Use rank_data_dir and rank_data_file in your code
-    #     print("[ICESEE Rank {MPI.COMM_WORLD.Get_rank()}] Processing {rank_data_file} in {rank_data_dir}")
-
-   
-
+    
     #  call the issm initalize_model.m matlab function to initialize the model
     issm_cmd = f"run(\'issm_env\'); initialize_model({icesee_rank}, {icesee_size}, {ens_id})"
     # result = run_icesee_with_server(lambda: server.send_command(issm_cmd),server,False,comm)
@@ -78,75 +52,23 @@ def initialize_model(**kwargs):
         server.kill_matlab_processes()
         sys.exit(1)       
     
-    # if not result:
-    #     sys.exit(1)
+
     # -- we would have broadcasted data to the remaining  ranks but now if nprocs > Nens, we need to duplicate data by copying data from ens_id_0000 to ens_id_0001, ens_id_0002, ... ens_id_000Nens
-    # if icesee_rank == 0:
-    #     data_dir = './Models/ens_id_0'
-    #     kwargs_data = 'model_kwargs_0.mat'
-    #     Nens = kwargs.get('Nens')
-    #     for ens in range(1, Nens):
-    #         new_data_dir = f'./Models/ens_id_{ens}'
-    #         new_kwargs_data = f'model_kwargs_{ens}.mat'
-    #         # if os.path.exists(new_data_dir):
-    #         #     shutil.rmtree(new_data_dir)
-    #         shutil.copytree(data_dir, new_data_dir, dirs_exist_ok=True)
-    #         shutil.copyfile(kwargs_data, new_kwargs_data)
-    #         # print("[ICESEE DEBUG] Copied {data_dir} to {new_data_dir}")
-    #         # print("[ICESEE DEBUG] Copied {kwargs_data} to {new_kwargs_data}")
-    # comm.Barrier()
-
-    # use symbolic linking instead of copying files
-    # Create symbolic links on root process
-    # Root directory and parameter file
-    # data_dir = os.path.abspath('./Models/ens_id_0')
-    # kwargs_data = os.path.abspath('model_kwargs_0.mat')
     Nens = kwargs.get('Nens')
-
-    # if rank == 0:
-    #     for ens in range(1, Nens):
-    #         new_data_dir = os.path.abspath(f'./Models/ens_id_{ens}')
-    #         new_kwargs_data = f'model_kwargs_{ens}.mat'
-
-    #         # Remove existing directory or symlink
-    #         if os.path.exists(new_data_dir) or os.path.islink(new_data_dir):
-    #             if os.path.isdir(new_data_dir) and not os.path.islink(new_data_dir):
-    #                 shutil.rmtree(new_data_dir)
-    #             else:
-    #                 os.remove(new_data_dir)
-
-    #         # Create symbolic link for directory
-    #         os.symlink(data_dir, new_data_dir, target_is_directory=True)
-
-    #         # Remove existing kwargs file or link
-    #         if os.path.exists(new_kwargs_data) or os.path.islink(new_kwargs_data):
-    #             os.remove(new_kwargs_data)
-
-    #         # Create symbolic link for parameter file
-    #         os.symlink(kwargs_data, new_kwargs_data)
-
-    #     print("[ICESEE Rank 0] Created symbolic links for {Nens - 1} ensemble members.")
-
-    # # Synchronize
-    # comm.Barrier()
     ensemble_dir, ensemble_kwargs = setup_ensemble_data(Nens)
 
     # fetch model size from output file
-    try: 
-        output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
-        # print("[ICESEE DEBUG] Attempting to open file: {output_filename}")
-        if not os.path.exists(output_filename):
-            print("[ICESEE ERROR] File does not exist: {output_filename}")
-            return None
-        # --get the size of the state vector from the output file
-        with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
-            for key in vec_inputs:
-                nd = f[key][0].shape[0]
-            return nd
-    except Exception as e:
-        print("[ICESEE Initialize-model] Error reading the file: {e}")
+    output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
+    # print("[ICESEE DEBUG] Attempting to open file: {output_filename}")
+    if not os.path.exists(output_filename):
+        print("[ICESEE ERROR] File does not exist: {output_filename}")
+        return None
+    # --get the size of the state vector from the output file
+    with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+        for key in vec_inputs:
+            nd = f[key][0].shape[0]
+        return nd
 
-        
     
 # ---- ISSM model ----
 def ISSM_model(**kwargs):
@@ -156,19 +78,16 @@ def ISSM_model(**kwargs):
 
     # --- get the number of processors ---
     # nprocs = kwargs.get('nprocs')
-    k = kwargs.get('k')
+    k  = kwargs.get('k')
     dt = kwargs.get('dt')
     tinitial = kwargs.get('tinitial')
     tfinal = kwargs.get('tfinal')
-    # rank = kwargs.get('rank')
     ens_id = kwargs.get('ens_id')
     comm = kwargs.get('comm')
 
     # get rank
     rank   = comm.Get_rank()
     nprocs = kwargs.get('model_nprocs')
-
-    # print("[ICESEE DEBUG] ISSM model {rank} of {nprocs}")
 
     # --- copy run_model.m to the current directory
     shutil.copyfile(os.path.join(os.path.dirname(__file__), 'run_model.m'), 'run_model.m')
@@ -177,7 +96,6 @@ def ISSM_model(**kwargs):
     # --- call the run_model.m function ---
     server   = kwargs.get('server')
     filename = kwargs.get('fname') 
-    # print(f"file name: {filename}")
 
     try:
         cmd = (
@@ -234,64 +152,57 @@ def run_model(ensemble, **kwargs):
     fname = 'enkf_state.mat'
     kwargs.update({'fname': fname})
 
+    # Generate output filename based on ensemble ID
+    input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+
+    # Get ensemble indices
+    vecs, indx_map, _ = icesee_get_index(ensemble, **kwargs)
+
+    #  --- Joint Estimations ---
+    if kwargs["joint_estimation"]:
+        bed = ensemble[indx_map['bed']]
+        coefficient = ensemble[indx_map['coefficient']]
+    else:
+        k = kwargs.get('k', 0) 
+        if k == 0:
+            bed_int = ensemble[indx_map['bed']]
+            coefficient_int = ensemble[indx_map['coefficient']]
+        bed = bed_int
+        coefficient = coefficient_int
+
+    # Write ensemble data to HDF5 file to be accessed by ISSM on the Matlab side
+    with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
+        # for key in vec_inputs:
+        #     f.create_dataset(key, data=ensemble[indx_map[key]])
+        f.create_dataset('Thickness', data=ensemble[indx_map['Thickness']])
+        f.create_dataset('bed', data=bed)
+        f.create_dataset('coefficient', data=coefficient)
+
+    # Run ISSM model to update state and parameters
     try:
-        # Generate output filename based on ensemble ID
-        input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
-
-        # Get ensemble indices
-        vecs, indx_map, _ = icesee_get_index(ensemble, **kwargs)
-
-        #  --- Joint Estimations ---
-        if kwargs["joint_estimation"]:
-            bed = ensemble[indx_map['bed']]
-            coefficient = ensemble[indx_map['coefficient']]
-        else:
-            k = kwargs.get('k', 0) 
-            if k == 0:
-                bed_int = ensemble[indx_map['bed']]
-                coefficient_int = ensemble[indx_map['coefficient']]
-            bed = bed_int
-            coefficient = coefficient_int
-
-        # Write ensemble data to HDF5 file to be accessed by ISSM on the Matlab side
-        with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
-            # for key in vec_inputs:
-            #     f.create_dataset(key, data=ensemble[indx_map[key]])
-            f.create_dataset('Thickness', data=ensemble[indx_map['Thickness']])
-            f.create_dataset('bed', data=bed)
-            f.create_dataset('coefficient', data=coefficient)
-
-        # Run ISSM model to update state and parameters
         ISSM_model(**kwargs)
-
-        # Read output from HDF5 file to be accessed by ICESEE on the Python side
-        output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
-        if not os.path.exists(output_filename):
-            print("[ICESEE run_model Error] File does not exist: {output_filename}")
-            return None
-        
-        updated_state = {}
-        with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
-            updated_state['Thickness'] = f['Thickness'][0]
-            # --Joint Estimations--
-            if kwargs["joint_estimation"]:
-                updated_state['bed'] = f['bed'][0]
-                updated_state['coefficient'] = f['coefficient'][0]
-            else:
-                bed_int = bed
-                coefficient_int = coefficient
-            
-        # updated_state = {}
-        # with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
-        #     for key in vec_inputs:
-        #         updated_state[key] = f[key][0]
-
     except Exception as e:
-        print("[ICESEE run_model] Error running the model: {e}")
-        updated_state = None
+        print(f"[ICESEE run_model Error] Error running the ISSM model: {e}")
+        server.kill_matlab_processes()
+        return None
 
-    finally:
-        # Return to original directory
-        os.chdir(icesee_path)
+    # Read output from HDF5 file to be accessed by ICESEE on the Python side
+    output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+    if not os.path.exists(output_filename):
+        print("[ICESEE run_model Error] File does not exist: {output_filename}")
+        return None
+    
+    updated_state = {}
+    with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+        updated_state['Thickness'] = f['Thickness'][0]
+        # --Joint Estimations--
+        if kwargs["joint_estimation"]:
+            updated_state['bed'] = f['bed'][0]
+            updated_state['coefficient'] = f['coefficient'][0]
+        else:
+            bed_int = bed
+            coefficient_int = coefficient
+            
+    os.chdir(icesee_path)
 
     return updated_state
