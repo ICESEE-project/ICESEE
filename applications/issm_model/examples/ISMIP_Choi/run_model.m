@@ -95,7 +95,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Cluster setup
             if hpcmode
-                md.settings.waitonlock = 0;
+                md.settings.waitonlock = 1;
                 md.cluster = generic('name', oshostname(), 'np', nprocs);
                 md.cluster.codepath = [issmroot , '/bin'];
                 md.cluster.login = 'arobel3';
@@ -243,7 +243,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
         % Cluster setup
         if hpcmode
-            md.settings.waitonlock = 0;
+            md.settings.waitonlock = 1;
             md.cluster = generic('name', oshostname(), 'np', nprocs);
             md.cluster.codepath = [issmroot , '/bin'];
             md.cluster.login = 'arobel3';
@@ -414,7 +414,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Cluster setup
             if hpcmode
-                md.settings.waitonlock = 0;
+                md.settings.waitonlock = 1;
                 md.cluster = generic('name', oshostname(), 'np', nprocs);
                 md.cluster.codepath = [issmroot , '/bin'];
                 md.cluster.login = 'arobel3';
@@ -475,7 +475,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Cluster setup
             if hpcmode
-                md.settings.waitonlock = 0;
+                md.settings.waitonlock = 1;
                 md.cluster = generic('name', oshostname(), 'np', nprocs);
                 md.cluster.codepath = [issmroot , '/bin'];
                 md.cluster.login = 'arobel3';
@@ -578,7 +578,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Cluster setup
             if hpcmode
-                md.settings.waitonlock = 0;
+                md.settings.waitonlock = 1;
                 md.cluster = generic('name', oshostname(), 'np', nprocs);
                 md.cluster.codepath = [issmroot , '/bin'];
                 md.cluster.login = 'arobel3';
