@@ -80,7 +80,7 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
         % plotmodel(md,'data','mesh');
         % Save mesh
         filename = fullfile(folder, 'ISMIP.Mesh_generation.mat');
-        save(filename, 'md');
+        save(filename, 'md', '-v7.3');
     end
 
     % Parameterization (Step 2)
@@ -92,7 +92,7 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
         md = parameterize(md, ParamFile); % Use Mismip2.par
         
         filename = fullfile(folder, 'ISMIP.Parameterization.mat');
-        save(filename, 'md');
+        save(filename, 'md', '-v7.3');
 
         % write_netCDF(md, 'ISMIP_Parameterization.nc');
         % filename = fullfile(folder, 'ISMIP_Parameterization.nc');
@@ -117,7 +117,7 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
         md.masstransport.spcthickness = NaN(md.mesh.numberofvertices, 1);
         
         filename = fullfile(folder, 'ISMIP.BoundaryCondition.mat');
-        save(filename, 'md');
+        save(filename, 'md', '-v7.3');
     end
 
     % Initialize ensemble fields (Step 6, equivalent to notebook's InitEnsemble)

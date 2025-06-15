@@ -130,7 +130,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % save updated model
             filename = fullfile(folder, data_fname);
-            save(filename, 'md');
+            save(filename, 'md', '-v7.3');
 
             % Initialize data cell array
             data = cell(length(md.results.TransientSolution) + 2, 3);
@@ -264,7 +264,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md = solve(md, 'Transient');
             
         filename = fullfile(folder, data_fname);
-        save(filename, 'md');
+        save(filename, 'md', '-v7.3');
 
         % update geometry
         md.geometry.thickness = md.results.TransientSolution(end).Thickness;
@@ -281,7 +281,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
         % save updated model
         filename = fullfile(folder, data_fname);
-        save(filename, 'md');
+        save(filename, 'md', '-v7.3');
 
         % Initialize data cell array
         data = cell(length(md.results.TransientSolution) + 2, 3);
@@ -435,7 +435,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md = solve(md, 'Transient');
 
             filename = fullfile(folder, data_fname);
-            save(filename, 'md');
+            save(filename, 'md', '-v7.3');
 
             % Save ensemble outputs in HDF5
             fields = {'Thickness', 'bed', 'coefficient'};
@@ -497,7 +497,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Save model
             filename = fullfile(folder, data_fname);
-            save(filename, 'md');
+            save(filename, 'md', '-v7.3');
 
             % Save ensemble outputs in HDF5
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
@@ -600,7 +600,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Save model
             filename = fullfile(folder, data_fname);
-            save(filename, 'md');
+            save(filename, 'md', '-v7.3');
 
             % Save ensemble outputs in HDF5
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
