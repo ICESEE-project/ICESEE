@@ -872,8 +872,58 @@ def setup_ensemble_intial_data(Nens, reference_data_dir, reference_data):
             except OSError as e:
                 raise RuntimeError(f"[Rank {rank}] Failed to create hard link {link_path} -> {initial_data}: {e}")
 
+# -- Setup ISSM Example Directory in Parallel Environment --
+def setup_example_directory(issm_dir, example_name):
+    """
+    Set up the ISSM example directory in a parallel environment using an absolute path.
+    Only rank 0 creates the directory if it doesn't exist, and all processes synchronize.
+    Ensures the path is a directory and not a file.
+    
+    Args:
+        issm_dir (str): Base directory for ISSM (relative or absolute).
+        example_name (str): Name of the example (e.g., 'ISMIP_Choi').
+    
+    Returns:
+        str: Absolute path to the example directory.
+    
+    Raises:
+        OSError: If the path exists but is not a directory, or if directory creation fails.
+    """
+    import os
+    from mpi4py import MPI
 
-
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    # Construct the absolute path
+    issm_examples_dir = os.path.abspath(os.path.join(issm_dir, 'examples', example_name))
+    
+    if rank == 0:
+        try:
+            if os.path.exists(issm_examples_dir):
+                if not os.path.isdir(issm_examples_dir):
+                    raise OSError(f"Path exists but is not a directory: {issm_examples_dir}")
+                print(f"Directory already exists: {issm_examples_dir}")
+            else:
+                os.makedirs(issm_examples_dir)
+                print(f"Created directory: {issm_examples_dir}")
+                # make the Models directory
+                os.makedirs(os.path.join(issm_examples_dir, 'Models'), exist_ok=True)
+                
+            # Verify directory is accessible
+            if not os.access(issm_examples_dir, os.R_OK | os.X_OK):
+                raise OSError(f"Directory not accessible: {issm_examples_dir}")
+        except OSError as e:
+            print(f"Error setting up directory {issm_examples_dir}: {e}")
+            raise
+    
+    # Synchronize all processes
+    comm.Barrier()
+    
+    # All processes verify the directory
+    if not os.path.isdir(issm_examples_dir):
+        raise OSError(f"Rank {rank}: Path is not a directory: {issm_examples_dir}")
+    
+    return issm_examples_dir
 
 
            

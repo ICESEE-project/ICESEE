@@ -38,8 +38,10 @@ def initialize_model(**kwargs):
     data_path   = kwargs.get('data_path')
     vec_inputs  = kwargs.get('vec_inputs')
     use_reference_data = kwargs.get('use_reference_data', False)
-    reference_data_dir = kwargs.get('reference_data_dir')
+    _reference_data_dir = kwargs.get('reference_data_dir')
     reference_data     = kwargs.get('reference_data')
+
+    reference_data_dir = f'{icesee_path}/{_reference_data_dir}'  # set the reference data directory from ICESEE side
 
     # --- prepare the reference data if use_reference_data is True ---
     rank_data_dir, rank_data_file = setup_reference_data(reference_data_dir, reference_data, use_reference_data)

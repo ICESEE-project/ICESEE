@@ -21,7 +21,7 @@ from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import 
 
 #  model-specific imports
 from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_model import initialize_model
-from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import add_issm_dir_to_sys_path, MatlabServer
+from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import add_issm_dir_to_sys_path, MatlabServer, setup_example_directory
 from ICESEE.applications.issm_model.issm_utils.matlab2python.server_utils import run_icesee_with_server, setup_server_shutdown
 
 # --- Initialize MPI ---
@@ -37,7 +37,7 @@ issm_dir = os.environ.get('ISSM_DIR')  # make sure ISSM_DIR is set in the enviro
 add_issm_dir_to_sys_path(issm_dir)     # add the issm directory to the system path 
 
 # --- make the examples directory available ---
-issm_examples_dir = os.path.join(issm_dir, 'examples',kwargs.get('example_name'))
+issm_examples_dir = setup_example_directory(issm_dir, kwargs.get('example_name'))
 
 # --- fetch the modeling parameters ---
 model_kwargs = {
