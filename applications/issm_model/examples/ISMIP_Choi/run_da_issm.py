@@ -85,7 +85,8 @@ kwargs.update(model_kwargs)
 shutil.copy(os.path.join(icesee_cwd,'..','..','issm_utils','matlab2python', 'issm_env.m'), issm_examples_dir)
 shutil.copy(os.path.join(icesee_cwd,'..','..','issm_utils','matlab2python', 'matlab_server.m'), issm_examples_dir)
 shutil.copy(os.path.join(icesee_cwd, f'model_kwargs_{ens_id}.mat'), issm_examples_dir)
-
+shutil.copy(os.path.join(icesee_cwd, model_kwargs.get('ParamFile')), issm_examples_dir)
+                         
 # --- change directory to the examples directory ---
 os.chdir(issm_examples_dir)
 
