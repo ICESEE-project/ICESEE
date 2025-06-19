@@ -37,17 +37,17 @@ mkdir -p examples execution
 	•	Place ISSM example data and scripts (e.g., model input files) in the examples/ directory.
 	•	The execution/ directory will be used for model outputs (initially empty, but must exist).
 
-⸻
+---
 
-Directory Structure
+### Directory Structure
 
 The following directories are bound from the host to the container:
 	•	examples/ → /opt/ISSM/execution (container): Contains example data and model scripts.
 	•	execution/ → /opt/execution (container): Stores output and execution results.
 
-⸻
+---
 
-Running the ISSM Script
+### Running the ISSM Script
 
 Execute the run_da_issm.py script using:
 
@@ -57,7 +57,7 @@ srun -n 4 apptainer exec \
   issm_matlab.sif python run_da_issm.py --Nens=2 --model_nprocs=2
 ```
 
-Command Breakdown
+### Command Breakdown
 	•	srun -n 4: Runs with 4 MPI tasks via Slurm.
 	•	apptainer exec: Executes a command inside the container.
 	•	-B examples:/opt/ISSM/execution,execution:/opt/execution: Binds host directories into the container.
@@ -66,9 +66,9 @@ Command Breakdown
 	•	--Nens=2: Number of ensemble members for data assimilation.
 	•	--model_nprocs=2: Number of processors for the model simulation.
 
-⸻
+--
 
-Expected Behavior
+### Expected Behavior
 	•	The script run_da_issm.py will execute within the Apptainer container.
 	•	Input files are read from /opt/ISSM/examples (host: examples/).
 	•	Execution files are written to /opt/execution (host: execution/).
