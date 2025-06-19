@@ -741,11 +741,13 @@ def setup_ensemble_data(Nens, base_data_dir='./Models/ens_id_0', base_kwargs_fil
                     rel_path = os.path.relpath(root, base_data_dir)
                     os.makedirs(os.path.join(ens_dir, rel_path), exist_ok=True)
                     for file_name in files:
-                        os.link(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
+                        # os.link(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
+                        os.symlink(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))  # Use symlink for better compatibility
                 
                 if os.path.exists(kwargs_file):
                     os.remove(kwargs_file)
-                os.link(base_kwargs_file, kwargs_file)
+                # os.link(base_kwargs_file, kwargs_file)
+                os.symlink(base_kwargs_file, kwargs_file)  # Use symlink for better compatibility
     
     comm.Barrier()
     
@@ -806,7 +808,8 @@ def setup_reference_data(reference_data_dir, reference_data, use_reference_data=
             if os.path.exists(link_path):
                 os.remove(link_path)
             try:
-                os.link(initial_data, link_path)
+                # os.link(initial_data, link_path)
+                os.symlink(initial_data, link_path)  # Use symlink for better compatibility
             except OSError as e:
                 raise RuntimeError(f"[Rank {rank}] Failed to create hard link {link_path} -> {initial_data}: {e}")
 
@@ -868,7 +871,8 @@ def setup_ensemble_intial_data(Nens, reference_data_dir, reference_data):
             if os.path.exists(link_path):
                 os.remove(link_path)
             try:
-                os.link(initial_data, link_path)
+                # os.link(initial_data, link_path)
+                os.symlink(initial_data, link_path)  # Use symlink for better compatibility
             except OSError as e:
                 raise RuntimeError(f"[Rank {rank}] Failed to create hard link {link_path} -> {initial_data}: {e}")
 
