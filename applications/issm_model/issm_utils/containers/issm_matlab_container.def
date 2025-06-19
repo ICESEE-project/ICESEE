@@ -11,27 +11,33 @@ From: mathworks/matlab:r2024b
     debconf-set-selections /tmp/tzdata.preseed
     rm /tmp/tzdata.preseed
 
-    # Install fakeroot first
+    # Install dependencies
     apt-get update -y && apt-get install -y --no-install-recommends ca-certificates \
         libtool cmake autotools-dev curl python3 python3-numpy g++ gfortran unzip \
         patch git make libopenmpi-dev openmpi-bin zlib1g-dev libblas-dev liblapack-dev \
-        libgfortran5 python3-pip python3-dev pkg-config libssl-dev fakeroot
+        libgfortran5 python3-pip python3-dev pkg-config libssl-dev fakeroot libhdf5-openmpi-dev
 
     # Create and activate a Python virtual environment
     python3 -m venv /opt/icesee-venv
     . /opt/icesee-venv/bin/activate
 
-    # Upgrade pip to ensure compatibility with package installations
+    # Upgrade pip
     pip install --no-cache-dir --upgrade pip
 
     # Install Python packages for ISSM and additional requested packages
-    pip install --no-cache-dir h5py numpy scipy>=1.15.1 jupyter>=1.1.1 matplotlib>=3.10.0 \
-        pandas>=2.2.3 mpi4py==4.0.1 bigmpi4py==1.2.4 jax==0.5.3 jaxlib==0.5.3 jaxopt==0.8.3 \
+    pip install --no-cache-dir numpy scipy>=1.15.1 jupyter>=1.1.1 matplotlib>=3.10.0 \
+        pandas>=2.2.3 bigmpi4py==1.2.4 jax==0.5.3 jaxlib==0.5.3 jaxopt==0.8.3 \
         jaxtyping==0.3.0 ray Cython dask psutil==6.1.1 tqdm==4.67.1 pyyaml nose
+
+    # Install mpi4py and h5py with MPI support
+    export HDF5_MPI="ON"
+    export CC=/usr/bin/mpicc
+    pip install --no-cache-dir mpi4py==4.0.1
+    pip install --no-cache-dir --no-binary=h5py h5py
 
     # Deactivate the virtual environment
     deactivate
-
+    
     # Download and install ISSM
     cd /opt
     git clone https://github.com/ISSMteam/ISSM.git
