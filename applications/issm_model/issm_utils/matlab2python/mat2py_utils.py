@@ -741,13 +741,22 @@ def setup_ensemble_data(Nens, base_data_dir='./Models/ens_id_0', base_kwargs_fil
                     rel_path = os.path.relpath(root, base_data_dir)
                     os.makedirs(os.path.join(ens_dir, rel_path), exist_ok=True)
                     for file_name in files:
-                        # os.link(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
-                        os.symlink(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))  # Use symlink for better compatibility
+                        try:
+                            os.link(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
+                        except (OSError, PermissionError) as e:
+                            try:
+                                os.symlink(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))  # Use symlink for better compatibility
+                            except (OSError, PermissionError) as e:
+                                try:
+                                    shutil.copy2(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
+                                except Exception as e:
+                                    shutil.copy(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
                 
                 if os.path.exists(kwargs_file):
                     os.remove(kwargs_file)
                 # os.link(base_kwargs_file, kwargs_file)
-                os.symlink(base_kwargs_file, kwargs_file)  # Use symlink for better compatibility
+                # os.symlink(base_kwargs_file, kwargs_file)  # Use symlink for better compatibility
+                shutil.copy2(base_kwargs_file, kwargs_file)
     
     comm.Barrier()
     
@@ -808,10 +817,18 @@ def setup_reference_data(reference_data_dir, reference_data, use_reference_data=
             if os.path.exists(link_path):
                 os.remove(link_path)
             try:
-                # os.link(initial_data, link_path)
-                os.symlink(initial_data, link_path)  # Use symlink for better compatibility
-            except OSError as e:
-                raise RuntimeError(f"[Rank {rank}] Failed to create hard link {link_path} -> {initial_data}: {e}")
+                os.link(initial_data, link_path)
+            except (OSError, PermissionError) as e:
+                try:
+                    os.symlink(initial_data, link_path)  # Use symlink for better compatibility
+                except (OSError, PermissionError) as e:
+                    try:
+                        shutil.copy2(initial_data, link_path)  
+                    except (FileExistsError, OSError) as e:
+                        try:
+                            shutil.copy(initial_data, link_path)  # Fallback to copy if link fails
+                        except OSError as e:
+                            raise RuntimeError(f"[Rank {rank}] Failed to create hard link {link_path} -> {initial_data}: {e}")
 
         # print(f"[Rank 0] Created {size} ensemble directories with hard-linked reference data")
 
@@ -871,10 +888,18 @@ def setup_ensemble_intial_data(Nens, reference_data_dir, reference_data):
             if os.path.exists(link_path):
                 os.remove(link_path)
             try:
-                # os.link(initial_data, link_path)
-                os.symlink(initial_data, link_path)  # Use symlink for better compatibility
-            except OSError as e:
-                raise RuntimeError(f"[Rank {rank}] Failed to create hard link {link_path} -> {initial_data}: {e}")
+                os.link(initial_data, link_path)
+            except (OSError, PermissionError) as e:
+                try:
+                    os.symlink(initial_data, link_path)  # Use symlink for better compatibility
+                except (OSError, PermissionError) as e:
+                    try:
+                        shutil.copy2(initial_data, link_path)
+                    except Exception as e:
+                        try:
+                            shutil.copy(initial_data, link_path)
+                        except OSError as e:
+                            raise RuntimeError(f"[Rank {rank}] Failed to create hard link {link_path} -> {initial_data}: {e}")
 
 # -- Setup ISSM Example Directory in Parallel Environment --
 def setup_example_directory(issm_dir, example_name):
@@ -929,5 +954,3 @@ def setup_example_directory(issm_dir, example_name):
     
     return issm_examples_dir
 
-
-           
