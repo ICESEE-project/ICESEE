@@ -1,0 +1,259 @@
+Bootstrap: docker
+From: spack/ubuntu-jammy:0.23
+Stage: build
+
+%post
+    apt update -y
+    apt install -y \
+        cmake \
+        curl \
+        git \
+        less \
+        make \
+        nano \
+        libucx-dev \
+        vim \
+        wget \
+        ca-certificates \
+        libtool \
+        autotools-dev \
+        python3 \
+        python3-numpy \
+        g++ \
+        gfortran \
+        unzip \
+        patch \
+        python3-pip \
+        python3-dev \
+        pkg-config \
+        libssl-dev \
+        zlib1g-dev \
+        libblas-dev \
+        liblapack-dev \
+        libgfortran5 \
+        fakeroot
+        # And any other libraries you want installed.
+        # * Make sure to include a trailing backslash for all but the last line.
+        # * Make sure the install list in the "Stage: final" section matches this.
+
+# DO NOT CHANGE UNLESS YOU KNOW WHAT YOU ARE DOING >>>
+    # Create the manifest file for the installation in /opt/spack-environment
+    # Can add other packages to the "specs" section, but header (lib___-dev) packages should
+    # be installed using the OS package manager above.
+    mkdir /opt/spack-environment && cd /opt/spack-environment
+    cat << EOF > spack.yaml
+spack:
+  specs:
+  - openmpi fabrics=ucx +pmi +legacylaunchers
+  - libfabric fabrics=sockets,ucx,mlx
+  - hdf5+hl+mpi ^openmpi
+
+  concretizer:
+    unify: true
+  config:
+    install_tree: /opt/software
+  view: /opt/view
+EOF
+
+    # Install all the required software
+    . /opt/spack/share/spack/setup-env.sh
+    spack external find --exclude perl --exclude openssh --exclude openssl
+    spack -e . concretize
+    spack -e . install
+    spack gc -y
+    spack env activate --sh -d . >> /opt/spack-environment/environment_modifications.sh
+
+    # Strip the binaries to reduce the size of the image
+    find -L /opt/view/* -type f -exec readlink -f '{}' \; | \
+        xargs file -i | \
+        grep 'charset=binary' | \
+        grep 'x-executable\|x-archive\|x-sharedlib' | \
+        awk -F: '{print $1}' | xargs strip
+
+Bootstrap: docker
+From: mathworks/matlab:r2024b 
+Stage: final
+
+%files from build
+    /opt/spack-environment /opt
+    /opt/software /opt
+    /opt/._view /opt
+    /opt/view /opt
+    /opt/spack-environment/environment_modifications.sh /opt/spack-environment/environment_modifications.sh
+
+%post
+    apt update -y 
+    apt install -y \
+        cmake \
+        curl \
+        git \
+        less \
+        make \
+        nano \
+        libucx-dev \
+        vim \
+        wget \
+        ca-certificates \
+        libtool \
+        autotools-dev \
+        python3 \
+        python3-numpy \
+        g++ \
+        gfortran \
+        unzip \
+        patch \
+        python3-pip \
+        python3-dev \
+        pkg-config \
+        libssl-dev \
+        zlib1g-dev \
+        libblas-dev \
+        liblapack-dev \
+        libgfortran5 \
+        fakeroot
+        # And any other libraries you want installed.
+        # * Make sure to include a trailing backslahs for all but the last line.
+        # * Make sure the install list in the "Stage: final" section matches this.
+
+    # Activate Spack to use the MPI packages during your program installation; do not remove!
+    . /opt/spack-environment/environment_modifications.sh
+
+    # Set non-interactive frontend for debconf
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Preconfigure tzdata to avoid interactive prompts
+    echo "tzdata tzdata/Areas select America" > /tmp/tzdata.preseed
+    echo "tzdata tzdata/Zones/America select New_York" >> /tmp/tzdata.preseed
+    debconf-set-selections /tmp/tzdata.preseed
+    rm /tmp/tzdata.preseed
+
+    # Download and install ISSM
+    cd /opt
+    git clone https://github.com/ISSMteam/ISSM.git
+
+    # Configure ISSM environment
+    export ISSM_DIR=/opt/ISSM
+    . $ISSM_DIR/etc/environment.sh
+
+    echo "export ISSM_DIR=/opt/ISSM" >> /etc/profile
+    echo "export PATH=\$ISSM_DIR/bin:\$PATH" >> /etc/profile
+    echo ". \$ISSM_DIR/etc/environment.sh" >> /etc/profile
+    
+    # Install ISSM dependencies
+    cd $ISSM_DIR/externalpackages/autotools
+    ./install-linux.sh
+
+    cd $ISSM_DIR/externalpackages/cmake
+    ./install.sh 
+
+    cd $ISSM_DIR/externalpackages/petsc
+    ./install-3.22-linux.sh
+
+    cd $ISSM_DIR/externalpackages/triangle
+    ./install-linux.sh
+
+    cd $ISSM_DIR/externalpackages/m1qn3
+    ./install-linux.sh
+
+    # After installation of each package one should . the ISSM env
+    . $ISSM_DIR/etc/environment.sh 
+
+    # ISSM compilation
+    cd $ISSM_DIR
+    autoreconf -ivf 
+
+    # create configure.sh file in $ISSM_DIR
+    cat << EOF > $ISSM_DIR/configure.sh 
+#!/bin/sh
+
+./configure \
+   --prefix=${ISSM_DIR} \
+   --with-numthreads=2 \
+   --with-matlab-dir="/opt/matlab/R2024b" \
+   --with-fortran-lib="-L/usr/lib/x86_64-linux-gnu -lgfortran" \
+   --with-mpi-include="${ISSM_DIR}/externalpackages/petsc/install/include" \
+   --with-mpi-libflags="-L${ISSM_DIR}/externalpackages/petsc/install/lib -lmpi -lmpicxx -lmpifort" \
+   --with-metis-dir="${ISSM_DIR}/externalpackages/petsc/install" \
+   --with-parmetis-dir="${ISSM_DIR}/externalpackages/petsc/install" \
+   --with-blas-lapack-dir="${ISSM_DIR}/externalpackages/petsc/install" \
+   --with-scalapack-dir="${ISSM_DIR}/externalpackages/petsc/install" \
+   --with-mumps-dir="${ISSM_DIR}/externalpackages/petsc/install" \
+   --with-petsc-dir="${ISSM_DIR}/externalpackages/petsc/install" \
+   --with-triangle-dir="${ISSM_DIR}/externalpackages/triangle/install" \
+   --with-m1qn3-dir="${ISSM_DIR}/externalpackages/m1qn3/install"
+EOF
+
+    # give the configure.sh script executable previllages
+    chmod +x configure.sh 
+
+    # run the script to configure ISSM
+    ./configure.sh
+
+    # Build and install ISSM
+    cd $ISSM_DIR 
+    make && make install 
+
+    # install ICESEE and its dependencies
+    git clone https://github.com/ICESEE-project/ICESEE.git /opt/ICESEE
+
+    # Create and activate a Python virtual environment
+    python3 -m venv /opt/icesee-venv
+    . /opt/icesee-venv/bin/activate
+
+    # Upgrade pip
+    pip install --no-cache-dir --upgrade pip
+
+    # Install Python packages for ISSM and additional requested packages
+    pip install --no-cache-dir numpy scipy>=1.15.1 jupyter>=1.1.1 matplotlib>=3.10.0 \
+        pandas>=2.2.3 bigmpi4py==1.2.4 jax==0.5.3 jaxlib==0.5.3 jaxopt==0.8.3 \
+        jaxtyping==0.3.0 ray Cython dask psutil==6.1.1 tqdm==4.67.1 pyyaml nose gstools
+
+    # Install mpi4py and h5py with MPI support using Spack's HDF5 and MPI
+    export HDF5_DIR=/opt/view
+    export HDF5_MPI="ON"
+    export CC=/opt/view/bin/mpicc
+    export CXX=/opt/view/bin/mpicxx
+    export FC=/opt/view/bin/mpifort
+    pip install --no-cache-dir mpi4py==4.0.1
+    pip install --no-cache-dir --no-binary=h5py h5py
+
+    # Deactivate the virtual environment
+    deactivate
+
+    # Clean up to reduce image size
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+    # rm -rf /opt/matlab/R2024b/connector
+
+    # This makes sure Spack packages are available to use at run time; do not remove!
+    cat /opt/spack-environment/environment_modifications.sh >> $APPTAINER_ENVIRONMENT
+%environment
+    # . /etc/bashrc
+    # Activate the Python virtual environment
+    . /opt/icesee-venv/bin/activate
+    # Set MATLAB license server
+    export MLM_LICENSE_FILE=1711@matlablic.ecs.gatech.edu
+    # Add MATLAB and ISSM to PATH
+    export ISSM_DIR=/opt/ISSM
+    export PATH=/opt/matlab/R2024b/bin:$ISSM_DIR/bin:$PATH
+    . $ISSM_DIR/etc/environment.sh
+
+    # Set ICESEE environment variables
+    export ICESEE=/opt/ICESEE
+    export PYTHONPATH=/opt:$PYTHONPATH
+
+%runscript
+    # Allow flexible execution: run MATLAB script or interactive mode
+    if [ -n "$1" ]; then
+        exec /opt/matlab/R2024b/bin/matlab -nodesktop -nosplash -r "addpath ${ISSM_DIR}/bin ${ISSM_DIR}/lib; run('$1')"
+    else
+        exec /opt/matlab/R2024b/bin/matlab -nodesktop -nosplash -r "addpath ${ISSM_DIR}/bin ${ISSM_DIR}/lib"
+    fi
+
+    # Activate the Python virtual environment
+    . /opt/icesee-venv/bin/activate
+
+%labels
+    Author Brian Kyanjo
+    Version 1.2
+    Description MATLAB Apptainer image with ISSM and ICESEE for cluster use, optimized for minimal size
