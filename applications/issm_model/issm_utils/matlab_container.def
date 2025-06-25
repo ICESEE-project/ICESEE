@@ -1,0 +1,71 @@
+Bootstrap: docker
+From: mathworks/matlab:r2024b
+
+%post
+    # Set non-interactive frontend for debconf
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Preconfigure tzdata to avoid interactive prompts
+    echo "tzdata tzdata/Areas select America" > /tmp/tzdata.preseed
+    echo "tzdata tzdata/Zones/America select New_York" >> /tmp/tzdata.preseed
+    debconf-set-selections /tmp/tzdata.preseed
+    rm /tmp/tzdata.preseed
+
+    # Install minimal dependencies
+    apt-get update -y
+    apt-get install -y --no-install-recommends wget python3-dev python3-pip python3-tk \
+        python3-venv python3-requests
+
+    # Create a script to set up temporary and cache directories
+    cat <<EOF > /usr/local/bin/set_tmp_cache_dir.sh
+#!/bin/sh
+# Script to configure temporary and cache directories for Apptainer 
+
+# Define directories for temporary files and caches
+APPTAINER_TMPDIR="container_cache/apptainer_tmp"
+APPTAINER_CACHEDIR="container_cache/apptainer_cache"
+
+# Ensure directories exist or clean them
+for dir in "\$APPTAINER_TMPDIR" "\$APPTAINER_CACHEDIR" ; do
+    if [ ! -d "\$dir" ]; then
+        mkdir -p "\$dir"
+    else
+        rm -rf "\$dir"/*
+    fi
+done
+
+# Export environment variables
+export APPTAINER_TMPDIR="\$APPTAINER_TMPDIR"
+export APPTAINER_CACHEDIR="\$APPTAINER_CACHEDIR"
+EOF
+
+    # Make the script executable
+    chmod +x /usr/local/bin/set_tmp_cache_dir.sh
+
+    # Optionally source the script for default execution in container sessions
+    echo ". /usr/local/bin/set_tmp_cache_dir.sh" >> /etc/profile
+
+    # Clean up to reduce image size
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+    # Remove MATLAB Connector to reduce overhead
+    rm -rf /opt/matlab/connector
+
+%environment
+    # Set MATLAB license server (replace with actual server at runtime if needed)
+    export MLM_LICENSE_FILE=1711@matlablic.ecs.gatech.edu
+    # Add MATLAB to PATH
+    export PATH=/opt/matlab/bin:$PATH
+
+%runscript
+    # Allow flexible execution: run MATLAB script or interactive mode
+    if [ -n "$1" ]; then
+        exec /opt/matlab/bin/matlab -nodisplay -r "run('$1')"
+    else
+        exec /opt/matlab/bin/matlab -nodisplay
+    fi
+
+%labels
+    Author Brian Kyanjo
+    Version 1.1
+    Description MATLAB Apptainer image for cluster use, optimized for minimal size

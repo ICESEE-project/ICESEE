@@ -21,7 +21,7 @@ from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import 
 
 #  model-specific imports
 from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_model import initialize_model
-from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import add_issm_dir_to_sys_path, MatlabServer
+from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import add_issm_dir_to_sys_path, MatlabServer, setup_example_directory
 from ICESEE.applications.issm_model.issm_utils.matlab2python.server_utils import run_icesee_with_server, setup_server_shutdown
 
 # --- Initialize MPI ---
@@ -37,7 +37,7 @@ issm_dir = os.environ.get('ISSM_DIR')  # make sure ISSM_DIR is set in the enviro
 add_issm_dir_to_sys_path(issm_dir)     # add the issm directory to the system path 
 
 # --- make the examples directory available ---
-issm_examples_dir = os.path.join(issm_dir, 'examples',kwargs.get('example_name'))
+issm_examples_dir = setup_example_directory(issm_dir, kwargs.get('example_name'))
 
 # --- fetch the modeling parameters ---
 model_kwargs = {
@@ -63,6 +63,15 @@ model_kwargs = {
                 'use_reference_data': modeling_params.get('use_reference_data', False),
                 'reference_data_dir': modeling_params.get('reference_data_dir', 'data'),
                 'reference_data' : modeling_params.get('reference_data'),
+                'sill_friction': enkf_params.get('sill_friction', 90000),
+                'range_friction': enkf_params.get('range_friction', 5000),
+                'mean_friction': enkf_params.get('mean_friction', 2500),
+                'nugget_friction': enkf_params.get('nugget_friction', 0),
+                'sill_bed': enkf_params.get('sill_bed', 4000),
+                'range_bed': enkf_params.get('range_bed', 50000),
+                'nugget_bed': enkf_params.get('nugget_bed', 200),      
+                'deepwater_melting_rate': float(modeling_params.get('deepwater_melting_rate', 200)),
+                'smb': float(modeling_params.get('smb', 0.0)),
 }
 
 # observation schedule
@@ -78,7 +87,8 @@ kwargs.update(model_kwargs)
 shutil.copy(os.path.join(icesee_cwd,'..','..','issm_utils','matlab2python', 'issm_env.m'), issm_examples_dir)
 shutil.copy(os.path.join(icesee_cwd,'..','..','issm_utils','matlab2python', 'matlab_server.m'), issm_examples_dir)
 shutil.copy(os.path.join(icesee_cwd, f'model_kwargs_{ens_id}.mat'), issm_examples_dir)
-
+shutil.copy(os.path.join(icesee_cwd, model_kwargs.get('ParamFile')), issm_examples_dir)
+                         
 # --- change directory to the examples directory ---
 os.chdir(issm_examples_dir)
 
@@ -89,7 +99,7 @@ server = MatlabServer(color=ens_id,
                       verbose=params.get('verbose')) 
 
 # Set up global shutdown handler
-setup_server_shutdown(server, icesee_comm, verbose=False)
+# setup_server_shutdown(server, icesee_comm, verbose=False)
 
 # --- load the model parameters ---
 kwargs.update({'server': server, 'Nens': params.get('Nens'), 'icesee_comm': icesee_comm,
@@ -109,7 +119,6 @@ os.chdir(icesee_cwd)
 kwargs.update({'params': params, 
                'server': server})
 
-# icesee_model_data_assimilation(**kwargs)
 try:
     icesee_model_data_assimilation(**kwargs)
     server.shutdown()

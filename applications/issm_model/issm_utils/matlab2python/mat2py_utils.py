@@ -294,7 +294,7 @@ class _MatlabServer:
     #         print("[ICESEE::Launcher] Command processed successfully.")
     #     return True
 
-    def send_command(self, command, timeout=3600):
+    def send_command(self, command, timeout=12960000*1000):
         """Send a command to MATLAB and wait for it to be processed.
 
         Writes the command to the command file and waits for MATLAB to process it
@@ -310,7 +310,7 @@ class _MatlabServer:
             bool: True if the command was processed successfully, False if it timed out.
         """
         # Set dynamic verbose interval: at least 60 seconds, or timeout / 20
-        verbose_interval = max(60.0, timeout / 20.0)
+        verbose_interval = max(3600.0, timeout / 1000.0)
 
         if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
             print(f"[ICESEE::Launcher] Sending command: {command}")
@@ -325,11 +325,11 @@ class _MatlabServer:
         
         # Wait for command to be processed (file deleted)
         start_time = time.time()
-        sleep_time = 0.2  # Initial sleep interval
-        min_sleep = 0.1   # Minimum sleep interval to prevent busy-waiting
-        max_sleep = 60.0  # Maximum sleep interval
+        sleep_time = 1.0  # Initial sleep interval
+        min_sleep = 0.5   # Minimum sleep interval to prevent busy-waiting
+        max_sleep = 3600.0  # Maximum sleep interval
         last_verbose_time = start_time  # Track last verbose print
-        warning_threshold = timeout * 0.8  # Warn at 80% of timeout
+        warning_threshold = timeout * 0.5  # Warn at 50% of timeout
         warning_issued = False
         last_loop_start = start_time  # Track start of the current loop iteration
         
@@ -741,11 +741,22 @@ def setup_ensemble_data(Nens, base_data_dir='./Models/ens_id_0', base_kwargs_fil
                     rel_path = os.path.relpath(root, base_data_dir)
                     os.makedirs(os.path.join(ens_dir, rel_path), exist_ok=True)
                     for file_name in files:
-                        os.link(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
+                        try:
+                            os.link(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
+                        except (OSError, PermissionError) as e:
+                            try:
+                                os.symlink(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))  # Use symlink for better compatibility
+                            except (OSError, PermissionError) as e:
+                                try:
+                                    shutil.copy2(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
+                                except Exception as e:
+                                    shutil.copy(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
                 
                 if os.path.exists(kwargs_file):
                     os.remove(kwargs_file)
-                os.link(base_kwargs_file, kwargs_file)
+                # os.link(base_kwargs_file, kwargs_file)
+                # os.symlink(base_kwargs_file, kwargs_file)  # Use symlink for better compatibility
+                shutil.copy2(base_kwargs_file, kwargs_file)
     
     comm.Barrier()
     
@@ -807,8 +818,17 @@ def setup_reference_data(reference_data_dir, reference_data, use_reference_data=
                 os.remove(link_path)
             try:
                 os.link(initial_data, link_path)
-            except OSError as e:
-                raise RuntimeError(f"[Rank {rank}] Failed to create hard link {link_path} -> {initial_data}: {e}")
+            except (OSError, PermissionError) as e:
+                try:
+                    os.symlink(initial_data, link_path)  # Use symlink for better compatibility
+                except (OSError, PermissionError) as e:
+                    try:
+                        shutil.copy2(initial_data, link_path)  
+                    except (FileExistsError, OSError) as e:
+                        try:
+                            shutil.copy(initial_data, link_path)  # Fallback to copy if link fails
+                        except OSError as e:
+                            raise RuntimeError(f"[Rank {rank}] Failed to create hard link {link_path} -> {initial_data}: {e}")
 
         # print(f"[Rank 0] Created {size} ensemble directories with hard-linked reference data")
 
@@ -869,11 +889,68 @@ def setup_ensemble_intial_data(Nens, reference_data_dir, reference_data):
                 os.remove(link_path)
             try:
                 os.link(initial_data, link_path)
-            except OSError as e:
-                raise RuntimeError(f"[Rank {rank}] Failed to create hard link {link_path} -> {initial_data}: {e}")
+            except (OSError, PermissionError) as e:
+                try:
+                    os.symlink(initial_data, link_path)  # Use symlink for better compatibility
+                except (OSError, PermissionError) as e:
+                    try:
+                        shutil.copy2(initial_data, link_path)
+                    except Exception as e:
+                        try:
+                            shutil.copy(initial_data, link_path)
+                        except OSError as e:
+                            raise RuntimeError(f"[Rank {rank}] Failed to create hard link {link_path} -> {initial_data}: {e}")
 
+# -- Setup ISSM Example Directory in Parallel Environment --
+def setup_example_directory(issm_dir, example_name):
+    """
+    Set up the ISSM example directory in a parallel environment using an absolute path.
+    Only rank 0 creates the directory if it doesn't exist, and all processes synchronize.
+    Ensures the path is a directory and not a file.
+    
+    Args:
+        issm_dir (str): Base directory for ISSM (relative or absolute).
+        example_name (str): Name of the example (e.g., 'ISMIP_Choi').
+    
+    Returns:
+        str: Absolute path to the example directory.
+    
+    Raises:
+        OSError: If the path exists but is not a directory, or if directory creation fails.
+    """
+    import os
+    from mpi4py import MPI
 
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    # Construct the absolute path
+    issm_examples_dir = os.path.abspath(os.path.join(issm_dir, 'examples', example_name))
+    
+    if rank == 0:
+        try:
+            if os.path.exists(issm_examples_dir):
+                if not os.path.isdir(issm_examples_dir):
+                    raise OSError(f"Path exists but is not a directory: {issm_examples_dir}")
+                print(f"Directory already exists: {issm_examples_dir}")
+            else:
+                os.makedirs(issm_examples_dir)
+                print(f"Created directory: {issm_examples_dir}")
+                # make the Models directory
+                os.makedirs(os.path.join(issm_examples_dir, 'Models'), exist_ok=True)
+                
+            # Verify directory is accessible
+            if not os.access(issm_examples_dir, os.R_OK | os.X_OK):
+                raise OSError(f"Directory not accessible: {issm_examples_dir}")
+        except OSError as e:
+            print(f"Error setting up directory {issm_examples_dir}: {e}")
+            raise
+    
+    # Synchronize all processes
+    comm.Barrier()
+    
+    # All processes verify the directory
+    if not os.path.isdir(issm_examples_dir):
+        raise OSError(f"Rank {rank}: Path is not a directory: {issm_examples_dir}")
+    
+    return issm_examples_dir
 
-
-
-           
