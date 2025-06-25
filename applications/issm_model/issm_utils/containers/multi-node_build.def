@@ -1,7 +1,123 @@
 Bootstrap: docker
-From: mathworks/matlab:r2024b
+From: spack/ubuntu-jammy:0.23
+Stage: build
 
 %post
+    apt update -y
+    apt install -y \
+        cmake \
+        curl \
+        git \
+        less \
+        make \
+        nano \
+        libucx-dev \
+        vim \
+        wget \
+        ca-certificates \
+        libtool \
+        autotools-dev \
+        python3 \
+        python3-numpy \
+        g++ \
+        gfortran \
+        unzip \
+        patch \
+        python3-pip \
+        python3-dev \
+        pkg-config \
+        libssl-dev \
+        zlib1g-dev \
+        libblas-dev \
+        liblapack-dev \
+        libgfortran5 \
+        fakeroot
+        # And any other libraries you want installed.
+        # * Make sure to include a trailing backslash for all but the last line.
+        # * Make sure the install list in the "Stage: final" section matches this.
+
+# DO NOT CHANGE UNLESS YOU KNOW WHAT YOU ARE DOING >>>
+    # Create the manifest file for the installation in /opt/spack-environment
+    # Can add other packages to the "specs" section, but header (lib___-dev) packages should
+    # be installed using the OS package manager above.
+    mkdir /opt/spack-environment && cd /opt/spack-environment
+    cat << EOF > spack.yaml
+spack:
+  specs:
+  - openmpi fabrics=ucx +pmi +legacylaunchers
+  - libfabric fabrics=sockets,ucx,mlx
+  - hdf5+hl+mpi ^openmpi
+
+  concretizer:
+    unify: true
+  config:
+    install_tree: /opt/software
+  view: /opt/view
+EOF
+
+    # Install all the required software
+    . /opt/spack/share/spack/setup-env.sh
+    spack external find --exclude perl --exclude openssh --exclude openssl
+    spack -e . concretize
+    spack -e . install
+    spack gc -y
+    spack env activate --sh -d . >> /opt/spack-environment/environment_modifications.sh
+
+    # Strip the binaries to reduce the size of the image
+    find -L /opt/view/* -type f -exec readlink -f '{}' \; | \
+        xargs file -i | \
+        grep 'charset=binary' | \
+        grep 'x-executable\|x-archive\|x-sharedlib' | \
+        awk -F: '{print $1}' | xargs strip
+
+Bootstrap: docker
+From: mathworks/matlab:r2024b 
+Stage: final
+
+%files from build
+    /opt/spack-environment /opt
+    /opt/software /opt
+    /opt/._view /opt
+    /opt/view /opt
+    /opt/spack-environment/environment_modifications.sh /opt/spack-environment/environment_modifications.sh
+
+%post
+    apt update -y 
+    apt install -y \
+        cmake \
+        curl \
+        git \
+        less \
+        make \
+        nano \
+        libucx-dev \
+        vim \
+        wget \
+        ca-certificates \
+        libtool \
+        autotools-dev \
+        python3 \
+        python3-numpy \
+        g++ \
+        gfortran \
+        unzip \
+        patch \
+        python3-pip \
+        python3-dev \
+        pkg-config \
+        libssl-dev \
+        zlib1g-dev \
+        libblas-dev \
+        liblapack-dev \
+        libgfortran5 \
+        fakeroot
+        # And any other libraries you want installed.
+        # * Make sure to include a trailing backslahs for all but the last line.
+        # * Make sure the install list in the "Stage: final" section matches this.
+
+    # Activate Spack to use the MPI packages during your program installation; do not remove!
+    . /opt/spack-environment/environment_modifications.sh
+
     # Set non-interactive frontend for debconf
     export DEBIAN_FRONTEND=noninteractive
 
@@ -10,12 +126,6 @@ From: mathworks/matlab:r2024b
     echo "tzdata tzdata/Zones/America select New_York" >> /tmp/tzdata.preseed
     debconf-set-selections /tmp/tzdata.preseed
     rm /tmp/tzdata.preseed
-
-    # Install dependencies
-    apt-get update -y && apt-get install -y --no-install-recommends ca-certificates \
-        libtool cmake autotools-dev curl python3 python3-numpy g++ gfortran unzip \
-        patch git make libopenmpi-dev openmpi-bin zlib1g-dev libblas-dev liblapack-dev \
-        libgfortran5 python3-pip python3-dev pkg-config libssl-dev fakeroot libhdf5-openmpi-dev
 
     # Download and install ISSM
     cd /opt
@@ -98,44 +208,27 @@ EOF
         pandas>=2.2.3 bigmpi4py==1.2.4 jax==0.5.3 jaxlib==0.5.3 jaxopt==0.8.3 \
         jaxtyping==0.3.0 ray Cython dask psutil==6.1.1 tqdm==4.67.1 pyyaml nose gstools
 
-    # Install mpi4py and h5py with MPI support
+    # Install mpi4py and h5py with MPI support using Spack's HDF5 and MPI
+    export HDF5_DIR=/opt/view
     export HDF5_MPI="ON"
-    export CC=/usr/bin/mpicc
+    export CC=/opt/view/bin/mpicc
+    export CXX=/opt/view/bin/mpicxx
+    export FC=/opt/view/bin/mpifort
     pip install --no-cache-dir mpi4py==4.0.1
     pip install --no-cache-dir --no-binary=h5py h5py
 
     # Deactivate the virtual environment
     deactivate
-    
-    # Create a script to set up temporary and cache directories
-    cat <<EOF > /usr/local/bin/set_tmp_cache_dir.sh
-#!/bin/sh
-# Script to configure temporary and cache directories for Apptainer 
-APPTAINER_TMPDIR="container_cache/apptainer_tmp"
-APPTAINER_CACHEDIR="container_cache/apptainer_cache"
-for dir in "\$APPTAINER_TMPDIR" "\$APPTAINER_CACHEDIR" ; do
-    if [ ! -d "\$dir" ]; then
-        mkdir -p "\$dir"
-    else
-        rm -rf "\$dir"/*
-    fi
-done
-export APPTAINER_TMPDIR="\$APPTAINER_TMPDIR"
-export APPTAINER_CACHEDIR="\$APPTAINER_CACHEDIR"
-EOF
-
-    # Make the script executable
-    chmod +x /usr/local/bin/set_tmp_cache_dir.sh
-
-    # . the script for default execution
-    echo ". /usr/local/bin/set_tmp_cache_dir.sh" >> /etc/profile
 
     # Clean up to reduce image size
     apt-get clean
     rm -rf /var/lib/apt/lists/*
     # rm -rf /opt/matlab/R2024b/connector
 
+    # This makes sure Spack packages are available to use at run time; do not remove!
+    cat /opt/spack-environment/environment_modifications.sh >> $APPTAINER_ENVIRONMENT
 %environment
+    # . /etc/bashrc
     # Activate the Python virtual environment
     . /opt/icesee-venv/bin/activate
     # Set MATLAB license server
