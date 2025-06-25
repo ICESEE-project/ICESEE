@@ -70,6 +70,8 @@ model_kwargs = {
                 'sill_bed': enkf_params.get('sill_bed', 4000),
                 'range_bed': enkf_params.get('range_bed', 50000),
                 'nugget_bed': enkf_params.get('nugget_bed', 200),      
+                'deepwater_melting_rate': float(modeling_params.get('deepwater_melting_rate', 200)),
+                'smb': float(modeling_params.get('smb', 0.0)),
 }
 
 # observation schedule

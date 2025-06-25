@@ -13,6 +13,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
     hpcmode      = logical(kwargs.hpcmode); % HPC mode flag
     devmode      = logical(kwargs.devmode); % Development mode flag
 
+    deepwater_melting_rate = double(kwargs.deepwater_melting_rate);
+    smb = double(kwargs.smb);
+
     reference_data = char(kwargs.reference_data);
 
     % Get the current working directory
@@ -68,11 +71,11 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.masstransport.spcthickness = NaN*ones(md.mesh.numberofvertices,1);
 
 
-            md.smb.mass_balance=-1.5*ones(md.mesh.numberofvertices,1);
+            md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
             md.transient.ismovingfront=0;
             % 
             md.basalforcings=linearbasalforcings();
-            md.basalforcings.deepwater_melting_rate=2000;
+            md.basalforcings.deepwater_melting_rate=deepwater_melting_rate;
             md.basalforcings.groundedice_melting_rate=zeros(md.mesh.numberofvertices,1);
 
             % friction coefficient
@@ -219,11 +222,11 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
        md.masstransport.spcthickness = NaN*ones(md.mesh.numberofvertices,1);
 
 
-       md.smb.mass_balance=-1.5*ones(md.mesh.numberofvertices,1);
+       md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
        md.transient.ismovingfront=0;
        % 
        md.basalforcings=linearbasalforcings();
-       md.basalforcings.deepwater_melting_rate=2000;
+       md.basalforcings.deepwater_melting_rate=deepwater_melting_rate;
        md.basalforcings.groundedice_melting_rate=zeros(md.mesh.numberofvertices,1);
 
        % friction coefficient
@@ -334,10 +337,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.timestepping.time_step  = dt;
             md.timestepping.final_time = tfinal;
 
-            md.smb.mass_balance = -1.5 * ones(md.mesh.numberofvertices, 1); % m/yr
+            md.smb.mass_balance = smb * ones(md.mesh.numberofvertices, 1); % m/yr
             
             md.basalforcings = linearbasalforcings();
-            md.basalforcings.deepwater_melting_rate = 2000; % m/yr
+            md.basalforcings.deepwater_melting_rate = deepwater_melting_rate; % m/yr
             md.basalforcings.groundedice_melting_rate = zeros(md.mesh.numberofvertices, 1);
 
             md.transient.ismovingfront = 0;   
