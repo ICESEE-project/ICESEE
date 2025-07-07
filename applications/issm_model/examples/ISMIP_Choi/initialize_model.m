@@ -157,7 +157,8 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
     if any(steps == 5)
     % if use_reference_data
         reference_data = char(kwargs.reference_data); % Path to reference data
-        folder = sprintf('./Models/ens_id_%d', ens_id);
+        ens_id_init = 0;
+        folder = sprintf('./Models/ens_id_%d',  ens_id_init);
         if ~exist(folder, 'dir')
             mkdir(folder);
         end
