@@ -44,7 +44,7 @@ def initialize_model(**kwargs):
     reference_data_dir = f'{icesee_path}/{_reference_data_dir}'  # set the reference data directory from ICESEE side
 
     # --- prepare the reference data if use_reference_data is True ---
-    rank_data_dir, rank_data_file = setup_reference_data(reference_data_dir, reference_data, use_reference_data)
+    setup_reference_data(reference_data_dir, reference_data, use_reference_data)
     
     #  call the issm initalize_model.m matlab function to initialize the model
     issm_cmd = f"run(\'issm_env\'); initialize_model({icesee_rank}, {icesee_size}, {ens_id})"
@@ -57,7 +57,7 @@ def initialize_model(**kwargs):
 
     # -- we would have broadcasted data to the remaining  ranks but now if nprocs > Nens, we need to duplicate data by copying data from ens_id_0000 to ens_id_0001, ens_id_0002, ... ens_id_000Nens
     Nens = kwargs.get('Nens')
-    ensemble_dir, ensemble_kwargs = setup_ensemble_data(Nens)
+    setup_ensemble_data(Nens)
 
     # fetch model size from output file
     output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
