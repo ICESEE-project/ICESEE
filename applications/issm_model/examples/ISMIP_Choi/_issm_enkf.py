@@ -194,7 +194,9 @@ def initialize_ensemble(ens, **kwargs):
 
     #  --- change directory to the issm directory ---
     os.chdir(issm_examples_dir)
-    ens_id = kwargs.get('ens_id')
+    # ens_id = kwargs.get('ens_id')
+    ens_id =  ens
+    kwargs.update({'ens_id': ens_id})
 
     #  -- control time stepping
     kwargs.update({'k':0}) 
