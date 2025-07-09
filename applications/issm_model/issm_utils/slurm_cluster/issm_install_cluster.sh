@@ -15,6 +15,14 @@ export GCC_LIB_DIR="/usr/local/pace-apps/spack/packages/linux-rhel9-x86_64_v3/gc
 
 # Define installation directory
 export ISSM_DIR="$HOME/ISSM"
+
+# check if ISSM_DIR already exists and if so remove it
+if [ -d "$ISSM_DIR" ]; then
+    echo "Directory $ISSM_DIR already exists. Removing it..."
+    rm -rf "$ISSM_DIR"
+fi
+
+# Create ISSM installation directory
 mkdir -p "$ISSM_DIR"
 
 # Clone ISSM repository
