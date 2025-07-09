@@ -25,7 +25,7 @@ cd "$ISSM_DIR"
 source "$ISSM_DIR/etc/environment.sh"
 
 # Download Slurm cluster configuration for ISSM
-curl -L -o src/m/classes/clusters/generic.m \
+wget -O src/m/classes/clusters/generic.m \
     https://raw.githubusercontent.com/ICESEE-project/ICESEE/refs/heads/main/applications/issm_model/issm_utils/slurm_cluster/generic.m
 
 # Load required modules (adjust module names/versions to match your cluster)
