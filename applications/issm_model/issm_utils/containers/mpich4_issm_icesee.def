@@ -1,0 +1,221 @@
+Bootstrap: docker
+From: mathworks/matlab:r2024b
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Preconfigure tzdata to avoid interactive prompts
+    echo "tzdata tzdata/Areas select America" > /tmp/tzdata.preseed
+    echo "tzdata tzdata/Zones/America select New_York" >> /tmp/tzdata.preseed
+    debconf-set-selections /tmp/tzdata.preseed
+    rm /tmp/tzdata.preseed
+
+    # Install dependencies
+    apt-get update -y && apt-get install -y --no-install-recommends ca-certificates \
+        libtool cmake autotools-dev curl python3 python3-numpy g++ gfortran unzip \
+        patch git make zlib1g-dev libblas-dev liblapack-dev \
+        libgfortran5 python3-pip python3-dev pkg-config libssl-dev libhdf5-openmpi-dev \
+        libhwloc-dev libhwloc15 libibverbs-dev liblapack-dev libnuma-dev \
+        libnuma1 libpmix-dev libpmix2 librdmacm-dev
+
+    # Install PMIx 4.2.6 to match host
+    wget https://github.com/openpmix/openpmix/releases/download/v4.2.6/pmix-4.2.6.tar.gz
+    tar -xzf pmix-4.2.6.tar.gz
+    cd pmix-4.2.6
+    ./configure PYTHON=/usr/bin/python3 --prefix=/opt/pmix/4.2.6
+    make -j$(nproc)
+    make install
+    cd ..
+    rm -rf pmix-4.2.6 pmix-4.2.6.tar.gz
+
+    # Install MPICH with PMIx support
+    export MPICH_VERSION=4.2.3
+    wget https://www.mpich.org/static/downloads/${MPICH_VERSION}/mpich-${MPICH_VERSION}.tar.gz
+    tar -xzf mpich-${MPICH_VERSION}.tar.gz
+    cd mpich-${MPICH_VERSION}
+    ./configure --prefix=/opt/mpich/${MPICH_VERSION} \
+                --with-pmix=/opt/pmix/4.2.6 \
+                --enable-fortran \
+                --enable-shared \
+                --with-device=ch4:ofi \
+                CC=gcc CXX=g++ FC=gfortran
+    make -j$(nproc)
+    make install
+    cd ..
+    rm -rf mpich-${MPICH_VERSION} mpich-${MPICH_VERSION}.tar.gz
+
+    # Update environment variables
+    echo "export PATH=/opt/mpich/${MPICH_VERSION}/bin:\$PATH" >> /etc/environment
+    echo "export LD_LIBRARY_PATH=/opt/mpich/${MPICH_VERSION}/lib:/opt/pmix/4.2.6/lib:\$LD_LIBRARY_PATH" >> /etc/environment
+
+    # Install ISSM
+    export MLM_LICENSE_FILE=1711@matlablic.ecs.gatech.edu
+
+    # Download and install ISSM
+    cd /opt
+    git clone https://github.com/ISSMteam/ISSM.git
+
+    # Configure ISSM environment
+    export ISSM_DIR=/opt/ISSM
+    . $ISSM_DIR/etc/environment.sh
+
+    echo "export ISSM_DIR=/opt/ISSM" >> /etc/profile
+    echo "export PATH=\$ISSM_DIR/bin:\$PATH" >> /etc/profile
+    echo ". \$ISSM_DIR/etc/environment.sh" >> /etc/profile
+    
+    # Install ISSM dependencies
+    cd $ISSM_DIR/externalpackages/autotools
+    ./install-linux.sh
+
+    cd $ISSM_DIR/externalpackages/cmake
+    ./install.sh 
+
+    cd $ISSM_DIR/externalpackages/petsc
+    # Install PETSc 3.22.3 using the installed MPICH
+    mkdir -p $ISSM_DIR/externalpackages/petsc/src
+    git clone -b v3.22.3 https://gitlab.com/petsc/petsc.git $ISSM_DIR/externalpackages/petsc/src
+    cd $ISSM_DIR/externalpackages/petsc/src
+    ./configure \
+        --prefix=$ISSM_DIR/externalpackages/petsc/install \
+        --PETSC_DIR=$ISSM_DIR/externalpackages/petsc/src \
+        --with-mpi-dir=/opt/mpich/4.2.3 \
+        --with-debugging=0 \
+        --with-valgrind=0 \
+        --with-x=0 \
+        --with-ssl=0 \
+        --with-pic=1 \
+        --download-fblaslapack=1 \
+        --download-metis=1 \
+        --download-mumps=1 \
+        --download-parmetis=1 \
+        --download-scalapack=1 \
+        --download-zlib=1
+    make -j$(nproc)
+    make install
+    cd ..
+
+    cd $ISSM_DIR/externalpackages/triangle
+    ./install-linux.sh
+
+    cd $ISSM_DIR/externalpackages/m1qn3
+    ./install-linux.sh
+
+    # Source ISSM environment after each package installation
+    . $ISSM_DIR/etc/environment.sh 
+
+    # ISSM compilation
+    cd $ISSM_DIR
+    autoreconf -ivf 
+
+    # Create configure.sh file in $ISSM_DIR
+    cat <<EOF > $ISSM_DIR/configure.sh
+#!/bin/sh
+./configure \\
+   --prefix=\${ISSM_DIR} \\
+   --with-numthreads=2 \\
+   --with-matlab-dir="/opt/matlab/R2024b" \\
+   --with-fortran-lib="-L/usr/lib/x86_64-linux-gnu -lgfortran" \\
+   --with-mpi-include="/opt/mpich/4.2.3/include" \\
+   --with-mpi-libflags="-L/opt/mpich/4.2.3/lib -lmpi -lmpicxx -lmpifort" \\
+   --with-metis-dir="\${ISSM_DIR}/externalpackages/petsc/install" \\
+   --with-parmetis-dir="\${ISSM_DIR}/externalpackages/petsc/install" \\
+   --with-blas-lapack-dir="\${ISSM_DIR}/externalpackages/petsc/install" \\
+   --with-scalapack-dir="\${ISSM_DIR}/externalpackages/petsc/install" \\
+   --with-mumps-dir="\${ISSM_DIR}/externalpackages/petsc/install" \\
+   --with-petsc-dir="\${ISSM_DIR}/externalpackages/petsc/install" \\
+   --with-triangle-dir="\${ISSM_DIR}/externalpackages/triangle/install" \\
+   --with-m1qn3-dir="\${ISSM_DIR}/externalpackages/m1qn3/install"
+EOF
+
+    # Give the configure.sh script executable privileges
+    chmod +x configure.sh 
+
+    # Run the script to configure ISSM
+    ./configure.sh
+
+    # Build and install ISSM
+    cd $ISSM_DIR 
+    make && make install 
+
+    # Install ICESEE and its dependencies
+    git clone https://github.com/ICESEE-project/ICESEE.git /opt/ICESEE
+
+    # Create and activate a Python virtual environment
+    python3 -m venv /opt/icesee-venv
+    . /opt/icesee-venv/bin/activate
+
+    # Upgrade pip
+    pip install --no-cache-dir --upgrade pip
+
+    # Install Python packages for ISSM and additional requested packages
+    pip install --no-cache-dir numpy scipy>=1.15.1 jupyter>=1.1.1 matplotlib>=3.10.0 \
+        pandas>=2.2.3 bigmpi4py==1.2.4 jax==0.5.3 jaxlib==0.5.3 jaxopt==0.8.3 \
+        jaxtyping==0.3.0 ray Cython dask psutil==6.1.1 tqdm==4.67.1 pyyaml nose gstools
+
+    export HDF5_MPI="ON"
+    export CC=/opt/mpich/4.2.3/bin/mpicc
+    pip install --no-cache-dir mpi4py==4.0.1
+    pip install --no-cache-dir --no-binary=h5py h5py
+
+    # Deactivate the virtual environment
+    deactivate
+
+    # Create a script to set up temporary and cache directories
+    cat <<EOF > /usr/local/bin/set_tmp_cache_dir.sh
+#!/bin/sh
+# Script to configure temporary and cache directories for Apptainer 
+APPTAINER_TMPDIR="container_cache/apptainer_tmp"
+APPTAINER_CACHEDIR="container_cache/apptainer_cache"
+for dir in "\$APPTAINER_TMPDIR" "\$APPTAINER_CACHEDIR" ; do
+    if [ ! -d "\$dir" ]; then
+        mkdir -p "\$dir"
+    else
+        rm -rf "\$dir"/*
+    fi
+done
+export APPTAINER_TMPDIR="\$APPTAINER_TMPDIR"
+export APPTAINER_CACHEDIR="\$APPTAINER_CACHEDIR"
+EOF
+
+    # Make the script executable
+    chmod +x /usr/local/bin/set_tmp_cache_dir.sh
+
+    # Source the script for default execution
+    echo ". /usr/local/bin/set_tmp_cache_dir.sh" >> /etc/profile
+
+    # Clean up to reduce image size
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+
+    # Update environment variables
+    echo "export PATH=/opt/mpich/${MPICH_VERSION}/bin:\$PATH" >> /etc/environment
+    echo "export LD_LIBRARY_PATH=/opt/mpich/${MPICH_VERSION}/lib:/opt/pmix/4.2.6/lib:\$LD_LIBRARY_PATH" >> /etc/environment
+
+%environment
+    . /opt/icesee-venv/bin/activate
+    # Set MATLAB license server
+    export MLM_LICENSE_FILE=1711@matlablic.ecs.gatech.edu
+    # Add MATLAB and ISSM to PATH
+    export ISSM_DIR=/opt/ISSM
+    export PATH=/opt/matlab/R2024b/bin:$ISSM_DIR/bin:$PATH
+    . $ISSM_DIR/etc/environment.sh
+
+    # Set ICESEE environment variables
+    export ICESEE=/opt/ICESEE
+    export PYTHONPATH=/opt:$PYTHONPATH
+
+    export PATH=/opt/mpich/4.2.3/bin:/opt/pmix/4.2.6/bin:$PATH 
+    export LD_LIBRARY_PATH=/opt/mpich/4.2.3/lib:/opt/pmix/4.2.6/lib:$LD_LIBRARY_PATH
+
+%runscript
+    . /opt/icesee-venv/bin/activate
+    if [ -n "$1" ]; then
+        /opt/matlab/R2024b/bin/matlab -nodesktop -nosplash -r "addpath ${ISSM_DIR}/bin ${ISSM_DIR}/lib; run('$1')"
+    else
+        /opt/matlab/R2024b/bin/matlab -nodesktop -nosplash -r "addpath ${ISSM_DIR}/bin ${ISSM_DIR}/lib"
+    fi
+
+%labels
+    Author bkyanjo
+    Version MPICH-4.2.3_PETSc-3.22.3
+    Description Container with MPICH 4.2.3, ISSM, PMIX, and ICESEE

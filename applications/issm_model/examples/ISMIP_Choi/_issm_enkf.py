@@ -13,7 +13,7 @@ import gstools as gs
 # --- import utility functions ---
 from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_model import *
 from ICESEE.config._utility_imports import icesee_get_index
-from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import setup_ensemble_intial_data
+from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import setup_ensemble_intial_data, MatlabServer
 from ICESEE.src.run_model_da.run_models_da import generate_enkf_field, generate_pseudo_random_field_1d
 
 
@@ -194,7 +194,9 @@ def initialize_ensemble(ens, **kwargs):
 
     #  --- change directory to the issm directory ---
     os.chdir(issm_examples_dir)
-    ens_id = kwargs.get('ens_id')
+    # ens_id = kwargs.get('ens_id')
+    ens_id =  ens
+    kwargs.update({'ens_id': ens_id})
 
     #  -- control time stepping
     kwargs.update({'k':0}) 
@@ -207,17 +209,24 @@ def initialize_ensemble(ens, **kwargs):
 
     try:
         # -- call the run_model function to initialize the ensemble members
+        # comm.Barrier()
+        # server.kill_matlab_processes()
+        # server = MatlabServer(color=ens_id,
+        #               Nens = params['Nens'],
+        #               comm = icesee_comm,
+        #               verbose=params.get('verbose')) 
+        # kwargs.update({'server': server})
         ISSM_model(**kwargs)
     except Exception as e:
         print(f"[ICESEE Initialize ensemble]] Error initializing ensemble: {e}")
         server.kill_matlab_processes()
 
     # if nprocs <= Nens then make fname available to all processes
-    Nens = kwargs.get('Nens')
-    size_world = kwargs.get('size_world', 1)
-    if size_world <= Nens:
-        data_dir = f'{issm_examples_dir}/Models/ens_id_0'
-        setup_ensemble_intial_data(Nens, data_dir, fname)
+    # Nens = kwargs.get('Nens')
+    # size_world = kwargs.get('size_world', 1)
+    # if size_world <= Nens:
+    #     data_dir = f'{issm_examples_dir}/Models/ens_id_0'
+    #     setup_ensemble_intial_data(Nens, data_dir, fname)
 
     #  -- Read data from the ISSM side to be accessed by ICESEE on the python side
     output_filename = f'{icesee_path}/{data_path}/ensemble_out_{ens_id}.h5'

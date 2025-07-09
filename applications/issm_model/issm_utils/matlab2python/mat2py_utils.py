@@ -733,24 +733,24 @@ def setup_ensemble_data(Nens, base_data_dir='./Models/ens_id_0', base_kwargs_fil
             kwargs_file = f'model_kwargs_{ens}.mat'
             
             if ens != 0:  # Skip ens_id_0 (base directory)
-                if os.path.exists(ens_dir):
-                    shutil.rmtree(ens_dir)
-                os.makedirs(ens_dir)
+                # if os.path.exists(ens_dir):
+                #     shutil.rmtree(ens_dir)
+                os.makedirs(ens_dir, exist_ok=True)
                 
-                for root, _, files in os.walk(base_data_dir):
-                    rel_path = os.path.relpath(root, base_data_dir)
-                    os.makedirs(os.path.join(ens_dir, rel_path), exist_ok=True)
-                    for file_name in files:
-                        try:
-                            os.link(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
-                        except (OSError, PermissionError) as e:
-                            try:
-                                os.symlink(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))  # Use symlink for better compatibility
-                            except (OSError, PermissionError) as e:
-                                try:
-                                    shutil.copy2(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
-                                except Exception as e:
-                                    shutil.copy(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
+            #     for root, _, files in os.walk(base_data_dir):
+            #         rel_path = os.path.relpath(root, base_data_dir)
+            #         os.makedirs(os.path.join(ens_dir, rel_path), exist_ok=True)
+            #         for file_name in files:
+            #             # try:
+            #             #     os.link(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
+            #             # except (OSError, PermissionError) as e:
+            #             #     try:
+            #             #         os.symlink(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))  # Use symlink for better compatibility
+            #             #     except (OSError, PermissionError) as e:
+            #             try:
+            #                 shutil.copy2(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
+            #             except Exception as e:
+            #                 shutil.copy(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
                 
                 if os.path.exists(kwargs_file):
                     os.remove(kwargs_file)
@@ -769,11 +769,8 @@ def setup_ensemble_data(Nens, base_data_dir='./Models/ens_id_0', base_kwargs_fil
         return ensemble_dir, ensemble_kwargs
     return None, None
 
-
 def setup_reference_data(reference_data_dir, reference_data, use_reference_data=True):
     """
-    Create ensemble directories with hard-linked reference data file for read-only access.
-    
     Parameters:
     - reference_data_dir: Directory containing the reference data file.
     - reference_data: Name of the reference data file.
@@ -784,63 +781,105 @@ def setup_reference_data(reference_data_dir, reference_data, use_reference_data=
     - rank_data_file: Path to the rank's reference data file.
     """
     from mpi4py import MPI
-    import os
-    import shutil
-
     comm = MPI.COMM_WORLD
-    size = comm.Get_size()
     rank = comm.Get_rank()
 
-    initial_data = os.path.abspath(os.path.join(reference_data_dir, reference_data))
-    rank_data_dir = os.path.abspath(f'./Models/ens_id_{rank}')
+    # Resolve symbolic links for paths to avoid SameFileError
+    initial_data = os.path.realpath(os.path.abspath(os.path.join(reference_data_dir, reference_data)))
+    rank_data_dir = os.path.realpath(os.path.abspath(f'./Models/ens_id_{rank}'))
     rank_data_file = os.path.join(rank_data_dir, reference_data)
+    link_path = rank_data_file
 
     if use_reference_data and rank == 0:
         # Verify reference data exists
         if not os.path.isfile(initial_data):
             raise FileNotFoundError(f"[Rank {rank}] Reference data {initial_data} not found")
 
-        # Create directories and hard link the reference file
-        for _rank in range(size):
-            rank_data_dir = os.path.abspath(f'./Models/ens_id_{_rank}')
-            link_path = os.path.join(rank_data_dir, reference_data)
+        # Create destination directory
+        os.makedirs(rank_data_dir, exist_ok=True)
 
-            # Create or clear directory
-            if os.path.exists(rank_data_dir):
-                if os.path.isdir(rank_data_dir):
-                    shutil.rmtree(rank_data_dir)
-                else:
-                    os.remove(rank_data_dir)
-            os.makedirs(rank_data_dir, exist_ok=True)
-
-            # Hard link the reference file
-            if os.path.exists(link_path):
-                os.remove(link_path)
+        # Check if source and destination are the same file
+        if os.path.exists(link_path) and os.path.samefile(initial_data, link_path):
+            print(f"[Rank {rank}] Skipping copy: {initial_data} and {link_path} are the same file.")
+        else:
+            # Use rsync for large files
+            print(f"[Rank {rank}] Copying with rsync: {initial_data} to {link_path}")
             try:
-                os.link(initial_data, link_path)
-            except (OSError, PermissionError) as e:
-                try:
-                    os.symlink(initial_data, link_path)  # Use symlink for better compatibility
-                except (OSError, PermissionError) as e:
-                    try:
-                        shutil.copy2(initial_data, link_path)  
-                    except (FileExistsError, OSError) as e:
-                        try:
-                            shutil.copy(initial_data, link_path)  # Fallback to copy if link fails
-                        except OSError as e:
-                            raise RuntimeError(f"[Rank {rank}] Failed to create hard link {link_path} -> {initial_data}: {e}")
+                subprocess.run(
+                    ["rsync", "-a", "--inplace", "--progress", initial_data, link_path],
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(f"[Rank {rank}] Failed to rsync {initial_data} to {link_path}: {e.stderr}")
 
-        # print(f"[Rank 0] Created {size} ensemble directories with hard-linked reference data")
+    comm.Barrier()  # Synchronize all ranks
+    return rank_data_dir, rank_data_file
 
-    # Synchronize all ranks
-    comm.Barrier()
 
-    # Verify access for this rank
-    if use_reference_data:
-        if not os.path.isdir(rank_data_dir) or not os.path.isfile(rank_data_file):
-            raise FileNotFoundError(f"[Rank {rank}] Cannot access {rank_data_dir} or {rank_data_file}")
-        return rank_data_dir, rank_data_file
-    return None, None
+# def setup_reference_data(reference_data_dir, reference_data, use_reference_data=True):
+#     """
+#     Create ensemble directories with hard-linked reference data file for read-only access.
+    
+#     Parameters:
+#     - reference_data_dir: Directory containing the reference data file.
+#     - reference_data: Name of the reference data file.
+#     - use_reference_data: Flag to enable/disable reference data setup.
+    
+#     Returns:
+#     - rank_data_dir: Path to the rank's ensemble directory (e.g., './Models/ens_id_X').
+#     - rank_data_file: Path to the rank's reference data file.
+#     """
+#     from mpi4py import MPI
+#     import os
+#     import shutil
+
+#     comm = MPI.COMM_WORLD
+#     size = comm.Get_size()
+#     rank = comm.Get_rank()
+
+#     initial_data = os.path.abspath(os.path.join(reference_data_dir, reference_data))
+#     rank_data_dir = os.path.abspath(f'./Models/ens_id_{rank}')
+#     rank_data_file = os.path.join(rank_data_dir, reference_data)
+
+#     if use_reference_data and rank == 0:
+#         # Verify reference data exists
+#         if not os.path.isfile(initial_data):
+#             raise FileNotFoundError(f"[Rank {rank}] Reference data {initial_data} not found")
+
+#         #  only copy data to ens_id_0
+#         rank_data_dir = os.path.abspath(f'./Models/ens_id_{rank}')
+#         link_path = os.path.join(rank_data_dir, reference_data)
+#         os.makedirs(rank_data_dir, exist_ok=True)
+
+#         # Skip copy if destination exists and is identical
+#         if os.path.exists(link_path):
+#             if os.path.samefile(initial_data, link_path):
+#                 print(f"Skipping copy: {initial_data} and {link_path} are the same file.")
+#             else:
+#                 print(f"Destination {link_path} exists but is different. Overwriting.")
+#                 try:
+#                     shutil.copy2(initial_data, link_path)
+#                 except (OSError, PermissionError) as e:
+#                     try:
+#                         shutil.copy(initial_data, link_path)
+#                     except OSError as e:
+#                         raise RuntimeError(f"[Rank {rank}] Failed to copy {link_path} -> {initial_data}: {e}")
+#         else:
+#             # Destination does not exist, perform copy
+#             try:
+#                 shutil.copy2(initial_data, link_path)
+#             except (OSError, PermissionError) as e:
+#                 try:
+#                     shutil.copy(initial_data, link_path)
+#                 except OSError as e:
+#                     raise RuntimeError(f"[Rank {rank}] Failed to copy {link_path} -> {initial_data}: {e}")
+            
+#     comm.Barrier()  # Synchronize all ranks after copying
+#     return rank_data_dir, rank_data_file
+
+
 
 
 # make data available in all ensemble directories
@@ -900,6 +939,7 @@ def setup_ensemble_intial_data(Nens, reference_data_dir, reference_data):
                             shutil.copy(initial_data, link_path)
                         except OSError as e:
                             raise RuntimeError(f"[Rank {rank}] Failed to create hard link {link_path} -> {initial_data}: {e}")
+                        
 
 # -- Setup ISSM Example Directory in Parallel Environment --
 def setup_example_directory(issm_dir, example_name):
@@ -933,7 +973,7 @@ def setup_example_directory(issm_dir, example_name):
                     raise OSError(f"Path exists but is not a directory: {issm_examples_dir}")
                 print(f"Directory already exists: {issm_examples_dir}")
             else:
-                os.makedirs(issm_examples_dir)
+                os.makedirs(issm_examples_dir, exist_ok=True)
                 print(f"Created directory: {issm_examples_dir}")
                 # make the Models directory
                 os.makedirs(os.path.join(issm_examples_dir, 'Models'), exist_ok=True)

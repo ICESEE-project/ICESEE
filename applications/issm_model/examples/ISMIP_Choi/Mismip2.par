@@ -5,9 +5,13 @@ disp(' creating thickness');
 Lx = 640000;
 Ly = 80000;
 xbar = 300000;
-fc = 4000;
-wc = 24000;
-dc = 500;
+%fc = 4000;
+%wc = 24000;
+%dc = 500;
+
+fc = 3000;
+wc = 23000;
+dc = 400;
 
 % Calculate bed elevation (bx)
 bx = zeros(md.mesh.numberofvertices, 1);
@@ -29,9 +33,9 @@ by0 = dc / (1 + exp(-2/fc * (0 - Ly/2 - wc))) + ...
 
 % Set geometry fields
 md.geometry.bed = max(bx + by, -720);
-md.geometry.surface =  max(bx + by0+ 100, 10);
-%md.geometry.surface = max(bx + by0 + 100, 10);
-md.geometry.base = max(md.geometry.bed, -90);
+%md.geometry.surface =  max(bx + by0+ 100, 10);
+md.geometry.surface = max(bx + by0 + 300, 20);
+md.geometry.base = max(md.geometry.bed, -280);
 md.geometry.thickness = md.geometry.surface - md.geometry.base;
 
 %figure;
@@ -107,7 +111,7 @@ indices = find(md.mesh.x >= x_min & md.mesh.x <= x_max & ...
                md.mesh.y >= y_min & md.mesh.y <= y_max);
 % Set negative SMB (-1 m/yr) for nodes in the region
 negative_smb = -1; % Negative SMB in m/yr (adjust as needed)
-%md.smb.mass_balance(indices) = negative_smb;
+md.smb.mass_balance(indices) = negative_smb;
 
 % Set geothermal flux
 md.basalforcings.geothermalflux = 0.5 * ones(md.mesh.numberofvertices, 1);
