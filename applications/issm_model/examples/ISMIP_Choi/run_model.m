@@ -110,7 +110,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             end
             md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
         else
-            md.cluster = generic('name', cluster_name, 'np', nprocs);
+            md.cluster = generic('name', oshostname(), 'np', nprocs);
             md.settings.waitonlock = 1;
             md.miscellaneous.name = sprintf('color_%d', ens_id);
         end
@@ -265,7 +265,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             end
             md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
         else
-            md.cluster = generic('name', cluster_name, 'np', nprocs);
+            md.cluster = generic('name', oshostname(), 'np', nprocs);
             md.settings.waitonlock = 1;
             md.miscellaneous.name = sprintf('color_%d', ens_id);
         end
@@ -440,7 +440,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                 end
                 md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
             else
-                md.cluster = generic('name', cluster_name, 'np', nprocs);
+                md.cluster = generic('name', oshostname(), 'np', nprocs);
                 md.settings.waitonlock = 1;
                 md.miscellaneous.name = sprintf('color_%d', ens_id);
             end
@@ -510,7 +510,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                 end
                 md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
             else
-                md.cluster = generic('name', cluster_name, 'np', nprocs);
+                md.cluster = generic('name', oshostname(), 'np', nprocs);
                 md.settings.waitonlock = 1;
                 md.miscellaneous.name = sprintf('color_%d', ens_id);
             end
@@ -614,7 +614,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                 end
                 md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
             else
-                md.cluster = generic('name', cluster_name, 'np', nprocs);
+                md.cluster = generic('name', oshostname(), 'np', nprocs);
                 md.settings.waitonlock = 1;
                 md.miscellaneous.name = sprintf('color_%d', ens_id);
             end
