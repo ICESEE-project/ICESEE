@@ -39,7 +39,7 @@ wget -O src/m/classes/clusters/generic.m \
 # Load required modules (adjust module names/versions to match your cluster)
 module load gcc/12
 module load mvapich2
-module load matlab/R2024b
+module load matlab/r2024b
 
 # Install PETSc (v3.22.3)
 cd "$ISSM_DIR/externalpackages/petsc"
