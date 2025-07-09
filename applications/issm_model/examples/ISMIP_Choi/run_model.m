@@ -198,9 +198,11 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         %  update the friction and bed
         md.friction.coefficient = friction_ref + coefficient;
 
-        bed_err = bed - bed_ref;
-        md.geometry.bed = bed_ref + bed_err;
-        md.geometry.base = base_ref + bed_err;
+        % bed_err = bed - bed_ref;
+        % md.geometry.bed = bed_ref + bed_err;
+        % md.geometry.base = base_ref + bed_err;
+        md.geometry.bed = bed_ref + bed;
+        md.geometry.base = base_ref + bed;
 
         md.geometry.thickness=md.geometry.surface-md.geometry.base;
         pos = find(md.geometry.thickness < 1);
