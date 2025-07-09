@@ -38,16 +38,8 @@ wget -O src/m/classes/clusters/generic.m \
 
 # Load required modules (adjust module names/versions to match your cluster)
 module load gcc/12
-module load mpi/mvapich2
+module load mvapich2
 module load matlab/R2024b
-
-# Install external package: Triangle
-cd "$ISSM_DIR/externalpackages/triangle"
-./install-linux.sh
-
-# Install external package: m1qn3
-cd "$ISSM_DIR/externalpackages/m1qn3"
-./install-linux.sh
 
 # Install PETSc (v3.22.3)
 cd "$ISSM_DIR/externalpackages/petsc"
@@ -69,9 +61,16 @@ cd src
     --download-parmetis=1 \
     --download-scalapack=1 \
     --download-zlib=1
-make -j$(nproc)
-make install
-cd ../..
+make -j$(nproc) && make install
+
+
+# Install external package: Triangle
+cd "$ISSM_DIR/externalpackages/triangle"
+./install-linux.sh
+
+# Install external package: m1qn3
+cd "$ISSM_DIR/externalpackages/m1qn3"
+./install-linux.sh
 
 # Refresh ISSM environment
 source "$ISSM_DIR/etc/environment.sh"
