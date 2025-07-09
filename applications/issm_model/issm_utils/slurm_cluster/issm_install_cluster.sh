@@ -13,8 +13,8 @@ set -e
 # Define GCC library directory for PACE
 export GCC_LIB_DIR="/usr/local/pace-apps/spack/packages/linux-rhel9-x86_64_v3/gcc-11.3.1/gcc-12.3.0-ukkkutsxfl5kpnnaxflpkq2jtliwthfz/lib64"
 
-# Define installation directory
-export ISSM_DIR="$HOME/ISSM"
+# Define installation directory, for pace -- we install in $HOME/p-arobel3-0/ISSM
+export ISSM_DIR="$HOME/p-arobel3-0/ISSM"
 
 # check if ISSM_DIR already exists and if so remove it
 if [ -d "$ISSM_DIR" ]; then
