@@ -33,7 +33,7 @@ class _MatlabServer:
         comm (mpi4py.MPI.Comm or None): MPI communicator for rank checking.
     """
 
-    def __init__(self, color=0, matlab_path="matlab", cmdfile="cmdfile", statusfile="statusfile", verbose=False, comm=None):
+    def __init__(self, color=0, matlab_path="matlab", cmdfile="cmdfile", statusfile="statusfile", verbose=False, comm=None, hpc=False):
         """Initialize the MATLAB server configuration.
 
         Args:
@@ -52,6 +52,7 @@ class _MatlabServer:
         self.output_queue = queue.Queue()  # Queue for asynchronous output handling
         self.running = False  # Controls output reading threads
         self.comm = comm  # MPI communicator
+        self.hpc = hpc  # Flag for HPC mode
 
     def kill_matlab_processes(self):
         """Terminate all non-GUI MATLAB processes.
@@ -140,6 +141,33 @@ class _MatlabServer:
             except queue.Empty:
                 continue  # No output available, keep checking
 
+    def issm_hpc_wrapper(self):
+        if self.hpc:
+            # Verify ISSM_DIR is set
+            if 'ISSM_DIR' not in os.environ:
+                raise RuntimeError("ISSM_DIR environment variable is not set")
+
+            # Save original PATH and LD_LIBRARY_PATH
+            original_path = os.environ.get('PATH', '')
+            original_ld_library_path = os.environ.get('LD_LIBRARY_PATH', '')
+
+            # Source environment.sh and capture the modified environment
+            command = f"source $ISSM_DIR/etc/environment.sh && echo $PATH && echo $LD_LIBRARY_PATH"
+            result = subprocess.run(command, shell=True, executable="/bin/bash", capture_output=True, text=True, check=True)
+
+            # Split the output into PATH and LD_LIBRARY_PATH
+            output_lines = result.stdout.strip().split('\n')
+            if len(output_lines) >= 2:
+                new_path = output_lines[0]
+                new_ld_library_path = output_lines[1]
+            else:
+                raise RuntimeError("Failed to capture PATH and LD_LIBRARY_PATH from environment.sh")
+
+            # Prepend original paths to ensure mvapich2 and gcc/12 take precedence
+            os.environ['PATH'] = f"{original_path}:{new_path}"
+            os.environ['LD_LIBRARY_PATH'] = f"{original_ld_library_path}:{new_ld_library_path}"
+
+
     def launch(self):
         """Launch the MATLAB server and wait for it to be ready.
 
@@ -170,6 +198,10 @@ class _MatlabServer:
         try:
             # Launch MATLAB with non-GUI flags and redirect I/O
             # matlab_cmd = f"{self.matlab_path} -nodesktop -nodisplay -nosplash -nojvm -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
+
+            # -- source all the necessary paths for ISSM
+            self.issm_hpc_wrapper()
+
             matlab_cmd = f"{self.matlab_path} -nodesktop -nosplash -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
 
             self.process = subprocess.Popen(
