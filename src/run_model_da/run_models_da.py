@@ -461,6 +461,9 @@ def icesee_model_data_assimilation(**model_kwargs):
         # --- initialize seed for reproducibility ---
         ParallelManager().initialize_seed(comm_world, base_seed=0)
 
+        # fetch model nprocs
+        model_nprocs = params.get("model_nprocs", 1)
+
         # --- Generate True and Nurged States ---------------------------------------------------
         if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
             if params["even_distribution"]:
@@ -471,12 +474,45 @@ def icesee_model_data_assimilation(**model_kwargs):
             dim_list = comm_world.allgather(params["nd"])
             # print(f"[ICESEE] Dim list: {dim_list}")
             # save model_nprocs before update if rank_world == 0
-            model_nprocs = params.get("model_nprocs", 1)
+            # model_nprocs = params.get("model_nprocs", 1)
+
+            # set modeel_nprocs adaptively
+            total_cores = os.cpu_count()
+            base_total_procs = size_world + (size_world * model_nprocs)  # MPI + MATLAB processes
+            diff = total_cores - base_total_procs  # Available or deficit cores
+
+            # Dynamic process allocation
+            if rank_world == 0:
+                # Prioritize rank 0: Allocate extra cores or handle deficit
+                if diff >= 0:
+                    # Extra cores available: give rank 0 up to 2x model_nprocs or more
+                    extra_procs = min(diff, model_nprocs * 2)  # Cap at 2x base for safety
+                    effective_model_nprocs = model_nprocs + extra_procs
+                else:
+                    # Deficit: Maintain base model_nprocs or slightly reduce
+                    effective_model_nprocs = max(1, model_nprocs + (diff // size_world))
+            else:
+                # Other ranks: Minimize MATLAB processes, ensure at least 1
+                if diff >= 0:
+                    effective_model_nprocs = model_nprocs
+                else:
+                    effective_model_nprocs = max(1, model_nprocs + (diff // size_world))
+
+            # Ensure total processes don’t exceed cores
+            total_matlab_procs = effective_model_nprocs if rank_world == 0 else effective_model_nprocs * (size_world - 1)
+            total_procs = size_world + total_matlab_procs
+            if total_procs > total_cores:
+                # Scale down proportionally
+                scale_factor = total_cores / total_procs
+                effective_model_nprocs = max(1, math.floor(effective_model_nprocs * scale_factor)) 
+
+            # update model_kwargs with the effective model_nprocs
+            model_kwargs.update({'model_nprocs': effective_model_nprocs})
             
             if rank_world == 0:
                 
                 model_kwargs.update({'ens_id': rank_world})
-                model_kwargs.update({'model_nprocs': (model_nprocs * size_world) - size_world}) # update the model_nprocs to include all processors for the external model run
+                # model_kwargs.update({'model_nprocs': (model_nprocs * size_world) - size_world}) # update the model_nprocs to include all processors for the external model run
 
                 if model_kwargs.get("generate_true_state", True):
                     print("[ICESEE] Generating true state ...")
@@ -523,7 +559,7 @@ def icesee_model_data_assimilation(**model_kwargs):
             model_kwargs.update({"dim_list": dim_list})
 
             # update model_nprocs back to the original value before proceeding to the # next step
-            model_kwargs.update({'model_nprocs': model_nprocs})
+            # model_kwargs.update({'model_nprocs': model_nprocs})
 
         else:
             # --- Generate True and Nurged States ---
@@ -860,6 +896,18 @@ def icesee_model_data_assimilation(**model_kwargs):
                 # pos, gs_model, L_C
 
             comm_world.Barrier()
+
+            # now reset the model_nprocs
+            if rank_world == 0:
+                diff = total_cores - base_total_procs 
+                if diff >= 0:
+                    # split the diff amaongest all processors
+                    model_nprocs = max(1, model_nprocs + (diff // size_world))
+                else:
+                    model_nprocs = model_nprocs
+
+            model_nprocs = comm_world.bcast(model_nprocs, root=0)
+            model_kwargs.update({'model_nprocs': model_nprocs})
 
             if params["even_distribution"]:
                 # Bcast the ensemble
