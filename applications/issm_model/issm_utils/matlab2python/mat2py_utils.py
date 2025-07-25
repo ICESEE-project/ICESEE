@@ -151,11 +151,12 @@ class _MatlabServer:
         elif os_name == 'windows':
             return 'Windows'
         else:
-            return 'Unknown OS'
+            return 'Unknown_OS'
 
     def issm_hpc_wrapper(self):
         # if self.hpc:
-        if self.get_os() == 'Linux':
+        # if True:
+        if self.get_os() == 'Linux' or self.get_os() == 'Unknown_OS':
             # Verify ISSM_DIR is set
             if 'ISSM_DIR' not in os.environ:
                 raise RuntimeError("ISSM_DIR environment variable is not set")
@@ -271,8 +272,9 @@ class _MatlabServer:
             
             self.issm_hpc_wrapper()
 
-            matlab_cmd = f"{self.matlab_path} -nodesktop -nosplash -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
-
+            # matlab_cmd = f"{self.matlab_path} -nodisplay -nosplash -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
+            matlab_cmd = f'bash -c "{self.matlab_path} -nodisplay -nosplash -r \\"matlab_server(\'{self.cmdfile}\', \'{self.statusfile}\')\\""'
+            
             self.process = subprocess.Popen(
                 matlab_cmd,
                 shell=True,

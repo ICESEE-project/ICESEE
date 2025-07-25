@@ -101,7 +101,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
         % Cluster setup
         if hpcmode
-            md.settings.waitonlock = 1;
+                       md.settings.waitonlock = Inf;
+                           md.settings.waitonlock=1;
             md.cluster = generic('name', oshostname(), 'np', nprocs);
             md.cluster.codepath = [issmroot , '/bin'];
             md.cluster.login = 'arobel3';
@@ -111,7 +112,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
         else
             md.cluster = generic('name', oshostname(), 'np', nprocs);
-            md.settings.waitonlock = 1;
+                       md.settings.waitonlock = Inf;
+                           md.settings.waitonlock=1;
             md.miscellaneous.name = sprintf('color_%d', ens_id);
         end
 
@@ -256,7 +258,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
         % Cluster setup
         if hpcmode
-            md.settings.waitonlock = 1;
+                       md.settings.waitonlock = Inf;
+                           md.settings.waitonlock=1;
             md.cluster = generic('name', oshostname(), 'np', nprocs);
             md.cluster.codepath = [issmroot , '/bin'];
             md.cluster.login = 'arobel3';
@@ -266,7 +269,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
         else
             md.cluster = generic('name', oshostname(), 'np', nprocs);
-            md.settings.waitonlock = 1;
+                       md.settings.waitonlock = Inf;
+                           md.settings.waitonlock=1;
             md.miscellaneous.name = sprintf('color_%d', ens_id);
         end
 
@@ -431,7 +435,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Cluster setup
             if hpcmode
-                md.settings.waitonlock = 1;
+                md.settings.waitonlock=1;
                 md.cluster = generic('name', oshostname(), 'np', nprocs);
                 md.cluster.codepath = [issmroot , '/bin'];
                 md.cluster.login = 'arobel3';
@@ -441,7 +445,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                 md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
             else
                 md.cluster = generic('name', oshostname(), 'np', nprocs);
-                md.settings.waitonlock = 1;
+                md.settings.waitonlock=1;
                 md.miscellaneous.name = sprintf('color_%d', ens_id);
             end
 
@@ -501,7 +505,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Cluster setup
             if hpcmode
-                md.settings.waitonlock = 1;
+                md.settings.waitonlock=1;
                 md.cluster = generic('name', oshostname(), 'np', nprocs);
                 md.cluster.codepath = [issmroot , '/bin'];
                 md.cluster.login = 'arobel3';
@@ -511,7 +515,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                 md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
             else
                 md.cluster = generic('name', oshostname(), 'np', nprocs);
-                md.settings.waitonlock = 1;
+                md.settings.waitonlock=1;
                 md.miscellaneous.name = sprintf('color_%d', ens_id);
             end
 
@@ -605,7 +609,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Cluster setup
             if hpcmode
-                md.settings.waitonlock = 1;
+                md.settings.waitonlock=1;
                 md.cluster = generic('name', oshostname(), 'np', nprocs);
                 md.cluster.codepath = [issmroot , '/bin'];
                 md.cluster.login = 'arobel3';
@@ -615,7 +619,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                 md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
             else
                 md.cluster = generic('name', oshostname(), 'np', nprocs);
-                md.settings.waitonlock = 1;
+                md.settings.waitonlock=1;
                 md.miscellaneous.name = sprintf('color_%d', ens_id);
             end
 
