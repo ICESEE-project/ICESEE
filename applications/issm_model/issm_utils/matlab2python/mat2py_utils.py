@@ -567,6 +567,7 @@ class MatlabServer:
             raise ValueError(
                 f"Nens ({self.Nens}) must be greater than or equal to the size of the MPI communicator ({self.size} set model_nprocs for the remaining resources if you want the coupled model to run in parallel). "
             )
+            # return True
         return False
 
     def __getattr__(self, name):

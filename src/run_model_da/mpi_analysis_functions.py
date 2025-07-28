@@ -17,11 +17,346 @@ from scipy.stats import multivariate_normal, beta
 # seed the random number generator
 np.random.seed(0)
 
+def process_ensemble_data_Nens_ge_size_world(rounds, color, subcomm_size, subcomm, comm_world, rank_world,\
+                                             sub_rank, model_kwargs, params, k, _modelrun_datasets, alpha, \
+                                                rho, dt, Lx, Ly, len_scale, model_module, UtilsFunctions, \
+                                                 generate_enkf_field, icesee_get_index):
+    """
+    Process ensemble data in parallel using MPI, with scalable communication via MPI_Gatherv.
+    Only rank 0 in each subcommunicator and the global communicator gathers and processes results.
+    """
+    import numpy as np
+    import h5py
+    from mpi4py import MPI
+
+    ens_list = []
+    for round_id in range(rounds):
+        ensemble_id = color + round_id * subcomm_size  # Global ensemble index
+        model_kwargs.update({'ens_id': ensemble_id, 'comm': subcomm})
+
+        if ensemble_id < model_kwargs.get('Nens'):  # Only process valid ensembles
+            # Ensure all ranks in the subcommunicator are synchronized before running
+            subcomm.Barrier()
+            ens = ensemble_id
+            # ---- read from file ----
+            input_file = f"{_modelrun_datasets}/icesee_ensemble_data.h5"
+            with h5py.File(input_file, "r") as f:
+                ensemble_vec = f["ensemble"][:, ens, k]
+            # ---- end of read from file ----
+
+            # Call the forecast step function
+            updated_state = model_module.forecast_step_single(ensemble=ensemble_vec, **model_kwargs)
+
+            # Fetch the updated state
+            vecs, indx_map, dim_per_proc = icesee_get_index(ensemble_vec, **model_kwargs)
+            for key, value in updated_state.items():
+                ensemble_vec[indx_map[key]] = value
+
+            # Add time evolution noise to the ensemble
+            if model_kwargs["joint_estimation"] or params["localization_flag"]:
+                hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
+            else:
+                hdim = ensemble_vec.shape[0] // params["num_state_vars"]
+            state_block_size = hdim * params["num_state_vars"]
+            if k == 0:
+                N_size = params["total_state_param_vars"] * hdim
+                noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+
+            noise_all = []
+            q0 = []
+            for ii, sig in enumerate(params["sig_Q"]):
+                if ii <= params["num_state_vars"]:
+                    W = generate_enkf_field(ii, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                    noise_ = alpha * noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2) * W
+                    q0.append(noise_)
+                    Z = np.sqrt(dt) * sig * rho * noise_
+                    noise_all.append(Z)
+            noise_ = np.concatenate(noise_all, axis=0)
+            ensemble_vec[:state_block_size] = ensemble_vec[:state_block_size] + noise_[:state_block_size]
+            noise = np.concatenate(q0, axis=0)
+            model_kwargs.update({"noise": noise})  # Save the noise to the model_kwargs dictionary
+
+            # Gather results within each subcommunicator using Gatherv
+            local_size = ensemble_vec.size
+            local_sizes = subcomm.gather(local_size, root=0)
+            
+            if sub_rank == 0:
+                total_size = sum(local_sizes)
+                counts = local_sizes
+                displs = [sum(counts[:i]) for i in range(subcomm.Get_size())]
+                gathered_ensemble = np.empty(total_size, dtype=ensemble_vec.dtype)
+            else:
+                gathered_ensemble = None
+                counts = None
+                displs = None
+
+            subcomm.Gatherv(ensemble_vec, [gathered_ensemble, counts, displs, MPI.DOUBLE], root=0)
+
+            # Reshape gathered data on subcommunicator root
+            if sub_rank == 0:
+                gathered_ensemble = gathered_ensemble.reshape(-1, 1)  # Reshape to column vector
+
+            ens_list.append(gathered_ensemble if sub_rank == 0 else None)
+
+        # Gather results from all subcommunicators to global root using Gatherv
+        if sub_rank == 0:
+            local_ens_size = len(ens_list) if ens_list else 0
+            local_ens_data = np.concatenate([e for e in ens_list if e is not None]) if ens_list else np.array([], dtype=ensemble_vec.dtype)
+        else:
+            local_ens_size = 0
+            local_ens_data = np.array([], dtype=ensemble_vec.dtype)
+
+        local_ens_sizes = comm_world.gather(local_ens_size, root=0)
+        
+        if rank_world == 0:
+            total_ens_size = sum(local_ens_sizes)
+            counts = [s * ensemble_vec.shape[0] for s in local_ens_sizes]  # Assuming each ensemble_vec has same shape[0]
+            displs = [sum(counts[:i]) for i in range(comm_world.Get_size())]
+            gathered_ensemble_global = np.empty(total_ens_size * ensemble_vec.shape[0], dtype=ensemble_vec.dtype)
+        else:
+            gathered_ensemble_global = None
+            counts = None
+            displs = None
+
+        comm_world.Gatherv(local_ens_data, [gathered_ensemble_global, counts, displs, MPI.DOUBLE], root=0)
+
+    if rank_world == 0:
+        ensemble_vec = gathered_ensemble_global.reshape(ensemble_vec.shape[0], -1)  # Reshape to (nd, Nens)
+        shape_ens = np.array(ensemble_vec.shape, dtype=np.int32)
+    else:
+        shape_ens = np.empty(2, dtype=np.int32)
+
+    # Broadcast the shape to all processors
+    shape_ens = comm_world.bcast(shape_ens, root=0)
+
+    return ensemble_vec, shape_ens
+
+# def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_chunk, comm, model_kwargs, output_file="icesee_ensemble_data.h5"):
+#     """
+#     Write ensemble data in parallel using h5py and MPI
+#     ensemble_chunk: local data on each rank with shape (local_nd, Nens)
+#     """
+#     # MPI setup
+#     rank = comm.Get_rank()
+#     size = comm.Get_size()
+
+#     # Get local chunk dimensions
+#     local_nd = ensemble_chunk.shape[0]  # rows per rank
+#     Nens = ensemble_chunk.shape[1]      # ensemble members (same for all ranks)
+
+#     # Gather the number of rows from each rank
+#     local_nd_array = comm.gather(local_nd, root=0)
+#     # local_nd_array = BM.gather(local_nd, comm)
+    
+#     if rank == 0:
+#         nd_total = sum(local_nd_array)
+#     else:
+#         nd_total = None
+#     nd_total = BM.bcast(nd_total, comm)
+
+#     # Calculate offsets for each rank
+#     offset = comm.scan(local_nd) - local_nd  # Exclusive scan gives starting position
+
+#     # check if _modelrun_datasets exists
+#     # _modelrun_datasets = f"_modelrun_datasets"
+#     # if rank == 0 and not os.path.exists(_modelrun_datasets):
+#     #     # cretate the directory
+#     #     os.makedirs(_modelrun_datasets, exist_ok=True)
+    
+#     # comm.barrier() # wait for all processes to reach this point
+#     output_file = os.path.join(model_kwargs.get('data_path'), output_file)
+
+#     # Open file in parallel mode
+#     if timestep == 0.0:
+#         with h5py.File(output_file, 'w', driver='mpio', comm=comm) as f:
+#             # Create dataset with total dimensions
+#             dset = f.create_dataset('ensemble', (nd_total, Nens, model_kwargs.get('nt', params['nt']) +1), dtype=ensemble_chunk.dtype)
+            
+#             # Each rank writes its chunk
+#             dset[offset:offset + local_nd, :,0] = ensemble_chunk
+
+#             # ens_mean 
+#             ens_mean = f.create_dataset('ensemble_mean', (local_nd, model_kwargs.get('nt', params['nt']) +1), dtype=ensemble_chunk.dtype)
+#             if rank == 0:
+#                 ens_mean[:,0] = ensemble_mean
+
+#             DEnKF_flag = model_kwargs.get("DEnKF_flag",False)
+#             if DEnKF_flag:
+#                 # dset = dset + ensemble_mean
+#                 comm.barrier() # wait for all processes to reach this point
+#                 if rank == 0:
+#                     ensemble_mean = np.mean(dset[:, :, 0], axis=1)
+#                     dset[:,:, 0] = dset[:, :, 0] + ensemble_mean[:,np.newaxis]
+#     else:
+#         with h5py.File(output_file, 'a', driver='mpio', comm=comm) as f:
+#             dset = f['ensemble']
+#             # dset[offset:offset + local_nd, :,timestep] = ensemble_chunk
+
+#             # ================
+#             if False: #TODO: test tomorrow
+#                 # # extract bounds for the parameters
+#                 # bounds = model_kwargs["bounds"]
+#                 # # Function f: Linear, bijective mapping from [0,1] to [l_theta - theta^a, u_theta - theta^a]
+#                 # def f(x, theta_a_i):
+#                 #     # Map x (from Beta[0,1]) to the range [l_theta - theta_a_i, u_theta - theta_a_i]
+#                 #     for i, vars in enumerate(model_kwargs["params_vec"]):
+#                 #         param_bound = bounds[i]
+#                 #         l_theta, u_theta = param_bound[0], param_bound[1]
+#                 #         l_theta = np.ones((theta_a_i.shape[0],1))*l_theta
+#                 #         u_theta = np.ones((theta_a_i.shape[0],1))*u_theta
+#                 #         lower = l_theta - theta_a_i
+#                 #         upper = u_theta - theta_a_i
+#                 #         x = x*(upper - lower) + lower
+#                 #     return x
+                
+#                 # ndim = ensemble_chunk.shape[0] // params["total_state_param_vars"]
+#                 # state_block_size = ndim*params["num_state_vars"]
+#                 # param_size = ensemble_chunk.shape[0] - state_block_size
+
+#                 # alpha_t, beta_t = 2.0, 2.0  # Beta distribution parameters
+#                 # X_t = beta.rvs(alpha_t, beta_t, ensemble_chunk.shape[1])
+#                 # pertubations = np.array([f(X_t[i], ensemble_chunk[state_block_size:,i]) for i in range( ensemble_chunk.shape[1])])
+#                 # prev_data = dset[offset:offset + local_nd, :, timestep-1]
+#                 # ensemble_chunk[state_block_size:,:] = prev_data[state_block_size:,:] + pertubations
+
+#                 # # ensure parameters stay within bounds
+#                 # for i, vars in enumerate(model_kwargs["params_vec"]):
+#                 #     param_bound = bounds[i]
+#                 #     l_theta, u_theta = param_bound[0], param_bound[1]
+#                 #     ensemble_chunk[state_block_size+i,:] = np.clip(ensemble_chunk[state_block_size+i,:], l_theta, u_theta)
+                
+#                 # dset[offset:offset + local_nd, :,timestep] = ensemble_chunk
+
+#                 # ----------
+#                 prev_data = dset[offset:offset + local_nd, :, timestep-1]
+#                 n_params = len(model_kwargs["params_vec"])
+#                 # Extract bounds
+#                 bounds = model_kwargs["bounds"]
+
+#                 # Fixed function f
+#                 def func(x, theta_a_i, l_theta, u_theta):
+#                     # lower = l_theta - theta_a_i
+#                     # upper = u_theta - theta_a_i
+#                     # return lower + x * (upper - lower)
+#                     # scale = u_theta - l_theta
+#                     # return (x-0.5)*scale 
+#                     scale = u_theta - l_theta
+#                     current_spread = np.std(theta_a_i, axis=1, keepdims=True)
+#                     adaptive_scale = np.maximum(scale, current_spread * 2.0)  # Boost spread
+#                     return (x - 0.5) * adaptive_scale
+
+#                 # Dimensions
+#                 ndim = ensemble_chunk.shape[0] // params["total_state_param_vars"]  # e.g., 50 / 4 = 12
+#                 state_block_size = ndim * params["num_state_vars"]  # e.g., 12 * 1 = 12
+#                 param_size = ensemble_chunk.shape[0] - state_block_size  # e.g., 50 - 12 = 38
+
+#                 # Perturbations
+#                 alpha_t, beta_t = 2.0, 2.0
+#                 X_t = beta.rvs(alpha_t, beta_t, size=(param_size, ensemble_chunk.shape[1]))
+#                 perturbations = np.zeros((param_size, ensemble_chunk.shape[1]))
+#                 # print(bounds)
+#                 # print(bounds[0][0], bounds[0][1])
+#                 # bounds = np.array([0.5, 1.9])
+#                 for i in range(n_params):
+#                     l_theta, u_theta = bounds[i]
+#                     # l_theta, u_theta = bounds
+#                     idx_start = i * ndim
+#                     idx_end = (i + 1) * ndim
+#                     # param_block = ensemble_chunk[state_block_size + idx_start:state_block_size + idx_end, :]
+#                     param_block = prev_data[state_block_size + idx_start:state_block_size + idx_end, :]
+#                     perturbations[idx_start:idx_end, :] = func(X_t[idx_start:idx_end, :], param_block, l_theta, u_theta)
+
+#                 # Update ensemble
+#                 # prev_data = dset[offset:offset + local_nd, :, timestep-1]
+#                 ensemble_chunk[state_block_size:, :] = prev_data[state_block_size:, :] + perturbations
+
+#                 # Enforce bounds
+#                 for i in range(n_params):
+#                     # l_theta, u_theta = bounds[i]
+#                     # l_theta, u_theta = bounds
+#                     idx_start = state_block_size + i * ndim
+#                     idx_end = idx_start + ndim
+#                     # ensemble_chunk[idx_start:idx_end, :] = np.clip(ensemble_chunk[idx_start:idx_end, :], l_theta, u_theta)
+
+#                 # Write to dataset
+#                 dset[offset:offset + local_nd, :, timestep] = ensemble_chunk
+
+
+#             # =================
+#             if False:
+#                 ndim = ensemble_chunk.shape[0] // params["total_state_param_vars"]
+#                 state_block_size = ndim*params["num_state_vars"]
+#                 param_size = ensemble_chunk.shape[0] - state_block_size
+#                 alpha = np.ones(param_size)*2.0
+#                 beta_param = alpha
+#                 def compute_f_params(alpha, beta_param):
+#                     mean_x = alpha/(alpha+beta_param)
+#                     a = 1.0
+#                     b = -a*mean_x
+#                     return a,b
+
+#                 def update_theta(alpha, beta_param):
+#                     # theta_f_t = np.zeros_like(theta_prev)
+#                     f_x_ti = np.zeros((param_size,ensemble_chunk.shape[1]))
+#                     for i in range(ensemble_chunk.shape[1]):
+#                         a,b = compute_f_params(alpha[i], beta_param[i])
+#                         x_ti = beta.rvs(alpha[i], beta_param[i])
+                        
+#                         f_x_ti[:,i] = a*x_ti + b
+
+#                         # theta_f_t[:,i] = theta_prev[:,i] + f_x_ti
+#                     # return theta_f_t
+#                     return f_x_ti
+                
+#                 # Update ensemble_chunk before writing
+#                 if state_block_size < ensemble_chunk.shape[0]:
+#                     prev_data = dset[offset:offset + local_nd, :, timestep-1]
+#                     ensemble_chunk[state_block_size:,:] = prev_data[state_block_size:,:] + update_theta(alpha, beta_param)
+
+#                 if False:
+#                      # ----------
+#                     n_params = len(model_kwargs["params_vec"])
+#                     # Extract bounds
+#                     # bounds = model_kwargs["bounds"]
+#                     bounds = np.array([0.2, 1.3])
+#                     # Enforce bounds
+#                     for i in range(n_params):
+#                         # l_theta, u_theta = bounds[i]
+#                         l_theta, u_theta = bounds
+#                         idx_start = state_block_size + i * ndim
+#                         idx_end = idx_start + ndim
+#                         ensemble_chunk[idx_start:idx_end, :] = np.clip(ensemble_chunk[idx_start:idx_end, :], l_theta, u_theta)
+
+#             # ensemble_chunk[state_block_size:,:] =  dset[offset:offset + local_nd, :,timestep-1] + update_theta(alpha, beta_param)
+#             dset[offset:offset + local_nd, :,timestep] = ensemble_chunk
+
+
+#             # ================
+
+#             if rank == 0:
+#                 ens_mean = f['ensemble_mean']
+#                 ens_mean[:,timestep] = ensemble_mean
+
+#             DEnKF_flag = model_kwargs.get("DEnKF_flag",False)
+#             if DEnKF_flag:
+#                 comm.barrier() # wait for all processes to reach this point
+#                 if rank == 0:
+#                     # dset = dset + ensemble_mean
+#                     ensemble_mean = np.mean(dset[:, :, timestep], axis=1)
+#                     dset[:,:, timestep] = dset[:, :, timestep] #- ensemble_mean[:,np.newaxis]
+
+#     comm.Barrier()
+
+# # ---- Will uncomment above after fixing parallel i/o issues on the cluster ----
 def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_chunk, comm, model_kwargs, output_file="icesee_ensemble_data.h5"):
     """
-    Write ensemble data in parallel using h5py and MPI
+    Write ensemble data using h5py and MPI, with only rank 0 writing to the dataset.
+    Optimized for large datasets and many processes using MPI_Gatherv, without parallel I/O.
     ensemble_chunk: local data on each rank with shape (local_nd, Nens)
     """
+    import numpy as np
+    from mpi4py import MPI
+
     # MPI setup
     rank = comm.Get_rank()
     size = comm.Get_size()
@@ -30,206 +365,53 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
     local_nd = ensemble_chunk.shape[0]  # rows per rank
     Nens = ensemble_chunk.shape[1]      # ensemble members (same for all ranks)
 
-    # Gather the number of rows from each rank
+    # Gather the number of rows from each rank to rank 0
     local_nd_array = comm.gather(local_nd, root=0)
-    # local_nd_array = BM.gather(local_nd, comm)
     
     if rank == 0:
         nd_total = sum(local_nd_array)
+        # Prepare arrays for Gatherv
+        counts = [n * Nens for n in local_nd_array]
+        displs = [sum(counts[:i]) for i in range(size)]
+        recvbuf = np.empty((nd_total, Nens), dtype=ensemble_chunk.dtype)
     else:
         nd_total = None
-    nd_total = BM.bcast(nd_total, comm)
+        counts = None
+        displs = None
+        recvbuf = None
 
-    # Calculate offsets for each rank
-    offset = comm.scan(local_nd) - local_nd  # Exclusive scan gives starting position
+    nd_total = comm.bcast(nd_total, root=0)
 
-    # check if _modelrun_datasets exists
-    # _modelrun_datasets = f"_modelrun_datasets"
-    # if rank == 0 and not os.path.exists(_modelrun_datasets):
-    #     # cretate the directory
-    #     os.makedirs(_modelrun_datasets, exist_ok=True)
-    
-    # comm.barrier() # wait for all processes to reach this point
+    # Gather ensemble chunks to rank 0
+    comm.Gatherv(ensemble_chunk, [recvbuf, counts, displs, MPI.DOUBLE], root=0)
+
     output_file = os.path.join(model_kwargs.get('data_path'), output_file)
 
-    # Open file in parallel mode
-    if timestep == 0.0:
-        with h5py.File(output_file, 'w', driver='mpio', comm=comm) as f:
-            # Create dataset with total dimensions
-            dset = f.create_dataset('ensemble', (nd_total, Nens, model_kwargs.get('nt', params['nt']) +1), dtype=ensemble_chunk.dtype)
-            
-            # Each rank writes its chunk
-            dset[offset:offset + local_nd, :,0] = ensemble_chunk
+    if rank == 0:
+        if timestep == 0.0:
+            with h5py.File(output_file, 'w') as f:
+                dset = f.create_dataset('ensemble', (nd_total, Nens, model_kwargs.get('nt', params['nt']) + 1), dtype=ensemble_chunk.dtype)
+                ens_mean = f.create_dataset('ensemble_mean', (nd_total, model_kwargs.get('nt', params['nt']) + 1), dtype=ensemble_chunk.dtype)
+                
+                # Write gathered data
+                dset[:, :, 0] = recvbuf
+                ens_mean[:, 0] = ensemble_mean
 
-            # ens_mean 
-            ens_mean = f.create_dataset('ensemble_mean', (local_nd, model_kwargs.get('nt', params['nt']) +1), dtype=ensemble_chunk.dtype)
-            if rank == 0:
-                ens_mean[:,0] = ensemble_mean
-
-            DEnKF_flag = model_kwargs.get("DEnKF_flag",False)
-            if DEnKF_flag:
-                # dset = dset + ensemble_mean
-                comm.barrier() # wait for all processes to reach this point
-                if rank == 0:
+                if model_kwargs.get("DEnKF_flag", False):
                     ensemble_mean = np.mean(dset[:, :, 0], axis=1)
-                    dset[:,:, 0] = dset[:, :, 0] + ensemble_mean[:,np.newaxis]
-    else:
-        with h5py.File(output_file, 'a', driver='mpio', comm=comm) as f:
-            dset = f['ensemble']
-            # dset[offset:offset + local_nd, :,timestep] = ensemble_chunk
-
-            # ================
-            if False: #TODO: test tomorrow
-                # # extract bounds for the parameters
-                # bounds = model_kwargs["bounds"]
-                # # Function f: Linear, bijective mapping from [0,1] to [l_theta - theta^a, u_theta - theta^a]
-                # def f(x, theta_a_i):
-                #     # Map x (from Beta[0,1]) to the range [l_theta - theta_a_i, u_theta - theta_a_i]
-                #     for i, vars in enumerate(model_kwargs["params_vec"]):
-                #         param_bound = bounds[i]
-                #         l_theta, u_theta = param_bound[0], param_bound[1]
-                #         l_theta = np.ones((theta_a_i.shape[0],1))*l_theta
-                #         u_theta = np.ones((theta_a_i.shape[0],1))*u_theta
-                #         lower = l_theta - theta_a_i
-                #         upper = u_theta - theta_a_i
-                #         x = x*(upper - lower) + lower
-                #     return x
-                
-                # ndim = ensemble_chunk.shape[0] // params["total_state_param_vars"]
-                # state_block_size = ndim*params["num_state_vars"]
-                # param_size = ensemble_chunk.shape[0] - state_block_size
-
-                # alpha_t, beta_t = 2.0, 2.0  # Beta distribution parameters
-                # X_t = beta.rvs(alpha_t, beta_t, ensemble_chunk.shape[1])
-                # pertubations = np.array([f(X_t[i], ensemble_chunk[state_block_size:,i]) for i in range( ensemble_chunk.shape[1])])
-                # prev_data = dset[offset:offset + local_nd, :, timestep-1]
-                # ensemble_chunk[state_block_size:,:] = prev_data[state_block_size:,:] + pertubations
-
-                # # ensure parameters stay within bounds
-                # for i, vars in enumerate(model_kwargs["params_vec"]):
-                #     param_bound = bounds[i]
-                #     l_theta, u_theta = param_bound[0], param_bound[1]
-                #     ensemble_chunk[state_block_size+i,:] = np.clip(ensemble_chunk[state_block_size+i,:], l_theta, u_theta)
-                
-                # dset[offset:offset + local_nd, :,timestep] = ensemble_chunk
-
-                # ----------
-                prev_data = dset[offset:offset + local_nd, :, timestep-1]
-                n_params = len(model_kwargs["params_vec"])
-                # Extract bounds
-                bounds = model_kwargs["bounds"]
-
-                # Fixed function f
-                def func(x, theta_a_i, l_theta, u_theta):
-                    # lower = l_theta - theta_a_i
-                    # upper = u_theta - theta_a_i
-                    # return lower + x * (upper - lower)
-                    # scale = u_theta - l_theta
-                    # return (x-0.5)*scale 
-                    scale = u_theta - l_theta
-                    current_spread = np.std(theta_a_i, axis=1, keepdims=True)
-                    adaptive_scale = np.maximum(scale, current_spread * 2.0)  # Boost spread
-                    return (x - 0.5) * adaptive_scale
-
-                # Dimensions
-                ndim = ensemble_chunk.shape[0] // params["total_state_param_vars"]  # e.g., 50 / 4 = 12
-                state_block_size = ndim * params["num_state_vars"]  # e.g., 12 * 1 = 12
-                param_size = ensemble_chunk.shape[0] - state_block_size  # e.g., 50 - 12 = 38
-
-                # Perturbations
-                alpha_t, beta_t = 2.0, 2.0
-                X_t = beta.rvs(alpha_t, beta_t, size=(param_size, ensemble_chunk.shape[1]))
-                perturbations = np.zeros((param_size, ensemble_chunk.shape[1]))
-                # print(bounds)
-                # print(bounds[0][0], bounds[0][1])
-                # bounds = np.array([0.5, 1.9])
-                for i in range(n_params):
-                    l_theta, u_theta = bounds[i]
-                    # l_theta, u_theta = bounds
-                    idx_start = i * ndim
-                    idx_end = (i + 1) * ndim
-                    # param_block = ensemble_chunk[state_block_size + idx_start:state_block_size + idx_end, :]
-                    param_block = prev_data[state_block_size + idx_start:state_block_size + idx_end, :]
-                    perturbations[idx_start:idx_end, :] = func(X_t[idx_start:idx_end, :], param_block, l_theta, u_theta)
-
-                # Update ensemble
-                # prev_data = dset[offset:offset + local_nd, :, timestep-1]
-                ensemble_chunk[state_block_size:, :] = prev_data[state_block_size:, :] + perturbations
-
-                # Enforce bounds
-                for i in range(n_params):
-                    # l_theta, u_theta = bounds[i]
-                    # l_theta, u_theta = bounds
-                    idx_start = state_block_size + i * ndim
-                    idx_end = idx_start + ndim
-                    # ensemble_chunk[idx_start:idx_end, :] = np.clip(ensemble_chunk[idx_start:idx_end, :], l_theta, u_theta)
-
-                # Write to dataset
-                dset[offset:offset + local_nd, :, timestep] = ensemble_chunk
-
-
-            # =================
-            if False:
-                ndim = ensemble_chunk.shape[0] // params["total_state_param_vars"]
-                state_block_size = ndim*params["num_state_vars"]
-                param_size = ensemble_chunk.shape[0] - state_block_size
-                alpha = np.ones(param_size)*2.0
-                beta_param = alpha
-                def compute_f_params(alpha, beta_param):
-                    mean_x = alpha/(alpha+beta_param)
-                    a = 1.0
-                    b = -a*mean_x
-                    return a,b
-
-                def update_theta(alpha, beta_param):
-                    # theta_f_t = np.zeros_like(theta_prev)
-                    f_x_ti = np.zeros((param_size,ensemble_chunk.shape[1]))
-                    for i in range(ensemble_chunk.shape[1]):
-                        a,b = compute_f_params(alpha[i], beta_param[i])
-                        x_ti = beta.rvs(alpha[i], beta_param[i])
-                        
-                        f_x_ti[:,i] = a*x_ti + b
-
-                        # theta_f_t[:,i] = theta_prev[:,i] + f_x_ti
-                    # return theta_f_t
-                    return f_x_ti
-                
-                # Update ensemble_chunk before writing
-                if state_block_size < ensemble_chunk.shape[0]:
-                    prev_data = dset[offset:offset + local_nd, :, timestep-1]
-                    ensemble_chunk[state_block_size:,:] = prev_data[state_block_size:,:] + update_theta(alpha, beta_param)
-
-                if False:
-                     # ----------
-                    n_params = len(model_kwargs["params_vec"])
-                    # Extract bounds
-                    # bounds = model_kwargs["bounds"]
-                    bounds = np.array([0.2, 1.3])
-                    # Enforce bounds
-                    for i in range(n_params):
-                        # l_theta, u_theta = bounds[i]
-                        l_theta, u_theta = bounds
-                        idx_start = state_block_size + i * ndim
-                        idx_end = idx_start + ndim
-                        ensemble_chunk[idx_start:idx_end, :] = np.clip(ensemble_chunk[idx_start:idx_end, :], l_theta, u_theta)
-
-            # ensemble_chunk[state_block_size:,:] =  dset[offset:offset + local_nd, :,timestep-1] + update_theta(alpha, beta_param)
-            dset[offset:offset + local_nd, :,timestep] = ensemble_chunk
-
-
-            # ================
-
-            if rank == 0:
+                    dset[:, :, 0] += ensemble_mean[:, np.newaxis]
+        else:
+            with h5py.File(output_file, 'a') as f:
+                dset = f['ensemble']
                 ens_mean = f['ensemble_mean']
-                ens_mean[:,timestep] = ensemble_mean
+                
+                # Write gathered data
+                dset[:, :, timestep] = recvbuf
+                ens_mean[:, timestep] = ensemble_mean
 
-            DEnKF_flag = model_kwargs.get("DEnKF_flag",False)
-            if DEnKF_flag:
-                comm.barrier() # wait for all processes to reach this point
-                if rank == 0:
-                    # dset = dset + ensemble_mean
+                if model_kwargs.get("DEnKF_flag", False):
                     ensemble_mean = np.mean(dset[:, :, timestep], axis=1)
-                    dset[:,:, timestep] = dset[:, :, timestep] #- ensemble_mean[:,np.newaxis]
+                    dset[:, :, timestep] += ensemble_mean[:, np.newaxis]
 
     comm.Barrier()
 
@@ -340,20 +522,91 @@ def parallel_write_vector_from_root(full_ensemble=None, comm=None, data_shape=No
 
 
     
-def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, model_kwargs,full_ensemble=None, comm=None, output_file="icesee_ensemble_data.h5"):
-    """
-    Append ensemble data in parallel where the full matrix exists on rank 0.
-    Each call appends a new time step, resulting in a dataset of shape (nd, Nens, nt).
+# def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, model_kwargs,full_ensemble=None, comm=None, output_file="icesee_ensemble_data.h5"):
+#     """
+#     Append ensemble data in parallel where the full matrix exists on rank 0.
+#     Each call appends a new time step, resulting in a dataset of shape (nd, Nens, nt).
 
+#     full_ensemble: complete matrix on rank 0 with shape (nd, Nens)
+#     comm: MPI communicator
+#     output_file: Name of the output HDF5 file
+#     """
+#     params = model_kwargs.get("params")
+
+#     # MPI setup
+#     rank = comm.Get_rank()
+#     size = comm.Get_size()
+
+#     # Get dimensions on root and broadcast
+#     if rank == 0:
+#         nd, Nens = full_ensemble.shape
+#         dtype = full_ensemble.dtype
+#     else:
+#         nd, Nens, dtype = None, None, None
+    
+#     nd = comm.bcast(nd, root=0)
+#     Nens = comm.bcast(Nens, root=0)
+#     dtype = comm.bcast(dtype, root=0)
+
+#     # Calculate local chunk sizes
+#     local_nd = nd // size
+#     remainder = nd % size
+
+#     if rank < remainder:
+#         local_nd += 1
+#     offset = rank * (nd // size) + min(rank, remainder)
+
+#     # Scatter the data from rank 0
+#     if rank == 0:
+#         chunks = np.array_split(full_ensemble, size, axis=0)
+#     else:
+#         chunks = None
+    
+#     local_chunk = BM.scatter(chunks, comm)
+
+#     # Define output file path
+#     output_file = os.path.join(params.get('data_path'), output_file)
+
+#     # Open file in parallel mode
+#     if timestep == 0:
+#         with h5py.File(output_file, 'w', driver='mpio', comm=comm) as f:
+#             # Create dataset with total dimensions
+#             dset = f.create_dataset('ensemble', (nd, Nens, model_kwargs.get('nt', params['nt'])+1), dtype=dtype)
+            
+#             # Each rank writes its chunk
+#             dset[offset:offset + local_nd, :,0] = local_chunk
+
+#             # ens_mean 
+#             ens_mean = f.create_dataset('ensemble_mean', (nd, model_kwargs.get('nt', params['nt'])+1), dtype=dtype)
+#             if rank == 0:
+#                 ens_mean[:,0] = ensemble_mean
+#     else:
+#         with h5py.File(output_file, 'a', driver='mpio', comm=comm) as f:
+#             dset = f['ensemble']
+#             dset[offset:offset + local_nd, :,timestep] = local_chunk
+
+#             if rank == 0:
+#                 ens_mean = f['ensemble_mean']
+#                 ens_mean[:,timestep] = ensemble_mean
+#     comm.Barrier()
+
+# ---- Will uncomment above after fixing parallel i/o issues on the cluster ----
+def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, model_kwargs, full_ensemble=None, comm=None, output_file="icesee_ensemble_data.h5"):
+    """
+    Append ensemble data where the full matrix exists on rank 0, with only rank 0 writing to the dataset.
+    Optimized for large datasets and many processes without parallel I/O.
+    Each call appends a new time step, resulting in a dataset of shape (nd, Nens, nt).
     full_ensemble: complete matrix on rank 0 with shape (nd, Nens)
     comm: MPI communicator
     output_file: Name of the output HDF5 file
     """
+    import numpy as np
+    import h5py
+
     params = model_kwargs.get("params")
 
     # MPI setup
     rank = comm.Get_rank()
-    size = comm.Get_size()
 
     # Get dimensions on root and broadcast
     if rank == 0:
@@ -366,46 +619,38 @@ def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, model_kwargs
     Nens = comm.bcast(Nens, root=0)
     dtype = comm.bcast(dtype, root=0)
 
-    # Calculate local chunk sizes
-    local_nd = nd // size
-    remainder = nd % size
-
-    if rank < remainder:
-        local_nd += 1
-    offset = rank * (nd // size) + min(rank, remainder)
-
-    # Scatter the data from rank 0
-    if rank == 0:
-        chunks = np.array_split(full_ensemble, size, axis=0)
-    else:
-        chunks = None
-    
-    local_chunk = BM.scatter(chunks, comm)
-
     # Define output file path
     output_file = os.path.join(params.get('data_path'), output_file)
 
-    # Open file in parallel mode
-    if timestep == 0:
-        with h5py.File(output_file, 'w', driver='mpio', comm=comm) as f:
-            # Create dataset with total dimensions
-            dset = f.create_dataset('ensemble', (nd, Nens, model_kwargs.get('nt', params['nt'])+1), dtype=dtype)
-            
-            # Each rank writes its chunk
-            dset[offset:offset + local_nd, :,0] = local_chunk
+    # Only rank 0 writes to the file
+    if rank == 0:
+        if timestep == 0:
+            with h5py.File(output_file, 'w') as f:
+                # Create dataset with total dimensions
+                dset = f.create_dataset('ensemble', (nd, Nens, model_kwargs.get('nt', params['nt']) + 1), dtype=dtype)
+                # Write full ensemble
+                dset[:, :, 0] = full_ensemble
 
-            # ens_mean 
-            ens_mean = f.create_dataset('ensemble_mean', (nd, model_kwargs.get('nt', params['nt'])+1), dtype=dtype)
-            if rank == 0:
-                ens_mean[:,0] = ensemble_mean
-    else:
-        with h5py.File(output_file, 'a', driver='mpio', comm=comm) as f:
-            dset = f['ensemble']
-            dset[offset:offset + local_nd, :,timestep] = local_chunk
+                # Create and write ensemble mean
+                ens_mean = f.create_dataset('ensemble_mean', (nd, model_kwargs.get('nt', params['nt']) + 1), dtype=dtype)
+                ens_mean[:, 0] = ensemble_mean
 
-            if rank == 0:
+                if model_kwargs.get("DEnKF_flag", False):
+                    ensemble_mean = np.mean(dset[:, :, 0], axis=1)
+                    dset[:, :, 0] += ensemble_mean[:, np.newaxis]
+        else:
+            with h5py.File(output_file, 'a') as f:
+                dset = f['ensemble']
+                # Write full ensemble for current timestep
+                dset[:, :, timestep] = full_ensemble
+
                 ens_mean = f['ensemble_mean']
-                ens_mean[:,timestep] = ensemble_mean
+                ens_mean[:, timestep] = ensemble_mean
+
+                if model_kwargs.get("DEnKF_flag", False):
+                    ensemble_mean = np.mean(dset[:, :, timestep], axis=1)
+                    dset[:, :, timestep] += ensemble_mean[:, np.newaxis]
+
     comm.Barrier()
 
 def get_grid_dimensions(nx, ny, ndim):
@@ -1120,4 +1365,3 @@ def gather_and_broadcast_data_default_run(updated_state, subcomm, sub_rank, comm
     # ensemble_vec = BM.bcast(ensemble_vec, comm_world)
 
     return ensemble_vec, shape_
-

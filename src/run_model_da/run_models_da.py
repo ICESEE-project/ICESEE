@@ -429,7 +429,8 @@ def icesee_model_data_assimilation(**model_kwargs):
                                             parallel_write_full_ensemble_from_root, \
                                             parallel_write_data_from_root_2D, \
                                             parallel_write_vector_from_root, \
-                                            analysis_Denkf_update
+                                            analysis_Denkf_update, \
+                                            process_ensemble_data_Nens_ge_size_world
         
 
         # start the timer
@@ -464,6 +465,39 @@ def icesee_model_data_assimilation(**model_kwargs):
         # fetch model nprocs
         model_nprocs = params.get("model_nprocs", 1)
 
+        # set modeel_nprocs adaptively
+        total_cores = os.cpu_count()
+        base_total_procs = size_world + (size_world * model_nprocs)  # MPI + MATLAB processes
+        diff = total_cores - base_total_procs  # Available or deficit cores
+
+        # Dynamic process allocation
+        if rank_world == 0:
+            # Prioritize rank 0: Allocate extra cores or handle deficit
+            if diff >= 0:
+                # Extra cores available: give rank 0 up to 2x model_nprocs or more
+                extra_procs = min(diff, model_nprocs * 2)  # Cap at 2x base for safety
+                effective_model_nprocs = model_nprocs + extra_procs
+            else:
+                # Deficit: Maintain base model_nprocs or slightly reduce
+                effective_model_nprocs = max(1, model_nprocs + (diff // size_world))
+        else:
+            # Other ranks: Minimize MATLAB processes, ensure at least 1
+            if diff >= 0:
+                effective_model_nprocs = model_nprocs
+            else:
+                effective_model_nprocs = max(1, model_nprocs + (diff // size_world))
+
+        # Ensure total processes don’t exceed cores
+        total_matlab_procs = effective_model_nprocs if rank_world == 0 else effective_model_nprocs * (size_world - 1)
+        total_procs = size_world + total_matlab_procs
+        if total_procs > total_cores:
+            # Scale down proportionally
+            scale_factor = total_cores / total_procs
+            effective_model_nprocs = max(1, np.floor(effective_model_nprocs * scale_factor)) 
+
+        # update model_kwargs with the effective model_nprocs
+        model_kwargs.update({'model_nprocs': effective_model_nprocs})
+
         # --- Generate True and Nurged States ---------------------------------------------------
         if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
             if params["even_distribution"]:
@@ -476,38 +510,6 @@ def icesee_model_data_assimilation(**model_kwargs):
             # save model_nprocs before update if rank_world == 0
             # model_nprocs = params.get("model_nprocs", 1)
 
-            # set modeel_nprocs adaptively
-            total_cores = os.cpu_count()
-            base_total_procs = size_world + (size_world * model_nprocs)  # MPI + MATLAB processes
-            diff = total_cores - base_total_procs  # Available or deficit cores
-
-            # Dynamic process allocation
-            if rank_world == 0:
-                # Prioritize rank 0: Allocate extra cores or handle deficit
-                if diff >= 0:
-                    # Extra cores available: give rank 0 up to 2x model_nprocs or more
-                    extra_procs = min(diff, model_nprocs * 2)  # Cap at 2x base for safety
-                    effective_model_nprocs = model_nprocs + extra_procs
-                else:
-                    # Deficit: Maintain base model_nprocs or slightly reduce
-                    effective_model_nprocs = max(1, model_nprocs + (diff // size_world))
-            else:
-                # Other ranks: Minimize MATLAB processes, ensure at least 1
-                if diff >= 0:
-                    effective_model_nprocs = model_nprocs
-                else:
-                    effective_model_nprocs = max(1, model_nprocs + (diff // size_world))
-
-            # Ensure total processes don’t exceed cores
-            total_matlab_procs = effective_model_nprocs if rank_world == 0 else effective_model_nprocs * (size_world - 1)
-            total_procs = size_world + total_matlab_procs
-            if total_procs > total_cores:
-                # Scale down proportionally
-                scale_factor = total_cores / total_procs
-                effective_model_nprocs = max(1, np.floor(effective_model_nprocs * scale_factor)) 
-
-            # update model_kwargs with the effective model_nprocs
-            # model_kwargs.update({'model_nprocs': effective_model_nprocs})
             
             if rank_world == 0:
                 
@@ -655,7 +657,9 @@ def icesee_model_data_assimilation(**model_kwargs):
                 ensemble_nurged_state = model_module.generate_nurged_state(**model_kwargs)
             
         # --- Generate the Observations ---------------------------------------------------
-            
+        ##debug
+        comm_world.Barrier()
+
         # --- Synthetic Observations ---
         if model_kwargs.get("generate_synthetic_obs", True):   
             if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
@@ -807,8 +811,8 @@ def icesee_model_data_assimilation(**model_kwargs):
         
 
         if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
-            if params["default_run"] and size_world <= params["Nens"]:
-            # if False:
+            # if params["default_run"] and size_world <= params["Nens"]:
+            if False:
                 if rank_world == 0:
                     print("[ICESEE] Initializing the ensemble ...")
 
@@ -841,24 +845,38 @@ def icesee_model_data_assimilation(**model_kwargs):
 
                         # call the model to initialize the ensemble
                         data = model_module.initialize_ensemble(ens, **model_kwargs)
-
-                        # iterate over the data and update the ensemble
                         for key, value in data.items():
                             ensemble_vec[indx_map[key], ens] = value
 
                         # add process noise
-                        N_size = params["total_state_param_vars"] * hdim
+                        # N_size = params["total_state_param_vars"] * hdim
                         noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                         ensemble_vec[:, ens] += noise
 
                         gathered_ensemble = subcomm.gather(ensemble_vec[:,ens], root=0)
+                        # local_shape = ensemble_vec[:,ens].size
+                        # local_shapes = subcomm.gather(local_shape, root=0)
+
+                        # if sub_rank == 0:
+                        #     total_size = sum(local_shapes)
+                        #     counts = local_shapes
+                        #     displs = [sum(counts[:i]) for i in range(subcomm.Get_size())]
+                        #     gathered_ensemble = np.empty(total_size, dtype=ensemble_vec[:,ens].dtype)
+                        # else:
+                        #     gathered_ensemble = None
+                        #     counts = None
+                        #     displs = None
+
+                        # subcomm.Gatherv(ensemble_vec[:,ens], [gathered_ensemble, counts, displs, MPI.DOUBLE], root=0)
+
 
                         # ensure only rank = 0 in each subcomm gathers the ensemble
                         if sub_rank == 0:
                             gathered_ensemble = np.hstack(gathered_ensemble)
-
+                        
                         ens_list_init.append(gathered_ensemble if sub_rank == 0 else None)
-                
+                    
+                    subcomm.Barrier()
                     # gather all the ensembles from all subcommunicators
                     gathered_ensemble_global = comm_world.gather(ens_list_init, root=0)
 
@@ -867,7 +885,6 @@ def icesee_model_data_assimilation(**model_kwargs):
                     ensemble_vec =np.column_stack(ensemble_vec)  # Stack all ensembles together
 
                     shape_ens = np.array(ensemble_vec.shape, dtype=np.int32)
-
                 else:
                     shape_ens = np.empty(2, dtype=np.int32)
 
@@ -991,6 +1008,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                 shape_ens = comm_world.bcast(shape_ens, root=0)
                 # write the ensemble to the file
                 ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
+
                 parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
 
             # comm_world.Bcast(ensemble_vec, root=0)
@@ -1206,7 +1224,6 @@ def icesee_model_data_assimilation(**model_kwargs):
 
             ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
             parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
-
 
     # --- hdim based on nd or global_shape ---
     if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
@@ -1488,6 +1505,12 @@ def icesee_model_data_assimilation(**model_kwargs):
             if params["default_run"]:
                 # --- case 2: Form batches of sub-communicators and distribute resources among them ---
                 if Nens >= size_world:
+                    # ensemble_vec, shape_ens = process_ensemble_data_Nens_ge_size_world(rounds, color, subcomm_size, subcomm, comm_world,\
+                    #                                           rank_world, sub_rank, model_kwargs, params, k, \
+                    #                                             _modelrun_datasets, alpha, rho, dt, Lx, Ly, \
+                    #                                                 len_scale, model_module, UtilsFunctions \
+                    #                                         , generate_enkf_field, icesee_get_index)
+                   
                     # store results for each round
                     ens_list = []
                     for round_id in range(rounds):
@@ -1502,7 +1525,8 @@ def icesee_model_data_assimilation(**model_kwargs):
                             ens = ensemble_id
                             # ---- read from file ----
                             input_file = f"{_modelrun_datasets}/icesee_ensemble_data.h5"
-                            with h5py.File(input_file, "r", driver="mpio", comm=subcomm) as f:
+                            # with h5py.File(input_file, "r", driver="mpio", comm=subcomm) as f:
+                            with h5py.File(input_file, "r") as f:
                                 ensemble_vec = f["ensemble"][:,ens,k]
                             # ---- end of read from file ----
 
@@ -1581,7 +1605,22 @@ def icesee_model_data_assimilation(**model_kwargs):
                             # subcomm.Barrier()
 
                             # Gather results within each subcommunicator
-                            gathered_ensemble = subcomm.gather(ensemble_vec[:], root=0)
+                            # gathered_ensemble = subcomm.gather(ensemble_vec[:], root=0)
+                            # replace with GatherV
+                            local_shape = ensemble_vec.size
+                            local_shapes = subcomm.gather(local_shape, root=0)
+
+                            if sub_rank == 0:
+                                total_size = sum(local_shapes)
+                                counts = local_shapes
+                                displs = [sum(counts[:i]) for i in range(subcomm.Get_size())]
+                                gathered_ensemble = np.empty(total_size, dtype=ensemble_vec.dtype)
+                            else:
+                                gathered_ensemble = None
+                                counts = None
+                                displs = None
+
+                            subcomm.Gatherv(ensemble_vec[:], [gathered_ensemble, counts, displs, MPI.DOUBLE], root=0)
 
                             # Ensure only rank = 0 in each subcommunicator gathers the results
                             if sub_rank == 0:
@@ -1590,8 +1629,22 @@ def icesee_model_data_assimilation(**model_kwargs):
                             ens_list.append(gathered_ensemble if sub_rank == 0 else None)
 
                         # Gather results from all subcommunicators
-                        # gathered_ensemble_global = ParallelManager().gather_data(comm_world, ens_list, root=0)
-                        gathered_ensemble_global = comm_world.gather(ens_list, root=0)
+                        gathered_ensemble_global = ParallelManager().gather_data(comm_world, ens_list, root=0)
+                        # gathered_ensemble_global = comm_world.gather(ens_list, root=0)
+                        # replace with GatherV
+                        # local_list_shape = np.array(ens_list).size
+                        # local_list_shapes = comm_world.gather(local_list_shape, root=0)
+                        # if rank_world == 0:
+                        #     total_size_global = sum(local_list_shapes)
+                        #     counts_global = local_list_shapes
+                        #     displs_global = [sum(counts_global[:i]) for i in range(size_world)]
+                        #     gathered_ensemble_global = np.empty(total_size_global, dtype=np.float64)
+                        # else:
+                        #     gathered_ensemble_global = None
+                        #     counts_global = None
+                        #     displs_global = None
+                        # comm_world.Gatherv(ens_list, [gathered_ensemble_global, counts_global, displs_global, MPI.DOUBLE], root=0)
+
                         #  free up memory
                         # del gathered_ensemble; gc.collect()
                     if rank_world == 0:
