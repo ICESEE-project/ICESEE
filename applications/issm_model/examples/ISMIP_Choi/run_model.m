@@ -10,8 +10,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
     steps        = double(kwargs.steps);
     icesee_path  = char(kwargs.icesee_path);
     data_path    = char(kwargs.data_path);
-    hpcmode      = logical(kwargs.hpcmode); % HPC mode flag
-    devmode      = logical(kwargs.devmode); % Development mode flag
+    devmode      = logical(kwargs.devmode);
 
     deepwater_melting_rate = double(kwargs.deepwater_melting_rate);
     smb = double(kwargs.smb);
@@ -100,20 +99,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.settings.solver_residue_threshold=5e-2;
 
         % Cluster setup
-        if hpcmode
-            md.settings.waitonlock = 1;
-            md.cluster = generic('name', oshostname(), 'np', nprocs);
-            md.cluster.codepath = [issmroot , '/bin'];
-            md.cluster.login = 'arobel3';
-            if ~exist(sprintf('%s/execution/color_%d', issmroot, ens_id), 'dir')
-                mkdir(sprintf('%s/execution/color_%d', issmroot, ens_id));
-            end
-            md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
-        else
-            md.cluster = generic('name', cluster_name, 'np', nprocs);
-            md.settings.waitonlock = 1;
-            md.miscellaneous.name = sprintf('color_%d', ens_id);
-        end
+        md.cluster = generic('name', oshostname(), 'np', nprocs);
+        md.settings.waitonlock = Inf;
+        md.settings.waitonlock=1;
+        md.miscellaneous.name = sprintf('color_%d', ens_id);
 
         % Verbose settings
         md.verbose = verbose('convergence', false, 'solution', true);
@@ -255,20 +244,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
        md.settings.solver_residue_threshold=5e-2;
 
         % Cluster setup
-        if hpcmode
-            md.settings.waitonlock = 1;
-            md.cluster = generic('name', oshostname(), 'np', nprocs);
-            md.cluster.codepath = [issmroot , '/bin'];
-            md.cluster.login = 'arobel3';
-            if ~exist(sprintf('%s/execution/color_%d', issmroot, ens_id), 'dir')
-                mkdir(sprintf('%s/execution/color_%d', issmroot, ens_id));
-            end
-            md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
-        else
-            md.cluster = generic('name', cluster_name, 'np', nprocs);
-            md.settings.waitonlock = 1;
-            md.miscellaneous.name = sprintf('color_%d', ens_id);
-        end
+        md.cluster = generic('name', oshostname(), 'np', nprocs);
+        md.settings.waitonlock = Inf;
+        md.settings.waitonlock=1;
+        md.miscellaneous.name = sprintf('color_%d', ens_id);
 
         % Verbose settings
         md.verbose = verbose('convergence', false, 'solution', true);
@@ -430,20 +409,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.geometry.surface = md.geometry.base + md.geometry.thickness;
 
             % Cluster setup
-            if hpcmode
-                md.settings.waitonlock = 1;
-                md.cluster = generic('name', oshostname(), 'np', nprocs);
-                md.cluster.codepath = [issmroot , '/bin'];
-                md.cluster.login = 'arobel3';
-                if ~exist(sprintf('%s/execution/color_%d', issmroot, ens_id), 'dir')
-                    mkdir(sprintf('%s/execution/color_%d', issmroot, ens_id));
-                end
-                md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
-            else
-                md.cluster = generic('name', cluster_name, 'np', nprocs);
-                md.settings.waitonlock = 1;
-                md.miscellaneous.name = sprintf('color_%d', ens_id);
-            end
+            md.cluster = generic('name', oshostname(), 'np', nprocs);
+            md.settings.waitonlock = Inf;
+            md.settings.waitonlock=1;
+            md.miscellaneous.name = sprintf('color_%d', ens_id);
 
             % Verbose settings
             md.verbose = verbose('convergence', false, 'solution', true);
@@ -500,20 +469,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.timestepping.final_time = 0.2;
 
             % Cluster setup
-            if hpcmode
-                md.settings.waitonlock = 1;
-                md.cluster = generic('name', oshostname(), 'np', nprocs);
-                md.cluster.codepath = [issmroot , '/bin'];
-                md.cluster.login = 'arobel3';
-                if ~exist(sprintf('%s/execution/color_%d', issmroot, ens_id), 'dir')
-                    mkdir(sprintf('%s/execution/color_%d', issmroot, ens_id));
-                end
-                md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
-            else
-                md.cluster = generic('name', cluster_name, 'np', nprocs);
-                md.settings.waitonlock = 1;
-                md.miscellaneous.name = sprintf('color_%d', ens_id);
-            end
+            md.cluster = generic('name', oshostname(), 'np', nprocs);
+            md.settings.waitonlock = Inf;
+            md.settings.waitonlock=1;
+            md.miscellaneous.name = sprintf('color_%d', ens_id);
 
             % Verbose settings
             md.verbose = verbose('convergence', false, 'solution', true);
@@ -604,20 +563,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.stressbalance.abstol = NaN;
 
             % Cluster setup
-            if hpcmode
-                md.settings.waitonlock = 1;
-                md.cluster = generic('name', oshostname(), 'np', nprocs);
-                md.cluster.codepath = [issmroot , '/bin'];
-                md.cluster.login = 'arobel3';
-                if ~exist(sprintf('%s/execution/color_%d', issmroot, ens_id), 'dir')
-                    mkdir(sprintf('%s/execution/color_%d', issmroot, ens_id));
-                end
-                md.cluster.executionpath = sprintf('%s/execution/color_%d', issmroot, ens_id);
-            else
-                md.cluster = generic('name', cluster_name, 'np', nprocs);
-                md.settings.waitonlock = 1;
-                md.miscellaneous.name = sprintf('color_%d', ens_id);
-            end
+            md.cluster = generic('name', oshostname(), 'np', nprocs);
+            md.settings.waitonlock = Inf;
+            md.settings.waitonlock=1;
+            md.miscellaneous.name = sprintf('color_%d', ens_id);
 
             % Verbose settings
             md.verbose = verbose('convergence', false, 'solution', true);

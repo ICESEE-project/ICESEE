@@ -14,6 +14,7 @@ import psutil
 import platform
 import threading
 import queue
+import shutil
 
 class _MatlabServer:
     """A class to manage a MATLAB server for running ISSM models.
@@ -33,7 +34,7 @@ class _MatlabServer:
         comm (mpi4py.MPI.Comm or None): MPI communicator for rank checking.
     """
 
-    def __init__(self, color=0, matlab_path="matlab", cmdfile="cmdfile", statusfile="statusfile", verbose=False, comm=None):
+    def __init__(self, color=0, matlab_path="matlab", cmdfile="cmdfile", statusfile="statusfile", verbose=False, comm=None, hpc=False):
         """Initialize the MATLAB server configuration.
 
         Args:
@@ -52,6 +53,7 @@ class _MatlabServer:
         self.output_queue = queue.Queue()  # Queue for asynchronous output handling
         self.running = False  # Controls output reading threads
         self.comm = comm  # MPI communicator
+        self.hpc = hpc  # Flag for HPC mode
 
     def kill_matlab_processes(self):
         """Terminate all non-GUI MATLAB processes.
@@ -140,6 +142,101 @@ class _MatlabServer:
             except queue.Empty:
                 continue  # No output available, keep checking
 
+    def get_os(self):
+        os_name = platform.system().lower()
+        if os_name == 'linux':
+            return 'Linux'
+        elif os_name == 'darwin':
+            return 'MacOS'
+        elif os_name == 'windows':
+            return 'Windows'
+        else:
+            return 'Unknown_OS'
+
+    def issm_hpc_wrapper(self):
+        # if self.hpc:
+        # if True:
+        if self.get_os() == 'Linux' or self.get_os() == 'Unknown_OS':
+            # Verify ISSM_DIR is set
+            if 'ISSM_DIR' not in os.environ:
+                raise RuntimeError("ISSM_DIR environment variable is not set")
+
+            # Save original PATH and LD_LIBRARY_PATH
+            original_path = os.environ.get('PATH', '')
+            original_ld_library_path = os.environ.get('LD_LIBRARY_PATH', '')
+
+            # Source environment.sh and capture the modified environment
+            command = f"source $ISSM_DIR/etc/environment.sh && echo $PATH && echo $LD_LIBRARY_PATH"
+            result = subprocess.run(command, shell=True, executable="/bin/bash", capture_output=True, text=True, check=True)
+
+            # Split the output into PATH and LD_LIBRARY_PATH
+            output_lines = result.stdout.strip().split('\n')
+            if len(output_lines) >= 2:
+                new_path = output_lines[0]
+                new_ld_library_path = output_lines[1]
+            else:
+                raise RuntimeError("Failed to capture PATH and LD_LIBRARY_PATH from environment.sh")
+
+            # Prepend original paths to ensure mvapich2 and gcc/12 take precedence
+            os.environ['PATH'] = f"{original_path}:{new_path}"
+            os.environ['LD_LIBRARY_PATH'] = f"{original_ld_library_path}:{new_ld_library_path}"
+
+            # mvapich_bin = "/usr/local/pace-apps/manual/packages/openmpi/4.1.8/nvhpc-25.5/bin"
+            # mvapich_lib = "/usr/local/pace-apps/manual/packages/openmpi/4.1.8/nvhpc-25.5/lib"
+
+            # Function to find MPI bin and lib paths
+            def find_mpi_paths():
+                """Find MPI bin and lib paths by searching for mpirun/mpiexec and libmpi.so."""
+                mpi_bin_path = None
+                mpi_lib_path = None
+
+                # Search for mpirun or mpiexec in PATH
+                paths = os.environ.get("PATH", "").split(":")
+                mpi_executables = ["mpirun", "mpiexec"]
+                for path in paths:
+                    if os.path.isdir(path):
+                        for exe in mpi_executables:
+                            if os.path.isfile(os.path.join(path, exe)):
+                                mpi_bin_path = path
+                                break
+                        if mpi_bin_path:
+                            break
+
+                # Search for libmpi.so in LD_LIBRARY_PATH
+                lib_paths = os.environ.get("LD_LIBRARY_PATH", "").split(":")
+                for path in lib_paths:
+                    if os.path.isfile(os.path.join(path, "libmpi.so")):
+                        mpi_lib_path = path
+                        break
+
+                return mpi_bin_path, mpi_lib_path
+
+            # Get MPI bin and lib paths
+            mvapich_bin, mvapich_lib = find_mpi_paths()
+
+            # Get current PATH and LD_LIBRARY_PATH
+            path = os.environ.get("PATH", "")
+            ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
+
+            # Function to remove path using sed
+            def remove_path(original, path_to_remove):
+                # Escape special characters for sed
+                path_to_remove = path_to_remove.replace("/", r"\/")
+                # Use sed to remove the path
+                sed_command = f"echo '{original}' | sed 's|{path_to_remove}:||g; s|:{path_to_remove}||g; s|^{path_to_remove}$||g'"
+                result = subprocess.run(sed_command, shell=True, capture_output=True, text=True)
+                return result.stdout.strip()
+
+            # Remove mvapich paths
+            new_path = remove_path(path, mvapich_bin)
+            new_ld_library_path = remove_path(ld_library_path, mvapich_lib)
+
+            # Remove mvapich paths and update environment variables
+            os.environ["PATH"] = remove_path(path, mvapich_bin)
+            os.environ["LD_LIBRARY_PATH"] = remove_path(ld_library_path, mvapich_lib)
+
+
+
     def launch(self):
         """Launch the MATLAB server and wait for it to be ready.
 
@@ -170,8 +267,14 @@ class _MatlabServer:
         try:
             # Launch MATLAB with non-GUI flags and redirect I/O
             # matlab_cmd = f"{self.matlab_path} -nodesktop -nodisplay -nosplash -nojvm -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
-            matlab_cmd = f"{self.matlab_path} -nodesktop -nosplash -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
 
+            # -- source all the necessary paths for ISSM
+            
+            self.issm_hpc_wrapper()
+
+            # matlab_cmd = f"{self.matlab_path} -nodisplay -nosplash -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
+            matlab_cmd = f'bash -c "{self.matlab_path} -nodisplay -nosplash -r \\"matlab_server(\'{self.cmdfile}\', \'{self.statusfile}\')\\""'
+            
             self.process = subprocess.Popen(
                 matlab_cmd,
                 shell=True,
@@ -464,6 +567,7 @@ class MatlabServer:
             raise ValueError(
                 f"Nens ({self.Nens}) must be greater than or equal to the size of the MPI communicator ({self.size} set model_nprocs for the remaining resources if you want the coupled model to run in parallel). "
             )
+            # return True
         return False
 
     def __getattr__(self, name):
@@ -780,6 +884,10 @@ def setup_reference_data(reference_data_dir, reference_data, use_reference_data=
     - rank_data_dir: Path to the rank's ensemble directory (e.g., './Models/ens_id_X').
     - rank_data_file: Path to the rank's reference data file.
     """
+    import os
+    import shutil
+    import subprocess
+
     from mpi4py import MPI
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -813,6 +921,17 @@ def setup_reference_data(reference_data_dir, reference_data, use_reference_data=
                 )
             except subprocess.CalledProcessError as e:
                 raise RuntimeError(f"[Rank {rank}] Failed to rsync {initial_data} to {link_path}: {e.stderr}")
+            except PermissionError as e:
+                print(f"[Rank {rank}] Permission denied for rsync: {e}. Falling back to shutil.copy.")
+                try:
+                    # Ensure the destination directory exists
+                    os.makedirs(os.path.dirname(link_path), exist_ok=True)
+                    # Copy the file using shutil
+                    shutil.copy(initial_data, link_path)
+                    print(f"[Rank {rank}] Successfully copied {initial_data} to {link_path} using shutil.")
+                except Exception as copy_error:
+                    raise RuntimeError(f"[Rank {rank}] Failed to copy {initial_data} to {link_path} using shutil: {copy_error}")
+            
 
     comm.Barrier()  # Synchronize all ranks
     return rank_data_dir, rank_data_file

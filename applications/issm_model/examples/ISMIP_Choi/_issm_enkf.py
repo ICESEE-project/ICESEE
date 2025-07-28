@@ -200,7 +200,8 @@ def initialize_ensemble(ens, **kwargs):
 
     #  -- control time stepping
     kwargs.update({'k':0}) 
-    kwargs.update({'tinitial': 0, 'tfinal': 0.2})
+    dt = kwargs.get('dt')
+    kwargs.update({'tinitial': 0, 'tfinal': dt})
 
 
     # --- filename for data saving

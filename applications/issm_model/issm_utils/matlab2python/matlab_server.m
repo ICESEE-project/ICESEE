@@ -46,6 +46,12 @@ function matlab_server(cmdfile, statusfile)
                 disp(['Executing: ', command]);
                 evalin('base', command);  % Execute in base workspace
                 disp('Command completed.');
+                fid = fopen(statusfile, 'w');
+                fprintf(fid, 'done');
+                fclose(fid);
+                drawnow;  % Ensure GUI updates if needed
+                pause(0.1);  % Allow time for GUI updates
+                disp('Status updated to done.');
                 delete(cmdfile);  % Clean up
                 
             catch ME

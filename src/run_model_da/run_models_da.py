@@ -429,7 +429,8 @@ def icesee_model_data_assimilation(**model_kwargs):
                                             parallel_write_full_ensemble_from_root, \
                                             parallel_write_data_from_root_2D, \
                                             parallel_write_vector_from_root, \
-                                            analysis_Denkf_update
+                                            analysis_Denkf_update, \
+                                            process_ensemble_data_Nens_ge_size_world
         
 
         # start the timer
@@ -461,6 +462,42 @@ def icesee_model_data_assimilation(**model_kwargs):
         # --- initialize seed for reproducibility ---
         ParallelManager().initialize_seed(comm_world, base_seed=0)
 
+        # fetch model nprocs
+        model_nprocs = params.get("model_nprocs", 1)
+
+        # set modeel_nprocs adaptively
+        total_cores = os.cpu_count()
+        base_total_procs = size_world + (size_world * model_nprocs)  # MPI + MATLAB processes
+        diff = total_cores - base_total_procs  # Available or deficit cores
+
+        # Dynamic process allocation
+        if rank_world == 0:
+            # Prioritize rank 0: Allocate extra cores or handle deficit
+            if diff >= 0:
+                # Extra cores available: give rank 0 up to 2x model_nprocs or more
+                extra_procs = min(diff, model_nprocs * 2)  # Cap at 2x base for safety
+                effective_model_nprocs = model_nprocs + extra_procs
+            else:
+                # Deficit: Maintain base model_nprocs or slightly reduce
+                effective_model_nprocs = max(1, model_nprocs + (diff // size_world))
+        else:
+            # Other ranks: Minimize MATLAB processes, ensure at least 1
+            if diff >= 0:
+                effective_model_nprocs = model_nprocs
+            else:
+                effective_model_nprocs = max(1, model_nprocs + (diff // size_world))
+
+        # Ensure total processes don’t exceed cores
+        total_matlab_procs = effective_model_nprocs if rank_world == 0 else effective_model_nprocs * (size_world - 1)
+        total_procs = size_world + total_matlab_procs
+        if total_procs > total_cores:
+            # Scale down proportionally
+            scale_factor = total_cores / total_procs
+            effective_model_nprocs = max(1, np.floor(effective_model_nprocs * scale_factor)) 
+
+        # update model_kwargs with the effective model_nprocs
+        model_kwargs.update({'model_nprocs': effective_model_nprocs})
+
         # --- Generate True and Nurged States ---------------------------------------------------
         if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
             if params["even_distribution"]:
@@ -471,12 +508,13 @@ def icesee_model_data_assimilation(**model_kwargs):
             dim_list = comm_world.allgather(params["nd"])
             # print(f"[ICESEE] Dim list: {dim_list}")
             # save model_nprocs before update if rank_world == 0
-            model_nprocs = params.get("model_nprocs", 1)
+            # model_nprocs = params.get("model_nprocs", 1)
+
             
             if rank_world == 0:
                 
                 model_kwargs.update({'ens_id': rank_world})
-                model_kwargs.update({'model_nprocs': (model_nprocs * size_world) - size_world}) # update the model_nprocs to include all processors for the external model run
+                # model_kwargs.update({'model_nprocs': (model_nprocs * size_world) - size_world}) # update the model_nprocs to include all processors for the external model run
 
                 if model_kwargs.get("generate_true_state", True):
                     print("[ICESEE] Generating true state ...")
@@ -523,7 +561,7 @@ def icesee_model_data_assimilation(**model_kwargs):
             model_kwargs.update({"dim_list": dim_list})
 
             # update model_nprocs back to the original value before proceeding to the # next step
-            model_kwargs.update({'model_nprocs': model_nprocs})
+            # model_kwargs.update({'model_nprocs': model_nprocs})
 
         else:
             # --- Generate True and Nurged States ---
@@ -619,7 +657,9 @@ def icesee_model_data_assimilation(**model_kwargs):
                 ensemble_nurged_state = model_module.generate_nurged_state(**model_kwargs)
             
         # --- Generate the Observations ---------------------------------------------------
-            
+        ##debug
+        comm_world.Barrier()
+
         # --- Synthetic Observations ---
         if model_kwargs.get("generate_synthetic_obs", True):   
             if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
@@ -771,16 +811,17 @@ def icesee_model_data_assimilation(**model_kwargs):
         
 
         if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
-            if rank_world == 0:
-                print("[ICESEE] Initializing the ensemble ...")
-                model_kwargs.update({'ens_id': rank_world})
-                if params["even_distribution"]:
-                    model_kwargs.update({'rank': rank_world, 'color': color, 'comm': comm_world})
-                else:
-                    model_kwargs.update({'rank': sub_rank, 'color': color, 'comm': subcomm})
+            # if params["default_run"] and size_world <= params["Nens"]:
+            if False:
+                if rank_world == 0:
+                    print("[ICESEE] Initializing the ensemble ...")
+
+                # model_kwargs.update({'ens_id': rank_world})
+                Nens = params["Nens"]
+                model_kwargs.update({'rank': sub_rank, 'color': color, 'comm': subcomm})
 
                 model_kwargs.update({"statevec_ens":np.zeros([params["nd"], params["Nens"]])})
-                
+
                 # get the ensemble matrix   
                 vecs, indx_map, dim_per_proc = icesee_get_index(model_kwargs["statevec_ens"], **model_kwargs)
                 ensemble_vec = np.zeros_like(model_kwargs["statevec_ens"])
@@ -790,76 +831,168 @@ def icesee_model_data_assimilation(**model_kwargs):
                 else:
                     hdim = ensemble_vec.shape[0] // params["num_state_vars"]
                 state_block_size = hdim * params["num_state_vars"]
-
-                # # --- get the process noise ---
-                # pos, gs_model, L_C = compute_Q_err_random_fields(hdim, params["total_state_param_vars"], params["sig_Q"], Q_rho, len_scale)
-
-                # process_noise = []
-                for ens in range(params["Nens"]):
-                    # model_kwargs.update({"ens_id": ens})
-                    data = model_module.initialize_ensemble(ens,**model_kwargs)
                 
-                    # iterate over the data and update the ensemble
-                    for key, value in data.items():
-                        ensemble_vec[indx_map[key],ens] = value
+                # store results for each round
+                ens_list_init = []
+                for round_id in range(rounds):
+                    ensemble_id = color + (round_id * subcomm_size)
+                    model_kwargs.update({'ens_id': ensemble_id})
 
-                # ensemble = ensemble_vec
-                # for ens in range(params["Nens"]):
-                    # add process noise
-                    # if model_kwargs["joint_estimation"] or params["localization_flag"]:
-                    #     hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
-                    # else:
-                    #     hdim = ensemble_vec.shape[0] // params["num_state_vars"]
-                    # state_block_size = hdim * params["num_state_vars"]
+                    if ensemble_id < Nens:
+                        # synchronize the ensemble initialization
+                        subcomm.Barrier()
+                        ens = ensemble_id
 
-                    # --->
-                    # noise = compute_noise_random_fields(ens, hdim, pos, gs_model, params["total_state_param_vars"], L_C)
-                    # ensemble_vec[:,ens] += noise
-                    #----->
-                    N_size = params["total_state_param_vars"] * hdim
-                    # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=True)
-                    noise = generate_enkf_field(None,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
-                    ensemble_vec[:,ens] += noise
-                    # for ii, sig in enumerate(params["sig_Q"]):
-                    #     if ii <=params["num_state_vars"]:
-                    #         start_idx = ii * hdim
-                    #         end_idx = start_idx + hdim
-                    #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
+                        # call the model to initialize the ensemble
+                        data = model_module.initialize_ensemble(ens, **model_kwargs)
+                        for key, value in data.items():
+                            ensemble_vec[indx_map[key], ens] = value
 
+                        # add process noise
+                        # N_size = params["total_state_param_vars"] * hdim
+                        noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                        ensemble_vec[:, ens] += noise
 
-                    # -----------------------------
-                    # full_block_size = hdim * params["total_state_param_vars"]
-                    # Q_err = np.zeros((full_block_size,full_block_size))
-                    # for i, sig in enumerate(params["sig_Q"]):
-                    #     start_idx = i *hdim
-                    #     end_idx = start_idx + hdim
-                    #     Q_err[start_idx:end_idx,start_idx:end_idx] = np.eye(hdim) * sig ** 2
+                        gathered_ensemble = subcomm.gather(ensemble_vec[:,ens], root=0)
+                        # local_shape = ensemble_vec[:,ens].size
+                        # local_shapes = subcomm.gather(local_shape, root=0)
 
-                    # # print(f"[ICESEE] [Q_err] Q_err shape: {Q_err.shape}, Q_err: {Q_err[:10,:10]}")
+                        # if sub_rank == 0:
+                        #     total_size = sum(local_shapes)
+                        #     counts = local_shapes
+                        #     displs = [sum(counts[:i]) for i in range(subcomm.Get_size())]
+                        #     gathered_ensemble = np.empty(total_size, dtype=ensemble_vec[:,ens].dtype)
+                        # else:
+                        #     gathered_ensemble = None
+                        #     counts = None
+                        #     displs = None
+
+                        # subcomm.Gatherv(ensemble_vec[:,ens], [gathered_ensemble, counts, displs, MPI.DOUBLE], root=0)
 
 
-                    # # noise = multivariate_normal.rvs(mean=np.zeros(state_block_size), cov=Q_err[:state_block_size,:state_block_size])
-                    # noise = multivariate_normal.rvs(mean=np.zeros(full_block_size), cov=Q_err)
-                    # ensemble_vec[:,ens] += noise
-
-                    # # print(f"[ICESEE] [Debug] Ensemble vector shape: {ensemble_vec.shape}, noise shape: {noise.shape}")
-                    # ------------------------------
-
-                    # add a spread to the smb
-                    # if model_kwargs["joint_estimation"] or params["localization_flag"]:
-                        # ensemble_vec[state_block_size:,ens] = ensemble_vec[state_block_size:,ens] + np.diag(Q_err[state_block_size:,state_block_size:])
-
+                        # ensure only rank = 0 in each subcomm gathers the ensemble
+                        if sub_rank == 0:
+                            gathered_ensemble = np.hstack(gathered_ensemble)
+                        
+                        ens_list_init.append(gathered_ensemble if sub_rank == 0 else None)
                     
-                    
-                shape_ens = np.array(ensemble_vec.shape,dtype=np.int32)
-                
-    
+                    subcomm.Barrier()
+                    # gather all the ensembles from all subcommunicators
+                    gathered_ensemble_global = comm_world.gather(ens_list_init, root=0)
+
+                if rank_world == 0:
+                    ensemble_vec = [arr for sublist in gathered_ensemble_global for arr in sublist if arr is not None]
+                    ensemble_vec =np.column_stack(ensemble_vec)  # Stack all ensembles together
+
+                    shape_ens = np.array(ensemble_vec.shape, dtype=np.int32)
+                else:
+                    shape_ens = np.empty(2, dtype=np.int32)
+
+                # broadcast the shape of the ensemble
+                shape_ens = comm_world.bcast(shape_ens, root=0)
+
             else:
-                ensemble_vec = np.empty((params["nd"],params["Nens"]),dtype=np.float64)
-                shape_ens = np.empty(2,dtype=np.int32)
-                # pos, gs_model, L_C
+                if rank_world == 0:
+                    print("[ICESEE] Initializing the ensemble ...")
+                    model_kwargs.update({'ens_id': rank_world})
+                    if params["even_distribution"]:
+                        model_kwargs.update({'rank': rank_world, 'color': color, 'comm': comm_world})
+                    else:
+                        model_kwargs.update({'rank': sub_rank, 'color': color, 'comm': subcomm})
+
+                    model_kwargs.update({"statevec_ens":np.zeros([params["nd"], params["Nens"]])})
+                    
+                    # get the ensemble matrix   
+                    vecs, indx_map, dim_per_proc = icesee_get_index(model_kwargs["statevec_ens"], **model_kwargs)
+                    ensemble_vec = np.zeros_like(model_kwargs["statevec_ens"])
+
+                    if model_kwargs["joint_estimation"] or params["localization_flag"]:
+                            hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
+                    else:
+                        hdim = ensemble_vec.shape[0] // params["num_state_vars"]
+                    state_block_size = hdim * params["num_state_vars"]
+
+                    # # --- get the process noise ---
+                    # pos, gs_model, L_C = compute_Q_err_random_fields(hdim, params["total_state_param_vars"], params["sig_Q"], Q_rho, len_scale)
+
+                    # process_noise = []
+                    for ens in range(params["Nens"]):
+                        # model_kwargs.update({"ens_id": ens})
+                        data = model_module.initialize_ensemble(ens,**model_kwargs)
+                    
+                        # iterate over the data and update the ensemble
+                        for key, value in data.items():
+                            ensemble_vec[indx_map[key],ens] = value
+
+                    # ensemble = ensemble_vec
+                    # for ens in range(params["Nens"]):
+                        # add process noise
+                        # if model_kwargs["joint_estimation"] or params["localization_flag"]:
+                        #     hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
+                        # else:
+                        #     hdim = ensemble_vec.shape[0] // params["num_state_vars"]
+                        # state_block_size = hdim * params["num_state_vars"]
+
+                        # --->
+                        # noise = compute_noise_random_fields(ens, hdim, pos, gs_model, params["total_state_param_vars"], L_C)
+                        # ensemble_vec[:,ens] += noise
+                        #----->
+                        N_size = params["total_state_param_vars"] * hdim
+                        # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=True)
+                        noise = generate_enkf_field(None,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                        ensemble_vec[:,ens] += noise
+                        # for ii, sig in enumerate(params["sig_Q"]):
+                        #     if ii <=params["num_state_vars"]:
+                        #         start_idx = ii * hdim
+                        #         end_idx = start_idx + hdim
+                        #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
+
+
+                        # -----------------------------
+                        # full_block_size = hdim * params["total_state_param_vars"]
+                        # Q_err = np.zeros((full_block_size,full_block_size))
+                        # for i, sig in enumerate(params["sig_Q"]):
+                        #     start_idx = i *hdim
+                        #     end_idx = start_idx + hdim
+                        #     Q_err[start_idx:end_idx,start_idx:end_idx] = np.eye(hdim) * sig ** 2
+
+                        # # print(f"[ICESEE] [Q_err] Q_err shape: {Q_err.shape}, Q_err: {Q_err[:10,:10]}")
+
+
+                        # # noise = multivariate_normal.rvs(mean=np.zeros(state_block_size), cov=Q_err[:state_block_size,:state_block_size])
+                        # noise = multivariate_normal.rvs(mean=np.zeros(full_block_size), cov=Q_err)
+                        # ensemble_vec[:,ens] += noise
+
+                        # # print(f"[ICESEE] [Debug] Ensemble vector shape: {ensemble_vec.shape}, noise shape: {noise.shape}")
+                        # ------------------------------
+
+                        # add a spread to the smb
+                        # if model_kwargs["joint_estimation"] or params["localization_flag"]:
+                            # ensemble_vec[state_block_size:,ens] = ensemble_vec[state_block_size:,ens] + np.diag(Q_err[state_block_size:,state_block_size:])
+
+                        
+                        
+                    shape_ens = np.array(ensemble_vec.shape,dtype=np.int32)
+                    
+        
+                else:
+                    ensemble_vec = np.empty((params["nd"],params["Nens"]),dtype=np.float64)
+                    shape_ens = np.empty(2,dtype=np.int32)
+                    # pos, gs_model, L_C
 
             comm_world.Barrier()
+
+            # now reset the model_nprocs
+            if rank_world == 0:
+                diff = total_cores - base_total_procs 
+                if diff >= 0:
+                    # split the diff amaongest all processors
+                    model_nprocs = max(1, model_nprocs + (diff // size_world))
+                else:
+                    model_nprocs = model_nprocs
+
+            model_nprocs = comm_world.bcast(model_nprocs, root=0)
+            model_kwargs.update({'model_nprocs': model_nprocs})
 
             if params["even_distribution"]:
                 # Bcast the ensemble
@@ -875,6 +1008,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                 shape_ens = comm_world.bcast(shape_ens, root=0)
                 # write the ensemble to the file
                 ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
+
                 parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
 
             # comm_world.Bcast(ensemble_vec, root=0)
@@ -1091,7 +1225,6 @@ def icesee_model_data_assimilation(**model_kwargs):
             ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
             parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
 
-
     # --- hdim based on nd or global_shape ---
     if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
         if model_kwargs["joint_estimation"] or params["localization_flag"]:
@@ -1183,8 +1316,17 @@ def icesee_model_data_assimilation(**model_kwargs):
     EnKFclass = EnKF(parameters=params, parallel_manager=parallel_manager, parallel_flag = parallel_flag)
 
     # tqdm progress bar
+    # Initialize progress bar on the root process
     if rank_world == 0:
-        pbar = tqdm(total=model_kwargs.get("nt",params["nt"]), desc=f"[ICESEE] Progress on {size_world} processors", position=0)
+        nt = model_kwargs.get("nt", params["nt"])
+        print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {size_world} MPI ranks.")
+        pbar = tqdm(
+            total=nt,
+            desc=f"[ICESEE] Assimilation progress ({size_world} ranks)",
+            position=0,
+            leave=True,
+            dynamic_ncols=True
+        )
 
     # ==== Time loop =======================================================================================
     # specified decorrelation length scale, tau,
@@ -1363,6 +1505,12 @@ def icesee_model_data_assimilation(**model_kwargs):
             if params["default_run"]:
                 # --- case 2: Form batches of sub-communicators and distribute resources among them ---
                 if Nens >= size_world:
+                    # ensemble_vec, shape_ens = process_ensemble_data_Nens_ge_size_world(rounds, color, subcomm_size, subcomm, comm_world,\
+                    #                                           rank_world, sub_rank, model_kwargs, params, k, \
+                    #                                             _modelrun_datasets, alpha, rho, dt, Lx, Ly, \
+                    #                                                 len_scale, model_module, UtilsFunctions \
+                    #                                         , generate_enkf_field, icesee_get_index)
+                   
                     # store results for each round
                     ens_list = []
                     for round_id in range(rounds):
@@ -1377,7 +1525,8 @@ def icesee_model_data_assimilation(**model_kwargs):
                             ens = ensemble_id
                             # ---- read from file ----
                             input_file = f"{_modelrun_datasets}/icesee_ensemble_data.h5"
-                            with h5py.File(input_file, "r", driver="mpio", comm=subcomm) as f:
+                            # with h5py.File(input_file, "r", driver="mpio", comm=subcomm) as f:
+                            with h5py.File(input_file, "r") as f:
                                 ensemble_vec = f["ensemble"][:,ens,k]
                             # ---- end of read from file ----
 
@@ -1456,7 +1605,22 @@ def icesee_model_data_assimilation(**model_kwargs):
                             # subcomm.Barrier()
 
                             # Gather results within each subcommunicator
-                            gathered_ensemble = subcomm.gather(ensemble_vec[:], root=0)
+                            # gathered_ensemble = subcomm.gather(ensemble_vec[:], root=0)
+                            # replace with GatherV
+                            local_shape = ensemble_vec.size
+                            local_shapes = subcomm.gather(local_shape, root=0)
+
+                            if sub_rank == 0:
+                                total_size = sum(local_shapes)
+                                counts = local_shapes
+                                displs = [sum(counts[:i]) for i in range(subcomm.Get_size())]
+                                gathered_ensemble = np.empty(total_size, dtype=ensemble_vec.dtype)
+                            else:
+                                gathered_ensemble = None
+                                counts = None
+                                displs = None
+
+                            subcomm.Gatherv(ensemble_vec[:], [gathered_ensemble, counts, displs, MPI.DOUBLE], root=0)
 
                             # Ensure only rank = 0 in each subcommunicator gathers the results
                             if sub_rank == 0:
@@ -1465,8 +1629,22 @@ def icesee_model_data_assimilation(**model_kwargs):
                             ens_list.append(gathered_ensemble if sub_rank == 0 else None)
 
                         # Gather results from all subcommunicators
-                        # gathered_ensemble_global = ParallelManager().gather_data(comm_world, ens_list, root=0)
-                        gathered_ensemble_global = comm_world.gather(ens_list, root=0)
+                        gathered_ensemble_global = ParallelManager().gather_data(comm_world, ens_list, root=0)
+                        # gathered_ensemble_global = comm_world.gather(ens_list, root=0)
+                        # replace with GatherV
+                        # local_list_shape = np.array(ens_list).size
+                        # local_list_shapes = comm_world.gather(local_list_shape, root=0)
+                        # if rank_world == 0:
+                        #     total_size_global = sum(local_list_shapes)
+                        #     counts_global = local_list_shapes
+                        #     displs_global = [sum(counts_global[:i]) for i in range(size_world)]
+                        #     gathered_ensemble_global = np.empty(total_size_global, dtype=np.float64)
+                        # else:
+                        #     gathered_ensemble_global = None
+                        #     counts_global = None
+                        #     displs_global = None
+                        # comm_world.Gatherv(ens_list, [gathered_ensemble_global, counts_global, displs_global, MPI.DOUBLE], root=0)
+
                         #  free up memory
                         # del gathered_ensemble; gc.collect()
                     if rank_world == 0:
