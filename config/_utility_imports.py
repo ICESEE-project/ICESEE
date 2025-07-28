@@ -211,6 +211,7 @@ if not flag_jupyter:
         'generate_true_state': enkf_params.get("generate_true_state", True),
         'generate_nurged_state': enkf_params.get("generate_nurged_state", True),
         'use_ensemble_pertubations': enkf_params.get("use_ensemble_pertubations", True),
+        'sequential_ensemble_initialization': enkf_params.get("sequential_ensemble_initialization", False),
     }
 
 

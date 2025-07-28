@@ -493,7 +493,8 @@ def icesee_model_data_assimilation(**model_kwargs):
         if total_procs > total_cores:
             # Scale down proportionally
             scale_factor = total_cores / total_procs
-            effective_model_nprocs = max(1, np.floor(effective_model_nprocs * scale_factor)) 
+            min_model_nprocs = max(model_nprocs-1, 1)  # Ensure at least 1 process
+            effective_model_nprocs = max(min_model_nprocs, np.floor(effective_model_nprocs * scale_factor))
 
         # update model_kwargs with the effective model_nprocs
         model_kwargs.update({'model_nprocs': effective_model_nprocs})
@@ -811,8 +812,8 @@ def icesee_model_data_assimilation(**model_kwargs):
         
 
         if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
-            # if params["default_run"] and size_world <= params["Nens"]:
-            if False:
+            if params["default_run"] and size_world <= params["Nens"] and not (model_kwargs.get("sequential_ensemble_initialization", False)):
+            # if False:
                 if rank_world == 0:
                     print("[ICESEE] Initializing the ensemble ...")
 
@@ -987,7 +988,8 @@ def icesee_model_data_assimilation(**model_kwargs):
                 diff = total_cores - base_total_procs 
                 if diff >= 0:
                     # split the diff amaongest all processors
-                    model_nprocs = max(1, model_nprocs + (diff // size_world))
+                    min_model_nprocs = max(model_nprocs-1, 1) 
+                    model_nprocs = max(min_model_nprocs, model_nprocs + (diff // size_world))
                 else:
                     model_nprocs = model_nprocs
 

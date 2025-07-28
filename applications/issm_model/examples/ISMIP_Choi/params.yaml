@@ -34,6 +34,7 @@ enkf-parameters:
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state:    1  # Generate true state for synthetic observations
   generate_nurged_state:  1  # Generate nudged state for synthetic observations
+  sequential_ensemble_initialization: 0  # Sequential ensemble initialization (True for sequential, False for parallel)
 
   num_state_vars: 1             # State variables: ice thickness (H), velocities (u, v)
   num_param_vars: 2             # Parameter variables: friction coefficient (C), bed topography (B)
