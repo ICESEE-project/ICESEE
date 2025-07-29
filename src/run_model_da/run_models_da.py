@@ -833,63 +833,62 @@ def icesee_model_data_assimilation(**model_kwargs):
                     hdim = ensemble_vec.shape[0] // params["num_state_vars"]
                 state_block_size = hdim * params["num_state_vars"]
                 
-                # store results for each round
-                ens_list_init = []
+                if sub_rank == 0:
+                    ens_list_init = []
+                else:
+                    ens_list_init = []
+
                 for round_id in range(rounds):
                     ensemble_id = color + (round_id * subcomm_size)
                     model_kwargs.update({'ens_id': ensemble_id})
 
                     if ensemble_id < Nens:
-                        # synchronize the ensemble initialization
+                        # Synchronize the ensemble initialization
                         subcomm.Barrier()
                         ens = ensemble_id
 
-                        # call the model to initialize the ensemble
+                        # Call the model to initialize the ensemble
                         data = model_module.initialize_ensemble(ens, **model_kwargs)
                         for key, value in data.items():
                             ensemble_vec[indx_map[key], ens] = value
 
-                        # add process noise
-                        # N_size = params["total_state_param_vars"] * hdim
+                        # Add process noise in-place to avoid temporary array
                         noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                         ensemble_vec[:, ens] += noise
+                        del noise  # Free memory immediately
 
-                        gathered_ensemble = subcomm.gather(ensemble_vec[:,ens], root=0)
-                        # local_shape = ensemble_vec[:,ens].size
-                        # local_shapes = subcomm.gather(local_shape, root=0)
-
-                        # if sub_rank == 0:
-                        #     total_size = sum(local_shapes)
-                        #     counts = local_shapes
-                        #     displs = [sum(counts[:i]) for i in range(subcomm.Get_size())]
-                        #     gathered_ensemble = np.empty(total_size, dtype=ensemble_vec[:,ens].dtype)
-                        # else:
-                        #     gathered_ensemble = None
-                        #     counts = None
-                        #     displs = None
-
-                        # subcomm.Gatherv(ensemble_vec[:,ens], [gathered_ensemble, counts, displs, MPI.DOUBLE], root=0)
-
-
-                        # ensure only rank = 0 in each subcomm gathers the ensemble
-                        if sub_rank == 0:
-                            gathered_ensemble = np.hstack(gathered_ensemble)
+                        # Gather ensemble data efficiently
+                        gathered_ensemble = subcomm.gather(ensemble_vec[:, ens], root=0)
                         
-                        ens_list_init.append(gathered_ensemble if sub_rank == 0 else None)
-                    
-                    subcomm.Barrier()
-                    # gather all the ensembles from all subcommunicators
-                    gathered_ensemble_global = comm_world.gather(ens_list_init, root=0)
+                        if sub_rank == 0:
+                            # Use np.concatenate with pre-allocated array to avoid np.hstack memory overhead
+                            gathered_ensemble = np.concatenate(gathered_ensemble, axis=0)
+                            ens_list_init.append(gathered_ensemble)
+                        
+                        del gathered_ensemble  # Free memory after appending
 
+                    # subcomm.Barrier()
+                    # Gather all ensembles from all subcommunicators
+                    gathered_ensemble_global = ParallelManager().gather_data(comm_world, ens_list_init, root=0)
+
+                # Final processing on rank 0
+                # subcomm.Barrier()
+                del ens_list_init; gc.collect()
                 if rank_world == 0:
+                    # Flatten and filter None values
                     ensemble_vec = [arr for sublist in gathered_ensemble_global for arr in sublist if arr is not None]
-                    ensemble_vec =np.column_stack(ensemble_vec)  # Stack all ensembles together
-
-                    shape_ens = np.array(ensemble_vec.shape, dtype=np.int32)
+                    # Pre-allocate final array to avoid memory spikes during np.column_stack
+                    final_shape = (len(ensemble_vec[0]), len(ensemble_vec)) if ensemble_vec else (0, 0)
+                    ensemble_vec_final = np.empty(final_shape, dtype=ensemble_vec[0].dtype)
+                    for i, arr in enumerate(ensemble_vec):
+                        ensemble_vec_final[:, i] = arr
+                    shape_ens = np.array(ensemble_vec_final.shape, dtype=np.int32)
+                    ensemble_vec = ensemble_vec_final  # Replace ensemble_vec with final array
+                    del ensemble_vec_final  # Free memory
                 else:
                     shape_ens = np.empty(2, dtype=np.int32)
 
-                # broadcast the shape of the ensemble
+                # Broadcast the shape of the ensemble
                 shape_ens = comm_world.bcast(shape_ens, root=0)
 
             else:
@@ -1513,7 +1512,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                     #                                                 len_scale, model_module, UtilsFunctions \
                     #                                         , generate_enkf_field, icesee_get_index)
                    
-                    # store results for each round
+                    # store results for each round      
                     ens_list = []
                     for round_id in range(rounds):
                         ensemble_id = color + round_id * subcomm_size  # Global ensemble index
@@ -1596,6 +1595,9 @@ def icesee_model_data_assimilation(**model_kwargs):
                             ensemble_vec[:state_block_size] = ensemble_vec[:state_block_size] + noise_[:state_block_size]
                             noise = np.concatenate(q0, axis=0)
                             model_kwargs.update({"noise": noise})  # save the noise to the model_kwargs dictionary
+
+                            # clean up memory
+                            del noise_all, q0, noise_, W
                             
                             # =====
                             # pack
@@ -1648,7 +1650,9 @@ def icesee_model_data_assimilation(**model_kwargs):
                         # comm_world.Gatherv(ens_list, [gathered_ensemble_global, counts_global, displs_global, MPI.DOUBLE], root=0)
 
                         #  free up memory
-                        # del gathered_ensemble; gc.collect()
+                
+                    # subcomm.Barrier()
+                    del ens_list; del gathered_ensemble; gc.collect()
                     if rank_world == 0:
                         ensemble_vec = [arr for sublist in gathered_ensemble_global for arr in sublist if arr is not None]
                         ensemble_vec = np.column_stack(ensemble_vec) 
