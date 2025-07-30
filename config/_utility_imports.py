@@ -127,8 +127,8 @@ if not flag_jupyter:
     # print(f"Params: {params}")
 
     # Log which file is being loaded if verbose
-    if _verbose:
-        print(f"[ICESEE] Loading parameters from {parameters_file}")
+    # if _verbose:
+    #     print(f"[ICESEE] Loading parameters from {parameters_file}")
 
     # Verify if the specified parameters file exists
     if not os.path.exists(parameters_file):
