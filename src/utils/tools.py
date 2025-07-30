@@ -432,3 +432,61 @@ def display_timing(
         else:  # Metric with value
             logger.info(pad_line(entry[0], entry[1]))
     logger.info(footer)
+
+def get_grid_dimensions(nx, ny, ndim):
+    """
+    Calculate grid dimensions mx and my based on physical dimensions and total points.
+    
+    Parameters:
+    nx (int): Number of elements in x-direction
+    ny (int): Number of elements in y-direction
+    ndim (int): Total number of grid points (mx * my)
+    
+    Returns:
+    tuple: (mx, my) - number of grid points in x and y directions
+    """
+    # Calculate aspect ratio from physical dimensions
+    alpha = nx / ny
+    
+    # Initial estimate based on aspect ratio and ndim
+    # mx/my = alpha and mx*my = ndim
+    # mx = sqrt(ndim * alpha), my = sqrt(ndim / alpha)
+    mx = np.sqrt(ndim * alpha)
+    my = np.sqrt(ndim / alpha)
+    
+    # Initial rounding
+    if mx - int(mx) > 0.5:
+        mx = int(np.ceil(mx))
+        my = int(np.floor(my))
+    elif my - int(my) > 0.5:
+        my = int(np.ceil(my))
+        mx = int(np.floor(mx))
+    else:
+        mx, my = int(mx), int(my)
+    
+    # Quick adjustment to reach ndim
+    current_product = mx * my
+    if current_product != ndim:
+        # Calculate scale factor
+        scale = np.sqrt(ndim / current_product)
+        mx = int(round(mx * scale))
+        my = int(round(my * scale))
+        
+        # Fast fine-tuning with minimal iterations
+        product = mx * my
+        if product < ndim:
+            while product < ndim:
+                if mx/my < alpha:
+                    mx += 1
+                else:
+                    my += 1
+                product = mx * my
+        elif product > ndim:
+            while product > ndim:
+                if mx/my > alpha:
+                    mx -= 1
+                else:
+                    my -= 1
+                product = mx * my
+    
+    return mx, my

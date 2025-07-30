@@ -157,6 +157,7 @@ if not flag_jupyter:
         "n_modeltasks": int(enkf_params.get("n_modeltasks", 1)),
         "execution_flag": int(enkf_params.get("execution_flag", 0)),
         "model_name": enkf_params.get("model_name", "model"),
+        "use_random_fields": bool(enkf_params.get("use_random_fields", False)),
     })
 
     # --- incase CL args not provided ---
