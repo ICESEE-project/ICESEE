@@ -13,7 +13,6 @@ from mpi4py import MPI
 
 from ICESEE.src.utils.tools import icesee_get_index
 
-
 def generate_true_wrong_state(**model_kwargs):
     """"Generate true and nurged states for the ICESEE model.
     """

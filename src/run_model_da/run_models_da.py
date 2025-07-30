@@ -104,7 +104,8 @@ def icesee_model_data_assimilation(**model_kwargs):
         model_kwargs.update({"true_nurged_file": _true_nurged, "synthetic_obs_file": _synthetic_obs})
 
         # --- initialize seed for reproducibility ---
-        ParallelManager().initialize_seed(comm_world, base_seed=0)
+        rank_seed, rng = ParallelManager().initialize_seed(MPI.COMM_WORLD, base_seed=42)
+        model_kwargs.update({"rank_seed": rank_seed})
 
         # fetch model nprocs
         model_nprocs = params.get("model_nprocs", 1)
@@ -245,7 +246,8 @@ def icesee_model_data_assimilation(**model_kwargs):
                         ensemble_vec[indx_map[key],ens] = value
 
                     N_size = params["total_state_param_vars"] * hdim
-                    noise = generate_enkf_field(None,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                    model_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
+                    noise = generate_enkf_field(**model_kwargs)
 
                     # for ii, sig in enumerate(params["sig_Q"]):
                     #     start_idx = ii *hdim
@@ -404,7 +406,8 @@ def icesee_model_data_assimilation(**model_kwargs):
     else:
         N_size = params["total_state_param_vars"] * hdim
         # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=0)
-        noise = generate_enkf_field(None,np.sqrt(Lx*Ly),hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+        model_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
+        noise = generate_enkf_field(**model_kwargs)
 
 
     for k in range(model_kwargs.get("nt",params["nt"])):
@@ -438,7 +441,7 @@ def icesee_model_data_assimilation(**model_kwargs):
                                 "time_forecast_file_writing": time_forecast_file_writing,
                                 "time_analysis_file_writing": time_analysis_file_writing,
                                 "time_forecast_ensemble_mean_generation": time_forecast_ensemble_mean_generation,
-                                "state_block_size": state_block_size, "noise": noise,})
+                                "state_block_size": state_block_size, "noise": noise, "rng": rng, "rank_seed": rank_seed,})
             
             if not params.get("default_run", False):
                 model_kwargs.update({"ensemble_vec": ensemble_vec,

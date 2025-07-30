@@ -13,6 +13,7 @@ from mpi4py import MPI
 from ICESEE.src.utils.utils import UtilsFunctions
 from ICESEE.src.utils.tools import icesee_get_index
 
+
 def generate_synthetic_observations(**model_kwargs):
     """Generate synthetic observations for the ICESEE model.
     """

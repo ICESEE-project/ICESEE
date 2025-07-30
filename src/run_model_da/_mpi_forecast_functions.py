@@ -15,14 +15,14 @@ import bigmpi4py as BM
 from scipy.stats import multivariate_normal, beta
 from mpi4py import MPI
 
-from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 from ICESEE.src.utils.tools import icesee_get_index
 # from ICESEE.src.run_model_da._parallel_i_o import parallel_write_full_ensemble_from_root
                                                
 from ICESEE.src.run_model_da._error_generation import generate_enkf_field
 from ICESEE.src.utils.utils import UtilsFunctions
 
-
+from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
+# rank_seed, rng = ParallelManager().initialize_seed(MPI.COMM_WORLD)
 
 def parallel_forecast_step_default_run(**model_kwargs):
     """
@@ -60,7 +60,11 @@ def parallel_forecast_step_default_run(**model_kwargs):
     len_scale                 = model_kwargs.get("len_scale", 1.0)             # Default length scale for noise generation
     model_module              = model_kwargs.get("model_module", None)         # Module containing the forecast step function
     k                         = model_kwargs.get("k", 0)                      # Time step index, default to 0 if not provided
-    noise                   = model_kwargs.get("noise", None)                   # Noise vector, if provided
+    noise                     = model_kwargs.get("noise", None)                   # Noise vector, if provided
+    rng                       = model_kwargs.get("rng", np.random.default_rng())  # Random number generator, default to numpy's default RNG
+    rank_seed = model_kwargs.get("rank_seed", 0)
+
+    # np.random.seed(rank_seed)
 
     size_world = comm_world.Get_size()  # Total number of ranks in the global communicator
 
@@ -137,7 +141,7 @@ def parallel_forecast_step_default_run(**model_kwargs):
                 #     # noise = compute_noise_random_fields(ens, hdim, pos, gs_model, params["total_state_param_vars"], L_C)
                 #     N_size = params["total_state_param_vars"] * hdim
                 #     # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=0)
-                #     noise = generate_enkf_field(None,np.sqrt(Lx*Ly),hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                #     noise = generate_enkf_field(None,np.sqrt(Lx*Ly),hdim, params["total_state_param_vars"], rh=len_scale, rng=rng, verbose=False)
 
                 # noise = noise / np.max(np.abs(noise))
                 # if k+1 <= max(model_kwargs["obs_index"]):
@@ -150,7 +154,8 @@ def parallel_forecast_step_default_run(**model_kwargs):
                     if ii <=params["num_state_vars"]:
                         # W = np.random.normal(0, 1, hdim)
                         # W = generate_pseudo_random_field_1d(hdim,np.sqrt(Lx*Ly), len_scale, verbose=0)
-                        W = generate_enkf_field(ii,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                        model_kwargs.update({"ii_sig": ii, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
+                        W = generate_enkf_field(**model_kwargs)
                         noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
                         q0.append(noise_)
 
@@ -275,7 +280,7 @@ def parallel_forecast_step_default_run(**model_kwargs):
                 _time_forecast_noise_generation = MPI.Wtime()
                 # if k == 0:
                 #     N_size = params["total_state_param_vars"] * hdim
-                #     noise = generate_enkf_field(ens,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                #     noise = generate_enkf_field(ens,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, rng=rng, verbose=False)
 
                 noise_all = []
                 q0 = []
@@ -283,7 +288,8 @@ def parallel_forecast_step_default_run(**model_kwargs):
                     if ii <=params["num_state_vars"]:
                         # W = np.random.normal(0, 1, hdim)
                         # W = generate_pseudo_random_field_1d(hdim,np.sqrt(Lx*Ly), len_scale, verbose=0)
-                        W = generate_enkf_field(ii,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                        model_kwargs.update({"ii_sig": ii, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
+                        W = generate_enkf_field(**model_kwargs)
                         noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
                         q0.append(noise_)
 

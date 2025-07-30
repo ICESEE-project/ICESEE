@@ -10,7 +10,6 @@ import h5py
 import gc
 from mpi4py import MPI
 
-from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 from ICESEE.src.utils.tools import icesee_get_index
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
@@ -18,6 +17,9 @@ from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_field
                               generate_pseudo_random_field_2D, \
                               generate_enkf_field
 from ICESEE.src.run_model_da._parallel_i_o import parallel_write_full_ensemble_from_root
+
+from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
+# rank_seed, rng = ParallelManager().initialize_seed(MPI.COMM_WORLD)
 
 def ensemble_initialization(**model_kwargs):
     """Initialize the ensemble for the ICESEE model.
@@ -42,6 +44,10 @@ def ensemble_initialization(**model_kwargs):
     base_total_procs = model_kwargs.get("base_total_procs", 1)
     rounds         = model_kwargs.get("rounds", 1)
     subcomm_size   = model_kwargs.get("subcomm_size", 1)
+    rng           = model_kwargs.get("rng", np.random.default_rng())
+    rank_seed = model_kwargs.get("rank_seed", 0)
+
+    # np.random.seed(rank_seed)
 
     rank_world = comm_world.Get_rank()
     size_world = comm_world.Get_size()
@@ -91,7 +97,8 @@ def ensemble_initialization(**model_kwargs):
 
                     # Add process noise in-place to avoid temporary array
                     _time_init_noise_generation = MPI.Wtime()
-                    noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                    model_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
+                    noise = generate_enkf_field(**model_kwargs)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
                     ensemble_vec[:, ens] += noise
                     del noise  # Free memory immediately
@@ -179,7 +186,8 @@ def ensemble_initialization(**model_kwargs):
                     _time_init_noise_generation = MPI.Wtime()
                     N_size = params["total_state_param_vars"] * hdim
                     # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=True)
-                    noise = generate_enkf_field(None,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                    model_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
+                    noise = generate_enkf_field(**model_kwargs)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
                     ensemble_vec[:,ens] += noise
                     # for ii, sig in enumerate(params["sig_Q"]):
@@ -322,7 +330,8 @@ def ensemble_initialization(**model_kwargs):
                     else:
                         N_size = params["total_state_param_vars"] * hdim
                         _time_init_noise_generation = MPI.Wtime()
-                        noise = generate_enkf_field(None,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                        model_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
+                        noise = generate_enkf_field(**model_kwargs)
                         time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
                         initial_data[key] += noise
                         # for ii, sig in enumerate(params["sig_Q"]):

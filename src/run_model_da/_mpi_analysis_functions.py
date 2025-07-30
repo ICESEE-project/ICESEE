@@ -19,6 +19,9 @@ from ICESEE.src.run_model_da._parallel_i_o import parallel_write_full_ensemble_f
                                                 parallel_write_ensemble_scattered
 from ICESEE.src.utils.tools import icesee_get_index, get_grid_dimensions
 
+# from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
+# rank_seed, rng = ParallelManager().initialize_seed(MPI.COMM_WORLD)
+
 # seed the random number generator
 # np.random.seed(0)
 
@@ -35,6 +38,10 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
     params = model_kwargs.get("params")
     comm_world = model_kwargs.get("comm_world")
     generate_enkf_field = model_kwargs.get("generate_enkf_field", False)
+    rng = model_kwargs.get("rng", np.random.default_rng())
+    rank_seed = model_kwargs.get("rank_seed", 0)
+
+    # np.random.seed(rank_seed)
 
     H = UtilsFunctions(params, ensemble_vec).JObs_fun(ensemble_vec.shape[0]) # mxNens, observation operator
 
@@ -64,7 +71,8 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
             noise_all = []
             q0 = []
             for ii, sig in enumerate(params["sig_obs"]):
-                W = generate_enkf_field(ii,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                model_kwargs.update({"ii_sig": ii, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
+                W = generate_enkf_field(**model_kwargs)
                 noise_ = sig*W
                 # noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
                 # q0.append(noise_)
