@@ -227,26 +227,112 @@ def icesee_get_index(vec, **kwargs):
     return var_indices, index_map, local_size_per_rank[rank]
 # ==============================================================================
 
+# # Refined ANSI color codes
+# COLORS = {
+#     "GRAY": "\033[90m",    # Subtle gray for borders
+#     "CYAN": "\033[36m",    # Calm cyan for title
+#     "GREEN": "\033[32m",   # Muted green for computational time
+#     "MAGENTA": "\033[35m", # Soft magenta for wall-clock time
+#     "RESET": "\033[0m"
+# }
+
+# def format_time_(seconds: float) -> str:
+#     """Convert seconds to a formatted HR:MIN:SEC string with milliseconds."""
+#     hours = int(seconds // 3600)
+#     minutes = int((seconds % 3600) // 60)
+#     secs = int(seconds % 60)
+#     millis = int((seconds % 1) * 1000)
+#     return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+
+# def format_time(seconds: float) -> str:
+#     """Convert seconds to a formatted DAY:HR:MIN:SEC string with milliseconds."""
+#     days = int(seconds // 86400)  # 86400 seconds in a day
+#     hours = int((seconds % 86400) // 3600)
+#     minutes = int((seconds % 3600) // 60)
+#     secs = int(seconds % 60)
+#     millis = int((seconds % 1) * 1000)
+#     return f"{days:02d}:{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+
+# def setup_logger(log_file: str = "icesee_timing.log"):
+#     """Set up a logger for timing output."""
+#     logger = logging.getLogger("ICESEE_Timing")
+#     logger.setLevel(logging.INFO)
+    
+#     # Avoid duplicate handlers
+#     if not logger.handlers:
+#         # File handler for logging to a file
+#         file_handler = logging.FileHandler(log_file)
+#         file_handler.setFormatter(logging.Formatter("%(message)s"))
+#         logger.addHandler(file_handler)
+        
+#         # Optional: Stream handler for console output (only for root process)
+#         comm = MPI.COMM_WORLD
+#         rank = comm.Get_rank()
+#         if rank == 0:
+#             stream_handler = logging.StreamHandler(sys.stderr)  # Use stderr to avoid stdout issues
+#             stream_handler.setFormatter(logging.Formatter("%(message)s"))
+#             logger.addHandler(stream_handler)
+    
+#     return logger
+
+# def display_timing(computational_time: float, wallclock_time: float) -> None:
+#     """Display computational and wall-clock times with perfectly aligned formatting using logging."""
+#     # Set up logger
+#     logger = setup_logger()
+    
+#     # Only log from the root MPI process
+#     comm = MPI.COMM_WORLD
+#     rank = comm.Get_rank()
+#     if rank != 0:
+#         return  # Non-root processes exit silently
+
+#     # Formatted time strings
+#     comp_time_str = format_time(computational_time)
+#     wall_time_str = format_time(wallclock_time)
+    
+#     # Content lines (no trailing spaces after emojis)
+#     title = "[ICESEE] Performance Metrics"
+#     comp_line = f"Computational Time (Σ): {comp_time_str} (DAY:HR:MIN:SEC.ms) ⏱️"
+#     wall_line = f"Wall-Clock Time (max):  {wall_time_str} (DAY:HR:MIN:SEC.ms) 🕒"
+    
+#     # Calculate max width based on plain text length (excluding ANSI codes)
+#     max_content_width = max(len(title), len(comp_line), len(wall_line))
+#     box_width = max_content_width + 12  # 2 for '║' on each side + 2 for padding
+    
+#     # Box drawing
+#     header = f"{COLORS['GRAY']}╔{'═' * box_width}╗{COLORS['RESET']}"
+#     footer = f"{COLORS['GRAY']}╚{'═' * box_width}╝{COLORS['RESET']}"
+    
+#     # Pad lines to exact width, ensuring no extra spaces
+#     def pad_line(text: str) -> str:
+#         padding = " " * (max_content_width - len(text) + 6 + 4)
+#         return f"{COLORS['GRAY']}║ {text}{padding} ║{COLORS['RESET']}"
+    
+#     def pad_line_comp(text: str) -> str:
+#         padding = " " * (max_content_width - len(text) + 7 + 4)
+#         return f"{COLORS['GRAY']}║ {text}{padding} ║{COLORS['RESET']}"
+    
+#     def pad_line_wall(text: str) -> str:
+#         padding = " " * (max_content_width - len(text) + 5 + 4)
+#         return f"{COLORS['GRAY']}║ {text}{padding} ║{COLORS['RESET']}"
+    
+#     # Log with strict alignment
+#     logger.info(f"\n{header}")
+#     logger.info(f"{COLORS['CYAN']}{pad_line(title)}{COLORS['RESET']}")
+#     logger.info(f"{COLORS['GREEN']}{pad_line_comp(comp_line)}{COLORS['RESET']}")
+#     logger.info(f"{COLORS['MAGENTA']}{pad_line_wall(wall_line)}{COLORS['RESET']}")
+#     logger.info(footer)
+
+
 # Refined ANSI color codes
 COLORS = {
-    "GRAY": "\033[90m",    # Subtle gray for borders
-    "CYAN": "\033[36m",    # Calm cyan for title
-    "GREEN": "\033[32m",   # Muted green for computational time
-    "MAGENTA": "\033[35m", # Soft magenta for wall-clock time
+    "GRAY": "\033[10m",    # Uniform gray for all text and borders
     "RESET": "\033[0m"
 }
 
-def format_time_(seconds: float) -> str:
-    """Convert seconds to a formatted HR:MIN:SEC string with milliseconds."""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    millis = int((seconds % 1) * 1000)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
-
 def format_time(seconds: float) -> str:
     """Convert seconds to a formatted DAY:HR:MIN:SEC string with milliseconds."""
-    days = int(seconds // 86400)  # 86400 seconds in a day
+    days = int(seconds // 86400)
     hours = int((seconds % 86400) // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
@@ -255,70 +341,94 @@ def format_time(seconds: float) -> str:
 
 def setup_logger(log_file: str = "icesee_timing.log"):
     """Set up a logger for timing output."""
+    import logging
+    import sys
+    from mpi4py import MPI
+    
     logger = logging.getLogger("ICESEE_Timing")
     logger.setLevel(logging.INFO)
     
-    # Avoid duplicate handlers
     if not logger.handlers:
-        # File handler for logging to a file
         file_handler = logging.FileHandler(log_file)
         file_handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(file_handler)
         
-        # Optional: Stream handler for console output (only for root process)
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         if rank == 0:
-            stream_handler = logging.StreamHandler(sys.stderr)  # Use stderr to avoid stdout issues
+            stream_handler = logging.StreamHandler(sys.stderr)
             stream_handler.setFormatter(logging.Formatter("%(message)s"))
             logger.addHandler(stream_handler)
     
     return logger
 
-def display_timing(computational_time: float, wallclock_time: float) -> None:
-    """Display computational and wall-clock times with perfectly aligned formatting using logging."""
+def display_timing(
+    computational_time: float,
+    wallclock_time: float,
+    true_wrong_time: float,
+    assimilation_time: float,
+    forecast_step_time: float,
+    analysis_step_time: float,
+    ensemble_init_time: float,
+    init_file_time: float,
+    forecast_file_time: float,
+    analysis_file_time: float,
+    total_file_time: float,
+    forecast_noise_time: float, comm: MPI.Comm = None
+) -> None:
+    """Display all timing metrics in a table with strict aligned formatting using logging, all in gray."""
+    # from mpi4py import MPI
+    
     # Set up logger
     logger = setup_logger()
     
     # Only log from the root MPI process
-    comm = MPI.COMM_WORLD
+    # comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     if rank != 0:
-        return  # Non-root processes exit silently
+        return
 
-    # Formatted time strings
-    comp_time_str = format_time(computational_time)
-    wall_time_str = format_time(wallclock_time)
+    # Formatted time strings with metrics and values
+    time_entries = [
+        ("[ICESEE] Performance Metrics       (DAY:HR:MIN:SEC.ms)",),  # Bold header
+        ("Computational Time (Σ)", format_time(computational_time)),
+        ("Wall-Clock Time (max)", format_time(wallclock_time)),
+        ("True/Wrong State Time", format_time(true_wrong_time)),
+        ("Ensemble Init Time", format_time(ensemble_init_time)),
+        ("Forecast Step Time", format_time(forecast_step_time)),
+        ("Analysis Step Time", format_time(analysis_step_time)),
+        ("Assimilation Time", format_time(assimilation_time)),
+        ("Init file I/O Time", format_time(init_file_time)),
+        ("Forecast File I/O Time", format_time(forecast_file_time)),
+        ("Analysis File I/O Time", format_time(analysis_file_time)),
+        ("Total File I/O Time", format_time(total_file_time)),
+        ("Forecast Noise Time", format_time(forecast_noise_time))
+    ]
     
-    # Content lines (no trailing spaces after emojis)
-    title = "[ICESEE] Performance Metrics"
-    comp_line = f"Computational Time (Σ): {comp_time_str} (DAY:HR:MIN:SEC.ms) ⏱️"
-    wall_line = f"Wall-Clock Time (max):  {wall_time_str} (DAY:HR:MIN:SEC.ms) 🕒"
-    
-    # Calculate max width based on plain text length (excluding ANSI codes)
-    max_content_width = max(len(title), len(comp_line), len(wall_line))
-    box_width = max_content_width + 12  # 2 for '║' on each side + 2 for padding
+    # Calculate max width based on the longest metric label and value
+    max_label_width = max(len(entry[0]) for entry in time_entries)
+    max_value_width = max(len(entry[1]) for entry in time_entries[1:])  # Skip header for value width
+    total_width = max_label_width + max_value_width - 14  # 2 for '║' + 2 for padding
     
     # Box drawing
-    header = f"{COLORS['GRAY']}╔{'═' * box_width}╗{COLORS['RESET']}"
-    footer = f"{COLORS['GRAY']}╚{'═' * box_width}╝{COLORS['RESET']}"
+    header = f"{COLORS['GRAY']}╔{'═' * total_width}╗{COLORS['RESET']}"
+    footer = f"{COLORS['GRAY']}╚{'═' * total_width}╝{COLORS['RESET']}"
     
-    # Pad lines to exact width, ensuring no extra spaces
-    def pad_line(text: str) -> str:
-        padding = " " * (max_content_width - len(text) + 6 + 4)
-        return f"{COLORS['GRAY']}║ {text}{padding} ║{COLORS['RESET']}"
-    
-    def pad_line_comp(text: str) -> str:
-        padding = " " * (max_content_width - len(text) + 7 + 4)
-        return f"{COLORS['GRAY']}║ {text}{padding} ║{COLORS['RESET']}"
-    
-    def pad_line_wall(text: str) -> str:
-        padding = " " * (max_content_width - len(text) + 5 + 4)
-        return f"{COLORS['GRAY']}║ {text}{padding} ║{COLORS['RESET']}"
+    # Pad lines to exact width with strict alignment
+    def pad_line(label: str, value: str = "") -> str:
+        if not value:  # Header
+            padding = " " * (total_width -10 - len(label))
+            return f"{COLORS['GRAY']}║ \033[1m{label}{COLORS['RESET']}{padding}{COLORS['GRAY']}║{COLORS['RESET']}"
+        else:  # Metric with value
+            label_padding = " " * (max_label_width -17 - len(label))  # +1 for space
+            value_padding = " " * (max_value_width -17 - len(value))  # +1 for space
+            return f"{COLORS['GRAY']}║ {label}{label_padding}{value}{value_padding}{COLORS['RESET']}{COLORS['GRAY']}  ║{COLORS['RESET']}"
     
     # Log with strict alignment
-    logger.info(f"\n{header}")
-    logger.info(f"{COLORS['CYAN']}{pad_line(title)}{COLORS['RESET']}")
-    logger.info(f"{COLORS['GREEN']}{pad_line_comp(comp_line)}{COLORS['RESET']}")
-    logger.info(f"{COLORS['MAGENTA']}{pad_line_wall(wall_line)}{COLORS['RESET']}")
+    logger.info(f"{header}")
+    for entry in time_entries:
+        if len(entry) == 1:  # Header
+            logger.info(pad_line(entry[0]))
+        else:  # Metric with value
+            logger.info(pad_line(entry[0], entry[1]))
     logger.info(footer)

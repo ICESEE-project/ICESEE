@@ -13,6 +13,7 @@ import h5py
 import numpy as np
 import bigmpi4py as BM
 from scipy.stats import multivariate_normal, beta
+from mpi4py import MPI
 
 # seed the random number generator
 np.random.seed(0)
@@ -938,7 +939,7 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
 
     return X5, analysis_vec_ij
 
-def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, analysis_vec_ij,UtilsFunctions,model_kwargs,smb_scale):
+def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,time_analysis_mean_generation,time_analysis_file_writing, analysis_vec_ij,UtilsFunctions,model_kwargs,smb_scale):
     """
     Function to perform the analysis update using the EnKF
         - broadcast X5 to all processors
@@ -958,6 +959,7 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, analysis_vec_ij
         rank_world = comm_world.Get_rank()
         # broadcast X5 to all processors
         X5 = BM.bcast(X5, comm=comm_world)
+        time_analysis_mean_generation = BM.bcast(time_analysis_mean_generation, comm=comm_world)
         # X5_diff = BM.bcast(X5_diff, comm=comm_world)
 
         # initialize the an empty ensemble vector for the rest of the processors
@@ -989,7 +991,11 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, analysis_vec_ij
         # params['inflation_factor'] = 1.1
         # analysis_vec = UtilsFunctions(params,  analysis_vec).inflate_ensemble(in_place=True)
         # ---> multiplicative inflation
+        time_analysis_mean_generation1  = MPI.Wtime() 
         mean_params = np.mean(analysis_vec[state_block_size:,:], axis=1)
+        time_analysis_mean_generation1 = MPI.Wtime() - time_analysis_mean_generation1
+        time_analysis_mean_generation += time_analysis_mean_generation1
+
         #  compute parturbations
         pertubations = analysis_vec[state_block_size:,:] - mean_params.reshape(-1,1)
         # apply the inflation factor
@@ -1048,10 +1054,14 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, analysis_vec_ij
 
         # gather from all processors
         # ensemble_vec = BM.allgather(analysis_vec, comm_world)
+        _time_analysis_file_writing = MPI.Wtime()
         parallel_write_ensemble_scattered(k+1,ens_mean, params,analysis_vec, comm_world,model_kwargs)
+        time_analysis_file_writing += MPI.Wtime() - _time_analysis_file_writing
 
         # clean the memory
         del scatter_ensemble, analysis_vec; gc.collect()
+
+        return time_analysis_mean_generation, time_analysis_file_writing
 
 # ============================ EnKF functions ============================
 
