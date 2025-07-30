@@ -5,7 +5,7 @@
 # @author: Brian Kyanjo
 # ==============================================================================
     
-# --- Imports ---
+# ==== Imports ========================================================
 import os
 import sys
 import gc # garbage collector to free up memory
@@ -21,389 +21,19 @@ from scipy.sparse import block_diag
 from scipy.stats import multivariate_normal
 from scipy.spatial import distance_matrix
 
-# --- ICESEE utility imports ---
+# ==== ICESEE utility imports ========================================
 from ICESEE.src.utils import tools, utils                                     # utility functions for the model 
 from ICESEE.src.utils.utils import UtilsFunctions
 from ICESEE.src.EnKF.python_enkf.EnKF import EnsembleKalmanFilter as EnKF     # Ensemble Kalman Filter
 from ICESEE.applications.supported_models import SupportedModels              # supported models for data assimilation routine
-from ICESEE.src.run_model_da.localization_func import localization            # localization function for EnKF
 from ICESEE.src.utils.tools import icesee_get_index, display_timing, \
                                 save_all_data
-
-# ---- Run model with EnKF ----
-def gaspari_cohn(r):
-    """
-    Gaspari-Cohn taper function for localization in EnKF.
-    Defined for 0 <= r <= 2.
-    """
-    r = np.abs(r)
-    taper = np.zeros_like(r)
-    
-    mask1 = (r >= 0) & (r <= 1)
-    mask2 = (r > 1) & (r <= 2)
-
-    taper[mask1] = (((-0.25 * r[mask1] + 0.5) * r[mask1] + 0.625) * r[mask1] - 5/3) * r[mask1]**2 + 1
-    taper[mask2] = ((((1/12 * r[mask2] - 0.5) * r[mask2] + 0.625) * r[mask2] + 5/3) * r[mask2] - 5) * r[mask2]**2 + 4 - 2/(3 * r[mask2])
-
-    return np.maximum(taper, 0)  # Ensure non-negative values
-
-def compute_Q_err_random_fields(hdim, num_blocks, sig_Q, rho, len_scale):
-    """
-    """
-    import numpy as np
-    import gstools as gs
-
-    gs.config.USE_GSTOOLS_CORE = True
-
-    pos = np.arange(hdim).reshape(-1, 1)
-    model = gs.Gaussian(dim=1, var=1, len_scale=len_scale)
-
-    sig_Q_sq = [s**2 for s in sig_Q]
-    C = np.zeros((num_blocks, num_blocks))
-    outer = np.outer(sig_Q, sig_Q)       # shape: (num_blocks, num_blocks)
-    C = rho * outer                      # initialize with off-diagonal terms
-    np.fill_diagonal(C, sig_Q_sq)       # set the diagonal elements
-
-    try:
-        L_C = np.linalg.cholesky(C)
-    except np.linalg.LinAlgError:
-        eps = 1e-6
-        C  += np.eye(C.shape[0]) * eps
-        L_C = np.linalg.cholesky(C)
-
-    return pos, model, L_C
-
-def compute_noise_random_fields(k, hdim, pos, model, num_blocks, L_C):
-    import numpy as np
-    import gstools as gs
-
-    Y = np.zeros((hdim, num_blocks))
-    for i in range(num_blocks):
-        srf_i = gs.SRF(model, seed=k * num_blocks + i)
-        Y[:, i] = srf_i(pos).flatten()
-    X = Y @ L_C.T
-    total_noise_k = X.flatten()
-    # all_noise.append(total_noise_k)
-    return total_noise_k
-
-def generate_pseudo_random_field_1d(N, Lx, rh, grid_extension=2, verbose=False):
-    """
-    Generate a 1D pseudo-random field with zero mean, unit variance, and specified covariance.
-    
-    Parameters:
-    - N: Number of grid points
-    - Lx: Physical domain size
-    - rh: Decorrelation length for covariance
-    - grid_extension: Factor to extend grid to avoid periodicity (default=2)
-    - verbose: If True, print diagnostic information (default=False)
-    
-    Returns:
-    - q: 1D array of shape (N,) containing the random field
-    """
-
-    import numpy as np
-    from scipy.optimize import brentq
-    import warnings
-    
-    # Grid spacing
-    dx = Lx / N
-    # dx = Lx/nx
-    
-    # rh = min(min(Lx)/10,rh)
-
-    # Validate parameters
-    if rh < dx:
-        warnings.warn(f"Decorrelation length rh={rh} is smaller than grid spacing dx={dx}. "
-                      "Consider increasing rh, decreasing Lx, or increasing N.")
-    
-    # Extended grid to avoid periodicity
-    N_ext = int(N * grid_extension)
-    
-    # Wave numbers
-    kx = np.fft.fftfreq(N_ext, d=dx) * 2 * np.pi
-    
-    # Delta k for Fourier summation
-    dk = 2 * np.pi / (N_ext * dx)
-    
-    # Compute sigma by solving the covariance equation
-    def covariance_eq(sigma):
-        k2 = kx**2
-        exp_term = np.exp(-2 * k2 / sigma**2)
-        numerator = np.sum(exp_term * np.cos(kx * rh))
-        denominator = np.sum(exp_term)
-        return numerator / denominator - np.exp(-1)
-    
-    # Dynamically find a bracketing interval
-    a, b = 1e-6, 100
-    fa = covariance_eq(a)
-    fb = covariance_eq(b)
-    
-    if verbose:
-        print(f"[ICESEE] covariance_eq at sigma={a}: {fa}")
-        print(f"[ICESEE] covariance_eq at sigma={b}: {fb}")
-    
-    # Try expanding the interval if signs are the same
-    if fa * fb > 0:
-        warnings.warn("Initial interval [1e-6, 100] does not bracket a root. Trying to find a new interval.")
-        sigma_values = np.logspace(-6, 6, 25)  # Test a wider, finer range
-        f_values = [covariance_eq(s) for s in sigma_values]
-        
-        if verbose:
-            print("[ICESEE] Testing sigma values:")
-            for s, f in zip(sigma_values, f_values):
-                print(f"[ICESEE] sigma={s:.2e}, covariance_eq={f:.2e}")
-        
-        # Find a sign change
-        for i in range(len(f_values) - 1):
-            if f_values[i] * f_values[i + 1] < 0:
-                a, b = sigma_values[i], sigma_values[i + 1]
-                fa, fb = f_values[i], f_values[i + 1]
-                break
-        else:
-            # Fallback: Estimate sigma based on rh
-            warnings.warn("Could not find a bracketing interval. Using heuristic sigma based on rh.")
-            sigma = 2 / rh  # Heuristic: sigma ~ 2/rh
-            if verbose:
-                print(f"[ICESEE] Fallback sigma: {sigma}")
-    else:
-        # Solve for sigma
-        try:
-            sigma = brentq(covariance_eq, a, b, rtol=1e-6)
-            if verbose:
-                print(f"[ICESEE] Solved sigma: {sigma}")
-        except ValueError as e:
-            warnings.warn(f"brentq failed: {str(e)}. Using heuristic sigma.")
-            sigma = 2 / rh  # Fallback
-            if verbose:
-                print(f"[ICESEE] Fallback sigma: {sigma}")
-    
-    # Compute c from variance condition
-    k2 = kx**2
-    sum_exp = np.sum(np.exp(-2 * k2 / sigma**2))
-    c2 = 1 / (dk * sum_exp)
-    c = np.sqrt(c2)
-    
-    if verbose:
-        print(f"[ICESEE] Computed c: {c}")
-    
-    # Compute amplitude
-    A = c * np.sqrt(dk) * np.exp(-k2 / sigma**2)
-    
-    # Generate random phases with Hermitian symmetry
-    phi = np.zeros(N_ext)
-    I = np.arange(N_ext)
-    I_conj = np.mod(-I, N_ext)
-    self_conj_mask = (I == I_conj)  # Points where k=0 or k=pi
-    mask_representative = (I <= I_conj)  # Choose half of the spectrum
-    
-    # Set phases: zero for self-conjugate points, random for representatives
-    phi[mask_representative & ~self_conj_mask] = np.random.rand(np.sum(mask_representative & ~self_conj_mask))
-    phi[~mask_representative] = (-phi[I_conj[~mask_representative]]) % 1
-    
-    # Fourier coefficients
-    b_q = A * np.exp(2j * np.pi * phi)
-    
-    # Inverse FFT to get the field
-    q_ext = np.real(np.fft.ifft(b_q) * N_ext)
-    
-    # Crop to original domain
-    q = q_ext[:N]
-    
-    # Normalize to ensure unit variance
-    q = q / np.std(q) * 1.0
-    
-    if verbose:
-        print(f"[ICESEE] Field variance: {np.var(q)}")
-        print(f"[ICESEE] Field mean: {np.mean(q)}")
-    
-    return q
-
-
-def generate_pseudo_random_field_2D(N, M, Lx, Ly, rh, grid_extension=2, verbose=False):
-    """
-    Generate a 2D pseudo-random field with zero mean, unit variance, and specified covariance.
-    
-    Parameters:
-    - N, M: Grid points in x and y directions
-    - Lx, Ly: Physical domain sizes in x and y directions
-    - rh: Decorrelation length for covariance
-    - grid_extension: Factor to extend grid to avoid periodicity (default=2)
-    - verbose: If True, print diagnostic information (default=False)
-    
-    Returns:
-    - q: 2D array of shape (N, M) containing the random field
-    """
-
-    import numpy as np
-    from scipy.optimize import brentq
-    import warnings
-
-    # Grid spacing
-    dx = Lx / N
-    dy = Ly / M
-    
-    # Validate parameters
-    if rh < dx or rh < dy:
-        warnings.warn(f"Decorrelation length rh={rh} is smaller than grid spacing (dx={dx}, dy={dy}). "
-                      "Consider increasing rh to be at least dx or dy, or decreasing Lx, Ly, or increasing N, M.")
-    
-    # Extended grid to avoid periodicity
-    N_ext = int(N * grid_extension)
-    M_ext = int(M * grid_extension)
-    
-    # Wave numbers
-    kx = np.fft.fftfreq(M_ext, d=dx) * 2 * np.pi
-    ky = np.fft.fftfreq(N_ext, d=dy) * 2 * np.pi
-    KY, KX = np.meshgrid(ky, kx, indexing='ij')
-    
-    # Delta k for Fourier summation
-    dk = (2 * np.pi)**2 / (N_ext * M_ext * dx * dy)
-    
-    # Compute sigma by solving the covariance equation
-    def covariance_eq(sigma):
-        k2 = KX**2 + KY**2
-        exp_term = np.exp(-2 * k2 / sigma**2)
-        numerator = np.sum(exp_term * np.cos(KX * rh))
-        denominator = np.sum(exp_term)
-        return numerator / denominator - np.exp(-1)
-    
-    # Dynamically find a bracketing interval
-    a, b = 1e-6, 100
-    fa = covariance_eq(a)
-    fb = covariance_eq(b)
-    
-    if verbose:
-        print(f"[ICESEE] covariance_eq at sigma={a}: {fa}")
-        print(f"[ICESEE] covariance_eq at sigma={b}: {fb}")
-    
-    # Try expanding the interval if signs are the same
-    if fa * fb > 0:
-        warnings.warn("Initial interval [1e-6, 100] does not bracket a root. Trying to find a new interval.")
-        sigma_values = np.logspace(-6, 6, 25)  # Test a wider, finer range
-        f_values = [covariance_eq(s) for s in sigma_values]
-        
-        if verbose:
-            print("[ICESEE] Testing sigma values:")
-            for s, f in zip(sigma_values, f_values):
-                print(f"[ICESEE] sigma={s:.2e}, covariance_eq={f:.2e}")
-        
-        # Find a sign change
-        for i in range(len(f_values) - 1):
-            if f_values[i] * f_values[i + 1] < 0:
-                a, b = sigma_values[i], sigma_values[i + 1]
-                fa, fb = f_values[i], f_values[i + 1]
-                break
-        else:
-            # Fallback: Estimate sigma based on rh
-            warnings.warn("Could not find a bracketing interval. Using heuristic sigma based on rh.")
-            sigma = 2 / rh  # Heuristic: sigma ~ 2/rh from Gaussian covariance approximation
-            if verbose:
-                print(f"[ICESEE] Fallback sigma: {sigma}")
-    else:
-        # Solve for sigma
-        try:
-            sigma = brentq(covariance_eq, a, b, rtol=1e-6)
-            if verbose:
-                print(f"[ICESEE] Solved sigma: {sigma}")
-        except ValueError as e:
-            warnings.warn(f"brentq failed: {str(e)}. Using heuristic sigma.")
-            sigma = 2 / rh  # Fallback
-            if verbose:
-                print(f"[ICESEE] Fallback sigma: {sigma}")
-    
-    # Compute c from variance condition
-    k2 = KX**2 + KY**2
-    sum_exp = np.sum(np.exp(-2 * k2 / sigma**2))
-    c2 = 1 / (dk * sum_exp)
-    c = np.sqrt(c2)
-    
-    if verbose:
-        print(f"[ICESEE] Computed c: {c}")
-    
-    # Compute amplitude
-    A = c * np.sqrt(dk) * np.exp(-k2 / sigma**2)
-    
-    # Generate random phases with Hermitian symmetry
-    phi = np.zeros((N_ext, M_ext))
-    I, J = np.meshgrid(np.arange(N_ext), np.arange(M_ext), indexing='ij')
-    I_conj = np.mod(-I, N_ext)
-    J_conj = np.mod(-J, M_ext)
-    self_conj_mask = (I == I_conj) & (J == J_conj)
-    mask_representative = (I < I_conj) | ((I == I_conj) & (J <= J_conj))
-    
-    # Set phases: zero for self-conjugate points, random for representatives
-    phi[mask_representative & ~self_conj_mask] = np.random.rand(np.sum(mask_representative & ~self_conj_mask))
-    phi[~mask_representative] = (-phi[I_conj[~mask_representative], J_conj[~mask_representative]]) % 1
-    
-    # Fourier coefficients
-    b_q = A * np.exp(2j * np.pi * phi)
-    
-    # Inverse FFT to get the field
-    q_ext = np.real(np.fft.ifft2(b_q) * N_ext * M_ext)
-    
-    # Crop to original domain
-    q = q_ext[:N, :M]
-    
-    # Normalize to ensure unit variance
-    q = q / np.std(q) * 1.0
-    
-    if verbose:
-        print(f"[ICESEE] Field variance: {np.var(q)}")
-        print(f"[ICESEE] Field mean: {np.mean(q)}")
-    
-    return q
-
-def generate_enkf_field(ii_sig, Lx, hdim, num_vars, rh=None, grid_extension=2, verbose=False):
-    """
-    Generate a pseudo-random field for EnKF with specified DoF.
-
-    Parameters:
-    - Lx: Representative length scale (e.g., domain size in x)
-    - hdim: Degrees of freedom per variable
-    - num_vars: Number of variables
-    - rh: Decorrelation length (float or dict with variable-specific values)
-    - grid_extension: Factor to extend grid (default=2)
-    - verbose: Print diagnostics (default=False)
-
-    Returns:
-    - q: Array of shape (hdim * num_vars, 1)
-    """
-    # N = hdim * num_vars
-    if rh is None:
-        rh = Lx / 10  # Default decorrelation length
-
-    # check if rh is a array
-    if isinstance(rh, (list, np.ndarray)):
-      
-        if ii_sig is None:
-            # Separate fields for each variable
-            q_total = []
-            for i in range(num_vars):
-                # var_rh = rh.get(f'var{i+1}', Lx / 10)
-                var_rh = rh[i] if isinstance(rh, list) else rh
-                q_var = generate_pseudo_random_field_1d(
-                    N=hdim, Lx=Lx, rh=var_rh, grid_extension=grid_extension, verbose=verbose
-                )
-                q_total.append(q_var)
-            return np.concatenate(q_total, axis=0)
-        else:
-            # we are in the for loop for perturbation update already
-            q0 = generate_pseudo_random_field_1d(
-                N=hdim, Lx=Lx, rh=rh[ii_sig], grid_extension=grid_extension, verbose=verbose
-            )
-            return q0
-    else:
-        # Single field
-        if ii_sig is None:
-            q0 = generate_pseudo_random_field_1d(
-                N=hdim*num_vars, Lx=Lx, rh=rh, grid_extension=grid_extension, verbose=verbose
-            )
-        else:
-            q0 = generate_pseudo_random_field_1d(
-                N=hdim, Lx=Lx, rh=rh, grid_extension=grid_extension, verbose=verbose
-            )
-        # print(f"[ICESEE] Field shape: {q0.shape}")
-        return q0
+from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
+                              compute_noise_random_fields, \
+                              generate_pseudo_random_field_1d, \
+                              generate_pseudo_random_field_2D, \
+                              generate_enkf_field
+from ICESEE.src.run_model_da._localization_functions import gaspari_cohn, localization 
 
 # ======================== Run model with EnKF ========================
 def icesee_model_data_assimilation(**model_kwargs): 
@@ -423,16 +53,18 @@ def icesee_model_data_assimilation(**model_kwargs):
     # --- call the ICESEE mpi parallel manager ---
     if re.match(r"\AMPI_model\Z", parallel_flag, re.IGNORECASE):
         from mpi4py import MPI
-        from parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
-        from mpi_analysis_functions import analysis_enkf_update, EnKF_X5, DEnKF_X5, \
+        from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
+        from ICESEE.src.run_model_da._mpi_analysis_functions import analysis_enkf_update, EnKF_X5, DEnKF_X5, \
                                             gather_and_broadcast_data_default_run, \
                                             parallel_write_full_ensemble_from_root, \
                                             parallel_write_data_from_root_2D, \
                                             parallel_write_vector_from_root, \
                                             analysis_Denkf_update, \
-                                            process_ensemble_data_Nens_ge_size_world
+                                            parallel_forecast_step_default_run
         
-
+        from ICESEE.src.run_model_da._mpi_generate_true_wrong_state import generate_true_wrong_state
+        from ICESEE.src.run_model_da._mpi_generate_synthetic_observations import generate_synthetic_observations
+        
         # start the timer
         global_start_time = MPI.Wtime()
 
@@ -445,8 +77,14 @@ def icesee_model_data_assimilation(**model_kwargs):
         model_module = SupportedModels(model=model,comm=comm_world,verbose=params.get('verbose')).call_model()
 
 
-        # pack the global communicator and the subcommunicator
-        model_kwargs.update({"comm_world": comm_world, "subcomm": subcomm})
+        # pack the global communicator, the subcommunicator and other important parameters
+        model_kwargs.update({"comm_world": comm_world, "subcomm": subcomm,
+                             "rank_world": rank_world, "sub_rank": sub_rank,
+                             "size_world": size_world, "sub_size": sub_size,
+                             "rounds": rounds, "color": color,
+                             "start": start, "stop": stop,
+                             "subcomm_size": subcomm_size,
+                             "model_module": model_module})
 
         # --- check if the modelrun dataset directory is present ---
         _modelrun_datasets = model_kwargs.get("data_path",None)
@@ -458,6 +96,9 @@ def icesee_model_data_assimilation(**model_kwargs):
         # --- file_names
         _true_nurged   = f'{ _modelrun_datasets}/true_nurged_states.h5'
         _synthetic_obs = f'{ _modelrun_datasets}/synthetic_obs.h5'
+
+        # --update model_kwargs with the file names
+        model_kwargs.update({"true_nurged_file": _true_nurged, "synthetic_obs_file": _synthetic_obs})
 
         # --- initialize seed for reproducibility ---
         ParallelManager().initialize_seed(comm_world, base_seed=0)
@@ -499,322 +140,25 @@ def icesee_model_data_assimilation(**model_kwargs):
         # update model_kwargs with the effective model_nprocs
         model_kwargs.update({'model_nprocs': effective_model_nprocs})
 
+        # --- Generate True and Nurged States -------------------------------------------------------------------
         # -- time generation of true state ----
         time_generation_true_and_wrong_state = MPI.Wtime()
-
-        # --- Generate True and Nurged States ---------------------------------------------------
-        if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
-            if params["even_distribution"]:
-                model_kwargs.update({'rank': rank_world, 'color': color, 'comm': comm_world})
-            else:
-                model_kwargs.update({'rank': sub_rank, 'color': color, 'comm': subcomm})
-
-            dim_list = comm_world.allgather(params["nd"])
-            # print(f"[ICESEE] Dim list: {dim_list}")
-            # save model_nprocs before update if rank_world == 0
-            # model_nprocs = params.get("model_nprocs", 1)
-
-            
-            if rank_world == 0:
-                
-                model_kwargs.update({'ens_id': rank_world})
-                # model_kwargs.update({'model_nprocs': (model_nprocs * size_world) - size_world}) # update the model_nprocs to include all processors for the external model run
-
-                if model_kwargs.get("generate_true_state", True):
-                    print("[ICESEE] Generating true state ...")
-                    # dim_list = np.tile(params["nd"],size_world) # all processors have the same dimension
-                    model_kwargs.update({"global_shape": params["nd"], "dim_list": dim_list})
-                    statevec_true = np.zeros([params["nd"], model_kwargs.get("nt",params["nt"]) + 1])
-                    model_kwargs.update({"statevec_true": statevec_true})
-                    updated_true_state = model_module.generate_true_state(**model_kwargs)
-
-                    # unpack the dictionaery
-                    vecs, indx_map, dim_per_proc = icesee_get_index(statevec_true, **model_kwargs)
-                    ensemble_true_state = np.zeros_like(statevec_true)
-                    for key, value in updated_true_state.items():
-                        ensemble_true_state[indx_map[key], :] = value
-
-                if model_kwargs.get("generate_nurged_state",True):
-                    print("[ICESEE] Generating nurged state ...")
-                    model_kwargs.update({"statevec_nurged": np.zeros([params["nd"], model_kwargs.get("nt",params["nt"]) + 1])})
-                    ensemble_nurged_state = model_module.generate_nurged_state(**model_kwargs)
-
-                # Write data to file
-                if model_kwargs.get("generate_true_state",True) or model_kwargs.get("generate_nurged_state",True):
-                    with h5py.File(_true_nurged, "w") as f:
-                        if model_kwargs.get("generate_true_state"):
-                            f.create_dataset("true_state", data=ensemble_true_state)
-                        if model_kwargs.get("generate_nurged_state"):
-                            f.create_dataset("nurged_state", data=ensemble_nurged_state)
-
-                # clean memory 
-                if model_kwargs.get("generate_true_state",True):
-                    del updated_true_state
-                if model_kwargs.get("generate_nurged_state",True):
-                    del ensemble_nurged_state
-                gc.collect()
-
-            else:
-                pass
-                
-            comm_world.Barrier()
-           
-            # -- write both the true and nurged states to file --
-            data_shape = (params["nd"], model_kwargs.get("nt",params["nt"]) + 1)
-            
-            model_kwargs.update({"dim_list": dim_list})
-
-            # update model_nprocs back to the original value before proceeding to the # next step
-            # model_kwargs.update({'model_nprocs': model_nprocs})
-
-        else:
-            # --- Generate True and Nurged States ---
-
-            if params["default_run"] and size_world > params["Nens"]:
-                model_kwargs.update({'rank': sub_rank, 'color': color, 'comm': subcomm})
-                model_kwargs.update({'ens_id': color}) # Nens = color
-                # gather all the vector dimensions from all processors
-                dim_list = subcomm.allgather(params["nd"])
-                global_shape = sum(dim_list)
-                model_kwargs.update({"global_shape": global_shape, "dim_list": dim_list})
-
-                if model_kwargs.get("generate_true_state", True):
-                    if rank_world == 0:
-                        print("[ICESEE] Generating true state ...  ")
-                    # statevec_true = np.zeros([model_kwargs['dim_list'][sub_rank], model_kwargs.get("nt",params["nt"]) + 1])
-                    statevec_true = np.zeros([global_shape, model_kwargs.get("nt",params["nt"]) + 1])
-                    model_kwargs.update({"statevec_true": statevec_true})
-                    # generate the true state
-                    updated_true_state = model_module.generate_true_state(**model_kwargs)
-                    # ensemble_true_state = gather_and_broadcast_data_default_run(updated_true_state, subcomm, sub_rank, comm_world, rank_world, params)
-                    global_data = {key: subcomm.gather(data, root=0) for key, data in updated_true_state.items()}
-
-                    if sub_rank == 0:
-                        for key in global_data:
-                            # print(f"[ICESEE] Key: {key}, shape: {[arr.shape for arr in global_data[key]]}")
-                            global_data[key] = np.vstack(global_data[key])
-
-                        # stack all variables together into a single array
-                        stacked = np.vstack([global_data[key] for key in updated_true_state.keys()])
-                        shape_ = np.array(stacked.shape,dtype=np.int32)
-                        hdim = stacked.shape[0] // params["total_state_param_vars"]
-                        # print(f"[ICESEE] Shape of the true state: {stacked.shape} min ensemble true: {np.min(stacked[hdim,:])}, max ensemble true: {np.max(stacked[hdim,:])}")
-                        if model_kwargs.get("generate_true_state"):
-                            # write data to the file
-                            with h5py.File(_true_nurged, "w", driver='mpio', comm=subcomm) as f:
-                                f.create_dataset("true_state", data=stacked)
-                            
-                        hdim = stacked.shape[0] // params["total_state_param_vars"]
-
-                    else:
-                        shape_ = np.empty(2,dtype=np.int32)
-                        hdim = 0
-
-                    # broadcast the shape of the true state
-                    shape_ = comm_world.bcast(shape_, root=0)
-                    hdim   = comm_world.bcast(hdim, root=0)
-
-                    if sub_rank != 0:
-                        stacked = np.empty(shape_,dtype=np.float64)
-                
-
-                    # write data to the file instead for memory management
-
-
-
-                    # broadcast the true state
-                    # ensemble_true_state = comm_world.bcast(stacked, root=0)
-                    # hdim = ensemble_true_state.shape[0] // params["total_state_param_vars"]
-                
-                if model_kwargs.get("generate_nurged_state", True):
-                    if rank_world == 0:
-                        print("[ICESEE] Generating nurged state ... ")
-                    # statevec_nurged = np.zeros([model_kwargs['dim_list'][sub_rank], model_kwargs.get("nt",params["nt"]) + 1])
-                    statevec_nurged = np.zeros([global_shape, model_kwargs.get("nt",params["nt"]) + 1])
-                    model_kwargs.update({"statevec_nurged": statevec_nurged})
-                    ensemble_nurged_state = model_module.generate_nurged_state(**model_kwargs)
-
-                    with h5py.File(_true_nurged, "a", driver='mpio', comm=comm_world) as f:
-                        f.create_dataset("nurged_state", data=ensemble_nurged_state)
-                    del ensemble_nurged_state 
-
-                comm_world.Barrier()
-                # clean memory
-                if model_kwargs.get("generate_true_state"):
-                    del updated_true_state
-                gc.collect()
-
-                # exit()
-            elif params["sequential_run"]:
-                # gather all the vector dimensions from all processors
-                dim_list = comm_world.allgather(params["nd"])
-                global_shape = sum(dim_list)
-                model_kwargs.update({"global_shape": global_shape, "dim_list": dim_list})
-                statevec_true = np.zeros([model_kwargs["global_shape"], model_kwargs.get("nt",params["nt"]) + 1])
-                model_kwargs.update({"statevec_true": statevec_true})
-                # generate the true state
-                ensemble_true_state = model_module.generate_true_state(**model_kwargs)
-
-                # generate the nurged state
-                statevec_nurged = np.zeros([model_kwargs["global_shape"], model_kwargs.get("nt",params["nt"]) + 1])
-                model_kwargs.update({"statevec_nurged": statevec_nurged})
-                ensemble_nurged_state = model_module.generate_nurged_state(**model_kwargs)
-            
-
+        # call the generate_true_wrong_state function
+        model_kwargs = generate_true_wrong_state(**model_kwargs)
         # --- time generation of true state and nurged state ---
         time_generation_true_and_wrong_state = MPI.Wtime() - time_generation_true_and_wrong_state
 
-        # --- Generate the Observations ---------------------------------------------------
-        ##debug
         comm_world.Barrier()
 
-        # --- Synthetic Observations ---
+        # --- Generate the Synthetic ObservationsObservations ---------------------------------------------------
         # --- time generation of synthetic observations ---
         time_generation_synthetic_obs = MPI.Wtime()
-        if model_kwargs.get("generate_synthetic_obs", True):   
-            if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
-                if rank_world == 0:
-                    # --- Synthetic Observations ---
-                    print("[ICESEE] Generating synthetic observations ...")
-                    with h5py.File(_true_nurged, "r") as f:
-                        ensemble_true_state = f['true_state'][:]
-
-                    utils_funs = UtilsFunctions(params, ensemble_true_state)
-                    model_kwargs.update({"statevec_true": ensemble_true_state})
-                    hu_obs, error_R = utils_funs._create_synthetic_observations(**model_kwargs)
-
-                    # observe or don't observe parameters.
-                    vecs, indx_map,_ = icesee_get_index(hu_obs, **model_kwargs)
-                    # check if model_kwargs['observe_params'] is empty
-                    if len(model_kwargs['observed_params']) == 0:
-                        for key in model_kwargs['params_vec']:
-                            hu_obs[indx_map[key],:] = 0.0
-                            error_R[:,indx_map[key]] = 0.0
-                    else: 
-                        for key in model_kwargs['params_vec']:
-                            if key not in model_kwargs['observed_params']:
-                                hu_obs[indx_map[key],:] = 0.0
-                                error_R[:,indx_map[key]] = 0.0
-
-                    # -- write data to file
-                    with h5py.File(_synthetic_obs, 'w') as f:
-                        f.create_dataset("hu_obs", data=hu_obs)
-                        f.create_dataset("R", data=error_R)
-
-                    # --- clear memory
-                    del hu_obs
-                    del error_R
-                    gc.collect()
-
-                else:
-                    pass
-                    # hu_obs = np.empty((params["nd"],params["number_obs_instants"]),dtype=np.float64)
-                    # error_R = np.empty((params["number_obs_instants"], params["nd"]),dtype=np.float64)
-
-                if params["even_distribution"]:
-                    # Bcast the observations
-                    comm_world.Bcast(hu_obs, root=0)
-                else:
-                    pass
-                    # hu_obs = comm_world.bcast(hu_obs, root=0)
-                    # error_R = comm_world.bcast(error_R, root=0)
-                    # *--- write observations to file ---
-                    # parallel_write_data_from_root_2D(full_ensemble=hu_obs, comm=comm_world, data_name='hu_obs', output_file="icesee_ensemble_data.h5")
-            else:
-                # --- Synthetic Observations ---
-                if rank_world == 0:
-                    print("[ICESEE] Generating synthetic observations ...")
-
-                if params["default_run"] and size_world > params["Nens"]:
-                    subcomm.Barrier()
-                    # comm_world.Bcast(hu_obs, root=0)
-                    if sub_rank == 0:
-                        utils_funs = UtilsFunctions(params, ensemble_true_state)
-                        model_kwargs.update({"statevec_true": ensemble_true_state})
-                        hu_obs, error_R = utils_funs._create_synthetic_observations(**model_kwargs)
-
-                        # observe or don't observe parameters.
-                        vecs, indx_map,_ = icesee_get_index(hu_obs, **model_kwargs)
-                        # check if model_kwargs['observe_params'] is empty
-                        if len(model_kwargs['observed_params']) == 0:
-                            for key in model_kwargs['params_vec']:
-                                hu_obs[indx_map[key],:] = 0.0 
-                                error_R[:,indx_map[key]] = 0.0
-                        else: 
-                            for key in model_kwargs['params_vec']:
-                                if key not in model_kwargs['observed_params']:
-                                    hu_obs[indx_map[key],:] = 0.0
-                                    error_R[:,indx_map[key]] = 0.0
-
-                        shape_ = np.array(hu_obs.shape,dtype=np.int32)
-                        shape_R = np.array(error_R.shape,dtype=np.int32)
-
-                        # write data to the file
-                        with h5py.File(_synthetic_obs, 'w', driver='mpio', comm=subcomm) as f:
-                            f.create_dataset("hu_obs", data=hu_obs)
-                            f.create_dataset("R", data=error_R)
-                    else:
-                        shape_ = np.empty(2,dtype=np.int32)
-                        shape_R = np.empty(2,dtype=np.int32)
-
-                    subcomm.Bcast(shape_, root=0)
-                    subcomm.Bcast(shape_R, root=0)
-                    if sub_rank != 0:
-                        hu_obs = np.empty(shape_,dtype=np.float64)
-                        error_R = np.empty(shape_R,dtype=np.float64)
-
-
-                    # bcast the synthetic observations
-                    # subcomm.Bcast(hu_obs, root=0)
-                    # subcomm.Bcast(error_R, root=0)
-                    #- write observations to file
-                    # parallel_write_data_from_root_2D(full_ensemble=hu_obs, comm=subcomm, data_name='hu_obs', output_file="icesee_ensemble_data.h5")
-
-
-                    # broadcast to the global communicator
-                    # comm_world.Bcast(hu_obs, root=0)
-                    # print(f"[ICESEE] rank {rank_world} Shape of the observations: {hu_obs.shape}")
-                    # exit()    
-                elif params["sequential_run"]:
-                    comm_world.Barrier()
-                    # g_shape = model_kwargs['dim_list'][rank_world]
-                    # utils_funs = UtilsFunctions(params, ensemble_true_state)
-                    # model_kwargs.update({"statevec_true": ensemble_true_state})
-                    # hu_obs = utils_funs._create_synthetic_observations(**model_kwargs)
-                    # # gather from every rank to rank 0
-                    # gathered_obs = comm_world.gather(hu_obs[:g_shape,:], root=0)
-                    # if rank_world == 0:
-                    #     print(f"[ICESEE] {[arr.shape for arr in gathered_obs]}")
-                    #     hu_obs = np.vstack(gathered_obs)
-                    # else:
-                    #     hu_obs = np.empty((model_kwargs["global_shape"],params["number_obs_instants"]),dtype=np.float64)
-                    
-                    # comm_world.Bcast(hu_obs, root=0)
-                    if rank_world == 0:
-                        utils_funs = UtilsFunctions(params, ensemble_true_state)
-                        model_kwargs.update({"statevec_true": ensemble_true_state})
-                        hu_obs, error_R = utils_funs._create_synthetic_observations(**model_kwargs)
-                        shape_ = np.array(hu_obs.shape,dtype=np.int32)
-                        shape_R = np.array(error_R.shape,dtype=np.int32)
-                    else:
-                        shape_ = np.empty(2,dtype=np.int32)
-                        shape_R = np.empty(2,dtype=np.int32)
-
-                    comm_world.Bcast(shape_, root=0)
-                    comm_world.Bcast(shape_R, root=0)
-
-                    if rank_world != 0:
-                        hu_obs = np.empty(shape_,dtype=np.float64)
-                        error_R = np.empty(shape_R,dtype=np.float64)
-
-                    # bcast the synthetic observations
-                    comm_world.Bcast(hu_obs, root=0)
-                    comm_world.Bcast(error_R, root=0)
-        
+        # call the generate_synthetic_observations function
+        model_kwargs =  generate_synthetic_observations(**model_kwargs)
         # --- time generation of synthetic observations ---
         time_generation_synthetic_obs = MPI.Wtime() - time_generation_synthetic_obs
 
-        # --- Initialize the ensemble ---------------------------------------------------
+        # --- Initialize the ensemble -------------------------------------------------------------------------
         comm_world.Barrier()
         Q_rho     = model_kwargs.get("Q_rho")
         len_scale = model_kwargs.get("length_scale")
@@ -1405,6 +749,27 @@ def icesee_model_data_assimilation(**model_kwargs):
             
             # -- time forecast step ---
             _time_forecast_step = MPI.Wtime()
+
+            # load all needed parameters and variables into model_kwargs
+            model_kwargs.update({"rounds":rounds, 
+                                "color": color, 
+                                "subcomm_size": subcomm_size, 
+                                "subcomm": subcomm, 
+                                "comm_world": comm_world, 
+                                "rank_world": rank_world, 
+                                "sub_rank": sub_rank, 
+                                "_modelrun_datasets": _modelrun_datasets,
+                                "alpha": alpha, 
+                                "rho": rho, 
+                                "dt": dt, 
+                                "Lx": Lx, 
+                                "Ly": Ly, 
+                                "len_scale": len_scale,
+                                "model_module": model_module,
+                                "UtilsFunctions": UtilsFunctions,
+                                "generate_enkf_field": generate_enkf_field,
+                                "icesee_get_index": icesee_get_index})
+            
             # === Four approaches of forecast step mpi parallelization ===
             # --- case 1: Each forecast runs squentially using all available processors
             if params.get("sequential_run", False):
@@ -1548,14 +913,12 @@ def icesee_model_data_assimilation(**model_kwargs):
             #          - only works for size_world > Nens
             #          - even distribution and load balancing leading to performance improvement
             #          - best for size_world/Nens is a whole number
+
+            
             if params["default_run"]:
                 # --- case 2: Form batches of sub-communicators and distribute resources among them ---
                 if Nens >= size_world:
-                    # ensemble_vec, shape_ens = process_ensemble_data_Nens_ge_size_world(rounds, color, subcomm_size, subcomm, comm_world,\
-                    #                                           rank_world, sub_rank, model_kwargs, params, k, \
-                    #                                             _modelrun_datasets, alpha, rho, dt, Lx, Ly, \
-                    #                                                 len_scale, model_module, UtilsFunctions \
-                    #                                         , generate_enkf_field, icesee_get_index)
+                    # ensemble_vec, shape_ens = parallel_forecast_step_default_run(**model_kwargs)
                    
                     # store results for each round      
                     ens_list = []
