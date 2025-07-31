@@ -10,5 +10,5 @@ authors:
 title: "ICESEE: A state-of-the-art data assimilation software package for coupling ice sheet models."
 version: 1.0.0
 #doi: 10.5281/zenodo.1234
-date-released: 2025-03-18
-url: "https://github.com/KYANJO/ICESEE"
+date-released: 2025-07-18
+url: "https://github.com/ICESEE-project/ICESEE"

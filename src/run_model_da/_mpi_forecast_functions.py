@@ -155,7 +155,8 @@ def parallel_forecast_step_default_run(**model_kwargs):
                         # W = np.random.normal(0, 1, hdim)
                         # W = generate_pseudo_random_field_1d(hdim,np.sqrt(Lx*Ly), len_scale, verbose=0)
                         model_kwargs.update({"ii_sig": ii, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
-                        W = generate_enkf_field(**model_kwargs)
+                        # W = generate_enkf_field(**model_kwargs)
+                        W = generate_enkf_field(ii,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                         noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
                         q0.append(noise_)
 
@@ -289,7 +290,8 @@ def parallel_forecast_step_default_run(**model_kwargs):
                         # W = np.random.normal(0, 1, hdim)
                         # W = generate_pseudo_random_field_1d(hdim,np.sqrt(Lx*Ly), len_scale, verbose=0)
                         model_kwargs.update({"ii_sig": ii, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
-                        W = generate_enkf_field(**model_kwargs)
+                        # W = generate_enkf_field(**model_kwargs)
+                        W = generate_enkf_field(ii,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                         noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
                         q0.append(noise_)
 

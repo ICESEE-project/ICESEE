@@ -13,9 +13,6 @@ import bigmpi4py as BM
 from scipy.stats import multivariate_normal, beta
 from mpi4py import MPI
 
-# seed the random number generator
-# np.random.seed(0)
-
 
 # def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_chunk, comm, model_kwargs, output_file="icesee_ensemble_data.h5"):
 #     """

@@ -26,10 +26,9 @@ def ensemble_initialization(**model_kwargs):
     """
     
     # unpack model_kwargs
-    params         = model_kwargs.get("params", {})
+    params         = model_kwargs.get("params")
     model_module   = model_kwargs.get("model_module", None)
     comm_world     = model_kwargs.get("comm_world", MPI.COMM_WORLD)
-    sub_rank       = model_kwargs.get("sub_rank", 0)
     subcomm        = model_kwargs.get("subcomm", None)
     color          = model_kwargs.get("color", 0)
     pos            = model_kwargs.get("pos", None)
@@ -47,8 +46,8 @@ def ensemble_initialization(**model_kwargs):
     rng           = model_kwargs.get("rng", np.random.default_rng())
     rank_seed = model_kwargs.get("rank_seed", 0)
 
-    # np.random.seed(rank_seed)
-
+    sub_rank  = subcomm.Get_rank()
+    subcomm_size = subcomm.Get_size()
     rank_world = comm_world.Get_rank()
     size_world = comm_world.Get_size()
 
@@ -98,9 +97,21 @@ def ensemble_initialization(**model_kwargs):
                     # Add process noise in-place to avoid temporary array
                     _time_init_noise_generation = MPI.Wtime()
                     model_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
-                    noise = generate_enkf_field(**model_kwargs)
+                    # noise = generate_enkf_field(**model_kwargs)
+                    noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
                     ensemble_vec[:, ens] += noise
+
+                    # for ii, sig in enumerate(params["sig_Q"]):
+                    #     if ii <=params["num_state_vars"]:
+                    #         start_idx = ii * hdim
+                    #         end_idx = start_idx + hdim
+                    #         # make sure the noise has zero mean
+                    #         noise[start_idx:end_idx] *=sig
+                    #         noise[start_idx:end_idx] -= np.mean(noise[start_idx:end_idx])
+                    #         inflated_noise = noise[start_idx:end_idx] / np.max(np.abs(noise[start_idx:end_idx]))
+                    #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] + inflated_noise
+
                     del noise  # Free memory immediately
 
                     # Gather ensemble data efficiently
@@ -170,15 +181,6 @@ def ensemble_initialization(**model_kwargs):
                     for key, value in data.items():
                         ensemble_vec[indx_map[key],ens] = value
 
-                # ensemble = ensemble_vec
-                # for ens in range(params["Nens"]):
-                    # add process noise
-                    # if model_kwargs["joint_estimation"] or params["localization_flag"]:
-                    #     hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
-                    # else:
-                    #     hdim = ensemble_vec.shape[0] // params["num_state_vars"]
-                    # state_block_size = hdim * params["num_state_vars"]
-
                     # --->
                     # noise = compute_noise_random_fields(ens, hdim, pos, gs_model, params["total_state_param_vars"], L_C)
                     # ensemble_vec[:,ens] += noise
@@ -187,7 +189,8 @@ def ensemble_initialization(**model_kwargs):
                     N_size = params["total_state_param_vars"] * hdim
                     # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=True)
                     model_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
-                    noise = generate_enkf_field(**model_kwargs)
+                    # noise = generate_enkf_field(**model_kwargs)
+                    noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
                     ensemble_vec[:,ens] += noise
                     # for ii, sig in enumerate(params["sig_Q"]):
@@ -195,31 +198,6 @@ def ensemble_initialization(**model_kwargs):
                     #         start_idx = ii * hdim
                     #         end_idx = start_idx + hdim
                     #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
-
-
-                    # -----------------------------
-                    # full_block_size = hdim * params["total_state_param_vars"]
-                    # Q_err = np.zeros((full_block_size,full_block_size))
-                    # for i, sig in enumerate(params["sig_Q"]):
-                    #     start_idx = i *hdim
-                    #     end_idx = start_idx + hdim
-                    #     Q_err[start_idx:end_idx,start_idx:end_idx] = np.eye(hdim) * sig ** 2
-
-                    # # print(f"[ICESEE] [Q_err] Q_err shape: {Q_err.shape}, Q_err: {Q_err[:10,:10]}")
-
-
-                    # # noise = multivariate_normal.rvs(mean=np.zeros(state_block_size), cov=Q_err[:state_block_size,:state_block_size])
-                    # noise = multivariate_normal.rvs(mean=np.zeros(full_block_size), cov=Q_err)
-                    # ensemble_vec[:,ens] += noise
-
-                    # # print(f"[ICESEE] [Debug] Ensemble vector shape: {ensemble_vec.shape}, noise shape: {noise.shape}")
-                    # ------------------------------
-
-                    # add a spread to the smb
-                    # if model_kwargs["joint_estimation"] or params["localization_flag"]:
-                        # ensemble_vec[state_block_size:,ens] = ensemble_vec[state_block_size:,ens] + np.diag(Q_err[state_block_size:,state_block_size:])
-
-                    
                     
                 shape_ens = np.array(ensemble_vec.shape,dtype=np.int32)
                 

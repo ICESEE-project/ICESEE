@@ -19,11 +19,7 @@ from scipy.sparse import csr_matrix
 from scipy.sparse import block_diag
 from scipy.stats import multivariate_normal
 from scipy.spatial import distance_matrix
-
-from mpi4py import MPI
-
-# from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
-# rank_seed, rng = ParallelManager().initialize_seed(MPI.COMM_WORLD)
+from scipy.linalg import cholesky, solve_triangular
 
 
 def compute_Q_err_random_fields(hdim, num_blocks, sig_Q, rho, len_scale):
@@ -65,7 +61,8 @@ def compute_noise_random_fields(k, hdim, pos, model, num_blocks, L_C):
     # all_noise.append(total_noise_k)
     return total_noise_k
 
-def generate_pseudo_random_field_1d(N, Lx, rh, grid_extension=2, seed=None, verbose=False):
+# -----> debuging
+def generate_pseudo_random_field_1d(N, Lx, rh, grid_extension=2, verbose=False):
     """
     Generate a 1D pseudo-random field with zero mean, unit variance, and specified covariance.
     
@@ -83,9 +80,6 @@ def generate_pseudo_random_field_1d(N, Lx, rh, grid_extension=2, seed=None, verb
     import numpy as np
     from scipy.optimize import brentq
     import warnings
-
-    if seed is not None:
-        np.random.seed(seed)
     
     # Grid spacing
     dx = Lx / N
@@ -180,7 +174,6 @@ def generate_pseudo_random_field_1d(N, Lx, rh, grid_extension=2, seed=None, verb
     
     # Set phases: zero for self-conjugate points, random for representatives
     phi[mask_representative & ~self_conj_mask] = np.random.rand(np.sum(mask_representative & ~self_conj_mask))
-    # phi[mask_representative & ~self_conj_mask] = rng.random(np.sum(mask_representative & ~self_conj_mask))
     phi[~mask_representative] = (-phi[I_conj[~mask_representative]]) % 1
     
     # Fourier coefficients
@@ -202,7 +195,7 @@ def generate_pseudo_random_field_1d(N, Lx, rh, grid_extension=2, seed=None, verb
     return q
 
 
-def generate_pseudo_random_field_2D(N, M, Lx, Ly, rh, grid_extension=2, rng=np.random.default_rng(), verbose=False):
+def generate_pseudo_random_field_2D(N, M, Lx, Ly, rh, grid_extension=2, verbose=False):
     """
     Generate a 2D pseudo-random field with zero mean, unit variance, and specified covariance.
     
@@ -315,8 +308,7 @@ def generate_pseudo_random_field_2D(N, M, Lx, Ly, rh, grid_extension=2, rng=np.r
     mask_representative = (I < I_conj) | ((I == I_conj) & (J <= J_conj))
     
     # Set phases: zero for self-conjugate points, random for representatives
-    # phi[mask_representative & ~self_conj_mask] = np.random.rand(np.sum(mask_representative & ~self_conj_mask))
-    phi[mask_representative & ~self_conj_mask] = rng.random(np.sum(mask_representative & ~self_conj_mask))
+    phi[mask_representative & ~self_conj_mask] = np.random.rand(np.sum(mask_representative & ~self_conj_mask))
     phi[~mask_representative] = (-phi[I_conj[~mask_representative], J_conj[~mask_representative]]) % 1
     
     # Fourier coefficients
@@ -337,7 +329,7 @@ def generate_pseudo_random_field_2D(N, M, Lx, Ly, rh, grid_extension=2, rng=np.r
     
     return q
 
-def generate_enkf_field(**model_kwargs):
+def generate_enkf_field(ii_sig, Lx, hdim, num_vars, rh=None, grid_extension=2, verbose=False):
     """
     Generate a pseudo-random field for EnKF with specified DoF.
 
@@ -352,21 +344,6 @@ def generate_enkf_field(**model_kwargs):
     Returns:
     - q: Array of shape (hdim * num_vars, 1)
     """
-    ii_sig = model_kwargs.get('ii_sig', None)  # Index for variable-specific fields
-    Lx = model_kwargs.get('Lx', 1.0)  # Default length scale
-    Ly = model_kwargs.get('Ly', None)  # Optional length scale in y, not used in 1D
-    nd = model_kwargs.get('nd', None)  # Not used in this function, but can be passed
-    hdim = model_kwargs.get('hdim', nd)  # Default degrees of freedom
-    grid_extension = model_kwargs.get('grid_extension', 2)  # Default grid extension factor
-    seed = model_kwargs.get('rank_seed', None)  # Random seed for reproducibility
-    verbose = model_kwargs.get('verbose', False)  # Verbose output
-    params = model_kwargs.get('params', {})
-    num_vars =  model_kwargs.get('num_vars', params.get('total_state_param_vars', 1))  # Number of variables
-    rh =  model_kwargs.get("length_scale")  # Decorrelation length, can be a list or single value
-
-    # redefine Lx
-    Lx = np.sqrt(Lx*Ly)
-
     # N = hdim * num_vars
     if rh is None:
         rh = Lx / 10  # Default decorrelation length
@@ -381,25 +358,25 @@ def generate_enkf_field(**model_kwargs):
                 # var_rh = rh.get(f'var{i+1}', Lx / 10)
                 var_rh = rh[i] if isinstance(rh, list) else rh
                 q_var = generate_pseudo_random_field_1d(
-                    N=hdim, Lx=Lx, rh=var_rh, grid_extension=grid_extension, seed=seed, verbose=verbose
+                    N=hdim, Lx=Lx, rh=var_rh, grid_extension=grid_extension, verbose=verbose
                 )
                 q_total.append(q_var)
             return np.concatenate(q_total, axis=0)
         else:
             # we are in the for loop for perturbation update already
             q0 = generate_pseudo_random_field_1d(
-                N=hdim, Lx=Lx, rh=rh[ii_sig], grid_extension=grid_extension, seed=seed, verbose=verbose
+                N=hdim, Lx=Lx, rh=rh[ii_sig], grid_extension=grid_extension, verbose=verbose
             )
             return q0
     else:
         # Single field
         if ii_sig is None:
             q0 = generate_pseudo_random_field_1d(
-                N=hdim*num_vars, Lx=Lx, rh=rh, grid_extension=grid_extension, seed=seed, verbose=verbose
+                N=hdim*num_vars, Lx=Lx, rh=rh, grid_extension=grid_extension, verbose=verbose
             )
         else:
             q0 = generate_pseudo_random_field_1d(
-                N=hdim, Lx=Lx, rh=rh, grid_extension=grid_extension, seed=seed, verbose=verbose
+                N=hdim, Lx=Lx, rh=rh, grid_extension=grid_extension, verbose=verbose
             )
         # print(f"[ICESEE] Field shape: {q0.shape}")
         return q0

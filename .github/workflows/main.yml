@@ -13,9 +13,9 @@ jobs:
       - name: Set up virtual environment
         run: ./setup_venv.sh
       - name: Activate virtual environment
-        run: source venv/bin/activate
+        run: source icesee-env/bin/activate
         shell: bash
       - name: Install ICESEE
         run: make install
       - name: Run tests
-        run: python -m ICESEE.applications.icepack.examples.synthetic_flow.synthetic_flow
+        run: python -m ICESEE.applications.lorenz_model.examples.run_da_lorenz96

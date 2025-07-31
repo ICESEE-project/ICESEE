@@ -72,7 +72,8 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
             q0 = []
             for ii, sig in enumerate(params["sig_obs"]):
                 model_kwargs.update({"ii_sig": ii, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
-                W = generate_enkf_field(**model_kwargs)
+                # W = generate_enkf_field(**model_kwargs)
+                W = generate_enkf_field(ii,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                 noise_ = sig*W
                 # noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
                 # q0.append(noise_)
