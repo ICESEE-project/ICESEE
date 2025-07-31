@@ -80,6 +80,7 @@ if not flag_jupyter:
     parser.add_argument('--data_path', type=str, required=False, default= '_modelrun_datasets', help='folder to save data for single or multiple runs')
     parser.add_argument('execution_mode', type=int, choices=[0, 1, 2], nargs='?', help='Execution mode: 0=default_run, 1=sequential_run, 2=even_distribution')
     parser.add_argument('--model_nprocs', type=int, required = False, default=0, help='number of processors for the model')
+    parser.add_argument('-F', '--force-params', type=str, required=False, default='params.yaml', help='Path to YAML parameter file (default: params.yaml)')
 
     args = parser.parse_args()
 
@@ -109,6 +110,7 @@ if not flag_jupyter:
     data_path = args.data_path
     model_nprocs = int(args.model_nprocs)
     _verbose = args.verbose
+    parameters_file = args.force_params  # Use provided YAML file or default 'params.yaml'
 
     # Create params dictionary
     params = {
@@ -124,8 +126,15 @@ if not flag_jupyter:
     # print(f"Execution mode selected: {selected_mode}")
     # print(f"Params: {params}")
 
-    # Load parameters from a YAML file
-    parameters_file = "params.yaml"
+    # Log which file is being loaded if verbose
+    # if _verbose:
+    #     print(f"[ICESEE] Loading parameters from {parameters_file}")
+
+    # Verify if the specified parameters file exists
+    if not os.path.exists(parameters_file):
+        raise FileNotFoundError(f"Parameter file '{parameters_file}' not found. Please ensure the file exists.")
+
+    # Load parameters from the specified YAML file
     parameters = load_yaml_to_dict(parameters_file)
 
     physical_params = get_section(parameters, "physical-parameters")
@@ -148,6 +157,7 @@ if not flag_jupyter:
         "n_modeltasks": int(enkf_params.get("n_modeltasks", 1)),
         "execution_flag": int(enkf_params.get("execution_flag", 0)),
         "model_name": enkf_params.get("model_name", "model"),
+        "use_random_fields": bool(enkf_params.get("use_random_fields", False)),
     })
 
     # --- incase CL args not provided ---
@@ -211,6 +221,7 @@ if not flag_jupyter:
         'generate_true_state': enkf_params.get("generate_true_state", True),
         'generate_nurged_state': enkf_params.get("generate_nurged_state", True),
         'use_ensemble_pertubations': enkf_params.get("use_ensemble_pertubations", True),
+        'sequential_ensemble_initialization': enkf_params.get("sequential_ensemble_initialization", False),
     }
 
 
