@@ -17,11 +17,11 @@ modeling-parameters:
   hpcmode: False        # True - High-performance computing mode, False - local machine
   use_reference_data: True  # Use reference data for transient steady state
   reference_data_dir: "data" # Directory for reference data
-  reference_data: "initial_data_1.mat" # Reference data for transient steady state: only used if use_reference_data is True
+  reference_data: "ISMIP_initial_data.mat" # Reference data for transient steady state: only used if use_reference_data is True
   steps: 6                 # Increased steps for finer time integration
   verbose: True              # Enable verbosity for debugging
-  deepwater_melting_rate: 150           # Basal melt rate (150 m/yr)
-  smb: -0.3              # Surface mass balance (negative for melt, -0.3 m/yr)
+  deepwater_melting_rate: 200           # Basal melt rate (150 m/yr)
+  smb: -1.5              # Surface mass balance (negative for melt, -0.3 m/yr)
 
 
 enkf-parameters:
@@ -34,6 +34,7 @@ enkf-parameters:
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state:    1  # Generate true state for synthetic observations
   generate_nurged_state:  1  # Generate nudged state for synthetic observations
+  sequential_ensemble_initialization: 1  # Sequential ensemble initialization (True for sequential, False for parallel)
 
   num_state_vars: 1             # State variables: ice thickness (H), velocities (u, v)
   num_param_vars: 2             # Parameter variables: friction coefficient (C), bed topography (B)
