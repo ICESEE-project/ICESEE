@@ -41,9 +41,10 @@ enkf-parameters:
   observed_params: ['smb']  #['smb']
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state:    0  # Generate true state for synthetic observations
-  generate_nurged_state:  0  # Generate nudged state for synthetic observations
+  generate_true_state:    1  # Generate true state for synthetic observations
+  generate_nurged_state:  1  # Generate nudged state for synthetic observations
   use_ensemble_pertubations: 1 # Use ensemble perturbations for ensemble state
+  sequential_ensemble_initialization: 1  # Sequential ensemble initialization (True for sequential, False for parallel)
 
   # Statistical parameters (based on the number of state variables)
   sig_model: [0.1,0.1,0.1] # model error standard deviation
