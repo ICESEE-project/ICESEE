@@ -9,7 +9,7 @@ modeling-parameters:
   # Model parameters
   num_years: 250          # Number of years to run the model (30-year assimilation period from paper)
   tinitial: 0.0           # Initial time
-  timesteps_per_year: 0.1 # Number of timesteps per year (monthly for stability in SSA)
+  timesteps_per_year: 0.5 # Number of timesteps per year (monthly for stability in SSA)
 
   example_name: "ISMIP_Choi"  # Must have added this to the ISSM directory
   ParamFile: "Mismip2.par" # Parameter file for ISSM-DART setup
@@ -34,7 +34,7 @@ enkf-parameters:
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state:    1  # Generate true state for synthetic observations
   generate_nurged_state:  1  # Generate nudged state for synthetic observations
-  sequential_ensemble_initialization: 1
+  sequential_ensemble_initialization: 0
 
   num_state_vars: 1             # State variables: ice thickness (H), velocities (u, v)
   num_param_vars: 2             # Parameter variables: friction coefficient (C), bed topography (B)
