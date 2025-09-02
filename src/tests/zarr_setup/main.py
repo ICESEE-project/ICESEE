@@ -155,38 +155,37 @@ if rank == 0:
     enkf_io.H_matrix(**kwargs)
 comm.Barrier()
 
-# time_mean = 0.0
-# time_mean_chunked = 0.0
-# for t in range(nt):
-#     for round_idx in range(rounds):
-#         ens_id = color + round_idx * subcomm_size
-#         if ens_id < nens:
-#             state = enkf_io.read_forecast(t, ens_id)
-#             print(f"Rank {subcomm.Get_rank()}, time {t}, ens_id {ens_id}, state shape: {state.shape}")
-#             state = forecast(state)
-#             enkf_io.write_forecast(t + 1 if t < nt - 1 else t, state, ens_id)
-    
-#     # compute the forecast mean 
-#     start_mean_time = MPI.Wtime()
-#     # enkf_io.compute_forecast_mean(t)
-#     time_mean += MPI.Wtime() - start_mean_time
+time_mean = 0.0
+time_mean_chunked = 0.0
+for k in range(nt):
+    for round_idx in range(rounds):
+        ens_id = color + round_idx * subcomm_size
+        if ens_id < nens:
+            state = enkf_io.read_forecast(k, ens_id)
+            print(f"Rank {subcomm.Get_rank()}, time {k}, ens_id {ens_id}, state shape: {state.shape}")
+            state = forecast(state)
+            enkf_io.write_forecast(k + 1 if k < nt - 1 else k, state, ens_id)
 
-#     # use by chunked via ensemble dimension
-#     start_mean_chunked_time = MPI.Wtime()
-#     enkf_io.compute_forecast_mean_chunked(t)
-#     time_mean_chunked += MPI.Wtime() - start_mean_chunked_time
+    # compute the forecast mean
+    start_mean_time = MPI.Wtime()
+    # enkf_io.compute_forecast_mean(k)
+    time_mean += MPI.Wtime() - start_mean_time
 
-#     # comm.Barrier()
-#     # result = enkf_io.compare_forecast_means(t, ens_chunk_size=1)
-#     # if rank == 0:
-#     #     print(f"Comparison result: {result}")
+    # use by chunked via ensemble dimension
+    start_mean_chunked_time = MPI.Wtime()
+    enkf_io.compute_forecast_mean_chunked(k)
+    time_mean_chunked += MPI.Wtime() - start_mean_chunked_time
 
-#     if t in tobserve:
-#         # state = enkf_io.read_analysis(t, ens_id)
-#         # print(f"Rank {subcomm.Get_rank()}, Analysis read at time {t}, state shape: {state.shape}")
+    # comm.Barrier()
+    # result = enkf_io.compare_forecast_means(t, ens_chunk_size=1)
+    # if rank == 0:
+    #     print(f"Comparison result: {result}")
 
-#         # compute Eta
-#         enkf_io.Eta_matrix(t,zarr_path)
+    if k in tobserve:
+       
+        # compute Eta
+        kwargs.update({'Eta_matrix_zarr_path': "output/Eta_matrix.zarr"})
+        enkf_io.Eta_matrix(k, **kwargs)
 
 #         # state = analyze(state, H, d, ens_id, enkf_io, params)
 #         # enkf_io.write_analysis(t, state, ens_id)

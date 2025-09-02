@@ -633,40 +633,40 @@ class EnKFIO:
         local_size_per_rank = kwargs.get('dim_list', None)
         return index_map, local_size_per_rank[rank]
 
-    def generate_observation_schedule_(self,**kwargs):
-        """
-        Generate observation times and indices from a given array of time points.
+    # def generate_observation_schedule_(self,**kwargs):
+    #     """
+    #     Generate observation times and indices from a given array of time points.
 
-        Parameters:
-            t (list or np.ndarray): Array of time points.
-            freq_obs (int): Frequency of observations in the same unit as `t`.
-            obs_max_time (int): Maximum observation time in the same unit as `t`.
+    #     Parameters:
+    #         t (list or np.ndarray): Array of time points.
+    #         freq_obs (int): Frequency of observations in the same unit as `t`.
+    #         obs_max_time (int): Maximum observation time in the same unit as `t`.
 
-        Returns:
-            obs_t (list): Observation times.
-            obs_idx (list): Indices corresponding to observation times in `t`.
-        """
-        # unpack kwargs
-        t = kwargs["t"]
+    #     Returns:
+    #         obs_t (list): Observation times.
+    #         obs_idx (list): Indices corresponding to observation times in `t`.
+    #     """
+    #     # unpack kwargs
+    #     t = kwargs["t"]
 
-        # Convert input to a numpy array for easier manipulation
-        t = np.array(t)
+    #     # Convert input to a numpy array for easier manipulation
+    #     t = np.array(t)
         
-        # Generate observation times
-        obs_t = np.arange(self.params["obs_start_time"], self.params["obs_max_time"] + self.params["freq_obs"], self.params["freq_obs"])
-        print(f"Observation times (obs_t): {obs_t} for obs_start_time = {self.params['obs_start_time']}, obs_max_time = {self.params['obs_max_time']}, freq_obs = {self.params['freq_obs']}")
-        # obs_t = np.linspace(obs_start_time, obs_max_time, int(obs_max_time/freq_obs)+1)
+    #     # Generate observation times
+    #     obs_t = np.arange(self.params["obs_start_time"], self.params["obs_max_time"] + self.params["freq_obs"], self.params["freq_obs"])
+    #     print(f"Observation times (obs_t): {obs_t} for obs_start_time = {self.params['obs_start_time']}, obs_max_time = {self.params['obs_max_time']}, freq_obs = {self.params['freq_obs']}")
+    #     # obs_t = np.linspace(obs_start_time, obs_max_time, int(obs_max_time/freq_obs)+1)
         
-        # Find indices of observation times in the original array
-        obs_idx = np.array([np.where(t == time)[0][0] for time in obs_t if time in t]).astype(int)
-        print(f"Observation indices (obs_idx): {obs_idx} for obs_t = {obs_t} in t = {t}")
+    #     # Find indices of observation times in the original array
+    #     obs_idx = np.array([np.where(t == time)[0][0] for time in obs_t if time in t]).astype(int)
+    #     print(f"Observation indices (obs_idx): {obs_idx} for obs_t = {obs_t} in t = {t}")
 
-        # print(f"Number of observation instants: {len(obs_idx)} at times: {t[obs_idx]} for t = {t}")
+    #     # print(f"Number of observation instants: {len(obs_idx)} at times: {t[obs_idx]} for t = {t}")
 
-        # number of observation instants
-        num_observations = len(obs_idx)
+    #     # number of observation instants
+    #     num_observations = len(obs_idx)
 
-        return obs_t, obs_idx, num_observations
+    #     return obs_t, obs_idx, num_observations
 
     def generate_observation_schedule(self, **kwargs):
         """
@@ -714,70 +714,70 @@ class EnKFIO:
 
         return obs_t, obs_idx, num_observations
 
-    def generate_observation_schedule_(self, **kwargs):
-        """
-        Generate observation indices aligned to the provided time grid t.
+    # def generate_observation_schedule_(self, **kwargs):
+    #     """
+    #     Generate observation indices aligned to the provided time grid t.
 
-        Behavior:
-        - Assumes t is (approximately) uniformly spaced.
-        - First observation is the first grid time >= obs_start_time (ceil-to-grid).
-        - Subsequent observations use a fixed index stride ~ freq_obs/dt (rounded).
-        - Stops at obs_max_time (inclusive, with small tolerance).
+    #     Behavior:
+    #     - Assumes t is (approximately) uniformly spaced.
+    #     - First observation is the first grid time >= obs_start_time (ceil-to-grid).
+    #     - Subsequent observations use a fixed index stride ~ freq_obs/dt (rounded).
+    #     - Stops at obs_max_time (inclusive, with small tolerance).
 
-        Returns:
-        obs_t   : 1D np.ndarray of observation times (taken from t)
-        obs_idx : 1D np.ndarray of integer indices into t
-        num_observations : int
-        """
-        # unpack
-        t = np.asarray(kwargs["t"])
-        params = self.params  # or kwargs if you pass params there
+    #     Returns:
+    #     obs_t   : 1D np.ndarray of observation times (taken from t)
+    #     obs_idx : 1D np.ndarray of integer indices into t
+    #     num_observations : int
+    #     """
+    #     # unpack
+    #     t = np.asarray(kwargs["t"])
+    #     params = self.params  # or kwargs if you pass params there
 
-        obs_start_time = float(params["obs_start_time"])
-        obs_max_time   = float(params["obs_max_time"])
-        freq_obs       = float(params["freq_obs"])
+    #     obs_start_time = float(params["obs_start_time"])
+    #     obs_max_time   = float(params["obs_max_time"])
+    #     freq_obs       = float(params["freq_obs"])
 
-        # basic validations
-        if t.ndim != 1 or t.size < 2:
-            raise ValueError("t must be a 1D array with at least two points.")
-        if freq_obs <= 0:
-            raise ValueError("freq_obs must be > 0.")
-        if obs_start_time > t[-1]:
-            # nothing to schedule
-            return np.array([], dtype=t.dtype), np.array([], dtype=int), 0
+    #     # basic validations
+    #     if t.ndim != 1 or t.size < 2:
+    #         raise ValueError("t must be a 1D array with at least two points.")
+    #     if freq_obs <= 0:
+    #         raise ValueError("freq_obs must be > 0.")
+    #     if obs_start_time > t[-1]:
+    #         # nothing to schedule
+    #         return np.array([], dtype=t.dtype), np.array([], dtype=int), 0
 
-        # estimate dt and confirm near-uniform grid
-        dt_est = float(np.mean(np.diff(t)))
-        if dt_est <= 0:
-            raise ValueError("t must be strictly increasing.")
-        # tolerance for float comparisons
-        atol = max(1e-10, 1e-6 * max(1.0, abs(t[-1])))
+    #     # estimate dt and confirm near-uniform grid
+    #     dt_est = float(np.mean(np.diff(t)))
+    #     if dt_est <= 0:
+    #         raise ValueError("t must be strictly increasing.")
+    #     # tolerance for float comparisons
+    #     atol = max(1e-10, 1e-6 * max(1.0, abs(t[-1])))
 
-        # find first index at or after obs_start_time (ceil-to-grid)
-        i0 = int(np.searchsorted(t, obs_start_time, side="left"))
-        if i0 >= t.size:
-            return np.array([], dtype=t.dtype), np.array([], dtype=int), 0
+    #     # find first index at or after obs_start_time (ceil-to-grid)
+    #     i0 = int(np.searchsorted(t, obs_start_time, side="left"))
+    #     if i0 >= t.size:
+    #         return np.array([], dtype=t.dtype), np.array([], dtype=int), 0
 
-        # convert freq to an index stride (round to nearest integer step)
-        step_idx = max(1, int(round(freq_obs / dt_est)))
+    #     # convert freq to an index stride (round to nearest integer step)
+    #     step_idx = max(1, int(round(freq_obs / dt_est)))
 
-        # build candidate indices from i0 with stride step_idx
-        # stop when time would exceed obs_max_time (with small tolerance)
-        idx = []
-        i = i0
-        while i < t.size and (t[i] <= obs_max_time + atol):
-            idx.append(i)
-            i += step_idx
+    #     # build candidate indices from i0 with stride step_idx
+    #     # stop when time would exceed obs_max_time (with small tolerance)
+    #     idx = []
+    #     i = i0
+    #     while i < t.size and (t[i] <= obs_max_time + atol):
+    #         idx.append(i)
+    #         i += step_idx
 
-        obs_idx = np.array(idx, dtype=int)
-        obs_t = t[obs_idx]
-        num_observations = int(obs_idx.size)
+    #     obs_idx = np.array(idx, dtype=int)
+    #     obs_t = t[obs_idx]
+    #     num_observations = int(obs_idx.size)
 
-        # Optional: log what happened for debugging
-        print(f"[schedule] dt≈{dt_est:.6g}, start_i={i0}, step_idx={step_idx}, "
-              f"obs_t={obs_t}, obs_idx={obs_idx}")
+    #     # Optional: log what happened for debugging
+    #     print(f"[schedule] dt≈{dt_est:.6g}, start_i={i0}, step_idx={step_idx}, "
+    #           f"obs_t={obs_t}, obs_idx={obs_idx}")
 
-        return obs_t, obs_idx, num_observations
+    #     return obs_t, obs_idx, num_observations
 
     def _create_synthetic_observations(self, **kwargs):
 
@@ -928,29 +928,33 @@ class EnKFIO:
             self.mpi_comm.Abort(1)
 
     # Ensemble pertubations
-    def Eta_matrix(self, t, zarr_path="output/H_matrix.zarr"):
-     
+    def Eta_matrix(self, k, **kwargs):
+
         try:
+            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
+            Eta_matrix_zarr_path = kwargs.get('Eta_matrix_zarr_path', "output/Eta_matrix.zarr")
+
             # open H from zarr file
-            H_matrix_file = zarr.open_array(zarr_path, mode='r')
+            H_matrix_file = zarr.open_array(H_matrix_zarr_path, mode='r')
             H_local = H_matrix_file[:,self.nd_start_world:self.nd_end_world]
 
             #  read the forecast mean from h5py file
             mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
             with h5py.File(mean_file_path,'r', driver='mpio', comm=self.mpi_comm) as f:
-                ens_mean = f['mean'][self.nd_start_world:self.nd_end_world, t]
+                ens_mean = f['mean'][self.nd_start_world:self.nd_end_world, k]
                 
             # get local ensemble perturbations
             ens_idx=1
-            state = self.read_analysis(t,ens_idx)
+            state = self.read_analysis(k,ens_idx)
             ens_pertubations = state - ens_mean
             Eta_local = np.dot(H_local, ens_pertubations) # (m, nens)
+
         except Exception as e:
             # if self.mpi_comm.Get_rank() == 0:
             print(f"Error in Eta_matrix: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
-            # self.mpi_comm.Abort(1)
+            self.mpi_comm.Abort(1)
 
         # print(f"\nens_pertubations shape = {ens_pertubations.shape}, Eta_local shape = {Eta_local.shape}  H_local shape = {H_local.shape}\n")
     
@@ -962,27 +966,9 @@ class EnKFIO:
             H_matrix_file = zarr.open_array("output/H_matrix.zarr", mode='r')
             H_local = H_matrix_file[:,self.nd_start_world:self.nd_end_world]
 
-            #  read the forecast mean from h5py file
-            mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-            with h5py.File(mean_file_path, driver='mpio', comm=self.mpi_comm) as f:
-                ens_mean = f['mean'][self.nd_start_world:self.nd_end_world, t]
-                
-            # get local ensemble perturbations
-            ens_idx=1
-            state = self.read_analysis(t,ens_idx)
-            ens_pertubations = state - ens_mean
-            Eta_local = np.dot(H_local, ens_pertubations) # (m, nens)
-
-            # read synthetic observations from zarr file
-            hu_obs = zarr.open_array(store="output/synthetic_obs.zarr", mode='r')
-            hu_obs_local = hu_obs[self.nd_start_world:self.nd_end_world,:]
-
-            # compute d matrix
-            d_local = hu_obs_local - np.dot(H_local, ens_mean)[:, np.newaxis]  # (m, 1)
             
-            # write d matrix to zarr file
-            d_file = zarr.open_array(store=zarr_path, mode='a')
-            d_file[self.nd_start_world:self.nd_end_world,:] = d_local
+                
+           
 
         except Exception as e:
             if self.mpi_comm.Get_rank() == 0:
