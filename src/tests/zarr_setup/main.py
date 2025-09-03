@@ -18,8 +18,8 @@ def analyze(state, H, d, ens_idx, enkf_io, params=None):
 
 # Example parameters
 nd = 36231
-nens = 50
-nt = 100
+nens = 24
+nt = 10
 dt = 2.0
 comm = MPI.COMM_WORLD
 serial_file_creation = True
@@ -30,9 +30,9 @@ params = {
     'inflation_factor': 1.05,
     'vec_inputs': ['h'],
     'num_state_vars': 1,
-    'freq_obs': 11,
-    'obs_start_time': 5,
-    'obs_max_time': 80,
+    'freq_obs': 2,
+    'obs_start_time': 4,
+    'obs_max_time': 8,
     'sig_obs' : [0.2, 0.2],
     "default_run": True
 
@@ -135,9 +135,9 @@ for chunk_idx in chunk_indices:
 # Synchronize to ensure all writes are complete
 comm.Barrier()
 
-# Optional: Verify the array (e.g., on rank 0)
-if rank == 0:
-    print(f"Zarr array created with shape {statevec_true.shape}, chunks {statevec_true.chunks}")
+# # Optional: Verify the array (e.g., on rank 0)
+# if rank == 0:
+#     print(f"Zarr array created with shape {statevec_true.shape}, chunks {statevec_true.chunks}")
 
 # generate synthetic observations to get d = H \in (mxnd) @synthetic_obs \in (ndxkm)
 synthetic_obs_zarr_path="output/synthetic_observations.zarr"
@@ -166,10 +166,10 @@ for k in range(nt):
             state = forecast(state)
             enkf_io.write_forecast(k + 1 if k < nt - 1 else k, state, ens_id)
 
-    # compute the forecast mean
-    start_mean_time = MPI.Wtime()
-    # enkf_io.compute_forecast_mean(k)
-    time_mean += MPI.Wtime() - start_mean_time
+#     # compute the forecast mean
+#     start_mean_time = MPI.Wtime()
+#     # enkf_io.compute_forecast_mean(k)
+#     time_mean += MPI.Wtime() - start_mean_time
 
     # use by chunked via ensemble dimension
     start_mean_chunked_time = MPI.Wtime()
@@ -177,15 +177,20 @@ for k in range(nt):
     time_mean_chunked += MPI.Wtime() - start_mean_chunked_time
 
     # comm.Barrier()
-    # result = enkf_io.compare_forecast_means(t, ens_chunk_size=1)
+    # result = enkf_io.compare_forecast_means(k, ens_chunk_size=1)
     # if rank == 0:
     #     print(f"Comparison result: {result}")
 
     if k in tobserve:
-       
-        # compute Eta
+        km = k
+        # compute Eta for @ ens_idx
         kwargs.update({'Eta_matrix_zarr_path': "output/Eta_matrix.zarr"})
-        enkf_io.Eta_matrix(k, **kwargs)
+        enkf_io.Eta_matrix(km, **kwargs)
+
+        # compute d for @ ens_idx
+        kwargs.update({'d_matrix_zarr_path': "output/d_matrix.zarr"})
+        enkf_io.d_matrix(km, **kwargs)
+
 
 #         # state = analyze(state, H, d, ens_id, enkf_io, params)
 #         # enkf_io.write_analysis(t, state, ens_id)
