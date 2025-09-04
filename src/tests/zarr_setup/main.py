@@ -8,16 +8,23 @@ import gc
 
 # from forcast_class import EnKFIO  # Import the class above
 from forecast_analysis_i_o_class import EnKFIO
+# from EnKF_analysis_io import EnKFIO
+# from forecast_analysis_i_o_class_v0 import EnKFIO
 from assimilation_io_zarr import EnKFIO_zarr
 
 def forecast(state):
+    # create random values between 4 to 10
+    # np.random.seed(42)
+    state = np.random.rand(*state.shape) * np.sin(10) + 45
+    #add noise with zero mean
+    state += np.random.normal(0, 1, state.shape)
     return state  # Placeholder: modify state as needed
 
 def analyze(state, H, d, ens_idx, enkf_io, params=None):
     return None
 
 # Example parameters
-nd = 36231
+nd = 36024
 nens = 24
 nt = 10
 dt = 2.0
@@ -157,6 +164,7 @@ comm.Barrier()
 
 time_mean = 0.0
 time_mean_chunked = 0.0
+km = 0
 for k in range(nt):
     for round_idx in range(rounds):
         ens_id = color + round_idx * subcomm_size
@@ -168,32 +176,34 @@ for k in range(nt):
 
 #     # compute the forecast mean
 #     start_mean_time = MPI.Wtime()
-#     # enkf_io.compute_forecast_mean(k)
+    # enkf_io.compute_forecast_mean(k)
 #     time_mean += MPI.Wtime() - start_mean_time
-
+    comm.Barrier()
     # use by chunked via ensemble dimension
     start_mean_chunked_time = MPI.Wtime()
     enkf_io.compute_forecast_mean_chunked(k)
+    # enkf_io.compute_forecast_mean_chunked_gather(k)
     time_mean_chunked += MPI.Wtime() - start_mean_chunked_time
 
-    # comm.Barrier()
+    comm.Barrier()
     # result = enkf_io.compare_forecast_means(k, ens_chunk_size=1)
     # if rank == 0:
     #     print(f"Comparison result: {result}")
 
-    if k in tobserve:
-        km = k
-        # compute Eta for @ ens_idx
-        kwargs.update({'Eta_matrix_zarr_path': "output/Eta_matrix.zarr"})
-        enkf_io.Eta_matrix(km, **kwargs)
+    if km < m_obs and k+1 == tobserve[km]:
+    #     # compute Eta for @ ens_idx
+    #     # kwargs.update({'Eta_matrix_zarr_path': "output/Eta_matrix.zarr"})
+    #     # ens_idx = 1
+    #     # enkf_io.Eta_matrix(km, ens_idx, **kwargs)
 
-        # compute d for @ ens_idx
-        kwargs.update({'d_matrix_zarr_path': "output/d_matrix.zarr"})
-        enkf_io.d_matrix(km, **kwargs)
+    #     # compute d for @ ens_idx
+    #     kwargs.update({'d_matrix_zarr_path': "output/d_matrix.zarr"})
+        # X5 = enkf_io.compute_X5(km, **kwargs)
+    #     # comm.Barrier()
+        enkf_io.compute_analysis_update(km,**kwargs)
 
 
-#         # state = analyze(state, H, d, ens_id, enkf_io, params)
-#         # enkf_io.write_analysis(t, state, ens_id)
+        km += 1
 
 enkf_io.close()
 
