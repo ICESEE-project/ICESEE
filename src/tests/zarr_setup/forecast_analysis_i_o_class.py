@@ -173,7 +173,7 @@ class EnKFIO:
                 fname = f"{self.base_path}/{self.file_prefix}_{t:04d}.h5"
                 f = h5py.File(fname, 'a', driver='mpio', comm=self.comm)
                 # f = h5py.File(fname, 'a', driver='mpio', comm=self.mpi_comm)
-                # f.atomic = False
+                f.atomic = False
                 dset = f['states']
                 self.files.append(f)
                 self.datasets.append(dset)
@@ -470,7 +470,7 @@ class EnKFIO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
+    # @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
     def compute_forecast_mean_chunked(self, t, ens_chunk_size=None, use_collective_io=False, max_ranks=4):
         self._ensure_batch(t)
         comm = self.mpi_comm
@@ -585,154 +585,6 @@ class EnKFIO:
                     print(f"Total time: {MPI.Wtime() - start_total:.2f}s, I/O: {t_io:.2f}s, Compute: {t_comp:.2f}s")
 
             comm.Barrier()
-        except Exception as e:
-            print(f"Error occurred in compute_forecast_mean_chunked: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
-
-    def compute_forecast_mean_chunked_(self, t, ens_chunk_size=None, use_collective_io=True, max_ranks=20):
-        self._ensure_batch(t)
-        comm = self.mpi_comm
-        rank = comm.Get_rank()
-        size = comm.Get_size()
-
-        import numpy as np
-        import h5py.h5p as h5p
-        import h5py.h5s as h5s
-        import h5py.h5fd as h5fd
-
-        try:
-            # Use provided max_ranks, with fallback to serial for very small sizes
-            if size <= 2:
-                active_ranks = 1
-            else:
-                active_ranks = min(max_ranks, size)
-                # Optional: Add min_rows_per_rank logic if nd is known
-                # e.g., active_ranks = min(max_ranks, max(1, self.nd // min_rows_per_rank))
-
-            # Exclude ranks with no work
-            color = 0 if (rank < active_ranks) else MPI.UNDEFINED
-            sub_comm = comm.Split(color, rank)
-            active = sub_comm != MPI.COMM_NULL
-
-            # Timing instrumentation
-            t_io = 0.0
-            t_comp = 0.0
-            t_comm = 0.0
-            start_total = MPI.Wtime()
-
-            if active:
-                sub_rank = sub_comm.Get_rank()
-                sub_size = sub_comm.Get_size()
-
-                # Distribute rows
-                local_rows = (self.nd_end_world - self.nd_start_world) if rank == 0 else 0
-                local_rows = sub_comm.bcast(local_rows, root=0)
-                rows_per_rank = local_rows // sub_size
-                extra_rows = local_rows % sub_size
-                nd_start = sub_rank * rows_per_rank + min(sub_rank, extra_rows)
-                nd_end = nd_start + rows_per_rank + (1 if sub_rank < extra_rows else 0)
-
-                batch_idx = t - self.current_batch_start
-                ds = self.datasets[batch_idx]
-
-                # Dynamic chunk size
-                if ens_chunk_size is None:
-                    bytes_per_element = 8
-                    target_memory = 1e9  # 1GB target
-                    ens_chunk_size = max(1, int(target_memory / (nd_end - nd_start) / bytes_per_element))
-                    ens_chunk_size = min(ens_chunk_size, self.nens)
-                    if sub_rank == 0:
-                        print(f"Dynamic ens_chunk_size: {ens_chunk_size}")
-
-                local_sum = np.zeros(nd_end - nd_start, dtype='f8')
-
-                # Set up I/O
-                dxpl = h5p.create(h5p.DATASET_XFER)
-                if size <= 2:
-                    dxpl.set_dxpl_mpio(h5fd.MPIO_INDEPENDENT)  # Serial I/O for small sizes
-                elif use_collective_io:
-                    dxpl.set_dxpl_mpio(h5fd.MPIO_COLLECTIVE)
-                else:
-                    dxpl.set_dxpl_mpio(h5fd.MPIO_INDEPENDENT)
-
-
-                # Double buffering
-                buffers = [np.empty((nd_end - nd_start, ens_chunk_size), dtype='f8') for _ in range(2)]
-                current_buffer = 0
-
-                for start_ens in range(0, self.nens, ens_chunk_size):
-                    end_ens = min(start_ens + ens_chunk_size, self.nens)
-                    chunk_cols = end_ens - start_ens
-
-                    if chunk_cols < ens_chunk_size:
-                        buffers[current_buffer] = np.empty((nd_end - nd_start, chunk_cols), dtype='f8')
-
-                    # I/O
-                    t_start_io = MPI.Wtime()
-                    file_space = ds.id.get_space()
-                    file_space.select_hyperslab((self.nd_start_world + nd_start, start_ens), (nd_end - nd_start, chunk_cols))
-                    mem_space = h5s.create_simple((nd_end - nd_start, chunk_cols))
-                    ds.id.read(mem_space, file_space, buffers[current_buffer], dxpl=dxpl)
-                    t_io += MPI.Wtime() - t_start_io
-
-                    # Compute on previous buffer
-                    if start_ens > 0:
-                        t_start_comp = MPI.Wtime()
-                        local_sum += np.sum(buffers[1 - current_buffer], axis=1)
-                        t_comp += MPI.Wtime() - t_start_comp
-
-                    current_buffer = 1 - current_buffer
-
-                # Final compute
-                t_start_comp = MPI.Wtime()
-                local_sum += np.sum(buffers[current_buffer], axis=1)
-                t_comp += MPI.Wtime() - t_start_comp
-
-                local_mean = local_sum / self.nens
-
-                # Output
-                file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-                t_start_comm = MPI.Wtime()
-                sub_comm.Barrier()
-                t_comm += MPI.Wtime() - t_start_comm
-
-                t_start_io = MPI.Wtime()
-                f = h5py.File(file_path, 'a', driver='mpio', comm=sub_comm)
-
-                if 'mean' not in f:
-                    chunk_rows = min(self.nd, 1000)
-                    f.create_dataset(
-                        'mean', (self.nd, self.nt),
-                        chunks=(chunk_rows, 1),
-                        dtype='f8'
-                    )
-
-                out_ds = f['mean']
-                file_space = out_ds.id.get_space()
-                file_space.select_hyperslab((self.nd_start_world + nd_start, t), (nd_end - nd_start, 1))
-                mem_space = h5s.create_simple((nd_end - nd_start,))
-                out_ds.id.write(mem_space, file_space, local_mean, dxpl=dxpl)
-
-                f.close()
-                t_io += MPI.Wtime() - t_start_io
-
-                t_start_comm = MPI.Wtime()
-                sub_comm.Barrier()
-                t_comm += MPI.Wtime() - t_start_comm
-
-                if sub_rank == 0:
-                    print(f"Total time: {MPI.Wtime() - start_total:.2f}s, "
-                        f"I/O: {t_io:.2f}s, Compute: {t_comp:.2f}s, Comm: {t_comm:.2f}s")
-
-                # Note: For async I/O, explore h5py.AsyncRequest with mpi4py futures in Python 3.12+
-                # Not implemented here due to experimental status
-
-            t_start_comm = MPI.Wtime()
-            comm.Barrier()
-            t_comm += MPI.Wtime() - t_start_comm
-
         except Exception as e:
             print(f"Error occurred in compute_forecast_mean_chunked: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
@@ -1217,7 +1069,6 @@ class EnKFIO:
             # call the compute X5 function
             X5 = self.compute_X5(km, **kwargs)
             # compute column sums for X5
-            # yi = np.sum(X5, axis=1) 
 
             # print(f"shape of yi {yi.shape}, X5 shape: {X5.shape}")
 
@@ -1259,10 +1110,50 @@ class EnKFIO:
             # Compute analysis updates for all paucall ensembles using matrix multiplication
             analysis_updates = all_states_zarr @ X5  # Matrix multiplication
 
+            # performm inflation
+            inflation_factor = self.params.get('inflation_factor', 1.0)
+            ndim = analysis_updates.shape[0]//self.params["total_state_param_vars"]
+            state_block_size = ndim * self.params["num_state_vars"]
+            mean_params = np.mean(analysis_updates[state_block_size:, :], axis=1).reshape(-1, 1)
+            pertubations = analysis_updates[state_block_size:, :] - mean_params
+            inflated_pertubations = pertubations * inflation_factor
+            analysis_updates[state_block_size:, :] = mean_params + inflated_pertubations
+
+            # check for negative thicknes and set to 1e-3 if vec_input contains h
+            # Define valid thickness variable names
+            THICKNESS_VARS = {
+                "h", "ice_thickness", "thickness", "ice_thick", 
+                "hi", "h_ice", "h_ice_thickness", "H"
+            }
+            min_thickness = 1e-3
+            vec_inputs = kwargs.get("vec_inputs", None)
+         
+            for i, input_var in enumerate(vec_inputs or []):
+                if input_var in THICKNESS_VARS:
+                    start = i * ndim
+                    end = start + ndim
+                    analysis_updates[start:end, :] = np.maximum(analysis_updates[start:end, :], min_thickness)
+
             # Write back all analysis updates
             for j in range(Nens):
                 self.write_analysis(km, analysis_updates[:, j], j)
 
+            # compute the anlysis mean and write to h5 file
+            yi = np.sum(X5, axis=1)
+            analysis_mean = np.dot(all_states_zarr, yi) / Nens
+            # print(f"[Rank {self.mpi_comm.Get_rank()}]  shape: {analysis_mean.shape} shape_ {self.nd_end_world - self.nd_start_world}")
+            file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
+            with h5py.File(file_path, 'a', driver='mpio', comm=self.mpi_comm) as f:
+                if 'mean' not in f:
+                    if rank == 0:
+                        f.create_dataset(
+                            'mean', (self.nd, self.nt),
+                            chunks=(min(self.nd, 1000), 1),
+                            dtype='f8'
+                        )
+                comm.Barrier()
+                f['mean'][self.nd_start_world:self.nd_end_world, km] = analysis_mean
+            
             # clean up zarr file
             if os.path.exists(zarr_path):
                 shutil.rmtree(zarr_path)
@@ -1272,32 +1163,11 @@ class EnKFIO:
             gc.collect()
             # ----**** --------------------------------------------------------
 
-            # --- using chuncked approach
-            # chunk_size = min(10480,local_dim)  # Adjust based on available memory
-
-            # for start in range(0, local_dim, chunk_size):
-            #     end = min(start + chunk_size, local_dim)
-            #     chunk_dim = end - start
-
-            #     # Read chunk of data for all ensembles
-            #     chunk_states = np.zeros((chunk_dim, Nens))
-            #     for i in range(Nens):
-            #         # Adjust read_analysis to read only the chunk
-            #         chunk_states[:, i] = self.read_analysis(km, i)[start:end]
-
-            #     # Compute updates for the chunk
-            #     chunk_updates = chunk_states @ X5
-
-            #     # Write back chunk updates
-            #     for j in range(Nens):
-            #         self.write_analysis(km, chunk_updates[:, j], j, offset=start)
-
-
-                # print(f"[Rank {self.mpi_comm.Get_rank()}] Analysis update: {analysis_update.shape}")
             # compute the update mean
-            self.mpi_comm.Barrier()
-            self.compute_forecast_mean_chunked(km)
-            self.mpi_comm.Barrier()
+            # self.mpi_comm.Barrier()
+            # self.compute_forecast_mean_chunked(km)
+            # # self.compute_forecast_mean_chunked_gather(km)
+            # self.mpi_comm.Barrier()
             
             
 

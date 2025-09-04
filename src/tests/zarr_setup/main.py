@@ -35,7 +35,7 @@ params = {
     "joint_estimation": False,
     "total_state_param_vars": 2,
     'inflation_factor': 1.05,
-    'vec_inputs': ['h'],
+    'vec_inputs': ['h', 'v'],
     'num_state_vars': 1,
     'freq_obs': 2,
     'obs_start_time': 4,
@@ -202,7 +202,9 @@ for k in range(nt):
     #     # comm.Barrier()
         enkf_io.compute_analysis_update(km,**kwargs)
 
-
+        # compute the analysis mean
+        # comm.Barrier()
+        # enkf_io.compute_forecast_mean_chunked(km)
         km += 1
 
 enkf_io.close()
