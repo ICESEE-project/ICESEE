@@ -164,6 +164,7 @@ comm.Barrier()
 
 time_mean = 0.0
 time_mean_chunked = 0.0
+analysis_time = 0.0
 km = 0
 for k in range(nt):
     for round_idx in range(rounds):
@@ -182,6 +183,7 @@ for k in range(nt):
     # use by chunked via ensemble dimension
     start_mean_chunked_time = MPI.Wtime()
     enkf_io.compute_forecast_mean_chunked(k)
+    # enkf_io.compute_forecast_mean_chunked_v2(k)
     # enkf_io.compute_forecast_mean_chunked_gather(k)
     time_mean_chunked += MPI.Wtime() - start_mean_chunked_time
 
@@ -200,7 +202,10 @@ for k in range(nt):
     #     kwargs.update({'d_matrix_zarr_path': "output/d_matrix.zarr"})
         # X5 = enkf_io.compute_X5(km, **kwargs)
     #     # comm.Barrier()
+        analysis_time_start = MPI.Wtime()
         enkf_io.compute_analysis_update(km,**kwargs)
+        analysis_time += MPI.Wtime() - analysis_time_start
+        # comm.Barrier()
 
         # compute the analysis mean
         # comm.Barrier()
@@ -213,10 +218,12 @@ end_time = MPI.Wtime()
 walltime = MPI.COMM_WORLD.reduce(end_time - start_time, op=MPI.MAX, root=0)
 exec_time = MPI.COMM_WORLD.reduce(end_time - start_time, op=MPI.SUM, root=0)
 # forecast_mean_time = MPI.COMM_WORLD.reduce(time_mean, op=MPI.MAX, root=0)
-# forecast_mean_chunked_time = MPI.COMM_WORLD.reduce(time_mean_chunked, op=MPI.MAX, root=0)
+forecast_mean_chunked_time = MPI.COMM_WORLD.reduce(time_mean_chunked, op=MPI.MAX, root=0)
 # forecast_mean_chunked_time = time_mean_chunked
+analysis_time = MPI.COMM_WORLD.reduce(analysis_time, op=MPI.MAX, root=0)
 if MPI.COMM_WORLD.Get_rank() == 0:
     print(f"Total execution time: {exec_time:.2f} seconds, Wall time: {walltime:.2f} seconds")
     # print(f"Forecast mean time: {forecast_mean_time:.2f} seconds")
-    # print(f"Forecast mean chunked time: {forecast_mean_chunked_time:.2f} seconds")
+    print(f"Forecast mean chunked time: {forecast_mean_chunked_time:.2f} seconds")
+    print(f"Analysis time: {analysis_time:.2f} seconds")
     print(f"Test completed successfully on {MPI.COMM_WORLD.Get_size()} ranks.")

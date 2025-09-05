@@ -469,6 +469,97 @@ class EnKFIO:
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
+    
+    def compute_forecast_mean_chunked_v2(self, k, **kwargs):
+        """
+        Simple & hang-free:
+        - running sum in RAM (length = local_rows)
+        - collective dataset creation
+        - collective write with empty selection for zero-row ranks
+        """
+        from mpi4py import MPI
+        import numpy as np, h5py
+        import h5py.h5p as h5p, h5py.h5s as h5s, h5py.h5fd as h5fd
+        import sys, traceback
+
+        comm = self.mpi_comm
+        rank = comm.Get_rank()
+        size = comm.Get_size()
+
+        try:
+            nd0, nd1 = self.nd_start_world, self.nd_end_world
+            local_rows = nd1 - nd0
+            if local_rows < 0:
+                raise ValueError("Invalid local row bounds")
+
+            # ---- Optional per-rank Zarr cache (safe; not required) ---------------
+            # If you keep this, it's fine—just per-rank path to avoid contention.
+            # import zarr
+            # zarr.create_array(f"{self.base_path}/{self.file_prefix}_forecast_updates_{rank}.zarr",
+            #                   shape=(local_rows, self.nens),
+            #                   chunks=(min(local_rows, 1000), 1), dtype='f8', overwrite=True)
+
+            # ---- Running sum while reading ensembles ------------------------------
+            local_sum = np.zeros(max(local_rows, 0), dtype='f8')
+            for ens_idx in range(self.nens):
+                if local_rows > 0:
+                    v = self.read_analysis(k, ens_idx)
+                    v = np.asarray(v, dtype='f8')
+                    if v.ndim != 1 or v.size != local_rows:
+                        v = v.reshape(-1)
+                        assert v.size == local_rows, "read_analysis must return (local_rows,)"
+                    local_sum += v
+
+            local_mean = (local_sum / float(self.nens)) if local_rows > 0 else np.empty((0,), dtype='f8')
+
+            # ---- Parallel HDF5: collective create + collective write -------------
+            file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
+
+            # Dataset transfer property list: COLLECTIVE for the write
+            dxpl = h5p.create(h5p.DATASET_XFER)
+            dxpl.set_dxpl_mpio(h5fd.MPIO_COLLECTIVE)
+
+            with h5py.File(file_path, 'a', driver='mpio', comm=comm) as f:
+                # --- Collective dataset creation: ALL ranks must take the same branch
+                exists_local = ('mean' in f)
+                # If any rank sees it, treat as exists for all to avoid split branches
+                exists_any = comm.allreduce(1 if exists_local else 0, op=MPI.SUM) > 0
+
+                if not exists_any:
+                    # ALL ranks call create_dataset with identical args (collective)
+                    chunk_rows = min(self.nd, 4096)
+                    f.create_dataset('mean', (self.nd, self.nt),
+                                    chunks=(chunk_rows, 1), dtype='f8')
+                    # Ensure all ranks see the new metadata
+                    comm.Barrier()
+                else:
+                    # Ensure all ranks take the same path
+                    comm.Barrier()
+
+                dset = f['mean']
+
+                # --- Collective write: ALL ranks must participate
+                file_space = dset.id.get_space()
+                if local_rows > 0:
+                    # Select this rank's row slab for column k
+                    file_space.select_hyperslab((nd0, k), (local_rows, 1))
+                    mem_space = h5s.create_simple((local_rows,))
+                    buf = np.ascontiguousarray(local_mean)
+                else:
+                    # Empty (NULL) selection for ranks with no rows
+                    mem_space = h5s.create_simple((0,))
+                    file_space.select_none()
+                    buf = np.empty((0,), dtype='f8')
+
+                dset.id.write(mem_space, file_space, buf, dxpl=dxpl)
+
+            comm.Barrier()
+
+        except Exception as e:
+            print(f"Error in compute_forecast_mean_chunked_v2: {e}")
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
+            self.mpi_comm.Abort(1)
 
     # @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
     def compute_forecast_mean_chunked(self, t, ens_chunk_size=None, use_collective_io=False, max_ranks=4):
@@ -913,9 +1004,169 @@ class EnKFIO:
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
+    
+    def Eta_matrix_root(self, k, ens_idx, **kwargs):
+        try:
+            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
+            # Eta_matrix_zarr_path = kwargs.get('Eta_matrix_zarr_path', "output/Eta_matrix.zarr")
+
+            H_matrix_file = zarr.open_array(H_matrix_zarr_path, mode='r')
+            H_local = H_matrix_file[:, self.nd_start_world:self.nd_end_world]
+
+            mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
+            with h5py.File(mean_file_path, 'r', driver='mpio', comm=self.mpi_comm) as f:
+                ens_mean = f['mean'][self.nd_start_world:self.nd_end_world, k]
+                
+            state = self.read_analysis(k, ens_idx)
+            ens_pertubations = state - ens_mean
+
+            Eta_local = np.dot(H_local, ens_pertubations)
+
+            # compute Eta_global from all ranks 
+            Eta_global = np.empty_like(Eta_local)
+            self.mpi_comm.Allreduce(Eta_local, Eta_global, op=MPI.SUM)
+
+            return Eta_global
+        except Exception as e:
+            print(f"Error in Eta_matrix: {e}")
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
+            self.mpi_comm.Abort(1)
+
+    def compute_X5_root(self, km, **kwargs):
+        try:
+            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
+            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', "output/synthetic_obs.zarr")
+            # d_matrix_zarr_path = kwargs.get('d_matrix_zarr_path', "output/d_matrix.zarr")
+
+            H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')
+            H_local = H_matrix[:, self.nd_start_world:self.nd_end_world]
+
+            #  get the synthetic observations
+            synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
+            synthetic_obs_local = synthetic_obs[self.nd_start_world:self.nd_end_world, km]
+            # print(f"\n synthetic_obs shape: {synthetic_obs.shape} synthetic_obs_local shape: {synthetic_obs_local.shape}\n")
+
+            rank = self.mpi_comm.Get_rank()
+
+            #  compute the d matrix
+            # d_local = zarr.create_array(store=f"output/d_matrix_{rank}.zarr", shape=(H_matrix.shape[0],), chunks=(min(50, H_matrix.shape[0]),), dtype='f8', overwrite=True)
+            d_local = np.dot(H_local, synthetic_obs_local)
+
+            # compute global d from all ranks
+            d_global = np.empty_like(d_local)
+            # d_global = za
+            self.mpi_comm.Allreduce(d_local, d_global, op=MPI.SUM)
+
+            # read all ensemble members locally into a zarr array
+            state_local_matrix = zarr.create_array(store=f"output/state_local_matrix_{rank}.zarr", shape=(self.nd_end_world - self.nd_start_world, self.nens), chunks=(min(1000, self.nd_end_world - self.nd_start_world), min(10, self.nens)), dtype='f8', overwrite=True)
+            for ens_idx in range(self.nens):
+                state_local = self.read_analysis(km, ens_idx)
+                state_local_matrix[:, ens_idx] = state_local
+
+            # -- compute innovations D - HA for all ensemble members
+            HA_local = np.dot(H_local, state_local_matrix)  # (m, nens)
+            HA = np.empty_like(HA_local)
+            self.mpi_comm.Allreduce(HA_local, HA, op=MPI.SUM)
+
+            # compute Eta and D for all ensemble members
+            # get the ensemble mean
+            mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
+            with h5py.File(mean_file_path, 'r', driver='mpio', comm=self.mpi_comm) as f:
+                ens_mean = f['mean'][self.nd_start_world:self.nd_end_world, km]
+            ens_pertubations = state_local_matrix - ens_mean[:, np.newaxis]  # (nd_local, nens)
+            Eta_local = np.dot(H_local, ens_pertubations)  # (m, nens)
+            Eta = np.empty_like(Eta_local)
+            self.mpi_comm.Allreduce(Eta_local, Eta, op=MPI.SUM)
+
+            D_global = d_global + Eta  # (m, nens)
+            Dprime = D_global - HA  # (m, nens)
+
+            # -- create a zarr file for each processor to write to  
+            m = kwargs.get('m_obs')*2+1
+            Nens = self.nens
+        
+            X5 = np.empty((Nens, Nens))
+            if self.mpi_comm.Get_rank() == 0:
+            # if False:
+                # compute the HAbar
+                # HAbar = np.mean(HA, axis=1)
+                # HAprime_local = HA - HAbar[:, np.newaxis]
+                one_N = np.ones((Nens,Nens))/Nens
+                HAprime= HA@(np.eye(Nens) - one_N) # mxNens
+
+                # compute HAprime + Eta
+                HAprime_Eta = HAprime + Eta
+                print(f"[Rank {self.mpi_comm.Get_rank()}] HAprime_Eta_local norm: {np.linalg.norm(HAprime_Eta)}, shape: {HAprime_Eta.shape}")
+                # print(f"\n [Rank {self.mpi_comm.Get_rank()}] Dprime_local shape: {Dprime_local.shape} HAprime_local shape: {HAprime_local.shape} HAprime_Eta_local shape: {HAprime_Eta_local.shape}\n ")
+
+                # compute SVD of HAprime_Eta
+                U, sig, Vt = np.linalg.svd(HAprime_Eta, full_matrices=False)
+
+                # get the min (m Nens)
+                nrmin = min(Nens, m)
+                
+                # convert S to eigenvalues
+                sig = sig**2
+
+                # compute the number of significant eigenvalues
+                sigsum = np.sum(sig[:nrmin])
+                # print(f"[Rank {self.mpi_comm.Get_rank()}] sigsum: {sigsum}, sig: {sig[:nrmin]}")
+                sigsum1 = 0.0
+                nrsigma = 0
+                if sigsum == 0:
+                    print(f"[Rank {self.mpi_comm.Get_rank()}] Warning: sigsum is zero, setting nrsigma to 0")
+                    nrsigma = 0
+                    sig[:] = 0.0
+                else:
+                    for i in range(nrmin):
+                        if sigsum1 / sigsum < 0.999:
+                            nrsigma += 1
+                            sigsum1 += sig[i]
+                            sig[i] = 1.0 / sig[i]
+                        else:
+                            sig[i:nrmin] = 0.0
+                            break
+
+                # compute X1 = sig*UT (Nens x m)
+                X1 = np.empty((nrmin, m))
+                for j in range(m):
+                    for i in range(nrmin):
+                        X1[i,j] =sig[i]*U[j,i]
+
+                # compute X2 = X1*Dprime # Nens x Nens
+                X2 = np.dot(X1, Dprime)
+
+                #  compute X3 = U*X2 # m_obs x Nens
+                X3 = np.dot(U, X2)
+
+                # print(f"[ICESEE] Rank: {rank_world} X3 shape: {X3.shape}")
+                # compute X4 = (HAprime.T)*X3 # Nens x Nens
+                X4 = np.dot(HAprime.T, X3)
+                del X2, X3, U, HAprime, HA, Eta, Dprime
+                gc.collect()
+
+                # compute X5 = X4 + I
+                X5 = X4 + np.eye(Nens)
+                # sum of each column of X5 should be 1
+                if np.sum(X5, axis=0).all() != 1.0:
+                    print(f"[ICESEE] Sum of each X5 column is not 1.0: {np.sum(X5, axis=0)}")
+                # print(f"[ICESEE] Rank: {comm_world.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
+                del X4; gc.collect()
+            
+            # Broadcast X5 to all ranks
+            self.mpi_comm.Bcast(X5, root=0)
+
+            return X5
+        
+        except Exception as e:
+            print(f"Error in compute_X5_analysis_mean: {e}")
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
+            self.mpi_comm.Abort(1)
 
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
-    def compute_X5(self, km, **kwargs):
+    def compute_X5_(self, km, **kwargs):
         # innovation (Dprime) = D - HA 
         try:
             H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
@@ -1052,6 +1303,241 @@ class EnKFIO:
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
+    
+    def compute_X5_utils_batch(self, km, **kwargs):
+        """
+        Returns:
+        Eta   : (m, Nens)
+        Dprime: (m, Nens)   # constant across Nens (each column equal)
+        HA    : (m, Nens)
+        """
+        try:
+            comm = self.mpi_comm
+            rank = comm.Get_rank()
+
+            # ---- Config / inputs
+            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
+            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', "output/synthetic_obs.zarr")
+            m = kwargs.get('m_obs') * 2 + 1
+            Nens = int(self.nens)
+            block_size = int(kwargs.get('block_size', max(16, min(64, Nens))))  # tuneable batch size
+
+            # ---- Open H once and slice local columns
+            H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')  # shape (m_total, nd_total) or (m, nd_total) as per your layout
+            H_local = H_matrix[:, self.nd_start_world:self.nd_end_world]  # shape (m, local_nd)
+            H_local = np.ascontiguousarray(H_local, dtype=np.float64)
+            m_local, local_nd = H_local.shape  # expect m_local == m
+
+            # ---- Read local ensemble mean once
+            mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
+            with h5py.File(mean_file_path, 'r', driver='mpio', comm=comm) as f:
+                ens_mean_local = f['mean'][self.nd_start_world:self.nd_end_world, km]
+            ens_mean_local = np.ascontiguousarray(ens_mean_local, dtype=np.float64)  # (local_nd,)
+
+            # ---- Synthetic observations (local slice)
+            synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
+            synthetic_obs_local = synthetic_obs[self.nd_start_world:self.nd_end_world, km]
+            synthetic_obs_local = np.ascontiguousarray(synthetic_obs_local, dtype=np.float64)  # (local_nd,)
+
+            # ---- Fuse d and Hmean into a single GEMM + single Allreduce
+            # Build a 2-column local matrix [y_obs, ens_mean]
+            V_local = np.empty((local_nd, 2), dtype=np.float64, order='C')
+            V_local[:, 0] = synthetic_obs_local
+            V_local[:, 1] = ens_mean_local
+
+            Y_local = H_local @ V_local                   # (m, 2)
+            Y_global = np.empty_like(Y_local, order='C')  # (m, 2)
+
+            # Single collective for both vectors
+            comm.Allreduce([Y_local, MPI.DOUBLE], [Y_global, MPI.DOUBLE], op=MPI.SUM)
+            d_global     = Y_global[:, 0]                 # (m,)
+            Hmean_global = Y_global[:, 1]                 # (m,)
+
+            # ---- Compute HA for all ensemble members in batches
+            HA_global = np.empty((m_local, Nens), dtype=np.float64, order='C')
+
+            for j0 in range(0, Nens, block_size):
+                j1 = min(j0 + block_size, Nens)
+                B = j1 - j0
+
+                # Load a contiguous local block of states: shape (local_nd, B)
+                States_local_blk = np.empty((local_nd, B), dtype=np.float64, order='C')
+                for jj, ens_idx in enumerate(range(j0, j1)):
+                    States_local_blk[:, jj] = self.read_analysis(km, ens_idx)  # must return local slice (local_nd,)
+
+                # Local GEMM then one Allreduce for this batch
+                HA_local_blk = H_local @ States_local_blk             # (m, B)
+                HA_global_blk = np.empty_like(HA_local_blk, order='C')
+                comm.Allreduce([HA_local_blk, MPI.DOUBLE], [HA_global_blk, MPI.DOUBLE], op=MPI.SUM)
+
+                HA_global[:, j0:j1] = HA_global_blk
+
+            # ---- Eta and D'
+            # Eta = HA - Hmean[:, None]
+            Eta = HA_global - Hmean_global[:, None]                   # (m, Nens)
+
+            # D' = (d - Hmean) broadcast across columns
+            d_minus_Hmean = (d_global - Hmean_global)                 # (m,)
+            # Make every column identical, no extra collectives
+            Dprime = np.broadcast_to(d_minus_Hmean[:, None], (m_local, Nens)).copy()
+
+            return Eta, Dprime, HA_global
+
+        except Exception as e:
+            print(f"Error in compute_X5_utils: {e}")
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
+            self.mpi_comm.Abort(1)
+
+    def compute_X5_utils(self, km, **kwargs):
+        # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
+        # Dprime[:ens_idx] = d - Hmean
+        try:
+            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
+            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', "output/synthetic_obs.zarr")
+            m = kwargs.get('m_obs') * 2 + 1
+            Nens = self.nens
+
+            # --- Open H (read-only) once and slice local columns
+            H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')
+            # H has shape (m, nd_total); we take our local column block
+            H_local = H_matrix[:, self.nd_start_world:self.nd_end_world]  # (m, local_nd)
+
+            local_nd = self.nd_end_world - self.nd_start_world
+
+            # --- Read ensemble mean ONCE (parallel)
+            mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
+            with h5py.File(mean_file_path, 'r', driver='mpio', comm=self.mpi_comm) as f:
+                ens_mean_local = f['mean'][self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
+
+            # --- Synthetic obs (once)
+            synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
+            synthetic_obs_local = synthetic_obs[self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
+
+            # --- d = H * y_obs (one GEMV + one Allreduce)
+            d_local = H_local @ synthetic_obs_local              # (m,)
+            d_global = np.empty_like(d_local)
+            self.mpi_comm.Allreduce(d_local, d_global, op=MPI.SUM)  # 1st collective
+
+            # --- Hmean = H * ens_mean (one GEMV + (no extra open calls))
+            Hmean_local = H_local @ ens_mean_local               # (m,)
+            Hmean_global = np.empty_like(Hmean_local)
+            self.mpi_comm.Allreduce(Hmean_local, Hmean_global, op=MPI.SUM)  # 2nd collective
+
+            # --- Read all ensemble states locally and batch into a matrix
+            # Shape: (local_nd, Nens)
+            States_local = np.empty((local_nd, Nens), dtype=H_local.dtype, order='C')
+            for j in range(Nens):
+                States_local[:, j] = self.read_analysis(km, j)  # each returns local slice (local_nd,)
+
+            # --- HA for all ensemble members in one GEMM + one Allreduce on the whole matrix
+            # local (m, local_nd) @ (local_nd, Nens) -> (m, Nens)
+            HA_local = H_local @ States_local                   # matrix-matrix multiply
+            # Single Allreduce over full (m, Nens) buffer
+            HA = np.empty_like(HA_local, order='C')
+            # Allreduce on a contiguous buffer; flatten for safety
+            self.mpi_comm.Allreduce(
+                [HA_local, MPI.DOUBLE],
+                [HA, MPI.DOUBLE],
+                op=MPI.SUM
+            )
+
+            # --- Eta = HA - Hmean[:, None]
+            Eta = HA - Hmean_global[:, None]             # (m, Nens)
+
+            # --- D' = (d - Hmean)[:, None], same for all ensemble members
+            Dprime = (d_global - Hmean_global)[:, None] * np.ones((1, Nens), dtype=HA.dtype)
+
+            return Dprime, Eta, HA
+        except Exception as e:
+            print(f"Error in compute_X5_modified: {e}")
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
+            self.mpi_comm.Abort(1)
+
+
+    def compute_X5_modified(self, km, **kwargs):
+        # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
+        # Dprime[:ens_idx] = d - Hmean
+        try:
+            m = kwargs.get('m_obs') * 2 + 1
+            Nens = self.nens
+
+            Dprime, Eta, HA = self.compute_X5_utils(km, **kwargs)
+            # Dprime, Eta, HA = self.compute_X5_utils_batch(km, **kwargs)
+
+            # compute the HAbar
+            # HAbar = np.mean(HA, axis=1)
+            # HAprime_local = HA - HAbar[:, np.newaxis]
+            one_N = np.ones((Nens,Nens))/Nens
+            HAprime= HA@(np.eye(Nens) - one_N) # mxNens
+
+            # compute HAprime + Eta
+            HAprime_Eta = HAprime + Eta
+            print(f"[Rank {self.mpi_comm.Get_rank()}] HAprime_Eta_local norm: {np.linalg.norm(HAprime_Eta)}, shape: {HAprime_Eta.shape}")
+            # print(f"\n [Rank {self.mpi_comm.Get_rank()}] Dprime_local shape: {Dprime_local.shape} HAprime_local shape: {HAprime_local.shape} HAprime_Eta_local shape: {HAprime_Eta_local.shape}\n ")
+
+            # compute SVD of HAprime_Eta
+            U, sig, Vt = np.linalg.svd(HAprime_Eta, full_matrices=False)
+
+            # get the min (m Nens)
+            nrmin = min(Nens, m)
+            
+            # convert S to eigenvalues
+            sig = sig**2
+
+            sigsum = np.sum(sig[:nrmin])
+            # print(f"[Rank {self.mpi_comm.Get_rank()}] sigsum: {sigsum}, sig: {sig[:nrmin]}")
+            sigsum1 = 0.0
+            nrsigma = 0
+            if sigsum == 0:
+                print(f"[Rank {self.mpi_comm.Get_rank()}] Warning: sigsum is zero, setting nrsigma to 0")
+                nrsigma = 0
+                sig[:] = 0.0
+            else:
+                for i in range(nrmin):
+                    if sigsum1 / sigsum < 0.999:
+                        nrsigma += 1
+                        sigsum1 += sig[i]
+                        sig[i] = 1.0 / sig[i]
+                    else:
+                        sig[i:nrmin] = 0.0
+                        break
+
+            # compute X1 = sig*UT (Nens x m)
+            X1 = np.empty((nrmin, m))
+            for j in range(m):
+                for i in range(nrmin):
+                    X1[i,j] =sig[i]*U[j,i]
+
+            # compute X2 = X1*Dprime # Nens x Nens
+            X2 = np.dot(X1, Dprime)
+
+            #  compute X3 = U*X2 # m_obs x Nens
+            X3 = np.dot(U, X2)
+
+            # print(f"[ICESEE] Rank: {rank_world} X3 shape: {X3.shape}")
+            # compute X4 = (HAprime.T)*X3 # Nens x Nens
+            X4 = np.dot(HAprime.T, X3)
+            del X2, X3, U, HAprime, HA, Eta, Dprime
+            gc.collect()
+
+            # compute X5 = X4 + I
+            X5 = X4 + np.eye(Nens)
+            # sum of each column of X5 should be 1
+            if np.sum(X5, axis=0).all() != 1.0:
+                print(f"[ICESEE] Sum of each X5 column is not 1.0: {np.sum(X5, axis=0)}")
+            # print(f"[ICESEE] Rank: {comm_world.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
+            del X4; gc.collect()
+
+            return X5
+
+        except Exception as e:
+            print(f"Error in compute_X5_root_optimized: {e}")
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
+            self.mpi_comm.Abort(1)
+
 
     # compute analysis mean
     def compute_analysis_update(self, km, **kwargs):
@@ -1067,43 +1553,34 @@ class EnKFIO:
             start = MPI.Wtime()
 
             # call the compute X5 function
-            X5 = self.compute_X5(km, **kwargs)
+            # X5 = self.compute_X5_(km, **kwargs)
+            X5 = self.compute_X5_modified(km, **kwargs)
             # compute column sums for X5
-
-            # print(f"shape of yi {yi.shape}, X5 shape: {X5.shape}")
-
-            # read statevec
-            self.mpi_comm.barrier()
-            
-            # pack local data to compute analysis_update = np.dot(local_data,X5)
-            # row_chunks = np.empty((self.nd_end_world - self.nd_start_world, X5.shape[1]))
-            # for i in range(X5.shape[1]):
-            #     state = self.read_analysis(km, i)
-            #     row_chunks[:, i] = state
-
-            # # # compute the analysis update
-            # analysis_update = np.dot(row_chunks, X5)
 
             # ---
             local_dim = self.nd_end_world - self.nd_start_world
             Nens = self.nens
 
-            # for j in range(Nens):
-            #     analysis_update = np.zeros((local_dim,))
-            #     for i in range(Nens):
-            #         state = self.read_analysis(km, i)
-            #         analysis_update += state * X5[i, j]
-            #     # write back the analysis update
-            #     self.write_analysis(km, analysis_update, j)
-
             # ----works----
             # Read all ensemble data at once
             # all_states = np.zeros((local_dim, Nens))
-            # write all_states to zarr file
-            zarr_path = f"{self.base_path}/all_states_rank_{rank}.zarr"
-            if os.path.exists(zarr_path):
-                shutil.rmtree(zarr_path)
-            all_states_zarr = zarr.create_array(store=zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
+            # write all_states to zarr file *--------------------------------
+            allstates_sate_zarr_path = f"{self.base_path}/all_states_rank_{rank}.zarr"
+            mean_params_zarr_path = f"{self.base_path}/mean_params_rank_{rank}.zarr"
+            pertubations_zarr_path = f"{self.base_path}/pertubations_rank_{rank}.zarr"
+            analysis_updates_zarr_path = f"{self.base_path}/analysis_updates_rank_{rank}.zarr"
+
+            for path in [mean_params_zarr_path, pertubations_zarr_path, analysis_updates_zarr_path]:
+                if os.path.exists(path):
+                    shutil.rmtree(path)
+
+            # if os.path.exists(allstates_sate_zarr_path):
+            #     shutil.rmtree(allstates_sate_zarr_path)
+            all_states_zarr = zarr.create_array(store=allstates_sate_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
+            mean_params = zarr.create_array(store=mean_params_zarr_path, shape=(local_dim, 1), chunks=(min(1000, local_dim), 1), dtype='f8', overwrite=True)
+            pertubations = zarr.create_array(store=pertubations_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
+            analysis_updates = zarr.create_array(store=analysis_updates_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
+
             for i in range(Nens):
                 all_states_zarr[:, i] = self.read_analysis(km, i)
 
@@ -1116,8 +1593,8 @@ class EnKFIO:
             state_block_size = ndim * self.params["num_state_vars"]
             mean_params = np.mean(analysis_updates[state_block_size:, :], axis=1).reshape(-1, 1)
             pertubations = analysis_updates[state_block_size:, :] - mean_params
-            inflated_pertubations = pertubations * inflation_factor
-            analysis_updates[state_block_size:, :] = mean_params + inflated_pertubations
+            # inflated_pertubations = pertubations * inflation_factor
+            analysis_updates[state_block_size:, :] = mean_params + (pertubations * inflation_factor)
 
             # check for negative thicknes and set to 1e-3 if vec_input contains h
             # Define valid thickness variable names
@@ -1155,21 +1632,16 @@ class EnKFIO:
                 f['mean'][self.nd_start_world:self.nd_end_world, km] = analysis_mean
             
             # clean up zarr file
-            if os.path.exists(zarr_path):
-                shutil.rmtree(zarr_path)
+            # if os.path.exists(zarr_path):
+            #     shutil.rmtree(zarr_path)
+            for path in [allstates_sate_zarr_path, mean_params_zarr_path, pertubations_zarr_path, analysis_updates_zarr_path]:
+                if os.path.exists(path):
+                    shutil.rmtree(path)
             
             self.mpi_comm.Barrier()
-            del all_states_zarr
+            # del all_states_zarr
             gc.collect()
             # ----**** --------------------------------------------------------
-
-            # compute the update mean
-            # self.mpi_comm.Barrier()
-            # self.compute_forecast_mean_chunked(km)
-            # # self.compute_forecast_mean_chunked_gather(km)
-            # self.mpi_comm.Barrier()
-            
-            
 
         except Exception as e:
             print(f"Error in compute_analysis_mean: {e}")
