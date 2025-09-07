@@ -84,7 +84,8 @@ class PyVenvPackages(PythonPackage):
             'pyyaml',
             'nose',
             'gstools',
-            'mpi4py'
+            'mpi4py',
+            'zarr'
         ]
 
         subprocess.run([pip, 'install'] + pip_packages, check=True)

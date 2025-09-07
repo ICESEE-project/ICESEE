@@ -15,7 +15,7 @@ import bigmpi4py as BM
 from scipy.stats import multivariate_normal, beta
 from mpi4py import MPI
 
-from ICESEE.src.run_model_da._parallel_i_o import parallel_write_full_ensemble_from_root, \
+from ICESEE.src.parallelization._parallel_i_o import parallel_write_full_ensemble_from_root, \
                                                 parallel_write_ensemble_scattered
 from ICESEE.src.utils.tools import icesee_get_index, get_grid_dimensions
 

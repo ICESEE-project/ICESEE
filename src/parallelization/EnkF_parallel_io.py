@@ -28,6 +28,7 @@ import functools
 blosc.use_threads = False
 
 from typing import Callable, Optional, TypeVar, Any
+from ICESEE.src.utils.tools import icesee_get_index
 
 T = TypeVar("T")
 
@@ -738,53 +739,6 @@ class EnKFIO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def icesee_get_index(self, **kwargs):
-        try:
-            vec_inputs = kwargs.get("vec_inputs", None)
-            params = kwargs.get("params", None)
-            nd = kwargs.get("nd", params.get("nd", None))
-
-            if params["default_run"]:
-                comm = kwargs.get("subcomm", None)
-            else:
-                comm = kwargs.get("comm_world", None)
-            
-            len_vec = params["total_state_param_vars"]
-            dim_list_param = np.array(kwargs.get('dim_list', None)) // len_vec
-            hdim = nd // len_vec
-
-            if comm is None:
-                rank = 0
-                dim = dim_list_param[rank]
-                offsets = [0]
-            else:
-                if params["even_distribution"]:
-                    rank = 0
-                    dim = dim_list_param[rank]
-                    offsets = [0]
-                else:
-                    rank = comm.Get_rank()
-                    dim = dim_list_param[rank]
-                    offsets = np.cumsum(np.insert(dim_list_param, 0, 0))
-
-            start_idx = offsets[rank]
-            index_map = {}
-            var_start = 0
-
-            for var in vec_inputs:
-                start = var_start + start_idx
-                end = start + dim
-                index_map[var] = np.arange(start, end)
-                var_start += hdim
-
-            local_size_per_rank = kwargs.get('dim_list', None)
-            return index_map, local_size_per_rank[rank]
-        except Exception as e:
-            print(f"Error occurred in icesee_get_index: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
-
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
     def generate_observation_schedule(self, **kwargs):
         try:
@@ -859,7 +813,7 @@ class EnKFIO:
             self.mpi_comm.Barrier()
 
             statevec_true = zarr.open_array(store="output/statevec_true.zarr", mode='r+')
-            indx_map, _ = self.icesee_get_index(**kwargs)
+            _, indx_map, _ = icesee_get_index(**kwargs)
             if self.nd < 10000:
                 if rank==0:
                     km = 0
