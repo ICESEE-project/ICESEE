@@ -243,7 +243,9 @@ def generate_nurged_state(**kwargs):
 
     #  create a bump -100 to 0
     # h_indx = int(np.ceil(nurged_entries+1))
-    hdim = vecs['h'].shape[0]
+    # hdim = vecs['h'].shape[0]
+    h_index_map = indx_map["h"]
+    hdim = indx_map["h"].shape[0]
 
      # intialize the accumulation rate if joint estimation is enabled at the initial time step
     if kwargs["joint_estimation"]:

@@ -53,18 +53,18 @@ def icesee_model_data_assimilation(**model_kwargs):
     if re.match(r"\AMPI_model\Z", parallel_flag, re.IGNORECASE):
         from mpi4py import MPI
         from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
-        from ICESEE.src.run_model_da._mpi_analysis_functions import analysis_enkf_update, EnKF_X5, DEnKF_X5, \
+        from ICESEE.src.parallelization._mpi_analysis_functions import analysis_enkf_update, EnKF_X5, DEnKF_X5, \
                                              analysis_Denkf_update                                    
-        from ICESEE.src.run_model_da._mpi_forecast_functions import parallel_forecast_step_default_run, \
+        from ICESEE.src.parallelization._mpi_forecast_functions import parallel_forecast_step_default_run, \
                                                                     parallel_forecast_step_squential_run, \
                                                                     parallel_forecast_step_even_distribution_run
 
-        from ICESEE.src.run_model_da._parallel_i_o import parallel_write_data_from_root_2D, \
+        from ICESEE.src.parallelization._parallel_i_o import parallel_write_data_from_root_2D, \
                                             parallel_write_vector_from_root, parallel_write_full_ensemble_from_root, \
                                             parallel_write_ensemble_scattered, gather_and_broadcast_data_default_run
-        from ICESEE.src.run_model_da._mpi_generate_true_wrong_state import generate_true_wrong_state
-        from ICESEE.src.run_model_da._mpi_generate_synthetic_observations import generate_synthetic_observations
-        from ICESEE.src.run_model_da._mpi_ensemble_intialization import ensemble_initialization
+        from ICESEE.src.parallelization._mpi_generate_true_wrong_state import generate_true_wrong_state
+        from ICESEE.src.parallelization._mpi_generate_synthetic_observations import generate_synthetic_observations
+        from ICESEE.src.parallelization._mpi_ensemble_intialization import ensemble_initialization
 
         # start the timer
         global_start_time = MPI.Wtime()

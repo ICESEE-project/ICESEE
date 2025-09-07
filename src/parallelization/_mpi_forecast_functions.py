@@ -93,6 +93,7 @@ def parallel_forecast_step_default_run(**model_kwargs):
                 # ---- read from file ----
                 input_file = f"{_modelrun_datasets}/icesee_ensemble_data.h5"
                 # with h5py.File(input_file, "r", driver="mpio", comm=subcomm) as f:
+                # with h5py.File(input_file, "r", driver="mpio", comm=comm_world) as f:
                 with h5py.File(input_file, "r") as f:
                     ensemble_vec = f["ensemble"][:,ens,k]
                 # ---- end of read from file ----

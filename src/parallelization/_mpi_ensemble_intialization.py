@@ -16,7 +16,7 @@ from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_field
                               generate_pseudo_random_field_1d, \
                               generate_pseudo_random_field_2D, \
                               generate_enkf_field
-from ICESEE.src.run_model_da._parallel_i_o import parallel_write_full_ensemble_from_root
+from ICESEE.src.parallelization._parallel_i_o import parallel_write_full_ensemble_from_root
 
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 # rank_seed, rng = ParallelManager().initialize_seed(MPI.COMM_WORLD)
