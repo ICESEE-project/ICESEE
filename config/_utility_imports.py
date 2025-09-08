@@ -158,6 +158,7 @@ if not flag_jupyter:
         "execution_flag": int(enkf_params.get("execution_flag", 0)),
         "model_name": enkf_params.get("model_name", "model"),
         "use_random_fields": bool(enkf_params.get("use_random_fields", False)),
+        "execution_mode"   : int(enkf_params.get("execution_mode", 1)),  # 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
     })
 
     # --- incase CL args not provided ---
@@ -187,6 +188,18 @@ if not flag_jupyter:
         params["execution_flag"] = 2
     else:
         params["execution_flag"] = 0
+
+    # set run modes
+    execution_mode = {
+        "serial": 1 if params.get("execution_mode", 0) == 0  else 0,
+        "partial": 1 if params.get("execution_mode", 0) == 1  else 0,
+        "full": 1 if params.get("execution_mode", 0) == 2  else 0,
+    }
+    # if none of the above modes is set to True set partial to True
+    if not any(execution_mode.values()):
+        execution_mode["partial"] = True
+
+    params.update({"mode": execution_mode})
     
     # update for time t
     params["t"] = np.linspace(0, int(float(modeling_params["num_years"])), params["nt"] + 1)
