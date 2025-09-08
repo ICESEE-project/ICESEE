@@ -59,8 +59,9 @@ enkf-parameters:
   localization_flag: False      # localization flag: True, False
 
   # estimation flags
-  joint_estimation: True # joint estimation flag: True, False
+  joint_estimation: 1 # joint estimation flag: True, False
   parameter_estimation: True # parameter estimation flag: True, False
+  joint_estimated_params: ['smb']  # parameters to be jointly estimated
 
   # nurged parameters
   h_nurge_ic: 350         # nurged increment for initial thickness

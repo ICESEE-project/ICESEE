@@ -146,6 +146,8 @@ class UtilsFunctions:
             hdim = statevec_true.shape[0] // self.params["total_state_param_vars"]
         else:
             hdim = statevec_true.shape[0] // self.params["total_state_param_vars"]
+            nd = hdim * self.params["num_state_vars"]
+
 
         error_R = np.zeros((nd, m_obs * 2 + 1))
         for i, sig in enumerate(self.params["sig_obs"]):
@@ -153,6 +155,7 @@ class UtilsFunctions:
             end_idx = start_idx + hdim
             error_R[start_idx:end_idx,:] = np.ones((hdim,1)) * sig
 
+        print(f"[ICESEE] vec_inputs: {kwargs['vec_inputs']}")
         km = 0
         for step in range(nt):
             if (km<m_obs) and (step+1 == ind_m[km]):

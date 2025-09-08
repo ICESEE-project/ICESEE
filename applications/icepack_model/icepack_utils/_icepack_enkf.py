@@ -85,6 +85,7 @@ def generate_true_state(**kwargs):
     solver = kwargs.get('solver', None)
     statevec_true = kwargs["statevec_true"]
     params = kwargs["params"]
+    joint_estimated_params = kwargs.get("joint_estimated_params", [])
 
     # call the icesee_get_index function to get the indices of the state variables
     vecs, indx_map, dim_per_proc = icesee_get_index(statevec_true, **kwargs)
@@ -112,13 +113,13 @@ def generate_true_state(**kwargs):
         if kwargs["joint_estimation"]:
             statevec_true[indx_map["smb"],k+1] = a.dat.data_ro
 
-    update_state = {'h': statevec_true[indx_map["h"],:], 
-                    'u': statevec_true[indx_map["u"],:], 
-                    'v': statevec_true[indx_map["v"],:]}
-    # -- for joint estimation --
-    if kwargs["joint_estimation"]:
-        update_state['smb'] = statevec_true[indx_map["smb"],:]
-    return update_state
+    # update_state = {'h': statevec_true[indx_map["h"],:], 
+    #                 'u': statevec_true[indx_map["u"],:], 
+    #                 'v': statevec_true[indx_map["v"],:]}
+    # # -- for joint estimation --
+    # if kwargs["joint_estimation"]:
+    #     update_state['smb'] = statevec_true[indx_map["smb"],:]
+    # return update_state
 
 # --- initialize the ensemble members ---
 def initialize_ensemble(ens, **kwargs):
@@ -328,4 +329,4 @@ def generate_nurged_state(**kwargs):
             a    = firedrake.interpolate(a_in + da_ * x / Lx, Q)
             statevec_nurged[indx_map["smb"],k+1] = a.dat.data_ro
 
-    return statevec_nurged
+    # return statevec_nurged
