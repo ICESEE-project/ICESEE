@@ -159,6 +159,8 @@ if not flag_jupyter:
         "model_name": enkf_params.get("model_name", "model"),
         "use_random_fields": bool(enkf_params.get("use_random_fields", False)),
         "execution_mode"   : int(enkf_params.get("execution_mode", 1)),  # 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
+        "serial_file_creation": bool(enkf_params.get("serial_file_creation", True)),
+        "batch_size": int(enkf_params.get("batch_size", 50)),
     })
 
     # --- incase CL args not provided ---

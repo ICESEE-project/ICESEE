@@ -72,7 +72,7 @@ def retry_on_failure(
         return wrapper
     return decorator
 
-class EnKFIO:
+class EnKF_fully_parallel_IO:
     def __init__(self, file_prefix, nd, nens, nt, subcomm, mpi_comm, params, serial_file_creation=True, base_path="enkf_data", batch_size=50):
         try:
             self.nd = nd

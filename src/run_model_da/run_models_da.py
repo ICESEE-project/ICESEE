@@ -21,67 +21,53 @@
 # @author: Brian Kyanjo
 # ==============================================================================
 
-# ==== ICESEE utility imports ========================================
-from ICESEE.src.run_model_da.icesee_da_serial import (
-    icesee_model_data_assimilation_serial,  # (development in progress)
-)
-from ICESEE.src.run_model_da.icesee_da_full_parallel import (
-    icesee_model_data_assimilation_full_parallel,
-)
-from ICESEE.src.run_model_da.icesee_da_partial_parallel import (
-    icesee_model_data_assimilation_partial_parallel,
-)
+import importlib
+import sys, traceback
 
-import traceback
-import sys
+_MODE_TO_TARGET = {
+    "serial":  ("ICESEE.src.run_model_da.icesee_da_serial",
+                "icesee_model_data_assimilation_serial"),
+    "partial": ("ICESEE.src.run_model_da.icesee_da_partial_parallel",
+                "icesee_model_data_assimilation_partial_parallel"),
+    "full":    ("ICESEE.src.run_model_da.icesee_da_full_parallel",
+                "icesee_model_data_assimilation_full_parallel"),
+}
+
+def _resolve_mode(params) -> str:
+    """Accept 'mode' as str or dict {'serial':1,'partial':0,'full':0}. Default 'partial'."""
+    if not isinstance(params, dict):
+        return "partial"
+    mode = params.get("mode", "partial")
+    if isinstance(mode, dict):
+        mode = next((k for k, v in mode.items() if v), "partial")
+    return mode
 
 # ======================== Run model with EnKF ========================
 def icesee_model_data_assimilation(**model_kwargs):
     """
     Run ICESEE model-data assimilation using the Ensemble Kalman Filter (and variants).
 
-    Parameters
-    ----------
-    **model_kwargs :
-        Arbitrary keyword arguments passed through to the selected runner.
-        Expected to contain:
-          params : dict
-              Must include:
-                - 'mode': str
-                    One of {"serial", "partial", "full"}.
-                    Defaults to "partial" if not provided.
-
-    Raises
-    ------
-    ValueError
-        If 'mode' is not one of {"serial", "partial", "full"}.
+    model_kwargs expected:
+      params: dict with
+        - mode: "serial" | "partial" | "full"   OR
+        - mode: dict like {"serial":1,"partial":0,"full":0}
     """
+    params = model_kwargs.get("params", {}) or {}
+    mode = _resolve_mode(params)
 
-    params = model_kwargs.get("params", {})
-    mode = params.get("mode", "partial")
-
-    if isinstance(mode, dict):
-        mode = next((k for k, v in mode.items() if v), "partial")
-
-
-    if mode not in {"serial", "partial", "full"}:
+    if mode not in _MODE_TO_TARGET:
         raise ValueError(
             f"Invalid mode '{mode}'. Must be one of: 'serial', 'partial', or 'full'."
         )
 
-    # Dispatch map
-    runners = {
-        "serial": icesee_model_data_assimilation_serial,
-        "partial": icesee_model_data_assimilation_partial_parallel,
-        "full": icesee_model_data_assimilation_full_parallel,
-    }
-
-    runner = runners[mode]
+    module_name, func_name = _MODE_TO_TARGET[mode]
 
     try:
+        # Lazy import only the selected runner
+        mod = importlib.import_module(module_name)
+        runner = getattr(mod, func_name)
         return runner(**model_kwargs)
     except Exception:
         print(f"[ICESEE] Error in {mode} run mode:")
         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
         print(f"Traceback details:\n{tb_str}")
-        # raise  # optionally re-raise so the calling code can handle it
