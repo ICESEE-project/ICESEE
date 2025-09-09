@@ -772,8 +772,8 @@ class EnKF_fully_parallel_IO:
         try:
             synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path')
             error_R_zarr_path = kwargs.get('error_R_zarr_path')
-            nd = kwargs.get('nd')
-            nt = kwargs.get('nt')
+            nd = self.nd
+            nt = self.nt
 
             obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
             m = m_obs
@@ -790,7 +790,7 @@ class EnKF_fully_parallel_IO:
                 if os.path.exists(error_R_zarr_path):
                     shutil.rmtree(error_R_zarr_path)
             self.mpi_comm.Barrier()
-
+            
             if rank == 0:
                 hu_obs = zarr.create_array(store=synthetic_obs_zarr_path, shape=(nd, m), chunks=(min(1000, nd), min(50, m)), dtype='f8', overwrite=True)
                 error_R = zarr.create_array(store=error_R_zarr_path, shape=(nd, m_R), chunks=(min(1000, nd), min(50, m_R)), dtype='f8', overwrite=True)
@@ -805,17 +805,18 @@ class EnKF_fully_parallel_IO:
             else:
                 hdim = nd // self.params["total_state_param_vars"]
 
-            if rank == 0:
-                for i, sig in enumerate(self.params["sig_obs"]):
-                    start_idx = i*hdim
-                    end_idx = start_idx + hdim
-                    error_R[start_idx:end_idx,:] = np.ones((hdim,1)) * sig
-            self.mpi_comm.Barrier()
+            # if rank == 0:
+            #     for i, sig in enumerate(self.params["sig_obs"]):
+            #         start_idx = i*hdim
+            #         end_idx = start_idx + hdim
+            #         error_R[start_idx:end_idx,:] = np.ones((hdim,1)) * sig
+            # self.mpi_comm.Barrier()
 
-            statevec_true = zarr.open_array(store="output/statevec_true.zarr", mode='r+')
+            statevec_true = zarr.open_array(store=f"{self.base_path}/statevec_true.zarr", mode='r+')
             _, indx_map, _ = icesee_get_index(**kwargs)
             if self.nd < 10000:
                 if rank==0:
+                    print("[ICESEE] Generating synthetic observations ...")
                     km = 0
                     for step in range(nt):
                         if (km<m_obs) and (step+1 == ind_m[km]):
@@ -824,8 +825,12 @@ class EnKF_fully_parallel_IO:
                                 hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
 
                             km += 1
+                    # print(f"\n nd = {nd}, Nens = {self.nens}, nt = {nt}\n")        
                 self.mpi_comm.Barrier()
             else:
+                if rank == 0:
+                    print("[ICESEE] Generating synthetic observations in parallel ...")
+                    # print(f"\n nd = {nd}, Nens = {self.nens}, nt = {nt}\n")
                 if size >= m_obs:
                     obs_per_process = m_obs // size
                     remainder = m_obs % size
@@ -889,7 +894,7 @@ class EnKF_fully_parallel_IO:
     def H_matrix(self, **kwargs):
         try:
             zarr_path = kwargs.get('H_matrix_zarr_path')
-            nd = kwargs.get('nd')
+            nd = self.nd
             m_obs = kwargs.get('m_obs')
             m = m_obs * 2 + 1
             di = int((nd - 2) / (2 * m_obs))
@@ -923,8 +928,8 @@ class EnKF_fully_parallel_IO:
             rank = comm.Get_rank()
 
             # ---- Config / inputs
-            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
-            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', "output/synthetic_obs.zarr")
+            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
+            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
             m = kwargs.get('m_obs') * 2 + 1
             Nens = int(self.nens)
             block_size = int(kwargs.get('block_size', max(16, min(64, Nens))))  # tuneable batch size
@@ -1000,8 +1005,8 @@ class EnKF_fully_parallel_IO:
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
         try:
-            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
-            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', "output/synthetic_obs.zarr")
+            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
+            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
             m = kwargs.get('m_obs') * 2 + 1
             Nens = self.nens
 

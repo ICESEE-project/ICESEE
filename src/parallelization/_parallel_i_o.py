@@ -536,6 +536,70 @@ def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, model_kwargs
 
     comm.Barrier()
 
+def parallel_write_full_ensemble_from_root_full_parallel_run(timestep, ensemble_mean, model_kwargs, full_ensemble=None, comm=None, output_file="icesee_ensemble_data.h5"):
+        """
+        Append ensemble data where the full matrix exists on rank 0, with only rank 0 writing to the dataset.
+        Optimized for large datasets and many processes without parallel I/O.
+        Each call appends a new time step, resulting in a dataset of shape (nd, Nens, nt).
+        full_ensemble: complete matrix on rank 0 with shape (nd, Nens)
+        comm: MPI communicator
+        output_file: Name of the output HDF5 file
+        """
+        import numpy as np
+        import h5py
+
+        params = model_kwargs.get("params")
+
+        # MPI setup
+        rank = comm.Get_rank()
+
+        # Get dimensions on root and broadcast
+        if rank == 0:
+            nd, Nens = full_ensemble.shape
+            dtype = full_ensemble.dtype
+        else:
+            nd, Nens, dtype = None, None, None
+        
+        nd = comm.bcast(nd, root=0)
+        Nens = comm.bcast(Nens, root=0)
+        dtype = comm.bcast(dtype, root=0)
+
+        # Define output file path
+        output_file = os.path.join(params.get('data_path'), output_file)
+
+        # Only rank 0 writes to the file
+        if rank == 0:
+            if timestep == 0:
+                with h5py.File(output_file, 'w') as f:
+                    # Create dataset with total dimensions
+                    # dset = f.create_dataset('ensemble', (nd, Nens, model_kwargs.get('nt', params['nt']) + 1), dtype=dtype)
+                    chunk_size = (min(5000, nd), 1)
+                    dset = f.create_dataset('ensemble', (nd, Nens), dtype=dtype, chunks=chunk_size, compression="gzip", compression_opts=9)
+                    # Write full ensemble
+                    dset[:, :, 0] = full_ensemble
+
+                    # Create and write ensemble mean
+                    ens_mean = f.create_dataset('ensemble_mean', (nd, model_kwargs.get('nt', params['nt']) + 1), dtype=dtype)
+                    ens_mean[:, 0] = ensemble_mean
+
+                    if model_kwargs.get("DEnKF_flag", False):
+                        ensemble_mean = np.mean(dset[:, :, 0], axis=1)
+                        dset[:, :, 0] += ensemble_mean[:, np.newaxis]
+            else:
+                with h5py.File(output_file, 'a') as f:
+                    dset = f['ensemble']
+                    # Write full ensemble for current timestep
+                    dset[:, :, timestep] = full_ensemble
+
+                    ens_mean = f['ensemble_mean']
+                    ens_mean[:, timestep] = ensemble_mean
+
+                    if model_kwargs.get("DEnKF_flag", False):
+                        ensemble_mean = np.mean(dset[:, :, timestep], axis=1)
+                        dset[:, :, timestep] += ensemble_mean[:, np.newaxis]
+
+        comm.Barrier()
+
 def gather_and_broadcast_data_default_run(updated_state, subcomm, sub_rank, comm_world, rank_world, params):
     """
     Gathers, processes, and broadcasts ensemble data across MPI processes.

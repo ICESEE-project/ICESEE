@@ -124,7 +124,7 @@ class UtilsFunctions:
             print(f"Error occurred in generate_observation_schedule: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
+            # self.mpi_comm.Abort(1)
     
     # --- Create synthetic observations ---
     def _create_synthetic_observations(self,**kwargs):

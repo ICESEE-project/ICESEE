@@ -35,8 +35,8 @@ from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_field
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 from ICESEE.src.parallelization._mpi_forecast_functions import parallel_forecast_step_default_run
 from ICESEE.src.parallelization._mpi_generate_true_wrong_state import generate_true_wrong_state
-from ICESEE.src.parallelization._mpi_ensemble_intialization import ensemble_initialization
-from ICESEE.src.parallelization.EnkF_parallel_io import EnKF_fully_parallel_IO
+from ICESEE.src.parallelization._mpi_ensemble_intialization import ensemble_initialization_full_parallel_run
+from ICESEE.src.parallelization.EnKF_parallel_io import EnKF_fully_parallel_IO
 
 # ======================== Run model with EnKF ========================
 def icesee_model_data_assimilation_full_parallel(**model_kwargs): 
@@ -52,6 +52,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
     Lx, Ly            = model_kwargs.get("Lx",1.0), model_kwargs.get("Ly",1.0)
     nx, ny            = model_kwargs.get("nx",0.2), model_kwargs.get("ny",0.2)
     b_in, b_out       = model_kwargs.get("b_in",0.0), model_kwargs.get("b_out",0.0) 
+    data_path         = model_kwargs.get("data_path","_modelrun_datasets")      # data path
 
 
     # start the timer
@@ -97,11 +98,14 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
     nd = model_kwargs.get("nd",params["nd"])
     nt = model_kwargs.get("nt",params["nt"])
     Nens = model_kwargs.get("Nens",params["Nens"])
+    
     batch_size = model_kwargs.get("batch_size",100)
     serial_file_creation = model_kwargs.get("serial_file_creation",True)
     enkf_parallel_io = EnKF_fully_parallel_IO('icesee_enkf', nd, Nens, nt, subcomm, comm_world, \
                                              params, serial_file_creation, base_path=_modelrun_datasets, \
                                              batch_size=batch_size)
+    # Update model_kwargs with the EnKF I/O handler
+    model_kwargs.update({"enkf_parallel_io": enkf_parallel_io})
 
     # fetch model nprocs
     model_nprocs = params.get("model_nprocs", 1)
@@ -152,38 +156,55 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
 
     comm_world.Barrier()
 
-    # # --- Generate the Synthetic ObservationsObservations ---------------------------------------------------
-    # # --- time generation of synthetic observations ---
-    # time_generation_synthetic_obs = MPI.Wtime()
-    # # call the generate_synthetic_observations function
+    # --- Generate the Synthetic ObservationsObservations ---------------------------------------------------
+    # --- time generation of synthetic observations ---
+    time_generation_synthetic_obs = MPI.Wtime()
+    # call the generate_synthetic_observations function
     # model_kwargs =  generate_synthetic_observations(**model_kwargs)
-    # # --- time generation of synthetic observations ---
-    # time_generation_synthetic_obs = MPI.Wtime() - time_generation_synthetic_obs
-                
-    # # --- Initialize the ensemble ---------------------------------------------------
-    # comm_world.Barrier()
-    # Q_rho     = model_kwargs.get("Q_rho")
-    # len_scale = model_kwargs.get("length_scale")
-    # hdim  = params["nd"] // params["total_state_param_vars"]
-    # model_kwargs.update({"hdim": hdim, "Q_rho": Q_rho, "len_scale": len_scale})
+    synthetic_obs_zarr_path=f"{_modelrun_datasets}/synthetic_observations.zarr"
+    error_R_zarr_path=f"{_modelrun_datasets}/error_R.zarr"
+    model_kwargs.update({'synthetic_obs_zarr_path': synthetic_obs_zarr_path, 'error_R_zarr_path': error_R_zarr_path})
+    tobserve, m_obs = enkf_parallel_io._create_synthetic_observations(**model_kwargs)
+    model_kwargs.update({'tobserve': tobserve, 'm_obs': m_obs})
+    # --- time generation of synthetic observations ---
+    time_generation_synthetic_obs = MPI.Wtime() - time_generation_synthetic_obs
 
-    #     # --- get the process noise --->
-    # if params.get("use_random_fields", False):
-    #     pos, gs_model, L_C = compute_Q_err_random_fields(hdim, params["total_state_param_vars"], params["sig_Q"], Q_rho, len_scale)
-    #     model_kwargs.update({"pos": pos, "gs_model": gs_model, "L_C": L_C})
+    comm_world.Barrier()
+    #  --- generate the H file
+    rank = comm_world.Get_rank()
+    if rank == 0:
+        print("[ICESEE] Generating H matrix and saving to Zarr...")
+        H_matrix_zarr_path = "output/H_matrix.zarr"
+        model_kwargs.update({'H_matrix_zarr_path': H_matrix_zarr_path})
+        enkf_parallel_io.H_matrix(**model_kwargs)
+                
+    # --- Initialize the ensemble ---------------------------------------------------
+    comm_world.Barrier()
+    Q_rho     = model_kwargs.get("Q_rho")
+    len_scale = model_kwargs.get("length_scale")
+    hdim  = params["nd"] // params["total_state_param_vars"]
+    model_kwargs.update({"hdim": hdim, "Q_rho": Q_rho, "len_scale": len_scale})
+
+        # --- get the process noise --->
+    if params.get("use_random_fields", False):
+        pos, gs_model, L_C = compute_Q_err_random_fields(hdim, params["total_state_param_vars"], params["sig_Q"], Q_rho, len_scale)
+        model_kwargs.update({"pos": pos, "gs_model": gs_model, "L_C": L_C})
     
-    # # -- time ensemble initialization ---
-    # time_ensemble_initialization = MPI.Wtime()
-    # # call the ensemble_initialization function
-    # model_kwargs, ensemble_vec, time_init_noise_generation, \
-    # time_init_ensemble_mean_computation, time_init_file_writing, \
-    # shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full = ensemble_initialization(**model_kwargs)
-    # # --- time ensemble initialization ---
-    # time_ensemble_initialization = MPI.Wtime() - time_ensemble_initialization
-    
-    # # --- get the ensemble size
-    # nd, Nens = ensemble_vec.shape
-    # module_nprocs = model_kwargs.get("model_nprocs", 1)
+    # -- time ensemble initialization ---
+    time_ensemble_initialization = MPI.Wtime()
+    # call the ensemble_initialization function
+    model_kwargs, ensemble_vec, time_init_noise_generation, \
+    time_init_ensemble_mean_computation, time_init_file_writing, \
+    shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full = ensemble_initialization_full_parallel_run(**model_kwargs)
+    # --- time ensemble initialization ---
+    time_ensemble_initialization = MPI.Wtime() - time_ensemble_initialization
+
+    # get updated model_nprocs
+    model_nprocs = model_kwargs.get("model_nprocs", 1)
+
+    print(f"[ICESEE] rank: {rank_world}, model_nprocs: {model_nprocs}, total_cores: {total_cores}, base_total_procs: {base_total_procs}, effective_model_nprocs: {effective_model_nprocs}, total_procs: {total_procs}")
+    exit(0)
+
 
     # if params["even_distribution"]:
     #     ensemble_local = copy.deepcopy(ensemble_vec[:,start:stop])
