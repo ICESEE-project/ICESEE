@@ -26,6 +26,8 @@ def generate_true_wrong_state(**model_kwargs):
     color          = model_kwargs.get("color", 0)
     subcomm        = model_kwargs.get("subcomm", None)
     sub_rank       = model_kwargs.get("sub_rank", 0)
+    data_path      = model_kwargs.get("data_path", "output/")
+    chunk_size      = model_kwargs.get("chunk_size", 5000)
 
 
     rank_world = comm_world.Get_rank()
@@ -49,39 +51,47 @@ def generate_true_wrong_state(**model_kwargs):
             model_kwargs.update({'ens_id': rank_world})
             # model_kwargs.update({'model_nprocs': (model_nprocs * size_world) - size_world}) # update the model_nprocs to include all processors for the external model run
 
+            chunk_size = (min(chunk_size, params["nd"]), model_kwargs.get("nt",params["nt"]) + 1)
+
             if model_kwargs.get("generate_true_state", True):
                 print("[ICESEE] Generating true state ...")
                 # dim_list = np.tile(params["nd"],size_world) # all processors have the same dimension
                 model_kwargs.update({"global_shape": params["nd"], "dim_list": dim_list})
-                statevec_true = np.zeros([params["nd"], model_kwargs.get("nt",params["nt"]) + 1])
+                # statevec_true = np.zeros([params["nd"], model_kwargs.get("nt",params["nt"]) + 1])
+                
+                statevec_true = zarr.create_array(store=f"{data_path}/statevec_true.zarr", shape=(params["nd"], model_kwargs.get("nt",params["nt"]) + 1), chunks=chunk_size, dtype='f8', overwrite=True)
                 model_kwargs.update({"statevec_true": statevec_true})
                 updated_true_state = model_module.generate_true_state(**model_kwargs)
 
                 # unpack the dictionaery
-                vecs, indx_map, dim_per_proc = icesee_get_index(statevec_true, **model_kwargs)
-                ensemble_true_state = np.zeros_like(statevec_true)
-                for key, value in updated_true_state.items():
-                    ensemble_true_state[indx_map[key], :] = value
+                # vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                # ensemble_true_state = np.zeros_like(statevec_true)
+                # for key, value in updated_true_state.items():
+                #     ensemble_true_state[indx_map[key], :] = value
 
             if model_kwargs.get("generate_nurged_state",True):
                 print("[ICESEE] Generating nurged state ...")
-                model_kwargs.update({"statevec_nurged": np.zeros([params["nd"], model_kwargs.get("nt",params["nt"]) + 1])})
-                ensemble_nurged_state = model_module.generate_nurged_state(**model_kwargs)
+                statevec_nurged = zarr.create_array(store=f"{data_path}/statevec_nurged.zarr", shape=(params["nd"], model_kwargs.get("nt",params["nt"]) + 1), chunks=chunk_size, dtype='f8', overwrite=True)
+                model_kwargs.update({"statevec_nurged": statevec_nurged})
+                # ensemble_nurged_state = model_module.generate_nurged_state(**model_kwargs)
+                model_module.generate_nurged_state(**model_kwargs)
 
             # Write data to file
             if model_kwargs.get("generate_true_state",True) or model_kwargs.get("generate_nurged_state",True):
                 with h5py.File(_true_nurged, "w") as f:
                     if model_kwargs.get("generate_true_state"):
-                        f.create_dataset("true_state", data=ensemble_true_state)
+                        # f.create_dataset("true_state", data=ensemble_true_state)
+                        f.create_dataset("true_state", data=statevec_true, chunks=chunk_size)
                     if model_kwargs.get("generate_nurged_state"):
-                        f.create_dataset("nurged_state", data=ensemble_nurged_state)
+                        # f.create_dataset("nurged_state", data=ensemble_nurged_state)
+                        f.create_dataset("nurged_state", data=statevec_nurged, chunks=chunk_size)
 
             # clean memory 
-            if model_kwargs.get("generate_true_state",True):
-                del updated_true_state
-            if model_kwargs.get("generate_nurged_state",True):
-                del ensemble_nurged_state
-            gc.collect()
+            # if model_kwargs.get("generate_true_state",True):
+            #     del updated_true_state
+            # if model_kwargs.get("generate_nurged_state",True):
+            #     del ensemble_nurged_state
+            # gc.collect()
 
         else:
             pass

@@ -161,7 +161,7 @@ if not flag_jupyter:
         'execution_mode'   : int(enkf_params.get('execution_mode', 1)),  # 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
         'serial_file_creation': bool(enkf_params.get('serial_file_creation', True)),
         'batch_size': int(enkf_params.get('batch_size', 50)),
-        'chunk_size': int(enkf_params.get('chunk_size', 1000)),
+        'chunk_size': int(enkf_params.get('chunk_size', 5000)),
         'joint_estimated_params': enkf_params.get('joint_estimated_params', []),
         'vec_inputs': enkf_params['vec_inputs'],
     })
