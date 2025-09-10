@@ -30,10 +30,11 @@ jobs:
 
       - name: Update README
         run: |
-          cd config  # Change to script directory if needed
+          echo "Running update_readme.py in config/"
           python update_readme.py
-        shell: bash
-        working-directory: ${{ github.workspace }}
+        working-directory: config
+        env:
+          PYTHONPATH: ${{ github.workspace }}
 
       - name: Commit changes
         run: |
@@ -42,5 +43,6 @@ jobs:
           git add README.md
           git diff --staged --quiet || git commit -m "Auto-update README with latest flags" --allow-empty
           git push
+        working-directory: config
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
