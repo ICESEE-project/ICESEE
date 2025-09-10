@@ -1075,9 +1075,10 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def compute_X5_utils(self, km, **kwargs):
+    def compute_X5_utils(self, **kwargs):
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
+        km = kwargs.get('km')
         try:
             H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
             synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
@@ -1142,14 +1143,15 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Abort(1)
 
 
-    def compute_X5_modified(self, km, **kwargs):
+    def compute_X5_modified(self, **kwargs):
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
+        km = kwargs.get('km')
         try:
             m = kwargs.get('m_obs') * 2 + 1
             Nens = self.nens
 
-            Dprime, Eta, HA = self.compute_X5_utils(km, **kwargs)
+            Dprime, Eta, HA = self.compute_X5_utils(**kwargs)
             # Dprime, Eta, HA = self.compute_X5_utils_batch(km, **kwargs)
 
             # compute the HAbar
@@ -1226,8 +1228,10 @@ class EnKF_fully_parallel_IO:
 
 
     # compute analysis mean
-    def compute_analysis_update(self, km, **kwargs):
+    def compute_analysis_update(self, **kwargs):
         # Compute the analysis update for each rank
+        km = kwargs.get('km')
+        # print(f"[Rank {self.mpi_comm.Get_rank()}] Computing analysis update for time step {km} ...")    
         try:
             self._ensure_batch(km)
             comm = self.mpi_comm
@@ -1240,7 +1244,7 @@ class EnKF_fully_parallel_IO:
 
             # call the compute X5 function
             # X5 = self.compute_X5_(km, **kwargs)
-            X5 = self.compute_X5_modified(km, **kwargs)
+            X5 = self.compute_X5_modified(**kwargs)
             # compute column sums for X5
 
             # ---

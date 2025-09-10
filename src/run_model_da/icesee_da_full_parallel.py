@@ -178,7 +178,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         rank = comm_world.Get_rank()
         if rank == 0:
             print("[ICESEE] Generating H matrix and saving to Zarr...")
-            H_matrix_zarr_path = "output/H_matrix.zarr"
+            H_matrix_zarr_path = f"{_modelrun_datasets}/H_matrix.zarr"
             model_kwargs.update({'H_matrix_zarr_path': H_matrix_zarr_path})
             enkf_parallel_io.H_matrix(**model_kwargs)
                     
@@ -315,237 +315,109 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                     if model_kwargs.get('global_analysis', True) or model_kwargs.get('local_analysis', False):
                         # -- time global analysis step ---
                         _time_analysis_step = MPI.Wtime()
-                        t_observe = model_kwargs.get("tobserve", None)
+                        t_observe = model_kwargs.get("tobserve")
                         m_obs = model_kwargs.get("m_obs", params["number_obs_instants"])
 
-
-        #                 if (km < params["number_obs_instants"]) and (k+1 == obs_index[km]):
-        #                     #
-
-        #                     # comm_world.Barrier()
-        #                     if rank_world == 0:
-
-        #                         ndim = ensemble_vec.shape[0]//params["total_state_param_vars"]  
-        #                         state_block_size = ndim*params["num_state_vars"]
-                            
-        #                         # -------------
-        #                         # H = UtilsFunctions(params, ensemble_vec).JObs_fun(ensemble_vec.shape[0]) 
-        #                         # h = UtilsFunctions(params, ensemble_vec).Obs_fun # observation operator
-
-        #                         # compute the observation covariance matrix
-        #                         # Cov_obs = params["sig_obs"][k+1]**2 * np.eye(2*params["number_obs_instants"]+1)
-        #                         # Cov_obs = error_R[:,k+1]**2 * np.eye(2*params["number_obs_instants"]+1)
-
-        #                         # --- vector of measurements
-        #                         with h5py.File(_synthetic_obs, 'r') as f:
-        #                             hu_obs  = f['hu_obs'][:]
-        #                             error_R = f['R'][:]
-        #                             # Cov_obs = np.cov(error_R)
-        #                             Cov_obs = np.zeros(error_R.shape)
-
-        #                         d = UtilsFunctions(params, ensemble_vec).Obs_fun(hu_obs[:,km])
-        #                         model_kwargs.update({"error_R": error_R}) # store the error covariance matrix
-        #                         #  -------------
-
-        #                         # get parameter
-        #                         # parameter_estimated = ensemble_vec[state_block_size:,:]
-        #                         eta = 0.0 # trend term
-        #                         beta = np.ones(nd)
-        #                         # ensemble_vec[state_block_size:,:] = ensemble_vec[state_block_size:,:] + (eta + beta)*model_kwargs.get("dt",params["dt"]) + np.sqrt(model_kwargs.get("dt",params["dt"])) * alpha*rho*q0[state_block_size:]
-
-        #                         if EnKF_flag:
-        #                             # compute the X5 matrix
-        #                             X5,analysis_vec_ij = EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions)
-        #                             # X5 = EnKF_X5(Cov_obs, Nens, D, HA, Eta, d)
-        #                             y_i = np.sum(X5, axis=1)
-        #                             # ensemble_vec_mean[:,k+1] = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
-        #                             time_analysis_mean_generation = MPI.Wtime()
-        #                             ens_mean = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
-        #                             time_analysis_mean_generation = MPI.Wtime() - time_analysis_mean_generation
-
-        #                         elif DEnKF_flag:
-        #                             # compute the X5 matrix
-        #                             X5,X5prime = DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions)
-        #                             # y_i = np.sum(X5, axis=1)
-        #                             # ens_mean = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
-        #                             # H = UtilsFunctions(params, ensemble_vec).JObs_fun(ensemble_vec.shape[0])
-        #                             # Cov_model = np.cov(ensemble_vec)
-        #                             # ens_mean = np.mean(ensemble_vec, axis=1)
-        #                             # diff = (ensemble_vec -np.tile(ens_mean.reshape(-1,1),Nens) )
-        #                             # Cov_model = 1/(Nens-1) * (diff @ diff.T)
-        #                             # epsilon = 1e-6
-        #                             # inv_matrix = np.linalg.pinv(H @ Cov_model @ H.T + Cov_obs + epsilon * np.eye(Cov_obs.shape[0]))
-        #                             # KalGain = Cov_model @ H.T @ inv_matrix
-        #                             # X5prime = KalGain@(d - np.dot(H, ens_mean))
-        #                             # ens_mean = ens_mean + X5prime
-        #                             # print(f"[ICESEE] X5prime shape: {X5prime.shape}")
-        #                             analysis_vec_ij = None
-        #                     else:
-        #                         X5 = np.empty((Nens, Nens))
-        #                         time_analysis_mean_generation = 0.0
-        #                         analysis_vec_ij = None
-        #                         smb_scale = 0.0
-        #                         if DEnKF_flag:
-        #                             ens_mean = np.empty((nd, 1))
-
-        #                     if model_kwargs.get('local_analysis', False):
-        #                         shape_ens = ensemble_vec.shape
-        #                         ens_mean = ParallelManager().compute_mean_matrix_from_root(analysis_vec_ij, shape_ens[0], params['Nens'], comm_world, root=0)
-        #                         parallel_write_full_ensemble_from_root(k+1,ens_mean, model_kwargs,analysis_vec_ij,comm_world)
-                            
-        #                     # smb_scale = comm_world.bcast(smb_scale, root=0)
-        #                     smb_scale = 1.0
-
-        #                     with h5py.File(_synthetic_obs, 'r', driver='mpio', comm=comm_world) as f:
-        #                         hu_obs  = f['hu_obs'][:]
-
-        #                     # fetch the upper and lower bounds for every paramerter from observed data
-        #                     ndim = hu_obs.shape[0]//params["total_state_param_vars"]
-        #                     state_block_size = ndim*params["num_state_vars"]
-        #                     bounds = []
-        #                     for i, var in enumerate(model_kwargs["params_vec"]):
-        #                         bound_idx = (params["num_state_vars"] + i) * ndim
-        #                         bound_idx_end = bound_idx + ndim
-
-        #                         param_slice = hu_obs[bound_idx:bound_idx_end, km]
-        #                         param_min = np.min(param_slice)
-        #                         param_max = np.max(param_slice)
-
-        #                         bounds.append(np.array([param_min, param_max]))
-
-        #                     # pack the bunds into model_kwargs
-        #                     model_kwargs.update({"bounds": bounds})
-                                
-
-        #                     # call the analysis update function
-        #                     if EnKF_flag:
-        #                         time_analysis_mean_generation, time_analysis_file_writing = analysis_enkf_update(k,ens_mean,ensemble_vec, \
-        #                                                                                                          shape_ens, X5, time_analysis_mean_generation, \
-        #                                                                                                             time_analysis_file_writing, analysis_vec_ij,\
-        #                                                                                                         UtilsFunctions,model_kwargs,smb_scale)
-        #                     elif DEnKF_flag:
-        #                         model_kwargs.update({"DEnKF_flag": True})
-        #                         analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,UtilsFunctions,model_kwargs,smb_scale)
-        #                         # analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, analysis_vec_ij,UtilsFunctions,model_kwargs,smb_scale)
+                        if (km < m_obs) and (k+1 == t_observe[km]):
+                            model_kwargs.update({'km': km})
+        
+                            # call the analysis update function
+                            if EnKF_flag:
+                                enkf_parallel_io.compute_analysis_update(**model_kwargs)
                         
-        #                     # update the observation index
-        #                     km += 1
-        #                     # hu_obs[state_block_size:,:] *= smb_scale
-        #                     del hu_obs
-        #                     gc.collect()
-                            
-        #                     # --- end time analysis step ---
-        #                     time_analysis_step += MPI.Wtime() - _time_analysis_step
+                            # update the observation index
+                            km += 1
+        #                    
+                            # --- end time analysis step ---
+                            time_analysis_step += MPI.Wtime() - _time_analysis_step
 
-        #                 else: 
-        #                     # if Nens < size_world:
-                            
-        #                     _time_forecast_file_writing = MPI.Wtime()
+            # update the progress bar
+            if rank_world == 0:
+                pbar.update(1)
 
-        #                     parallel_write_full_ensemble_from_root(k+1,ens_mean, model_kwargs,ensemble_vec,comm_world)
-
-        #                     # --time forecast file writing ---
-        #                     _time_forecast_file_writing = MPI.Wtime() - _time_forecast_file_writing
-        #                     time_forecast_file_writing += _time_forecast_file_writing
-        #                     time_forecast_step = time_forecast_step + _time_forecast_file_writing
-        #                     del ensemble_vec; gc.collect()
-        #                         # parallel_write_full_ensemble_from_root(ensemble_vec,ensemble_vec_full,comm_world,k)
-                        
-
-        #             # ======= Local analyais step =======
-        #             if model_kwargs.get('local_analysis', False):
-        #                 # --- compute the local X5 for each horizontal grid point ---
-        #                 pass
-
-        #         # -------------------------------------------------- end of cases 2 & 3 --------------------------------------------
-
-        #     # update the progress bar
-        #     if rank_world == 0:
-        #         pbar.update(1)
-
-        # # close the progress bar
-        # if rank_world == 0:
-        #     pbar.close()
-        # # comm_world.Barrier()
-
-        # # ====== load data to be written to file ======
-        # # print("[ICESEE] Saving data ...")
-        # save_all_data(
-        #     enkf_params=model_kwargs['enkf_params'],
-        #     nofilter=True,
-        #     t=model_kwargs["t"], b_io=np.array([b_in,b_out]),
-        #     Lxy=np.array([Lx,Ly]),nxy=np.array([nx,ny]),
-        #     # ensemble_true_state=ensemble_true_state,
-        #     # ensemble_nurged_state=ensemble_nurged_state, 
-        #     obs_max_time=np.array([params["obs_max_time"]]),
-        #     obs_index=model_kwargs["obs_index"],
-        #     # w=hu_obs,
-        #     run_mode= np.array([params["execution_flag"]])
-        # )
+        # close the progress bar
+        if rank_world == 0:
+            pbar.close()
+        # comm_world.Barrier()
         enkf_parallel_io.close()
 
-        # # ─────────────────────────────────────────────────────────────
-        # #  End Timer and Aggregate Elapsed Time Across Processors
-        # # ─────────────────────────────────────────────────────────────
-        # # --total elapsed time
-        # global_end_time = MPI.Wtime()
-        # global_elapsed_time = global_end_time - global_start_time
-        # # Reduce elapsed time across all processors (sum across ranks)
-        # total_elapsed_time = comm_world.allreduce(global_elapsed_time, op=MPI.SUM)
-        # total_wall_time = comm_world.allreduce(global_elapsed_time, op=MPI.MAX)
+        # ====== load data to be written to file ======
+        # print("[ICESEE] Saving data ...")
+        save_all_data(
+            enkf_params=model_kwargs['enkf_params'],
+            nofilter=True,
+            t=model_kwargs["t"], b_io=np.array([b_in,b_out]),
+            Lxy=np.array([Lx,Ly]),nxy=np.array([nx,ny]),
+            # ensemble_true_state=ensemble_true_state,
+            # ensemble_nurged_state=ensemble_nurged_state, 
+            obs_max_time=np.array([params["obs_max_time"]]),
+            obs_index=model_kwargs["obs_index"],
+            # w=hu_obs,
+            run_mode= np.array([params["execution_flag"]])
+        )
 
-        # # -- timing true and wrong state generation
-        # true_wrong_time = comm_world.allreduce(time_generation_true_and_wrong_state, op=MPI.MAX)
+        # ─────────────────────────────────────────────────────────────
+        #  End Timer and Aggregate Elapsed Time Across Processors
+        # ─────────────────────────────────────────────────────────────
+        # --total elapsed time
+        global_end_time = MPI.Wtime()
+        global_elapsed_time = global_end_time - global_start_time
+        # Reduce elapsed time across all processors (sum across ranks)
+        total_elapsed_time = comm_world.allreduce(global_elapsed_time, op=MPI.SUM)
+        total_wall_time = comm_world.allreduce(global_elapsed_time, op=MPI.MAX)
 
-        # # -- timing ensemble initialization
-        # ensemble_init_time = comm_world.allreduce(time_ensemble_initialization, op=MPI.MAX)
+        # -- timing true and wrong state generation
+        true_wrong_time = comm_world.allreduce(time_generation_true_and_wrong_state, op=MPI.MAX)
 
-        # # -- timing forecast step
-        # forecast_step_time = comm_world.allreduce(time_forecast_step, op=MPI.MAX)
+        # -- timing ensemble initialization
+        ensemble_init_time = comm_world.allreduce(time_ensemble_initialization, op=MPI.MAX)
 
-        # # -- timing forecast noise generation
-        # forecast_noise_time = comm_world.allreduce(time_forecast_noise_generation, op=MPI.MAX)
+        # -- timing forecast step
+        forecast_step_time = comm_world.allreduce(time_forecast_step, op=MPI.MAX)
 
-        # # -- timing analysis step
-        # analysis_step_time = comm_world.allreduce(time_analysis_step, op=MPI.MAX)
+        # -- timing forecast noise generation
+        forecast_noise_time = comm_world.allreduce(time_forecast_noise_generation, op=MPI.MAX)
 
-        # # -- total assimilation time = ensemble init + forecast step + analysis step
-        # assimilation_time = ensemble_init_time + forecast_step_time + analysis_step_time
+        # -- timing analysis step
+        analysis_step_time = comm_world.allreduce(time_analysis_step, op=MPI.MAX)
 
-        # # --- time forecast file writing ---
-        # forecast_file_time = comm_world.allreduce(time_forecast_file_writing, op=MPI.MAX)
+        # -- total assimilation time = ensemble init + forecast step + analysis step
+        assimilation_time = ensemble_init_time + forecast_step_time + analysis_step_time
 
-        # # --- time analysis file writing ---
-        # analysis_file_time = comm_world.allreduce(time_analysis_file_writing, op=MPI.MAX)
+        # --- time forecast file writing ---
+        forecast_file_time = comm_world.allreduce(time_forecast_file_writing, op=MPI.MAX)
 
-        # # total file writing time initialization file writing + forecast file writing + analysis file writing
-        # init_file_time = comm_world.allreduce(time_init_file_writing, op=MPI.MAX)
-        # total_file_time = init_file_time + forecast_file_time + analysis_file_time
+        # --- time analysis file writing ---
+        analysis_file_time = comm_world.allreduce(time_analysis_file_writing, op=MPI.MAX)
 
-        # # Display elapsed time on rank 0
-        # comm_world.Barrier()
-        # if rank_world == 0:
-        #     verbose = model_kwargs.get("verbose", False)
-        #     # if verbose:
-        #     if True:
-        #          display_timing_verbose(
-        #         computational_time=total_elapsed_time,
-        #         wallclock_time=total_wall_time,
-        #         true_wrong_time=true_wrong_time,
-        #         assimilation_time=assimilation_time,
-        #         forecast_step_time=forecast_step_time,
-        #         analysis_step_time=analysis_step_time,
-        #         ensemble_init_time=ensemble_init_time,
-        #         init_file_time=init_file_time,
-        #         forecast_file_time=forecast_file_time,
-        #         analysis_file_time=analysis_file_time,
-        #         total_file_time=total_file_time,
-        #         forecast_noise_time=forecast_noise_time, comm=comm_world
-        #     )
-        #     else:
-        #         display_timing_default(total_elapsed_time, total_wall_time)
-        # else:
-        #     None
+        # total file writing time initialization file writing + forecast file writing + analysis file writing
+        init_file_time = comm_world.allreduce(time_init_file_writing, op=MPI.MAX)
+        total_file_time = init_file_time + forecast_file_time + analysis_file_time
+
+        # Display elapsed time on rank 0
+        comm_world.Barrier()
+        if rank_world == 0:
+            verbose = model_kwargs.get("verbose", False)
+            # if verbose:
+            if True:
+                 display_timing_verbose(
+                computational_time=total_elapsed_time,
+                wallclock_time=total_wall_time,
+                true_wrong_time=true_wrong_time,
+                assimilation_time=assimilation_time,
+                forecast_step_time=forecast_step_time,
+                analysis_step_time=analysis_step_time,
+                ensemble_init_time=ensemble_init_time,
+                init_file_time=init_file_time,
+                forecast_file_time=forecast_file_time,
+                analysis_file_time=analysis_file_time,
+                total_file_time=total_file_time,
+                forecast_noise_time=forecast_noise_time, comm=comm_world
+            )
+            else:
+                display_timing_default(total_elapsed_time, total_wall_time)
+        else:
+            None
     except Exception as e:
         # Handle exceptions and print error messages
         comm_world.Barrier()
