@@ -43,13 +43,12 @@ def ensemble_initialization(**model_kwargs):
     total_cores    = model_kwargs.get("total_cores", 1)
     base_total_procs = model_kwargs.get("base_total_procs", 1)
     rounds         = model_kwargs.get("rounds", 1)
-    subcomm_size   = model_kwargs.get("subcomm_size", 1)
+    subcomm_size_min   = model_kwargs.get("subcomm_size_min", 1)
     rng           = model_kwargs.get("rng", np.random.default_rng())
     rank_seed = model_kwargs.get("rank_seed", 0)
 
 
     sub_rank  = subcomm.Get_rank()
-    subcomm_size = subcomm.Get_size()
     rank_world = comm_world.Get_rank()
     size_world = comm_world.Get_size()
 
@@ -83,7 +82,7 @@ def ensemble_initialization(**model_kwargs):
                 ens_list_init = []
 
             for round_id in range(rounds):
-                ensemble_id = color + (round_id * subcomm_size)
+                ensemble_id = color + (round_id * subcomm_size_min)
                 model_kwargs.update({'ens_id': ensemble_id})
 
                 if ensemble_id < Nens:
@@ -416,14 +415,13 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
     total_cores    = model_kwargs.get("total_cores", 1)
     base_total_procs = model_kwargs.get("base_total_procs", 1)
     rounds         = model_kwargs.get("rounds", 1)
-    subcomm_size   = model_kwargs.get("subcomm_size", 1)
+    subcomm_size_min   = model_kwargs.get("subcomm_size_min", 1)
     rng           = model_kwargs.get("rng", np.random.default_rng())
     rank_seed = model_kwargs.get("rank_seed", 0)
     data_path = model_kwargs.get("data_path", "_modeldatasets")
     enkf_parallel_io = model_kwargs.get("enkf_parallel_io", None)
 
     sub_rank     = subcomm.Get_rank()
-    subcomm_size = subcomm.Get_size()
     rank_world   = comm_world.Get_rank()
     size_world   = comm_world.Get_size()
 
@@ -437,6 +435,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
 
             # model_kwargs.update({'ens_id': rank_world})
             Nens = params["Nens"]
+            nd = model_kwargs.get("nd", params["nd"])
             model_kwargs.update({'rank': sub_rank, 'color': color, 'comm': subcomm})
 
             model_kwargs.update({"statevec_ens":np.zeros([params["nd"], params["Nens"]])})
@@ -444,35 +443,32 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
             # get the ensemble matrix   
             vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
             # ensemble_vec = np.zeros_like(model_kwargs["statevec_ens"])
-            # store=f"{data_path}/ensemble_initialization.zarr"
-            # chunk_size = (min(ensemble_vec.shape[0], 1000), 1)
+            # store=f"{data_path}/ensemble_initialization_{color}.zarr"
+            # chunk_size = (min(nd, 1000), 1)
             # ensemble_vec = zarr.create_array(store=store, shape=(params["nd"], params["Nens"]), chunks=chunk_size, dtype=np.float64, overwrite=True)
-            nd = model_kwargs.get("nd", params["nd"])
+            ensemble_vec = np.zeros(nd, dtype=np.float64)
 
             if model_kwargs["joint_estimation"] or params["localization_flag"]:
                     hdim = nd // params["total_state_param_vars"]
             else:
                 hdim = nd // params["num_state_vars"]
             state_block_size = hdim * params["num_state_vars"]
-            
-            if sub_rank == 0:
-                ens_list_init = []
-            else:
-                ens_list_init = []
 
             for round_id in range(rounds):
-                ensemble_id = color + (round_id * subcomm_size)
+                ensemble_id = color + (round_id * subcomm_size_min)
                 model_kwargs.update({'ens_id': ensemble_id})
 
                 if ensemble_id < Nens:
                     # Synchronize the ensemble initialization
-                    subcomm.Barrier()
+                    # subcomm.Barrier()
+                    # comm_world.Barrier()
                     ens = ensemble_id
 
                     # Call the model to initialize the ensemble
                     data = model_module.initialize_ensemble(ens, **model_kwargs)
                     for key, value in data.items():
-                        ensemble_vec[indx_map[key], ens] = value
+                        # ensemble_vec[indx_map[key], ens] = value
+                        ensemble_vec[indx_map[key]] = value
 
                     # Add process noise in-place to avoid temporary array
                     _time_init_noise_generation = MPI.Wtime()
@@ -480,16 +476,12 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
                     # noise = generate_enkf_field(**model_kwargs)
                     noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
-                    state += noise
+                    # ensemble_vec[:,ens] += noise
+                    ensemble_vec += noise
 
-                    enkf_parallel_io.write_forecast(0, state, ensemble_id)
-            
-            # compute the ensemble mean
-            comm_world.Barrier()
-            time_init_ensemble_mean_computation = MPI.Wtime()
-            enkf_parallel_io.compute_forecast_mean_chunked(0)
-            time_init_ensemble_mean_computation = MPI.Wtime() - time_init_ensemble_mean_computation
-
+                    enkf_parallel_io.write_forecast(0, ensemble_vec, ensemble_id)
+                    # enkf_parallel_io.datasets[0][:, ens] = ensemble_vec
+         
         else:
             if rank_world == 0:
                 print("[ICESEE] Initializing the ensemble ...")
@@ -545,7 +537,8 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
                     #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
 
                     enkf_parallel_io.write_forecast(0, ensemble_vec[:,ens], ens)
-                    
+                    # enkf_parallel_io._flush_and_world_barrier(t=0)
+
                 shape_ens = np.array(ensemble_vec.shape,dtype=np.int32)
                 
     
@@ -707,7 +700,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
     if params.get("default_run", False):
         return model_kwargs, None, time_init_noise_generation, \
                time_init_ensemble_mean_computation, None, \
-                shape_ens, None, None, None
+                None, None, None, None
     else:
         return model_kwargs, ensemble_vec, time_init_noise_generation, \
                time_init_ensemble_mean_computation, time_init_file_writing, \

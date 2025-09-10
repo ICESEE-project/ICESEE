@@ -71,7 +71,7 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
 
         # --- icesee mpi parallel manager ---------------------------------------------------
         # --- ensemble load distribution --
-        rounds, color, sub_rank, sub_size, subcomm, subcomm_size, rank_world, size_world, comm_world, start, stop = ParallelManager().icesee_mpi_ens_distribution(params)
+        rounds, color, sub_rank, sub_size, subcomm, subcomm_size_min, rank_world, size_world, comm_world, start, stop = ParallelManager().icesee_mpi_ens_distribution(params)
         model_kwargs.update({'size_world': size_world, 'comm_world': comm_world})
 
         # --- call curently supported model Class
@@ -82,7 +82,7 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
                              "size_world": size_world, "sub_size": sub_size,
                              "rounds": rounds, "color": color,
                              "start": start, "stop": stop,
-                             "subcomm_size": subcomm_size,
+                             "subcomm_size_min": subcomm_size_min,
                              "model_module": model_module})
 
         # pack the global communicator and the subcommunicator

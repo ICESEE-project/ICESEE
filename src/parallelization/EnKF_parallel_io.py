@@ -73,7 +73,7 @@ def retry_on_failure(
     return decorator
 
 class EnKF_fully_parallel_IO:
-    def __init__(self, file_prefix, nd, nens, nt, subcomm, mpi_comm, params, serial_file_creation=True, base_path="enkf_data", batch_size=50):
+    def __init__(self, file_prefix, nd, nens, nt, subcomm, mpi_comm, params, serial_file_creation=False, base_path="enkf_data", batch_size=50):
         try:
             self.nd = nd
             self.nens = nens
@@ -135,7 +135,7 @@ class EnKF_fully_parallel_IO:
                             os.remove(file_path)
                         except OSError as e:
                             print(f"Error deleting {file_path}: {e}")
-            self.comm.Barrier()
+            self.mpi_comm.Barrier()
 
             # Initialize file and dataset lists
             self.files = []
@@ -143,6 +143,7 @@ class EnKF_fully_parallel_IO:
             self.current_batch_start = -1
 
             # Create initial batch
+            # self._create_batch(0)
             if self.serial_file_creation:
                 self._create_batch_serial(0)
             else:
@@ -208,12 +209,15 @@ class EnKF_fully_parallel_IO:
             for t in range(t_start, t_start + nfiles):
                 fname = f"{self.base_path}/{self.file_prefix}_{t:04d}.h5"
                 f = h5py.File(fname, 'w', driver='mpio', comm=self.comm)
+                # f = h5py.File(fname, 'w', driver='mpio', comm=self.mpi_comm)
+                f.atomic = False
                 row_chunk = min(1024, self.nd)
                 col_chunk = 1
                 dset = f.create_dataset(
                     'states', (self.nd, self.nens),
                     chunks=(row_chunk, col_chunk),
-                    compression="gzip", compression_opts=4,
+                    # compression="gzip", compression_opts=4,
+                    compression="lzf",
                     dtype='f8'
                 )
                 self.files.append(f)
@@ -224,9 +228,38 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
+    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD)  # Reduce retries/delays for efficiency
+    def _create_batch(self, t_start):
+        self._close_batch()
+        self.files = []
+        self.datasets = []
+        self.current_batch_start = t_start
+        nfiles = min(self.batch_size, self.nt - t_start)
+
+        # All ranks collectively create files and datasets
+        for t in range(t_start, t_start + nfiles):
+            fname = f"{self.base_path}/{self.file_prefix}_{t:04d}.h5"
+            f = h5py.File(fname, 'w', driver='mpio', comm=self.mpi_comm)
+            f.atomic = True  # Enable atomic writes for consistency
+            row_chunk = min(1024, self.nd_local)  # Align with local partition
+            col_chunk = min(32, self.nens)  # Chunk ensembles for better access
+            dset = f.create_dataset(
+                'states', (self.nd, self.nens),
+                chunks=(row_chunk, col_chunk),
+                compression=None,  # Disable for now; test blosc if space is needed
+                dtype='f8'
+            )
+            self.files.append(f)
+            self.datasets.append(dset)
+        self.mpi_comm.Barrier()  # Single barrier after all creations
+
     def _close_batch(self):
         try:
             for f in self.files:
+                try:
+                    f.flush()
+                except Exception:
+                    pass
                 f.close()
             self.files = []
             self.datasets = []
@@ -240,6 +273,7 @@ class EnKF_fully_parallel_IO:
         try:
             batch_start = (t // self.batch_size) * self.batch_size
             if batch_start != self.current_batch_start:
+                # self._create_batch(batch_start)
                 if self.serial_file_creation:
                     self._create_batch_serial(batch_start)
                 else:
@@ -250,12 +284,50 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
+    def write_IC(self, t, ens_idx):
+        try:
+            self._ensure_batch(t)
+            batch_idx = 0 # t = 0 first_batch
+            start = MPI.Wtime()
+            data = self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx]
+            read_time = MPI.Wtime() - start
+            return data
+        except Exception as e:
+            print(f"Error occurred in read_forecast: {e}")
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
+            self.mpi_comm.Abort(1)
+
+    def _flush_and_world_barrier(self, t):
+        """
+        Flush the file containing time index t and then synchronize all ranks
+        in the WORLD communicator so that subsequent readers see all writes.
+        """
+        try:
+            self._ensure_batch(t)
+            batch_idx = t - self.current_batch_start
+
+            # Flush file metadata & data to storage.
+            # (h5py flushes the file; dataset-level flush is not exposed.)
+            if 0 <= batch_idx < len(self.files):
+                self.files[batch_idx].flush()
+
+            # IMPORTANT: use the WORLD / parent communicator so disjoint
+            # subcomms also synchronize before any reader proceeds.
+            self.mpi_comm.Barrier()
+        except Exception as e:
+            print(f"Error in _flush_and_world_barrier: {e}")
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
+            self.mpi_comm.Abort(1)
+
     def read_forecast(self, t, ens_idx):
         try:
             self._ensure_batch(t)
             batch_idx = t - self.current_batch_start
             start = MPI.Wtime()
             data = self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx]
+            # print(f"[ICESEE] Finished reading ensemble {ens_idx} ensemble shape: {data.shape} norm {np.linalg.norm(data)}")
             read_time = MPI.Wtime() - start
             return data
         except Exception as e:
@@ -270,6 +342,7 @@ class EnKF_fully_parallel_IO:
             batch_idx = t - self.current_batch_start
             start = MPI.Wtime()
             self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx] = data
+            self.files[batch_idx].flush()  # Ensure data is written to disk
             write_time = MPI.Wtime() - start
         except Exception as e:
             print(f"Error occurred in write_forecast: {e}")
@@ -298,6 +371,7 @@ class EnKF_fully_parallel_IO:
             start = MPI.Wtime()
             # self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx] = data
             self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx] = data
+            self.files[batch_idx].flush()  # Ensure data is written to disk
             write_time = MPI.Wtime() - start
         except Exception as e:
             print(f"Error occurred in write_analysis: {e}")

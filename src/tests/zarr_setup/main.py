@@ -10,7 +10,7 @@ import gc
 from forecast_analysis_i_o_class import EnKFIO
 # from EnKF_analysis_io import EnKFIO
 # from forecast_analysis_i_o_class_v0 import EnKFIO
-from assimilation_io_zarr import EnKFIO_zarr
+# from assimilation_io_zarr import EnKFIO_zarr
 
 def forecast(state):
     # create random values between 4 to 10
@@ -24,10 +24,10 @@ def analyze(state, H, d, ens_idx, enkf_io, params=None):
     return None
 
 # Example parameters
-nd = 36024
-nens = 24
-nt = 10
-dt = 2.0
+nd = 1700
+nens = 40
+nt = 200
+dt = 1.0
 comm = MPI.COMM_WORLD
 serial_file_creation = True
 

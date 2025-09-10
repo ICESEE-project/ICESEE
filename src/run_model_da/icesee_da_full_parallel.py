@@ -33,7 +33,7 @@ from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_field
 
 # --- call the ICESEE mpi parallel manager ---
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
-from ICESEE.src.parallelization._mpi_forecast_functions import parallel_forecast_step_default_run
+from ICESEE.src.parallelization._mpi_forecast_functions import parallel_forecast_step_default_full_parallel_run
 from ICESEE.src.parallelization._mpi_generate_true_wrong_state import generate_true_wrong_state
 from ICESEE.src.parallelization._mpi_ensemble_intialization import ensemble_initialization_full_parallel_run
 from ICESEE.src.parallelization.EnKF_parallel_io import EnKF_fully_parallel_IO
@@ -60,7 +60,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
 
     # --- icesee mpi parallel manager ---------------------------------------------------
     # --- ensemble load distribution --
-    rounds, color, sub_rank, sub_size, subcomm, subcomm_size, rank_world, size_world, comm_world, start, stop = ParallelManager().icesee_mpi_ens_distribution(params)
+    rounds, color, sub_rank, sub_size, subcomm, subcomm_size_min, rank_world, size_world, comm_world, start, stop = ParallelManager().icesee_mpi_ens_distribution(params)
     model_kwargs.update({'size_world': size_world, 'comm_world': comm_world})
 
     # --- call curently supported model Class
@@ -71,7 +71,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                             "size_world": size_world, "sub_size": sub_size,
                             "rounds": rounds, "color": color,
                             "start": start, "stop": stop,
-                            "subcomm_size": subcomm_size,
+                            "subcomm_size_min": subcomm_size_min,
                             "model_module": model_module})
 
     # pack the global communicator and the subcommunicator
@@ -100,7 +100,8 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
     Nens = model_kwargs.get("Nens",params["Nens"])
     
     batch_size = model_kwargs.get("batch_size",100)
-    serial_file_creation = model_kwargs.get("serial_file_creation",True)
+    # serial_file_creation = model_kwargs.get("serial_file_creation",True)
+    serial_file_creation = True
     enkf_parallel_io = EnKF_fully_parallel_IO('icesee_enkf', nd, Nens, nt, subcomm, comm_world, \
                                              params, serial_file_creation, base_path=_modelrun_datasets, \
                                              batch_size=batch_size)
@@ -202,175 +203,115 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
     # get updated model_nprocs
     model_nprocs = model_kwargs.get("model_nprocs", 1)
 
-    print(f"[ICESEE] rank: {rank_world}, model_nprocs: {model_nprocs}, total_cores: {total_cores}, base_total_procs: {base_total_procs}, effective_model_nprocs: {effective_model_nprocs}, total_procs: {total_procs}")
-    exit(0)
+    # --- Define filter flags
+    EnKF_flag   = re.match(r"\AEnKF\Z", filter_type, re.IGNORECASE)
+    DEnKF_flag  = re.match(r"\ADEnKF\Z", filter_type, re.IGNORECASE)
+    EnRSKF_flag = re.match(r"\AEnRSKF\Z", filter_type, re.IGNORECASE)
+    EnTKF_flag  = re.match(r"\AEnTKF\Z", filter_type, re.IGNORECASE)
 
+    # tqdm progress bar
+    # Initialize progress bar on the root process
+    if rank_world == 0:
+        nt = model_kwargs.get("nt", params["nt"])
+        print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {size_world} MPI ranks.")
+        pbar = tqdm(
+            total=nt,
+            desc=f"[ICESEE] Assimilation progress ({size_world} ranks)",
+            position=0,
+            leave=True,
+            dynamic_ncols=True
+        )
 
-    # if params["even_distribution"]:
-    #     ensemble_local = copy.deepcopy(ensemble_vec[:,start:stop])
-            
-    # # --- row vector load distribution ---   
-    # # local_rows, start_row, end_row = ParallelManager().icesee_mpi_row_distribution(ensemble_vec, params)
-    # comm_world.Barrier()
-    # parallel_manager = None # debugging flag for now
-        
+    # ==== Time loop =======================================================================================
+    # --- timing intializations
+    time_forecast_step = 0.0
+    time_analysis_step = 0.0
+    time_forecast_noise_generation = 0.0
+    time_forecast_file_writing = 0.0
+    time_analysis_file_writing = 0.0
+    time_forecast_ensemble_mean_generation = 0.0
+
+    # specified decorrelation length scale, tau,
+    min_tau = 200
+    max_tau = 500
+    dt  = model_kwargs.get("dt",params["dt"])
+    tau = max(max_tau,max(min_tau, dt))
+
+    # tau = max(model_kwargs.get("dt",params["dt"]),10)
+    alpha = 1 - dt/tau
+    # make sure  0=<alpha<1
+    if alpha <= 0 or alpha > 1:
+        alpha = 0.5
+
+    n = model_kwargs.get("nt",params["nt"])
+    # rho = np.sqrt((1-alpha**2)/(dt*(n - 2*alpha - n*alpha**2 + 2*alpha**(n+1))))
+    rho = np.sqrt((1/dt)*((1-alpha)**2)*(1/(n - (2*alpha) - (n*alpha**2) + (2*alpha**(n+1)))))
+    params_analysis_0 = np.zeros((2, Nens))
+    km = 0
+
+    #--- generate inital noise
+    if params.get("use_random_fields", False):
+        # with h5py.File(_synthetic_obs, 'r') as f:
+        #     error_R = f['error_R'][:]
+        #     Cov_obs = np.cov(error_R)
+        #  --- get the observation noise ---
+        pos_obs, gs_model_obs, L_C_obs = compute_Q_err_random_fields(hdim, params["total_state_param_vars"], params["sig_obs"], Q_rho, len_scale)
+    else:
+        N_size = params["total_state_param_vars"] * hdim
+        # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=0)
+        model_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
+        # noise = generate_enkf_field(**model_kwargs)
+        noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
     
-    # # --- hdim based on nd or global_shape ---
-    # if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
-    #     if model_kwargs["joint_estimation"] or params["localization_flag"]:
-    #         hdim = nd // params["total_state_param_vars"]
-    #     else:
-    #         hdim = nd // params["num_state_vars"]
-    # else:   
-    #     if model_kwargs["joint_estimation"] or params["localization_flag"]:
-    #         hdim = model_kwargs["global_shape"] // params["total_state_param_vars"]
-    #     else:
-    #         hdim = model_kwargs["global_shape"] // params["num_state_vars"]
-        
-    # state_block_size = hdim * params["num_state_vars"]
+    # synchronize all processes before starting the time loop
+    comm_world.Barrier()
 
-    # # --- compute the process noise covariance matrix ---
-    # # check if scalar or matrix
-    # if isinstance(params["sig_Q"], float):
-    #     nd = hdim*params["total_state_param_vars"]
-    #     # params["nd"] = nd
-    #     Q_err = np.eye(nd) * params["sig_Q"] ** 2
-    # else:
-    #     nd = hdim*params["total_state_param_vars"]
-    #     # params["nd"] = nd
-    #     # Q_err = np.diag(params["sig_Q"] ** 2)
-    #     Q_err = np.zeros((nd,nd))
-    #     # for i, sig in enumerate(params["sig_Q"]):
-    #     #     start_idx = i *hdim
-    #     #     end_idx = start_idx + hdim
-    #         # Q_err[start_idx:end_idx,start_idx:end_idx] = np.eye(hdim) * sig ** 2
+    for k in range(model_kwargs.get("nt",params["nt"])):
 
-    #     # with h5py.File(_synthetic_obs, 'r') as f:
-    #     #     error_R = f['error_R'][:]
-    #     #     Cov_obs = np.cov(error_R)
-    #     #  --- get the observation noise ---
-    #     # pos_obs, gs_model_obs, L_C_obs = compute_Q_err_random_fields(hdim, params["total_state_param_vars"], params["sig_obs"], Q_rho, len_scale) #TODO:will start from here
-    
-    # # save the process noise to the model_kwargs dictionary
-    # model_kwargs.update({"Q_err": Q_err})
-    
+        model_kwargs.update({"k": k, "km":km, "alpha": alpha, "rho": rho, "tau": tau, "dt": dt,"n": n})
+        model_kwargs.update({"generate_enkf_field": generate_enkf_field}) #save the function to generate the enkf field
 
-    # # --- Define filter flags
-    # EnKF_flag   = re.match(r"\AEnKF\Z", filter_type, re.IGNORECASE)
-    # DEnKF_flag  = re.match(r"\ADEnKF\Z", filter_type, re.IGNORECASE)
-    # EnRSKF_flag = re.match(r"\AEnRSKF\Z", filter_type, re.IGNORECASE)
-    # EnTKF_flag  = re.match(r"\AEnTKF\Z", filter_type, re.IGNORECASE)
+        if re.match(r"\AMPI_model\Z", parallel_flag, re.IGNORECASE):      
+            # -- time forecast step ---
+            _time_forecast_step = MPI.Wtime()
 
-    # # tqdm progress bar
-    # # Initialize progress bar on the root process
-    # if rank_world == 0:
-    #     nt = model_kwargs.get("nt", params["nt"])
-    #     print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {size_world} MPI ranks.")
-    #     pbar = tqdm(
-    #         total=nt,
-    #         desc=f"[ICESEE] Assimilation progress ({size_world} ranks)",
-    #         position=0,
-    #         leave=True,
-    #         dynamic_ncols=True
-    #     )
+            # get the state block size
+            ndim = nd//params["total_state_param_vars"]
+            state_block_size = ndim*params["num_state_vars"]
 
-    # # ==== Time loop =======================================================================================
-    # # --- timing intializations
-    # time_forecast_step = 0.0
-    # time_analysis_step = 0.0
-    # time_forecast_noise_generation = 0.0
-    # time_forecast_file_writing = 0.0
-    # time_analysis_file_writing = 0.0
-    # time_forecast_ensemble_mean_generation = 0.0
-
-    # # specified decorrelation length scale, tau,
-    # min_tau = 200
-    # max_tau = 500
-    # dt  = model_kwargs.get("dt",params["dt"])
-    # tau = max(max_tau,max(min_tau, dt))
-
-    # # tau = max(model_kwargs.get("dt",params["dt"]),10)
-    # alpha = 1 - dt/tau
-    # # make sure  0=<alpha<1
-    # if alpha <= 0 or alpha > 1:
-    #     alpha = 0.5
-
-    # n = model_kwargs.get("nt",params["nt"])
-    # # rho = np.sqrt((1-alpha**2)/(dt*(n - 2*alpha - n*alpha**2 + 2*alpha**(n+1))))
-    # rho = np.sqrt((1/dt)*((1-alpha)**2)*(1/(n - (2*alpha) - (n*alpha**2) + (2*alpha**(n+1)))))
-    # params_analysis_0 = np.zeros((2, Nens))
-    # km = 0
-
-    # #--- generate inital noise
-    # if params.get("use_random_fields", False):
-    #     # with h5py.File(_synthetic_obs, 'r') as f:
-    #     #     error_R = f['error_R'][:]
-    #     #     Cov_obs = np.cov(error_R)
-    #     #  --- get the observation noise ---
-    #     pos_obs, gs_model_obs, L_C_obs = compute_Q_err_random_fields(hdim, params["total_state_param_vars"], params["sig_obs"], Q_rho, len_scale)
-    # else:
-    #     N_size = params["total_state_param_vars"] * hdim
-    #     # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=0)
-    #     model_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
-    #     # noise = generate_enkf_field(**model_kwargs)
-    #     noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
-
-    # for k in range(model_kwargs.get("nt",params["nt"])):
-
-    #     model_kwargs.update({"k": k, "km":km, "alpha": alpha, "rho": rho, "tau": tau, "dt": dt,"n": n})
-    #     model_kwargs.update({"generate_enkf_field": generate_enkf_field}) #save the function to generate the enkf field
-
-    #     # background step
-    #     # ensemble_bg = model_module.background_step(k,ensemble_bg, hdim, **model_kwargs)
-
-    #     # save a copy of initial ensemble
-    #     # ensemble_init = ensemble_vec.copy()
-
-    #     if re.match(r"\AMPI_model\Z", parallel_flag, re.IGNORECASE):      
-    #         # -- time forecast step ---
-    #         _time_forecast_step = MPI.Wtime()
-
-    #         # load all needed parameters and variables into model_kwargs
-    #         model_kwargs.update({"_modelrun_datasets": _modelrun_datasets,
-    #                             "alpha": alpha, 
-    #                             "rho": rho, 
-    #                             "dt": dt, 
-    #                             "Lx": Lx, 
-    #                             "Ly": Ly, 
-    #                             "len_scale": len_scale,
-    #                             "model_module": model_module,
-    #                             "time_forecast_step": time_forecast_step,
-    #                             "time_analysis_step": time_analysis_step,
-    #                             "time_forecast_noise_generation": time_forecast_noise_generation,
-    #                             "time_forecast_file_writing": time_forecast_file_writing,
-    #                             "time_analysis_file_writing": time_analysis_file_writing,
-    #                             "time_forecast_ensemble_mean_generation": time_forecast_ensemble_mean_generation,
-    #                             "state_block_size": state_block_size, "noise": noise, "rng": None, "rank_seed": None,})
+            # load all needed parameters and variables into model_kwargs
+            model_kwargs.update({"_modelrun_datasets": _modelrun_datasets,
+                                "alpha": alpha, 
+                                "rho": rho, 
+                                "dt": dt, 
+                                "Lx": Lx, 
+                                "Ly": Ly, 
+                                "len_scale": len_scale,
+                                "model_module": model_module,
+                                "time_forecast_step": time_forecast_step,
+                                "time_analysis_step": time_analysis_step,
+                                "time_forecast_noise_generation": time_forecast_noise_generation,
+                                "time_forecast_file_writing": time_forecast_file_writing,
+                                "time_analysis_file_writing": time_analysis_file_writing,
+                                "time_forecast_ensemble_mean_generation": time_forecast_ensemble_mean_generation,
+                                "state_block_size": state_block_size, "noise": noise, "rng": None, "rank_seed": None,})
             
-    #         if not params.get("default_run", False):
-    #             model_kwargs.update({"ensemble_vec": ensemble_vec,
-    #                             "ensemble_vec_mean": ensemble_vec_mean,
-    #                             "ensemble_vec_full": ensemble_vec_full,
-    #                             "hdim": hdim,
-    #                             "Nens": Nens,
-    #                             "ensemble_local": ensemble_local if params.get("even_distribution", False) else None,
-    #                             })                             
+            if params["default_run"]:
+                # call the parallel_forecast_step_default_run function
+                model_kwargs = parallel_forecast_step_default_full_parallel_run(**model_kwargs)
+                time_forecast_step = model_kwargs.get("time_forecast_step", 0.0)
+                time_forecast_noise_generation = model_kwargs.get("time_forecast_noise_generation", 0.0)
+                time_forecast_file_writing = model_kwargs.get("time_forecast_file_writing", 0.0)
+                time_forecast_ensemble_mean_generation = model_kwargs.get("time_forecast_ensemble_mean_generation", 0.0)
             
-    #         if params["default_run"]:
-    #             # call the parallel_forecast_step_default_run function
-    #             model_kwargs, ensemble_vec, shape_ens,ens_mean = parallel_forecast_step_default_run(**model_kwargs)
-    #             time_forecast_step = model_kwargs.get("time_forecast_step", 0.0)
-    #             time_forecast_noise_generation = model_kwargs.get("time_forecast_noise_generation", 0.0)
-    #             time_forecast_file_writing = model_kwargs.get("time_forecast_file_writing", 0.0)
-    #             time_forecast_ensemble_mean_generation = model_kwargs.get("time_forecast_ensemble_mean_generation", 0.0)
+                comm_world.Barrier()
+                # --- end time forecast step
+                time_forecast_step += MPI.Wtime() - _time_forecast_step
 
-    #             # --- end time forecast step
-    #             time_forecast_step += MPI.Wtime() - _time_forecast_step
-
-    #             # ===== Global analysis step =====
-    #             if model_kwargs.get('global_analysis', True) or model_kwargs.get('local_analysis', False):
-    #                 # -- time global analysis step ---
-    #                 _time_analysis_step = MPI.Wtime()
+                # ===== Global analysis step =====
+                if model_kwargs.get('global_analysis', True) or model_kwargs.get('local_analysis', False):
+                    # -- time global analysis step ---
+                    _time_analysis_step = MPI.Wtime()
     #                 obs_index = model_kwargs["obs_index"]
     #                 if (km < params["number_obs_instants"]) and (k+1 == obs_index[km]):
     #                     #
@@ -535,6 +476,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
     #     # w=hu_obs,
     #     run_mode= np.array([params["execution_flag"]])
     # )
+    enkf_parallel_io.close()
 
     # # ─────────────────────────────────────────────────────────────
     # #  End Timer and Aggregate Elapsed Time Across Processors
