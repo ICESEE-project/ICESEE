@@ -1,0 +1,46 @@
+name: Update README with Flags
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - restructure
+
+permissions:
+  contents: write  # Required for git commit and push
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false  # Ensures clean push auth
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Add any deps your script needs, e.g., pip install pyyaml  # If using YAML parsing
+
+      - name: Update README
+        run: |
+          cd config  # Change to script directory if needed
+          python update_readme.py
+        shell: bash
+        working-directory: ${{ github.workspace }}
+
+      - name: Commit changes
+        run: |
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          git add README.md
+          git diff --staged --quiet || git commit -m "Auto-update README with latest flags" --allow-empty
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
