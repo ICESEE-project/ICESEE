@@ -225,6 +225,9 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                 dynamic_ncols=True
             )
 
+        # synchronize all processes before starting the time loop
+        comm_world.Barrier()
+
         # ==== Time loop =======================================================================================
         # --- timing intializations
         time_forecast_step = 0.0
@@ -319,7 +322,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                         m_obs = model_kwargs.get("m_obs", params["number_obs_instants"])
 
                         if (km < m_obs) and (k+1 == t_observe[km]):
-                            model_kwargs.update({'km': km})
+                            model_kwargs.update({'km': km, 'k': k})
         
                             # call the analysis update function
                             if EnKF_flag:

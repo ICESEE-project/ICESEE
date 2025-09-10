@@ -525,6 +525,7 @@ def parallel_forecast_step_default_full_parallel_run(**model_kwargs):
                 del noise_all, q0, noise_, W
                 time_forecast_noise_generation += MPI.Wtime() - _time_forecast_noise_generation
 
+                # enkf_parallel_io.write_forecast(k + 1 if k < nt - 1 else k, ensemble_vec, ens)
                 enkf_parallel_io.write_forecast(k + 1 if k < nt - 1 else k, ensemble_vec, ens)
 
                 shape_ens = np.array(ensemble_vec.shape, dtype=np.int32)

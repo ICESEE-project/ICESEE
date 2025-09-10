@@ -990,13 +990,14 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
     
-    def compute_X5_utils_batch(self, km, **kwargs):
+    def compute_X5_utils_batch(self, **kwargs):
         """
         Returns:
         Eta   : (m, Nens)
         Dprime: (m, Nens)   # constant across Nens (each column equal)
         HA    : (m, Nens)
         """
+        k = kwargs.get('k')
         try:
             comm = self.mpi_comm
             rank = comm.Get_rank()
@@ -1017,12 +1018,12 @@ class EnKF_fully_parallel_IO:
             # ---- Read local ensemble mean once
             mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
             with h5py.File(mean_file_path, 'r', driver='mpio', comm=comm) as f:
-                ens_mean_local = f['mean'][self.nd_start_world:self.nd_end_world, km]
+                ens_mean_local = f['mean'][self.nd_start_world:self.nd_end_world, k]
             ens_mean_local = np.ascontiguousarray(ens_mean_local, dtype=np.float64)  # (local_nd,)
 
             # ---- Synthetic observations (local slice)
             synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
-            synthetic_obs_local = synthetic_obs[self.nd_start_world:self.nd_end_world, km]
+            synthetic_obs_local = synthetic_obs[self.nd_start_world:self.nd_end_world, k]
             synthetic_obs_local = np.ascontiguousarray(synthetic_obs_local, dtype=np.float64)  # (local_nd,)
 
             # ---- Fuse d and Hmean into a single GEMM + single Allreduce
@@ -1049,7 +1050,7 @@ class EnKF_fully_parallel_IO:
                 # Load a contiguous local block of states: shape (local_nd, B)
                 States_local_blk = np.empty((local_nd, B), dtype=np.float64, order='C')
                 for jj, ens_idx in enumerate(range(j0, j1)):
-                    States_local_blk[:, jj] = self.read_analysis(km, ens_idx)  # must return local slice (local_nd,)
+                    States_local_blk[:, jj] = self.read_analysis(k, ens_idx)  # must return local slice (local_nd,)
 
                 # Local GEMM then one Allreduce for this batch
                 HA_local_blk = H_local @ States_local_blk             # (m, B)
@@ -1078,6 +1079,7 @@ class EnKF_fully_parallel_IO:
     def compute_X5_utils(self, **kwargs):
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
+        k = kwargs.get('k')
         km = kwargs.get('km')
         try:
             H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
@@ -1095,7 +1097,7 @@ class EnKF_fully_parallel_IO:
             # --- Read ensemble mean ONCE (parallel)
             mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
             with h5py.File(mean_file_path, 'r', driver='mpio', comm=self.mpi_comm) as f:
-                ens_mean_local = f['mean'][self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
+                ens_mean_local = f['mean'][self.nd_start_world:self.nd_end_world, k]  # (local_nd,)
 
             # --- Synthetic obs (once)
             synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
@@ -1115,7 +1117,7 @@ class EnKF_fully_parallel_IO:
             # Shape: (local_nd, Nens)
             States_local = np.empty((local_nd, Nens), dtype=H_local.dtype, order='C')
             for j in range(Nens):
-                States_local[:, j] = self.read_analysis(km, j)  # each returns local slice (local_nd,)
+                States_local[:, j] = self.read_analysis(k, j)  # each returns local slice (local_nd,)
 
             # --- HA for all ensemble members in one GEMM + one Allreduce on the whole matrix
             # local (m, local_nd) @ (local_nd, Nens) -> (m, Nens)
@@ -1146,13 +1148,12 @@ class EnKF_fully_parallel_IO:
     def compute_X5_modified(self, **kwargs):
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
-        km = kwargs.get('km')
         try:
             m = kwargs.get('m_obs') * 2 + 1
             Nens = self.nens
 
             Dprime, Eta, HA = self.compute_X5_utils(**kwargs)
-            # Dprime, Eta, HA = self.compute_X5_utils_batch(km, **kwargs)
+            # Dprime, Eta, HA = self.compute_X5_utils_batch(**kwargs)
 
             # compute the HAbar
             # HAbar = np.mean(HA, axis=1)
@@ -1230,20 +1231,19 @@ class EnKF_fully_parallel_IO:
     # compute analysis mean
     def compute_analysis_update(self, **kwargs):
         # Compute the analysis update for each rank
-        km = kwargs.get('km')
-        # print(f"[Rank {self.mpi_comm.Get_rank()}] Computing analysis update for time step {km} ...")    
+        k = kwargs.get('k')  
         try:
-            self._ensure_batch(km)
+            self._ensure_batch(k)
             comm = self.mpi_comm
             rank = comm.Get_rank()
             size = comm.Get_size()
 
-            batch_idx = km - self.current_batch_start
+            batch_idx = k - self.current_batch_start
 
             start = MPI.Wtime()
 
             # call the compute X5 function
-            # X5 = self.compute_X5_(km, **kwargs)
+            # X5 = self.compute_X5_(k, **kwargs)
             X5 = self.compute_X5_modified(**kwargs)
             # compute column sums for X5
 
@@ -1272,7 +1272,7 @@ class EnKF_fully_parallel_IO:
             analysis_updates = zarr.create_array(store=analysis_updates_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
 
             for i in range(Nens):
-                all_states_zarr[:, i] = self.read_analysis(km, i)
+                all_states_zarr[:, i] = self.read_analysis(k, i)
 
             # Compute analysis updates for all paucall ensembles using matrix multiplication
             analysis_updates = all_states_zarr @ X5  # Matrix multiplication
@@ -1303,7 +1303,7 @@ class EnKF_fully_parallel_IO:
 
             # Write back all analysis updates
             for j in range(Nens):
-                self.write_analysis(km, analysis_updates[:, j], j)
+                self.write_analysis(k + 1 if k < self.nt - 1 else k, analysis_updates[:, j], j)
 
             # compute the anlysis mean and write to h5 file
             yi = np.sum(X5, axis=1)
@@ -1319,7 +1319,7 @@ class EnKF_fully_parallel_IO:
                             dtype='f8'
                         )
                 comm.Barrier()
-                f['mean'][self.nd_start_world:self.nd_end_world, km] = analysis_mean
+                f['mean'][self.nd_start_world:self.nd_end_world, k] = analysis_mean
             
             # clean up zarr file
             # if os.path.exists(zarr_path):
