@@ -1,6 +1,6 @@
 import os
 import re
-from .extract_flags import extract_flags, generate_flags_markdown
+from extract_flags import extract_flags, generate_flags_markdown
 
 def get_project_root():
     current_dir = os.path.dirname(os.path.abspath(__file__))
