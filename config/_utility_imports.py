@@ -19,6 +19,8 @@ from argparse import ArgumentParser
 # Suppress warnings
 warnings.filterwarnings('ignore')
 
+from ICESEE.config.extract_flags import extract_flags, generate_flags_markdown
+
 def get_project_root():
     '''Automatically determines the root of the project.'''
     current_dir = os.path.dirname(os.path.abspath(__file__))  # Get absolute path of the current script
@@ -240,6 +242,8 @@ if not flag_jupyter:
         'generate_nurged_state': enkf_params.get('generate_nurged_state', True),
         'use_ensemble_pertubations': enkf_params.get('use_ensemble_pertubations', True),
         'sequential_ensemble_initialization': enkf_params.get('sequential_ensemble_initialization', False),
+        'observations_available': enkf_params.get('observations_available', False),
+        'obs_data_path': enkf_params.get('obs_data_path', 'observations_data.h5'),
     }
 
     # # update kwargs dictonary with params
@@ -281,9 +285,20 @@ if not flag_jupyter:
         kwargs.update({'vec_inputs': params['vec_inputs']})
 
     # --- Observations Parameters ---
-    obs_t, obs_idx, num_observations = UtilsFunctions(params).generate_observation_schedule(**kwargs)
-    kwargs['obs_index'] = obs_idx
-    params['number_obs_instants'] = num_observations
+    if kwargs.get('observations_available', False):
+        # load observation data
+        if not os.path.exists(kwargs.get('obs_data_path', 'observations_data.h5')):
+            raise FileNotFoundError(f"Observation data file '{kwargs.get('obs_data_path', 'observations_data.h5')}' not found. Please ensure the file exists.")
+        # Tell the user to load: kwargs['obs_index'] and params['number_obs_instants']
+        print("[ICESEE] Please load 'obs_index' and 'number_obs_instants' from the observation data file into the model dictionary.")
+        # obs_data = extract_datasets_from_h5(kwargs.get('obs_data_path', 'observations_data.h5'))
+        # kwargs.update({'obs_data': obs_data})
+    else:
+        # generate observation schedule for synthetic observations
+        obs_t, obs_idx, num_observations = UtilsFunctions(params).generate_observation_schedule(**kwargs)
+        kwargs['obs_index'] = obs_idx
+        params['number_obs_instants'] = num_observations
+
     kwargs['parallel_flag']       = enkf_params.get('parallel_flag', 'serial')
     kwargs['commandlinerun']      = enkf_params.get('commandlinerun', False)
 
@@ -323,3 +338,5 @@ if not flag_jupyter:
         _modelrun_datasets = kwargs.get('data_path',None)
         if not os.path.exists(_modelrun_datasets):
             os.makedirs(_modelrun_datasets, exist_ok=True)
+
+
