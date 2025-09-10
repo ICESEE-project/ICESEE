@@ -2,13 +2,10 @@ name: Update README with Flags
 
 on:
   push:
-    branches:
-      - main
-      - develop
-      - restructure
+    branches: [main, develop, restructure]
 
 permissions:
-  contents: write  # Required for git commit and push
+  contents: write
 
 jobs:
   update-readme:
@@ -16,7 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false  # Ensures clean push auth
+          persist-credentials: false    # fine— we explicitly add token below
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -26,8 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyyaml
-          # Add any deps your script needs, e.g., pip install pyyaml  # If using YAML parsing
+          # pip install pyyaml
 
       - name: Update README
         working-directory: config
@@ -36,12 +33,18 @@ jobs:
         run: |
           echo "Running update_readme.py in config/"
           python update_readme.py
+          # If you meant to update the ROOT README.md instead, make your script write ../README.md
 
-      - name: Commit & push changes
+      - name: Stage & commit changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # If your script writes config/README.md, add that file. Otherwise use -A.
           git add -A
           git diff --staged --quiet || git commit -m "Auto-update README with latest flags"
-          git push
+
+      - name: Push changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+          git push origin HEAD:${{ github.ref_name }}
