@@ -17,7 +17,7 @@ def update_readme(script_path):
         with open(readme_path, 'r') as f:
             readme_content = f.read()
     except FileNotFoundError:
-        readme_content = "# Project README\n\n"
+        readme_content = "# ICESEE FLAGS README\n\n"
 
     # Regex to match the entire "All Main Flags Used in ICESEE" section
     flags_section_regex = r'(## All Main Flags Used in ICESEE\n.*?)(?=\n## |\Z)'
