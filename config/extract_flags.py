@@ -6,16 +6,55 @@
 
 import ast
 import os
+import re
 
 class FlagVisitor(ast.NodeVisitor):
-    def __init__(self):
+    def __init__(self, source_lines):
         self.cli_flags = []
         self.internal_flags = []
         self.yaml_flags = []
         self.dict_params = []
         self.other_vars = []
+        self.source_lines = source_lines  # Store source lines for comment parsing
+
+    def _get_comments(self, lineno):
+        """Extract inline or preceding comments for a given line number."""
+        comments = []
+        # Check inline comment (same line)
+        line = self.source_lines[lineno - 1].strip()
+        inline_match = re.search(r'#\s*(.+)$', line)
+        if inline_match:
+            comments.append(inline_match.group(1).strip())
+        
+        # Check preceding lines for comments
+        for i in range(lineno - 2, -1, -1):
+            prev_line = self.source_lines[i].strip()
+            if prev_line.startswith('#'):
+                comments.append(prev_line.lstrip('#').strip())
+            elif prev_line.strip():  # Stop at first non-comment, non-empty line
+                break
+        return ' '.join(reversed(comments)) if comments else None
+
+    def _generate_description(self, name, source, comment=None):
+        """Generate a description based on name, source, and optional comment."""
+        if comment:
+            return comment
+        # Contextual descriptions based on name
+        name_lower = name.lower()
+        if 'flag' in name_lower:
+            return f"Controls {name_lower.replace('_', ' ')} behavior in script logic"
+        elif source == 'CLI':
+            return f"Command-line argument for {name_lower.replace('_', ' ')}"
+        elif source == 'YAML':
+            return f"YAML configuration parameter for {name_lower.replace('_', ' ')}"
+        elif source == 'Dictionary':
+            return f"Parameter for {name_lower.replace('_', ' ')} in dictionary"
+        elif source == 'Variable':
+            return f"Variable used for {name_lower.replace('_', ' ')} in script logic"
+        return f"Parameter {name_lower.replace('_', ' ')}"
 
     def visit_Assign(self, node):
+        comment = self._get_comments(node.lineno)
         # Internal flags (variables with "flag" in name)
         for target in node.targets:
             if isinstance(target, ast.Name) and 'flag' in target.id.lower():
@@ -29,7 +68,7 @@ class FlagVisitor(ast.NodeVisitor):
                     flag_type = 'bool' if isinstance(node.value.value, bool) else 'Unknown'
                 self.internal_flags.append({
                     'name': target.id,
-                    'description': 'Internal flag used in script logic',
+                    'description': self._generate_description(target.id, 'Internal', comment),
                     'type': flag_type,
                     'default': default,
                     'required': 'No',
@@ -46,7 +85,7 @@ class FlagVisitor(ast.NodeVisitor):
                     flag_type = 'list'
                 self.other_vars.append({
                     'name': target.id,
-                    'description': 'Variable used as a parameter in script logic',
+                    'description': self._generate_description(target.id, 'Variable', comment),
                     'type': flag_type,
                     'default': default,
                     'required': 'No',
@@ -75,7 +114,7 @@ class FlagVisitor(ast.NodeVisitor):
                     flag_type = 'Unknown'
                 self.dict_params.append({
                     'name': key,
-                    'description': f'Parameter in {dict_name} dictionary',
+                    'description': self._generate_description(key, 'Dictionary', comment),
                     'type': flag_type,
                     'default': default,
                     'required': 'No',
@@ -103,7 +142,7 @@ class FlagVisitor(ast.NodeVisitor):
                                 flag_type = 'list'
                             self.dict_params.append({
                                 'name': key.value,
-                                'description': f'Parameter in {dict_name} dictionary',
+                                'description': self._generate_description(key.value, 'Dictionary', comment),
                                 'type': flag_type,
                                 'default': default,
                                 'required': 'No',
@@ -116,7 +155,7 @@ class FlagVisitor(ast.NodeVisitor):
                     if dict_ref in ['physical_params', 'modeling_params', 'enkf_params']:
                         self.dict_params.append({
                             'name': f'{dict_ref}_keys',
-                            'description': f'All keys from {dict_ref} added to {dict_name}',
+                            'description': self._generate_description(f'{dict_ref}_keys', 'Dictionary', comment),
                             'type': 'dict',
                             'default': 'Unknown',
                             'required': 'No',
@@ -127,6 +166,7 @@ class FlagVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node):
+        comment = self._get_comments(node.lineno)
         # CLI flags from add_argument
         if isinstance(node.func, ast.Attribute) and node.func.attr == 'add_argument':
             if isinstance(node.func.value, ast.Name) and node.func.value.id == 'parser':
@@ -178,7 +218,7 @@ class FlagVisitor(ast.NodeVisitor):
                             flag_type = 'list'
                     self.yaml_flags.append({
                         'name': key,
-                        'description': f'YAML parameter from {node.func.value.id}',
+                        'description': self._generate_description(key, 'YAML', comment),
                         'type': flag_type,
                         'default': default,
                         'required': 'No',
@@ -190,9 +230,9 @@ class FlagVisitor(ast.NodeVisitor):
 
 def extract_flags(script_path):
     with open(script_path, 'r') as f:
-        code = f.read()
-    tree = ast.parse(code)
-    visitor = FlagVisitor()
+        source_lines = f.readlines()
+    tree = ast.parse(''.join(source_lines))
+    visitor = FlagVisitor(source_lines)
     visitor.visit(tree)
     
     # Combine and deduplicate by name
@@ -202,13 +242,15 @@ def extract_flags(script_path):
 
 def generate_flags_markdown(flags):
     doc_lines = [
-        "## All Flags in the Script\n",
+        "## All Main Flags used in ICESEE \n",
         "| Name | Description | Type | Default | Required | Choices | Source |\n",
         "|------|-------------|------|---------|----------|---------|--------|\n"
     ]
     for flag in flags:
+        # Clean description to avoid Markdown issues
+        description = flag['description'].replace('|', '&#124;').replace('\n', ' ')
         doc_lines.append(
-            f"| `{flag['name']}` | {flag['description']} | {flag['type']} | {flag['default']} | {flag['required']} | {flag['choices']} | {flag['source']} |\n"
+            f"| `{flag['name']}` | {description} | {flag['type']} | {flag['default']} | {flag['required']} | {flag['choices']} | {flag['source']} |\n"
         )
     return "".join(doc_lines)
 

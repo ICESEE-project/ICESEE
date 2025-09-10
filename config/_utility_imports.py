@@ -261,7 +261,6 @@ if not flag_jupyter:
         params['total_state_param_vars'] = params['num_state_vars'] + joint_estimated_params
     else:
         params['total_state_param_vars'] = params['num_state_vars']
-    # params['total_state_param_vars'] = params['num_state_vars'] + params['num_param_vars']
 
     # add joint estimation flag to params
     params['joint_estimation'] = kwargs['joint_estimation']

@@ -19,8 +19,8 @@ def update_readme(script_path):
     except FileNotFoundError:
         readme_content = "# Project README\n\n"
 
-    # Regex to match the entire "All Flags in the Script" section
-    flags_section_regex = r'(## All Flags in the Script\n.*?)(?=\n## |\Z)'
+    # Regex to match the entire "All Main Flags Used in ICESEE" section
+    flags_section_regex = r'(## All Main Flags Used in ICESEE\n.*?)(?=\n## |\Z)'
     if re.search(flags_section_regex, readme_content, re.DOTALL):
         # Replace the existing section
         new_content = re.sub(flags_section_regex, flags_doc, readme_content, flags=re.DOTALL)
