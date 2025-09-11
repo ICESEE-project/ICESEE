@@ -33,7 +33,6 @@ jobs:
         run: |
           echo "Running update_readme.py in config/"
           python update_readme.py
-          # If you meant to update the ROOT README.md instead, make your script write ../README.md
 
       - name: Stage & commit changes
         run: |
