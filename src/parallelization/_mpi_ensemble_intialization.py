@@ -536,10 +536,12 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
                     #         end_idx = start_idx + hdim
                     #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
 
-                    enkf_parallel_io.write_forecast(0, ensemble_vec[:,ens], ens)
-                    # enkf_parallel_io._flush_and_world_barrier(t=0)
-
+                    # enkf_parallel_io.write_forecast(0, ensemble_vec[:,ens], ens)
+                    # enkf_parallel_io.datasets[0][:, ens] = ensemble_vec[:,ens]
+                    # print(f"[ICESEE] Rank {rank_world}: Ensemble initialization completed and written to disk with norm {np.linalg.norm(ensemble_vec)}")
+                
                 shape_ens = np.array(ensemble_vec.shape,dtype=np.int32)
+                # print(f"[ICESEE] Rank {rank_world}: Ensemble initialization completed for all members.")
                 
     
             else:
@@ -547,9 +549,26 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
                 shape_ens = np.empty(2,dtype=np.int32)
                 # pos, gs_model, L_C
 
+            # scatter  enkf_parallel_io.nd_local_world of the ensemble to all processors
+            localshape = enkf_parallel_io.nd_local_world
+            all_local_shapes = comm_world.gather(localshape)
+            if rank_world == 0:
+                counts_rows = np.array(all_local_shapes) 
+                displacement_rows = np.insert(np.cumsum(counts_rows), 0, 0)[0:-1]
+                counts_rows = counts_rows * params["Nens"]
+                displacement_rows = displacement_rows * params["Nens"]
+            else:
+                counts_rows = None
+                displacement_rows = None
+            
+            local_ensemble = np.empty((localshape, params["Nens"]), dtype=np.float64)
+            comm_world.Scatterv([ensemble_vec, counts_rows, displacement_rows, MPI.DOUBLE], local_ensemble, root=0)
+            enkf_parallel_io.datasets[0][localshape, :] = local_ensemble
+
         comm_world.Barrier()
         time_init_ensemble_mean_computation = MPI.Wtime()
-        enkf_parallel_io.compute_forecast_mean_chunked(0)
+        # enkf_parallel_io.compute_forecast_mean_chunked(0)
+        enkf_parallel_io.compute_forecast_mean_chunked_v2(0)
         time_init_ensemble_mean_computation = MPI.Wtime() - time_init_ensemble_mean_computation
 
         # now reset the model_nprocs

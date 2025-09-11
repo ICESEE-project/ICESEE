@@ -311,6 +311,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                     time_forecast_ensemble_mean_generation = model_kwargs.get("time_forecast_ensemble_mean_generation", 0.0)
                 
                     comm_world.Barrier()
+                    print(f"[ICESEE] Rank {rank_world}, completed time step {k+1}/{params['nt']} with forecast time {time_forecast_step:.2f}s.")
                     # --- end time forecast step
                     time_forecast_step += MPI.Wtime() - _time_forecast_step
 
