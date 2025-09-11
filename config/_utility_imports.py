@@ -81,7 +81,7 @@ if not flag_jupyter:
     parser.add_argument('--even_distribution', action='store_true', help='even distribution')
     parser.add_argument('--data_path', type=str, required=False, default= '_modelrun_datasets', help='folder to save data for single or multiple runs')
     parser.add_argument('execution_mode', type=int, choices=[0, 1, 2], nargs='?', help='Execution mode: 0=default_run, 1=sequential_run, 2=even_distribution')
-    parser.add_argument('--model_nprocs', type=int, required = False, default=0, help='number of processors for the model')
+    parser.add_argument('--model_nprocs', type=int, required = False, default=0, help='number of processors for the coupled model')
     parser.add_argument('-F', '--force-params', type=str, required=False, default='params.yaml', help='Path to YAML parameter file (default: params.yaml)')
 
     args = parser.parse_args()
@@ -165,6 +165,7 @@ if not flag_jupyter:
         'batch_size': int(enkf_params.get('batch_size', 50)),
         'chunk_size': int(enkf_params.get('chunk_size', 5000)),
         'joint_estimated_params': enkf_params.get('joint_estimated_params', []),
+        'coupled_model_datasets_dir': enkf_params.get('coupled_model_datasets', 'data'),
         'vec_inputs': enkf_params['vec_inputs'],
     })
 
@@ -176,7 +177,7 @@ if not flag_jupyter:
         params['data_path'] = enkf_params.get('data_path', '_modelrun_datasets')
 
     if model_nprocs == 0:
-        params['model_nprocs'] = enkf_params.get('model_nprocs', 1)
+        params['model_nprocs'] = enkf_params.get('model_nprocs', 1) 
     
     if run_flag:
         execution_flag = params.get('execution_flag')
@@ -243,7 +244,7 @@ if not flag_jupyter:
         'use_ensemble_pertubations': enkf_params.get('use_ensemble_pertubations', True),
         'sequential_ensemble_initialization': enkf_params.get('sequential_ensemble_initialization', False),
         'observations_available': enkf_params.get('observations_available', False),
-        'obs_data_path': enkf_params.get('obs_data_path', 'observations_data.h5'),
+        'obs_data_path': enkf_params.get('obs_data_path', params.get('coupled_model_datasets_dir', 'data') + '/observations_data.h5'),
     }
 
     # # update kwargs dictonary with params
