@@ -13,9 +13,7 @@ import gstools as gs
 # --- import utility functions ---
 from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_model import *
 from ICESEE.config._utility_imports import icesee_get_index
-from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import setup_ensemble_intial_data, MatlabServer
-from ICESEE.src.run_model_da.run_models_da import generate_enkf_field, generate_pseudo_random_field_1d
-
+# from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import setup_ensemble_intial_data, MatlabServer
 
 # --- Forecast step ---
 def forecast_step_single(ensemble=None, **kwargs):
@@ -71,7 +69,7 @@ def generate_true_state(**kwargs):
     statevec_true = kwargs.get('statevec_true')
 
     # -- call the icesee_get_index function to get the index of the state vector
-    vecs, indx_map, dim_per_proc = icesee_get_index(statevec_true, **kwargs)
+    vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
 
     # get the data extracted from the matlab output file
     input_filename = f'{icesee_path}/{data_path}/ensemble_true_state_{ens_id}.h5'
@@ -83,14 +81,14 @@ def generate_true_state(**kwargs):
             statevec_true[indx_map['bed'], k-1] = f['bed'][0]
             statevec_true[indx_map['coefficient'], k-1] = f['coefficient'][0]
 
-    updated_state = {}
-    for key in vec_inputs:
-        updated_state[key] = statevec_true[indx_map[key],:]
+    # updated_state = {}
+    # for key in vec_inputs:
+    #     updated_state[key] = statevec_true[indx_map[key],:]
 
     #  --- change directory back to the original directory ---
     os.chdir(icesee_path)
     
-    return updated_state
+    # return updated_state
 
 
 def generate_nurged_state(**kwargs):
@@ -174,7 +172,7 @@ def generate_nurged_state(**kwargs):
     os.chdir(icesee_path)
     
     # return updated_state
-    return statevec_nurged
+    # return statevec_nurged
 
         
 #  --- initialize ensemble members ---

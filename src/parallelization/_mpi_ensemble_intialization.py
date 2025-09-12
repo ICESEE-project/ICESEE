@@ -67,7 +67,7 @@ def ensemble_initialization(**model_kwargs):
             model_kwargs.update({"statevec_ens":np.zeros([params["nd"], params["Nens"]])})
 
             # get the ensemble matrix   
-            vecs, indx_map, dim_per_proc = icesee_get_index(model_kwargs["statevec_ens"], **model_kwargs)
+            vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
             ensemble_vec = np.zeros_like(model_kwargs["statevec_ens"])
 
             if model_kwargs["joint_estimation"] or params["localization_flag"]:

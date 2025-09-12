@@ -31,9 +31,9 @@ enkf-parameters:
   obs_max_time: 2            # Maximum time for observations (30 years)
   obs_start_time: 4            # Start time for observations (start of simulation)
 
-  generate_synthetic_obs: 0  # Generate synthetic observations for testing
-  generate_true_state:    0  # Generate true state for synthetic observations
-  generate_nurged_state:  0  # Generate nudged state for synthetic observations
+  generate_synthetic_obs: 1  # Generate synthetic observations for testing
+  generate_true_state:    1  # Generate true state for synthetic observations
+  generate_nurged_state:  1  # Generate nudged state for synthetic observations
   sequential_ensemble_initialization: 0
 
   num_state_vars: 1             # State variables: ice thickness (H), velocities (u, v)
@@ -52,8 +52,9 @@ enkf-parameters:
   localization_radius: 6        # Localization radius in km (midpoint of 4–8 km)
 
   # Estimation flags
-  joint_estimation: True        # Enable joint state and parameter estimation
+  joint_estimation: True       # Enable joint state and parameter estimation
   parameter_estimation: True    # Enable parameter estimation
+  joint_estimated_params: ['bed','coefficient']  # parameters to be jointly estimated
 
   # Nudged parameters
   sill_friction: 90000      # Sill friction coefficient (90000 Pa s/m from paper)
@@ -70,6 +71,7 @@ enkf-parameters:
   parallel_flag: "MPI_model"    # Parallel flag
   n_modeltasks: 4               # Number of model tasks (increased for larger domain)
   commandlinerun: "True"        # Command line run flag
-  execution_flag: 2             # Even distribution of problem size
+  execution_flag: 0             # Even distribution of problem size
   model_nprocs: 2               # Number of processors for MPI (increased for efficiency)
+  execution_mode: 1                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
   data_path: _modelrun_datasets
