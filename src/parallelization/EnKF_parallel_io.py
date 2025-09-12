@@ -843,6 +843,65 @@ class EnKF_fully_parallel_IO:
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
+    
+    @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
+    def _create_synthetic_observations_(self, **kwargs):
+        synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path')
+        error_R_zarr_path = kwargs.get('error_R_zarr_path')
+        nd = self.nd
+        nt = self.nt
+
+        obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
+        m = m_obs
+        m_R = m_obs * 2 + 1
+
+        rank = self.mpi_comm.Get_rank()
+        size = self.mpi_comm.Get_size()
+
+        if kwargs.get('joint_estimation', False) or self.params.get('localization_flag', False):
+            hdim = nd // self.params["total_state_param_vars"]
+        else:
+            hdim = nd // self.params["total_state_param_vars"]
+
+        if rank == 0:
+            print("[ICESEE] Generating synthetic observations ...")
+            obs_file = f"{self.base_path}/synthetic_obs.h5"
+            # Remove existing file to avoid corruption
+            if os.path.exists(obs_file):
+                print(f"[ICESEE] Removing existing {obs_file}...")
+                os.remove(obs_file)
+            
+            statevec_true = zarr.open_array(store=f"{self.base_path}/statevec_true.zarr", mode='r+')
+            _, indx_map, _ = icesee_get_index(**kwargs)
+            
+            try:
+                with h5py.File(obs_file, 'a') as f:
+                    if 'hu_obs' not in f:
+                        f.create_dataset('hu_obs', (nd, m), chunks=(min(1000, nd), min(50, m)), dtype='f8')
+                    if 'error_R' not in f:
+                        f.create_dataset('error_R', (nd, m_R), chunks=(min(1000, nd), min(50, m_R)), dtype='f8')
+                    hu_obs = f['hu_obs']
+                    error_R = f['error_R']
+                    print(f"[ICESEE] error_R shape: {error_R.shape}, dtype: {error_R.dtype}")
+
+                    for i, sig in enumerate(self.params["sig_obs"]):
+                        start_idx = i * hdim
+                        end_idx = start_idx + hdim
+                        error_R[start_idx:end_idx, :] = np.ones((hdim, m_R)) * sig
+
+                    km = 0
+                    for step in range(nt):
+                        if (km < m_obs) and (step + 1 == ind_m[km]):
+                            for key in kwargs['vec_inputs']:
+                                hu_obs[indx_map[key], km] = statevec_true[indx_map[key], step + 1] + \
+                                                            np.random.normal(0, error_R[indx_map[key], km], len(indx_map[key]))
+                            km += 1
+            except Exception as e:
+                print(f"[ICESEE] Error in HDF5 operations: {e}")
+                raise
+        self.mpi_comm.Barrier()
+        return obs_t, m_obs
+        
 
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
     def _create_synthetic_observations(self, **kwargs):
@@ -882,12 +941,12 @@ class EnKF_fully_parallel_IO:
             else:
                 hdim = nd // self.params["total_state_param_vars"]
 
-            # if rank == 0:
-            #     for i, sig in enumerate(self.params["sig_obs"]):
-            #         start_idx = i*hdim
-            #         end_idx = start_idx + hdim
-            #         error_R[start_idx:end_idx,:] = np.ones((hdim,1)) * sig
-            # self.mpi_comm.Barrier()
+            if rank == 0:
+                for i, sig in enumerate(self.params["sig_obs"]):
+                    start_idx = i*hdim
+                    end_idx = start_idx + hdim
+                    error_R[start_idx:end_idx,:] = np.ones((hdim,1)) * sig
+            self.mpi_comm.Barrier()
 
             statevec_true = zarr.open_array(store=f"{self.base_path}/statevec_true.zarr", mode='r+')
             _, indx_map, _ = icesee_get_index(**kwargs)
@@ -1113,16 +1172,16 @@ class EnKF_fully_parallel_IO:
                 ens_mean_local = f['mean'][self.nd_start_world:self.nd_end_world, k ]  # (local_nd,)
 
             # --- Synthetic obs (once)
-            # synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
-            # synthetic_obs_local = synthetic_obs[self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
+            synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
+            synthetic_obs_local = synthetic_obs[self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
 
             # *--with open synthetic obs h5file *---rememdy for now---*
-            obs_file = f"{self.base_path}/synthetic_obs.h5"
-            with h5py.File(obs_file, 'r', driver='mpio', comm=self.mpi_comm) as f:
-                synthetic_obs_local = f['hu_obs'][self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
+            # obs_file = f"{self.base_path}/synthetic_obs.h5"
+            # with h5py.File(obs_file, 'r', driver='mpio', comm=self.mpi_comm) as f:
+            #     synthetic_obs_local = f['hu_obs'][self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
             # *---rememdy for now---*
 
-            print(f"\n[Rank {self.mpi_comm.Get_rank()}] H_local norm : {np.linalg.norm(H_local)}, ens_mean_local norm: {np.linalg.norm(ens_mean_local)}, synthetic_obs_local norm: {np.linalg.norm(synthetic_obs_local)}\n")
+            # print(f"\n[Rank {self.mpi_comm.Get_rank()}] H_local norm : {np.linalg.norm(H_local)}, ens_mean_local norm: {np.linalg.norm(ens_mean_local)}, synthetic_obs_local norm: {np.linalg.norm(synthetic_obs_local)}\n")
 
             # --- d = H * y_obs (one GEMV + one Allreduce)
             d_local = H_local @ synthetic_obs_local              # (m,)
@@ -1153,14 +1212,14 @@ class EnKF_fully_parallel_IO:
                 op=MPI.SUM
             )
 
-            # print(f"\n[Rank {self.mpi_comm.Get_rank()}] HA norm: {np.linalg.norm(HA)},Hmean norm: {np.linalg.norm(Hmean_global)}, d norm: {np.linalg.norm(d_global)}\n")
 
             # --- Eta = HA - Hmean[:, None]
             Eta = HA - Hmean_global[:, None]             # (m, Nens)
 
             # --- D' = (d - Hmean)[:, None], same for all ensemble members
             Dprime = (d_global - Hmean_global)[:, None] * np.ones((1, Nens), dtype=HA.dtype)
-            
+
+            print(f"\n[Rank {self.mpi_comm.Get_rank()}] norms H: {np.linalg.norm(H_matrix)},  ens_mean:{np.linalg.norm(np.mean(States_local, axis=1))}, d: {np.linalg.norm(d_local)} D: {np.linalg.norm(d_global.reshape(-1,1) + Eta)}, HA: {np.linalg.norm(HA)}, Eta: {np.linalg.norm(Eta)}, ensemble_vec: {np.linalg.norm(States_local)} \n")
 
             return Dprime, Eta, HA
         except Exception as e:
@@ -1190,7 +1249,7 @@ class EnKF_fully_parallel_IO:
             # compute HAprime + Eta
             HAprime_Eta = HAprime + Eta
            
-            print(f"\n[Rank {self.mpi_comm.Get_rank()}] HAprime_Eta norm: {np.linalg.norm(HAprime_Eta)}, shape: {HAprime_Eta.shape}\n")
+            # print(f"\n[Rank {self.mpi_comm.Get_rank()}] HAprime_Eta norm: {np.linalg.norm(HAprime_Eta)}, shape: {HAprime_Eta.shape}\n")
             # print(f"\n [Rank {self.mpi_comm.Get_rank()}] Dprime_local shape: {Dprime_local.shape} HAprime_local shape: {HAprime_local.shape} HAprime_Eta_local shape: {HAprime_Eta_local.shape}\n ")
 
             # compute SVD of HAprime_Eta
@@ -1243,7 +1302,7 @@ class EnKF_fully_parallel_IO:
             # sum of each column of X5 should be 1
             if np.sum(X5, axis=0).all() != 1.0:
                 print(f"\n[ICESEE] Sum of each X5 column is not 1.0: {np.sum(X5, axis=0)}\n")
-            print(f"[ICESEE] Rank: {self.mpi_comm.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
+            # print(f"[ICESEE] Rank: {self.mpi_comm.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
             del X4; gc.collect()
 
             return X5
@@ -1351,7 +1410,7 @@ class EnKF_fully_parallel_IO:
                 comm.Barrier()
                 f['mean'][self.nd_start_world:self.nd_end_world, k] = analysis_mean
 
-            print(f"\n[ICESEE] Rank {rank} completed analysis update for time step {k+1}/{nt} analysis_mean norm {np.linalg.norm(analysis_mean)}\n")
+            # print(f"\n[ICESEE] Rank {rank} completed analysis update for time step {k+1}/{nt} analysis_mean norm {np.linalg.norm(analysis_mean)}\n")
 
             # clean up zarr file
             # if os.path.exists(zarr_path):
