@@ -1,0 +1,49 @@
+name: Update README with Flags
+
+on:
+  push:
+    branches: [main, develop, restructure]
+
+permissions:
+  contents: write
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false    # fine— we explicitly add token below
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # pip install pyyaml
+
+      - name: Update README
+        working-directory: config
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          echo "Running update_readme.py in config/"
+          python update_readme.py
+
+      - name: Stage & commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --staged --quiet || git commit -m "Auto-update README with latest flags"
+
+      - name: Push changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+          git push origin HEAD:${{ github.ref_name }}

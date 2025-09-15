@@ -141,7 +141,6 @@ def initialize_ensemble(ens, **kwargs):
     h_nurge_ic      = kwargs.get('h_nurge_ic', None)
     u_nurge_ic      = kwargs.get('u_nurge_ic', None)
     nurged_entries_percentage  = kwargs.get('nurged_entries_percentage', None)
-    statevec_ens    = kwargs["statevec_ens"]
     x = kwargs.get('x', None)
     Lx = kwargs.get('Lx', None)
 

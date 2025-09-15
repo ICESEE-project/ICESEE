@@ -9,6 +9,8 @@
 # import libraries
 import numpy as np
 import re
+import sys
+import traceback
 from collections.abc import Iterable
 from scipy.stats import norm
 from scipy.interpolate import interp1d
@@ -97,38 +99,32 @@ class UtilsFunctions:
         return self.H_matrix(n_model)
 
     
-    def generate_observation_schedule(self,**kwargs):
-        """
-        Generate observation times and indices from a given array of time points.
+    def generate_observation_schedule(self, **kwargs):
+        try:
+            t = np.array(kwargs["t"])
+            freq_obs = self.params["freq_obs"]
+            obs_start_time = self.params["obs_start_time"]
+            obs_max_time = self.params["obs_max_time"]
 
-        Parameters:
-            t (list or np.ndarray): Array of time points.
-            freq_obs (int): Frequency of observations in the same unit as `t`.
-            obs_max_time (int): Maximum observation time in the same unit as `t`.
+            max_t = np.max(t)
+            obs_max_time = min(obs_max_time, max_t)
 
-        Returns:
-            obs_t (list): Observation times.
-            obs_idx (list): Indices corresponding to observation times in `t`.
-        """
-        # unpack kwargs
-        t = kwargs["t"]
+            obs_t = np.arange(obs_start_time, obs_max_time + freq_obs, freq_obs)
+            obs_t = obs_t[obs_t <= obs_max_time]
 
-        # Convert input to a numpy array for easier manipulation
-        t = np.array(t)
-        
-        # Generate observation times
-        obs_t = np.arange(self.params["obs_start_time"], self.params["obs_max_time"] + self.params["freq_obs"], self.params["freq_obs"])
-        # obs_t = np.linspace(obs_start_time, obs_max_time, int(obs_max_time/freq_obs)+1)
-        
-        # Find indices of observation times in the original array
-        obs_idx = np.array([np.where(t == time)[0][0] for time in obs_t if time in t]).astype(int)
+            obs_idx = []
+            for time in obs_t:
+                idx = np.argmin(np.abs(t - time))
+                obs_idx.append(idx)
+            obs_idx = np.array(obs_idx, dtype=int)
 
-        # print(f"Number of observation instants: {len(obs_idx)} at times: {t[obs_idx]}")
-        
-        # number of observation instants
-        num_observations = len(obs_idx)
-
-        return obs_t, obs_idx, num_observations
+            num_observations = len(obs_idx)
+            return obs_t, obs_idx, num_observations
+        except Exception as e:
+            print(f"Error occurred in generate_observation_schedule: {e}")
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
+            # self.mpi_comm.Abort(1)
     
     # --- Create synthetic observations ---
     def _create_synthetic_observations(self,**kwargs):
@@ -150,6 +146,8 @@ class UtilsFunctions:
             hdim = statevec_true.shape[0] // self.params["total_state_param_vars"]
         else:
             hdim = statevec_true.shape[0] // self.params["total_state_param_vars"]
+            nd = hdim * self.params["num_state_vars"]
+
 
         error_R = np.zeros((nd, m_obs * 2 + 1))
         for i, sig in enumerate(self.params["sig_obs"]):
@@ -157,6 +155,7 @@ class UtilsFunctions:
             end_idx = start_idx + hdim
             error_R[start_idx:end_idx,:] = np.ones((hdim,1)) * sig
 
+        # print(f"[ICESEE] vec_inputs: {kwargs['vec_inputs']}")
         km = 0
         for step in range(nt):
             if (km<m_obs) and (step+1 == ind_m[km]):

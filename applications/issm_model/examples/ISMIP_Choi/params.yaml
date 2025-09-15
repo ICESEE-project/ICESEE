@@ -7,7 +7,7 @@ physical-parameters:
 
 modeling-parameters:
   # Model parameters
-  num_years: 250          # Number of years to run the model (30-year assimilation period from paper)
+  num_years: 20          # Number of years to run the model (30-year assimilation period from paper)
   tinitial: 0.0           # Initial time
   timesteps_per_year: 0.5 # Number of timesteps per year (monthly for stability in SSA)
 
@@ -27,14 +27,14 @@ modeling-parameters:
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 50                      # Number of ensemble members (paper uses 50)
-  freq_obs: 10                 # Frequency of observations (annual, as per paper)
-  obs_max_time: 200             # Maximum time for observations (30 years)
-  obs_start_time: 15            # Start time for observations (start of simulation)
+  freq_obs: 4                 # Frequency of observations (annual, as per paper)
+  obs_max_time: 16            # Maximum time for observations (30 years)
+  obs_start_time: 2            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state:    1  # Generate true state for synthetic observations
   generate_nurged_state:  1  # Generate nudged state for synthetic observations
-  sequential_ensemble_initialization: 1  # Sequential ensemble initialization (True for sequential, False for parallel)
+  sequential_ensemble_initialization: 0
 
   num_state_vars: 1             # State variables: ice thickness (H), velocities (u, v)
   num_param_vars: 2             # Parameter variables: friction coefficient (C), bed topography (B)
@@ -52,8 +52,9 @@ enkf-parameters:
   localization_radius: 6        # Localization radius in km (midpoint of 4–8 km)
 
   # Estimation flags
-  joint_estimation: True        # Enable joint state and parameter estimation
+  joint_estimation: True       # Enable joint state and parameter estimation
   parameter_estimation: True    # Enable parameter estimation
+  joint_estimated_params: ['bed','coefficient']  # parameters to be jointly estimated
 
   # Nudged parameters
   sill_friction: 90000      # Sill friction coefficient (90000 Pa s/m from paper)
@@ -70,6 +71,7 @@ enkf-parameters:
   parallel_flag: "MPI_model"    # Parallel flag
   n_modeltasks: 4               # Number of model tasks (increased for larger domain)
   commandlinerun: "True"        # Command line run flag
-  execution_flag: 2             # Even distribution of problem size
+  execution_flag: 0             # Even distribution of problem size
   model_nprocs: 2               # Number of processors for MPI (increased for efficiency)
+  execution_mode: 1                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
   data_path: _modelrun_datasets

@@ -15,7 +15,7 @@ import bigmpi4py as BM
 from scipy.stats import multivariate_normal, beta
 from mpi4py import MPI
 
-from ICESEE.src.run_model_da._parallel_i_o import parallel_write_full_ensemble_from_root, \
+from ICESEE.src.parallelization._parallel_i_o import parallel_write_full_ensemble_from_root, \
                                                 parallel_write_ensemble_scattered
 from ICESEE.src.utils.tools import icesee_get_index, get_grid_dimensions
 
@@ -106,6 +106,8 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
         D[:,ens] = d + Eta[:,ens]
         HA[:,ens] = np.dot(H, ensemble_vec[:,ens])
     # ---------------------------------------
+
+    print(f"\n[Rank {comm_world.Get_rank()}] norms H: {np.linalg.norm(H)}, ens_mean: {np.linalg.norm(np.mean(ensemble_vec, axis=1))}, d: {np.linalg.norm(d)} D: {np.linalg.norm(D)}, HA: {np.linalg.norm(HA)}, Eta: {np.linalg.norm(Eta)} ensemble_vec: {np.linalg.norm(ensemble_vec)}\n")
 
     # --- compute the innovations D` = D-HA
     Dprime = D - HA # mxNens

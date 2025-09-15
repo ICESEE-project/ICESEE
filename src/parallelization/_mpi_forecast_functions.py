@@ -46,7 +46,7 @@ def parallel_forecast_step_default_run(**model_kwargs):
     Nens                      = params.get("Nens")
     rounds                    = model_kwargs.get("rounds")
     color                     = model_kwargs.get("color", 0)                    # Default color for the subcommunicator
-    subcomm_size              = model_kwargs.get("subcomm_size", 1)            # Size of the subcommunicator
+    subcomm_size_min              = model_kwargs.get("subcomm_size_min", 1)            # Size of the subcommunicator
     subcomm                   = model_kwargs.get("subcomm", None)              # Subcommunicator for local ensemble processing
     comm_world                = model_kwargs.get("comm_world", MPI.COMM_WORLD) # Global communicator
     rank_world                = comm_world.Get_rank()                          # Global rank
@@ -81,7 +81,7 @@ def parallel_forecast_step_default_run(**model_kwargs):
         # store results for each round      
         ens_list = []
         for round_id in range(rounds):
-            ensemble_id = color + round_id * subcomm_size  # Global ensemble index
+            ensemble_id = color + round_id * subcomm_size_min  # Global ensemble index
             model_kwargs.update({'ens_id': ensemble_id, 'comm': subcomm})
 
             if ensemble_id < Nens:  # Only process valid ensembles
@@ -93,8 +93,11 @@ def parallel_forecast_step_default_run(**model_kwargs):
                 # ---- read from file ----
                 input_file = f"{_modelrun_datasets}/icesee_ensemble_data.h5"
                 # with h5py.File(input_file, "r", driver="mpio", comm=subcomm) as f:
+                # with h5py.File(input_file, "r", driver="mpio", comm=comm_world) as f:
                 with h5py.File(input_file, "r") as f:
                     ensemble_vec = f["ensemble"][:,ens,k]
+                
+                # print(f"[ICESEE] Finished reading ensemble {ens} ensemble shape: {ensemble_vec.shape} norm {np.linalg.norm(ensemble_vec)}")
                 # ---- end of read from file ----
 
                 # Call the forecast step function
@@ -372,6 +375,299 @@ def parallel_forecast_step_default_run(**model_kwargs):
     })
 
     return model_kwargs, ensemble_vec, shape_ens, ens_mean
+
+
+
+def parallel_forecast_step_default_full_parallel_run(**model_kwargs):
+    """
+    Process ensemble data in parallel using MPI, with scalable communication via MPI_Gatherv.
+    Only rank 0 in each subcommunicator and the global communicator gathers and processes results.
+    """
+    import numpy as np
+    import h5py
+    from mpi4py import MPI
+
+    # --- cases 2 & 3 ---
+    # case 2: Form batches of sub-communicators and distribute resources among them
+    #          - only works for Nens >= size_world
+    # case 3: form Nens sub-communicators and distribute resources among them
+    #          - only works for size_world > Nens
+    #          - even distribution and load balancing leading to performance improvement
+    #          - best for size_world/Nens is a whole number
+
+    # Get necessary parameters
+    params                    = model_kwargs.get("params")
+    Nens                      = params.get("Nens")
+    rounds                    = model_kwargs.get("rounds")
+    color                     = model_kwargs.get("color", 0)                    # Default color for the subcommunicator
+    subcomm_size_min              = model_kwargs.get("subcomm_size_min", 1)            # Size of the subcommunicator
+    subcomm                   = model_kwargs.get("subcomm", None)              # Subcommunicator for local ensemble processing
+    comm_world                = model_kwargs.get("comm_world", MPI.COMM_WORLD) # Global communicator
+    rank_world                = comm_world.Get_rank()                          # Global rank
+    sub_rank                  = subcomm.Get_rank() if subcomm else 0          # Rank within the subcommunicator
+    _modelrun_datasets        = model_kwargs.get("_modelrun_datasets", "_modelrun_datasets")
+    alpha                     = model_kwargs.get("alpha", 0.0)                 # Default alpha value
+    rho                       = model_kwargs.get("rho", 1.0)                   # Default rho value
+    dt                        = model_kwargs.get("dt", 1.0)                    # Default time step
+    Lx                        = model_kwargs.get("Lx", 1.0)                    # Default domain length in x-direction
+    Ly                        = model_kwargs.get("Ly", 1.0)                    # Default domain length in y-direction
+    len_scale                 = model_kwargs.get("len_scale", 1.0)             # Default length scale for noise generation
+    model_module              = model_kwargs.get("model_module", None)         # Module containing the forecast step function
+    k                         = model_kwargs.get("k", 0)                      # Time step index, default to 0 if not provided
+    noise                     = model_kwargs.get("noise", None)                   # Noise vector, if provided
+    rng                       = model_kwargs.get("rng", np.random.default_rng())  # Random number generator, default to numpy's default RNG
+    rank_seed = model_kwargs.get("rank_seed", 0)
+    enkf_parallel_io = model_kwargs.get("enkf_parallel_io", None)
+
+    # np.random.seed(rank_seed)
+
+    size_world = comm_world.Get_size()  # Total number of ranks in the global communicator
+
+    # get timing variables from model_kwargs 
+    time_forecast_ensemble_generation = model_kwargs.get("time_forecast_ensemble_generation", 0.0)
+    time_forecast_noise_generation = model_kwargs.get("time_forecast_noise_generation", 0.0)
+    time_forecast_ensemble_mean_generation = model_kwargs.get("time_forecast_ensemble_mean_generation", 0.0)
+    time_forecast_file_writing = model_kwargs.get("time_forecast_file_writing", 0.0)
+                         
+    # --- case 2: Form batches of sub-communicators and distribute resources among them ---
+    if Nens >= size_world:
+        # ensemble_vec, shape_ens = parallel_forecast_step_default_run(**model_kwargs)
+        nd = model_kwargs.get("nd", params.get("nd"))
+        nt = model_kwargs.get("nt", params.get("nt"))
+
+        # store results for each round      
+        ens_list = []
+        for round_id in range(rounds):
+            ensemble_id = color + round_id * subcomm_size_min  # Global ensemble index
+            model_kwargs.update({'ens_id': ensemble_id, 'comm': subcomm})
+
+            if ensemble_id < Nens:  # Only process valid ensembles
+                # print(f"[ICESEE] Rank {rank_world} processing ensemble {ensemble_id} in round {round_id + 1}/{rounds}")
+
+                # Ensure all ranks in the subcommunicator are synchronized before running
+                subcomm.Barrier()
+                ens = ensemble_id
+                # ---- read from file ----
+                ensemble_vec = enkf_parallel_io.read_forecast(k, ens)
+                # ---- end of read from file ----
+
+                # Call the forecast step function
+                # hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
+                # print(f"[ICESEE] Rank: {rank_world}, min ensemble: {np.min(ensemble_vec[:hdim])}, max ensemble: {np.max(ensemble_vec[:hdim])}")
+
+                updated_state = model_module.forecast_step_single(ensemble=ensemble_vec,**model_kwargs)
+
+                #fetch the updated state
+                vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                for key,value in updated_state.items():
+                    ensemble_vec[indx_map[key]] = value
+
+                #  add time evolution noise to the ensemble
+                # if k == 0:
+                #     # model noise, q0
+                #     q0 = np.random.multivariate_normal(np.zeros(nd), Q_err)
+
+                # # squence of white noise drawn from  a smooth pseudorandm fields,w0,
+                # # w0 = np.random.normal(0, 1, nd) #TODO: look into this
+                # # w0 = np.random.multivariate_normal(np.zeros(nd), np.eye(nd))
+                # # q0 = alpha * q0 + np.sqrt(1 - alpha**2) * w0
+                # q0 = np.random.multivariate_normal(np.zeros(nd), Q_err)
+                # Q_err = Q_err[:state_block_size,:state_block_size]
+                # q0 = multivariate_normal.rvs(np.zeros(state_block_size), Q_err)
+                # q0 = np.sqrt(model_kwargs.get("dt",params["dt"]))*multivariate_normal.rvs(np.zeros(state_block_size), Q_err)
+
+                # if k+1 <= max(model_kwargs["obs_index"]):
+                #     ensemble_vec[:state_block_size] = ensemble_vec[:state_block_size] + q0[:state_block_size]
+                # else:
+                    #  create a guassian noise with zero mean and variance = 1
+                    # q0 = np.random.normal(0, 1, state_block_size)
+                    # ensemble_vec[:state_block_size] = ensemble_vec[:state_block_size] + q0[:state_block_size]
+                #---------------------------------------------------------------
+                if model_kwargs["joint_estimation"] or params["localization_flag"]:
+                    hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
+                else:
+                    hdim = ensemble_vec.shape[0] // params["num_state_vars"]
+                state_block_size = hdim * params["num_state_vars"]
+
+                # --- time forecast noise generation ---
+                _time_forecast_noise_generation = MPI.Wtime()
+                # if k == 0:
+                #     # noise = compute_noise_random_fields(ens, hdim, pos, gs_model, params["total_state_param_vars"], L_C)
+                #     N_size = params["total_state_param_vars"] * hdim
+                #     # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=0)
+                #     noise = generate_enkf_field(None,np.sqrt(Lx*Ly),hdim, params["total_state_param_vars"], rh=len_scale, rng=rng, verbose=False)
+
+                # noise = noise / np.max(np.abs(noise))
+                # if k+1 <= max(model_kwargs["obs_index"]):
+                    # W = np.random.normal(0, 1, state_block_size)
+
+                # ======
+                noise_all = []
+                q0 = []
+                for ii, sig in enumerate(params["sig_Q"]):
+                    if ii <=params["num_state_vars"]:
+                        # W = np.random.normal(0, 1, hdim)
+                        # W = generate_pseudo_random_field_1d(hdim,np.sqrt(Lx*Ly), len_scale, verbose=0)
+                        model_kwargs.update({"ii_sig": ii, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
+                        # W = generate_enkf_field(**model_kwargs)
+                        W = generate_enkf_field(ii,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                        noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
+                        q0.append(noise_)
+
+                        Z = np.sqrt(dt)*sig*rho*noise_
+                        noise_all.append(Z)
+                noise_ = np.concatenate(noise_all, axis=0)
+                ensemble_vec[:state_block_size] = ensemble_vec[:state_block_size] + noise_[:state_block_size]
+                noise = np.concatenate(q0, axis=0)
+                model_kwargs.update({"noise": noise})  # save the noise to the model_kwargs dictionary
+                
+                # clean up memory
+                del noise_all, q0, noise_, W
+                time_forecast_noise_generation += MPI.Wtime() - _time_forecast_noise_generation
+
+                # enkf_parallel_io.write_forecast(k + 1 if k < nt - 1 else k, ensemble_vec, ens)
+                enkf_parallel_io.write_forecast(k + 1 if k < nt - 1 else k, ensemble_vec, ens)
+
+                shape_ens = np.array(ensemble_vec.shape, dtype=np.int32)
+
+    # --- case 3: Form Nens sub-communicators and distribute resources among them ---
+    elif Nens < size_world:
+        # Ensure all ranks in subcomm are in sync 
+        subcomm.Barrier()
+        ens = color # each subcomm has a unique color
+        model_kwargs.update({'ens_id': ens, 'comm': subcomm})
+
+        # ---- read from file ----
+        input_file = f"{_modelrun_datasets}/icesee_ensemble_data.h5"
+        with h5py.File(input_file, "r", driver="mpio", comm=subcomm) as f:
+            ensemble_vec = f["ensemble"][:,ens,k]
+        # ---- end of read from file ----
+
+        # Call the forecast step fucntion- Each subcomm runs the function indepadently
+        updated_state = model_module.forecast_step_single(ensemble=ensemble_vec, **model_kwargs)
+
+        # ensemble_vec = gather_and_broadcast_data_default_run(updated_state, subcomm, sub_rank, comm_world, rank_world, params)
+        # ensemble_vec = BM.bcast(ensemble_vec, comm_world)
+        subcomm.Barrier() #*---
+        global_data = {key: subcomm.gather(data, root=0) for key, data in updated_state.items()}
+
+        # Step 2: Process on sub_rank 0
+        key_list = list(global_data.keys())
+        state_keys = key_list[:params["num_state_vars"]] # Get the state variables to add noise
+        if sub_rank == 0:
+            # for key in global_data:
+            for key in key_list:
+                global_data[key] = np.hstack(global_data[key])
+                if model_kwargs["joint_estimation"] or params["localization_flag"]:
+                    hdim = global_data[key].shape[0] // params["total_state_param_vars"]
+                else:
+                    hdim = global_data[key].shape[0] // params["num_state_vars"]
+                state_block_size = hdim * params["num_state_vars"]  # Compute the state block size
+                # Add process noise to the ensembles variables only
+                # if key in state_keys:
+                #     Q_err = Q_err[:state_block_size, :state_block_size]
+                #     q0 = multivariate_normal.rvs(np.zeros(state_block_size), Q_err)
+                #     # q0 = np.sqrt(model_kwargs.get("dt",params["dt"]))*multivariate_normal.rvs(np.zeros(state_block_size), Q_err)
+                #     global_data[key][:state_block_size] = global_data[key][:state_block_size] + q0[:state_block_size]
+
+                # use pseudorandom fields 
+                _time_forecast_noise_generation = MPI.Wtime()
+                # if k == 0:
+                #     N_size = params["total_state_param_vars"] * hdim
+                #     noise = generate_enkf_field(ens,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, rng=rng, verbose=False)
+
+                noise_all = []
+                q0 = []
+                for ii, sig in enumerate(params["sig_Q"]):
+                    if ii <=params["num_state_vars"]:
+                        # W = np.random.normal(0, 1, hdim)
+                        # W = generate_pseudo_random_field_1d(hdim,np.sqrt(Lx*Ly), len_scale, verbose=0)
+                        model_kwargs.update({"ii_sig": ii, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
+                        # W = generate_enkf_field(**model_kwargs)
+                        W = generate_enkf_field(ii,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                        noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
+                        q0.append(noise_)
+
+                        Z = np.sqrt(dt)*sig*rho*noise_
+                        noise_all.append(Z)
+                noise_ = np.concatenate(noise_all, axis=0)
+                global_data[key][:state_block_size] = global_data[key][:state_block_size] + noise_[:state_block_size]
+                noise = np.concatenate(q0, axis=0)
+                
+                del noise_all, q0, noise_, W
+                time_forecast_noise_generation += MPI.Wtime() - _time_forecast_noise_generation
+                
+            # Stack all variables into a single array
+            stacked = np.hstack([global_data[key] for key in updated_state.keys()])
+            shape_ = np.array(stacked.shape, dtype=np.int32)
+            
+            # *- compute the mean on each color
+
+
+            # *- Each color writes each ensemble to the h5 file
+            # with h5py.File(input_file, "a", driver="mpio", comm=subcomm) as f:
+            #     dset = f['ensemble']
+            #     dset[:,ens:ens+1,k+1] = stacked
+
+        else:
+            shape_ = np.empty(2, dtype=np.int32)
+
+        # Step 3: Broadcast the shape to all processors
+        shape_ = comm_world.bcast(shape_, root=0)
+
+        # Step 4: Prepare the stacked array for non-root sub-ranks
+        if sub_rank != 0:
+            stacked = np.empty(shape_, dtype=np.float64)
+
+        # Step 5: Gather the stacked arrays from all sub-ranks
+        all_ens = comm_world.gather(stacked if sub_rank == 0 else None, root=0)
+
+        # Step 6: Final processing on world rank 0
+        if rank_world == 0:
+            all_ens = [arr for arr in all_ens if isinstance(arr, np.ndarray)]
+            ensemble_vec = np.column_stack(all_ens)
+
+            # add some noise to the ensemble
+            # if model_kwargs["joint_estimation"] or params["localization_flag"]:
+            #     hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
+            # else:
+            #     hdim = ensemble_vec.shape[0] // params["num_state_vars"]
+            # state_block_size = hdim * params["num_state_vars"]  # Compute the state block size
+            # Q_err = Q_err[:state_block_size, :state_block_size]
+            # q0 = multivariate_normal.rvs(np.zeros(state_block_size), Q_err)
+            # ensemble_vec[:state_block_size, :] = ensemble_vec[:state_block_size, :] + q0[:state_block_size,np.newaxis]
+
+            # hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
+            shape_ens = np.array(ensemble_vec.shape, dtype=np.int32)
+        else:
+            shape_ens = np.empty(2, dtype=np.int32)
+            ensemble_vec = np.empty((shape_[0], params["Nens"]), dtype=np.float64)
+
+        # boradcast shape to all processors
+        shape_ens = comm_world.bcast(shape_ens, root=0)
+
+        # broadcast the ensemble to all processors
+        # ensemble_vec = comm_world.bcast(ensemble_vec, root=0)
+
+    # --- compute the mean
+    _time_forecast_ensemble_mean_generation = MPI.Wtime()
+    # enkf_parallel_io.compute_forecast_mean_chunked(k + 1 if k < nt - 1 else k)
+    enkf_parallel_io.compute_forecast_mean_chunked_v2(k + 1 if k < nt - 1 else k)
+    time_forecast_ensemble_generation += MPI.Wtime() - _time_forecast_ensemble_mean_generation
+
+    # update model_kwargs with timing variables and other parameters
+    model_kwargs.update({
+        "time_forecast_ensemble_generation": time_forecast_ensemble_generation,
+        "time_forecast_noise_generation": time_forecast_noise_generation,
+        "time_forecast_ensemble_mean_generation": time_forecast_ensemble_mean_generation,
+        "time_forecast_file_writing": time_forecast_file_writing,
+        "shape_ens": shape_ens,
+        "noise": noise,
+    })
+
+    return model_kwargs
+    # return model_kwargs, ensemble_vec, shape_ens, enkf_parallel_io.ensemble_mean
+
 
 
 def parallel_forecast_step_even_distribution_run(**model_kwargs):
