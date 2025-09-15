@@ -18,6 +18,7 @@
 | `commandlinerun` | Parameter for commandlinerun in dictionary | Unknown | Computed | No | None | Dictionary |
 | `coupled_model_datasets` | YAML configuration parameter for coupled model datasets | str | data | No | None | YAML |
 | `coupled_model_datasets_dir` | YAML configuration parameter for coupled model datasets dir | str | data | No | None | YAML |
+| `create_ensemble_dataset` | YAML configuration parameter for create ensemble dataset | bool | True | No | None | YAML |
 | `data_path` | Parameter for data path in dictionary | Unknown | Computed | No | None | Dictionary |
 | `default_run` | Parameter for default run in dictionary | bool | True | No | None | Dictionary |
 | `example_name` | YAML configuration parameter for example name | Unknown | None | No | None | YAML |
