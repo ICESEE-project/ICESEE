@@ -569,6 +569,8 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
         time_init_ensemble_mean_computation = MPI.Wtime()
         # enkf_parallel_io.compute_forecast_mean_chunked(0)
         enkf_parallel_io.compute_forecast_mean_chunked_v2(0)
+        # ens_mean = enkf_parallel_io.compute_forecast_mean(0)
+        # ens_mean = .datasets[0][:, :].mean(axis=1)
         time_init_ensemble_mean_computation = MPI.Wtime() - time_init_ensemble_mean_computation
 
         # now reset the model_nprocs

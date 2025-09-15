@@ -245,6 +245,7 @@ if not flag_jupyter:
         'sequential_ensemble_initialization': enkf_params.get('sequential_ensemble_initialization', False),
         'observations_available': enkf_params.get('observations_available', False),
         'obs_data_path': enkf_params.get('obs_data_path', params.get('coupled_model_datasets_dir', 'data') + '/observations_data.h5'),
+        'create_ensemble_dataset': enkf_params.get('create_ensemble_dataset', True),
     }
 
     # # update kwargs dictonary with params

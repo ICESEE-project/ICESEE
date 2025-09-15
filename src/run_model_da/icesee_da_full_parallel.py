@@ -345,6 +345,21 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         # comm_world.Barrier()
         enkf_parallel_io.close()
 
+        # call create enseble file to write all data to file
+        comm_world.Barrier()
+        if model_kwargs.get("create_ensemble_dataset", True):
+            time_final_file_writing = MPI.Wtime()
+            if rank_world == 0:
+                print("[ICESEE] Creating ensemble dataset...")
+            enkf_parallel_io.create_ensemble_dataset_(
+                                                    folder_path='_modelrun_datasets',
+                                                    file_pattern='icesee_enkf_ens_*.h5',
+                                                    dataset_name='states',
+                                                    output_file='icesee_ensemble_dataset.h5'
+                                                )
+            time_final_file_writing = MPI.Wtime() - time_final_file_writing
+            time_analysis_file_writing += time_final_file_writing
+            comm_world.Barrier()
         # ====== load data to be written to file ======
         # print("[ICESEE] Saving data ...")
         save_all_data(
@@ -395,7 +410,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         analysis_file_time = comm_world.allreduce(time_analysis_file_writing, op=MPI.MAX)
 
         # total file writing time initialization file writing + forecast file writing + analysis file writing
-        init_file_time = comm_world.allreduce(time_init_file_writing, op=MPI.MAX)
+        init_file_time = comm_world.allreduce(time_init_file_writing, op=MPI.MAX)      
         total_file_time = init_file_time + forecast_file_time + analysis_file_time
 
         # Display elapsed time on rank 0
