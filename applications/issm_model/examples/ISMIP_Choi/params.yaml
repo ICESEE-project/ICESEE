@@ -7,7 +7,7 @@ physical-parameters:
 
 modeling-parameters:
   # Model parameters
-  num_years: 5          # Number of years to run the model (30-year assimilation period from paper)
+  num_years: 20          # Number of years to run the model (30-year assimilation period from paper)
   tinitial: 0.0           # Initial time
   timesteps_per_year: 0.5 # Number of timesteps per year (monthly for stability in SSA)
 
@@ -27,9 +27,9 @@ modeling-parameters:
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 50                      # Number of ensemble members (paper uses 50)
-  freq_obs: 1                 # Frequency of observations (annual, as per paper)
-  obs_max_time: 2            # Maximum time for observations (30 years)
-  obs_start_time: 4            # Start time for observations (start of simulation)
+  freq_obs: 4                 # Frequency of observations (annual, as per paper)
+  obs_max_time: 16            # Maximum time for observations (30 years)
+  obs_start_time: 2            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state:    1  # Generate true state for synthetic observations

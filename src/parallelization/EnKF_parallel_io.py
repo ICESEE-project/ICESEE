@@ -1033,6 +1033,8 @@ class EnKF_fully_parallel_IO:
             nd = self.nd
             m_obs = kwargs.get('m_obs')
             m = m_obs * 2 + 1
+            obs_t, ind_m, _m_obs = self.generate_observation_schedule(**kwargs)
+            print(f"\n[ICESEE] Creating H matrix of shape ({m}, {nd}) and m_obs={m_obs} ... computed m_obs={_m_obs}\n")
             di = int((nd - 2) / (2 * m_obs))
 
             H_matrix_file = zarr.create_array(store=zarr_path, shape=(m, nd), chunks=(min(50, m), min(1000, nd)), dtype='f8', overwrite=True)

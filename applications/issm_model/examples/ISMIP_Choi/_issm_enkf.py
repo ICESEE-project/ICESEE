@@ -73,7 +73,8 @@ def generate_true_state(**kwargs):
 
     # get the data extracted from the matlab output file
     input_filename = f'{icesee_path}/{data_path}/ensemble_true_state_{ens_id}.h5'
-    with h5py.File(input_filename, 'r', driver='mpio', comm=comm) as f:
+    # with h5py.File(input_filename, 'r', driver='mpio', comm=comm) as f:
+    with h5py.File(input_filename, 'r') as f:
         # -- fetch state variables
         for k in range(1, kwargs.get('nt') + 1):
             key = f'Thickness_{k}'
