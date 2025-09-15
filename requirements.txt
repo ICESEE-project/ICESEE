@@ -14,3 +14,5 @@ psutil
 tqdm
 pyyaml
 numcodecs
+setuptools==80.8.0 
+wheel
