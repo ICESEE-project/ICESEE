@@ -13,7 +13,9 @@
 | `-F` | Path to YAML parameter file (default: params.yaml) | str | params.yaml | No | None | CLI |
 | `Nens` | Parameter for nens in dictionary | Unknown | Computed | No | None | Dictionary |
 | `Q_rho` | YAML configuration parameter for q rho | float | 1.0 | No | None | YAML |
+| `base_seed` | YAML configuration parameter for base seed | int | 42 | No | None | YAML |
 | `batch_size` | YAML configuration parameter for batch size | int | 50 | No | None | YAML |
+| `checkpoint_every` | YAML configuration parameter for checkpoint every | int | 1 | No | None | YAML |
 | `chunk_size` | YAML configuration parameter for chunk size | int | 5000 | No | None | YAML |
 | `commandlinerun` | Parameter for commandlinerun in dictionary | Unknown | Computed | No | None | Dictionary |
 | `coupled_model_datasets` | YAML configuration parameter for coupled model datasets | str | data | No | None | YAML |
@@ -25,6 +27,7 @@
 | `execution_flag` | Controls execution flag behavior in script logic | int | 0 | No | None | Dictionary |
 | `execution_mode` | YAML configuration parameter for execution mode | int | 0 | No | None | YAML |
 | `flag_jupyter` | leave entire routine | bool | True | No | None | Internal |
+| `force_fresh_start` | YAML configuration parameter for force fresh start | bool | False | No | None | YAML |
 | `freq_obs` | YAML configuration parameter for freq obs | int | 1 | No | None | YAML |
 | `generate_nurged_state` | YAML configuration parameter for generate nurged state | bool | True | No | None | YAML |
 | `generate_synthetic_obs` | YAML configuration parameter for generate synthetic obs | bool | True | No | None | YAML |
@@ -53,6 +56,7 @@
 | `parameter_estimation` | YAML configuration parameter for parameter estimation | bool | False | No | None | YAML |
 | `params_vec` | check available parameters in the obseve_params list that need to be observed | list | [] | No | None | Variable |
 | `partial` | Parameter for partial in dictionary | bool | True | No | None | Dictionary |
+| `restart_enabled` | YAML configuration parameter for restart enabled | bool | True | No | None | YAML |
 | `run_flag` | Controls run flag behavior in script logic | bool | True | No | None | Internal |
 | `sequential_ensemble_initialization` | YAML configuration parameter for sequential ensemble initialization | bool | False | No | None | YAML |
 | `serial_file_creation` | YAML configuration parameter for serial file creation | bool | True | No | None | YAML |
