@@ -74,5 +74,5 @@ enkf-parameters:
   execution_flag: 0             # Even distribution of problem size
   model_nprocs: 2               # Number of processors for MPI (increased for efficiency)
   execution_mode: 2                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
-  create_ensemble_dataset: False # Create dataset for ensemble runs
+  create_ensemble_dataset: True # Create dataset for ensemble runs
   data_path: _modelrun_datasets

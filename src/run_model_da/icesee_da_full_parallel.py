@@ -25,7 +25,8 @@ from mpi4py import MPI
 from ICESEE.src.utils import tools, utils                                     # utility functions for the model 
 from ICESEE.src.utils.utils import UtilsFunctions
 from ICESEE.applications.supported_models import SupportedModels              # supported models for data assimilation routine
-from ICESEE.src.utils.tools import icesee_get_index, display_timing_default,display_timing_verbose, save_all_data
+from ICESEE.src.utils.tools import icesee_get_index, display_timing_default,display_timing_verbose, \
+                                    save_all_data, finalize_stack
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
                               generate_pseudo_random_field_1d, \
@@ -311,7 +312,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                     time_forecast_ensemble_mean_generation = model_kwargs.get("time_forecast_ensemble_mean_generation", 0.0)
                 
                     comm_world.Barrier()
-                    print(f"[ICESEE] Rank {rank_world}, completed time step {k+1}/{params['nt']} with forecast time {time_forecast_step:.2f}s.")
+                    # print(f"[ICESEE] Rank {rank_world}, completed time step {k+1}/{params['nt']} with forecast time {time_forecast_step:.2f}s.")
                     # --- end time forecast step
                     time_forecast_step += MPI.Wtime() - _time_forecast_step
 
@@ -351,14 +352,22 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
             time_final_file_writing = MPI.Wtime()
             if rank_world == 0:
                 print("[ICESEE] Creating ensemble dataset...")
-            enkf_parallel_io.create_ensemble_dataset_(
-                                                    folder_path='_modelrun_datasets',
-                                                    file_pattern='icesee_enkf_ens_*.h5',
-                                                    dataset_name='states',
-                                                    output_file='icesee_ensemble_dataset.h5'
-                                                )
+                # Option A: no-copy, instant
+                out_vds = finalize_stack("_modelrun_datasets", mode="vds", dset_name="states")
+                print("VDS ready:", out_vds)
+                # Option B: portable single file
+                # out_h5 = finalize_stack("_modelrun_datasets", mode="h5", dset_name="states",
+                #                         allow_missing=False, compression="gzip", compression_opts=4)
+
+            # enkf_parallel_io.create_ensemble_dataset_(
+            #                                         folder_path='_modelrun_datasets',
+            #                                         file_pattern='icesee_enkf_ens_*.h5',
+            #                                         dataset_name='states',
+            #                                         output_file='icesee_ensemble_dataset.h5'
+            #                                     )
+            
             time_final_file_writing = MPI.Wtime() - time_final_file_writing
-            time_analysis_file_writing += time_final_file_writing
+           
             comm_world.Barrier()
         # ====== load data to be written to file ======
         # print("[ICESEE] Saving data ...")
@@ -411,7 +420,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
 
         # total file writing time initialization file writing + forecast file writing + analysis file writing
         init_file_time = comm_world.allreduce(time_init_file_writing, op=MPI.MAX)      
-        total_file_time = init_file_time + forecast_file_time + analysis_file_time
+        total_file_time = init_file_time + forecast_file_time + analysis_file_time + time_final_file_writing
 
         # Display elapsed time on rank 0
         comm_world.Barrier()
@@ -445,6 +454,18 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
             print(f"[ICESEE] You can restart from the previous checkpoint if enabled.")
         # close the EnKF I/O handler
         enkf_parallel_io.close()
+        comm_world.Barrier()
+        if model_kwargs.get("create_ensemble_dataset", True):
+            if rank_world == 0:
+                print("[ICESEE] Creating ensemble dataset...")
+                # Option A: no-copy, instant
+                out_vds = finalize_stack("_modelrun_datasets", mode="vds", dset_name="states")
+                print("VDS ready:", out_vds)
+                # Option B: portable single file
+                # out_h5 = finalize_stack("_modelrun_datasets", mode="h5", dset_name="states",
+                #                         allow_missing=False, compression="gzip", compression_opts=4)
+                
+            comm_world.Barrier()
         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
         print(f"Traceback details:\n{tb_str}")
         # comm_world.Abort(1)  # Abort all processes in the communicator
