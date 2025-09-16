@@ -572,24 +572,24 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
 
         # call create enseble file to write all data to file
         # comm_world.Barrier()
-        time_final_file_writing = MPI.Wtime()
-        if rank_world == 0:
-            if model_kwargs.get("create_ensemble_dataset", True):
-                print("[ICESEE] Creating ensemble dataset...")
-                # Option A: no-copy, instant
-                out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
-                print("VDS ready:", out_vds)
+        # time_final_file_writing = MPI.Wtime()
+        # if rank_world == 0:
+        #     if model_kwargs.get("create_ensemble_dataset", True):
+        #         print("[ICESEE] Creating ensemble dataset...")
+        #         # Option A: no-copy, instant
+        #         out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
+        #         print("VDS ready:", out_vds)
                 # Option B: portable single file
                 # out_h5 = finalize_stack(_modelrun_datasets, mode="h5", dset_name="states",
                 #                         allow_missing=False, compression="gzip", compression_opts=4)
                 
             # --- remove all .zarr files ---
-            for item in os.listdir(_modelrun_datasets):
-                if item.endswith(".zarr"):
-                    item_path = os.path.join(_modelrun_datasets, item)
-                    if os.path.isdir(item_path):
-                        shutil.rmtree(item_path, ignore_errors=True)
-                        print(f"[ICESEE] Removed {item_path}")
+            # for item in os.listdir(_modelrun_datasets):
+            #     if item.endswith(".zarr"):
+            #         item_path = os.path.join(_modelrun_datasets, item)
+            #         if os.path.isdir(item_path):
+            #             shutil.rmtree(item_path, ignore_errors=True)
+            #             print(f"[ICESEE] Removed {item_path}")
 
         # Option C: using EnKF_parallel_io method (slower)
         # enkf_parallel_io.create_ensemble_dataset_(
@@ -599,7 +599,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         #                                         output_file='icesee_ensemble_dataset.h5'
         #                                     )
         # comm_world.Barrier()  
-        time_final_file_writing = MPI.Wtime() - time_final_file_writing
+        # time_final_file_writing = MPI.Wtime() - time_final_file_writing
            
         # comm_world.Barrier()  
         # # ====== load data to be written to file ======
@@ -619,7 +619,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         )
 
         # ───────── Collective finalize (safe across ranks) ─────────
-        # comm_world.Barrier()  # ensure all finished compute before finalize
+        comm_world.Barrier()  # ensure all finished compute before finalize
 
         t0_final = MPI.Wtime()
         finalize_ok = True
@@ -631,10 +631,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                     print("[ICESEE] Creating ensemble dataset...")
                     out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
                     print("VDS ready:", out_vds)
-
-                # Only remove heavy intermediates at the very end
-                # If you want to keep them for debugging, make this conditional
-                # e.g., model_kwargs.get("cleanup_intermediates", True)
+                # --- remove all .zarr files ---
                 cleanup_intermediates = model_kwargs.get("cleanup_intermediates", True)
                 if cleanup_intermediates:
                     for item in os.listdir(_modelrun_datasets):
