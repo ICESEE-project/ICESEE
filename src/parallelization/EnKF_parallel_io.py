@@ -879,11 +879,14 @@ class EnKF_fully_parallel_IO:
             print("[ICESEE] Generating synthetic observations ...")
             obs_file = f"{self.base_path}/synthetic_obs.h5"
             # Remove existing file to avoid corruption
-            if os.path.exists(obs_file):
-                print(f"[ICESEE] Removing existing {obs_file}...")
-                os.remove(obs_file)
+            # if os.path.exists(obs_file):
+            #     print(f"[ICESEE] Removing existing {obs_file}...")
+            #     os.remove(obs_file)
             
-            statevec_true = zarr.open_array(store=f"{self.base_path}/statevec_true.zarr", mode='r+')
+            # statevec_true = zarr.open_array(store=f"{self.base_path}/statevec_true.zarr", mode='r+')
+            # read from HDF5 directly to avoid Zarr overhead for small nd
+            with h5py.File(f"{self.base_path}/true_nurged_states.h5", 'r') as f:
+                statevec_true = f['true_state'][:]
             _, indx_map, _ = icesee_get_index(**kwargs)
             
             try:
@@ -912,7 +915,7 @@ class EnKF_fully_parallel_IO:
                 print(f"[ICESEE] Error in HDF5 operations: {e}")
                 raise
         self.mpi_comm.Barrier()
-        return obs_t, m_obs
+        return ind_m, m_obs
         
 
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
@@ -1032,7 +1035,7 @@ class EnKF_fully_parallel_IO:
                                         hu_obs[local_indices, km] = result
                     self.mpi_comm.Barrier()
 
-            return obs_t, m_obs
+            return ind_m, m_obs
         except Exception as e:
             print(f"Error in _create_synthetic_observations: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))

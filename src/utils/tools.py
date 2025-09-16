@@ -15,7 +15,7 @@ import numpy as np
 import logging
 import traceback
 from mpi4py import MPI
-import json, glob, tempfile
+import json, glob, tempfile, hashlib
 
 CKPT_DIRNAME = "_checkpoints"
 CKPT_BASENAME = "icesee_ckpt.json"
@@ -660,11 +660,26 @@ def load_checkpoint(base_dir: str) -> dict | None:
     with open(path, "r") as f:
         return json.load(f)
 
-def compute_km_from_tobserve(tobserve: np.ndarray, k_start: int, m_obs: int) -> int:
-    """km = number of observation times already passed at step k_start."""
-    # tobserve may be 1-based times in your code (since you check k+1 == tobserve[km]).
-    # We therefore count those <= (k_start+1).
-    return int(np.sum(tobserve[:m_obs] <= (k_start + 1)))
+def compute_km_from_tobserve(tobserve, k_start, m_obs=None):
+    import numpy as np
+
+    # coerce tobserve to a flat int64 1-D array
+    tobserve = np.asarray(tobserve).astype(np.int64, copy=False).ravel()
+
+    # coerce m_obs to an int (or default to len(tobserve))
+    if m_obs is None:
+        m_obs_i = tobserve.size
+    else:
+        try:
+            m_obs_i = int(m_obs)  # handles python int or numpy scalar
+        except Exception:
+            m_obs_i = int(np.asarray(m_obs).reshape(-1)[0])
+    # clamp to valid range
+    m_obs_i = max(0, min(m_obs_i, tobserve.size))
+
+    # count how many obs times have occurred at start (remember your check uses k+1)
+    k1 = int(k_start) + 1
+    return int(np.count_nonzero(tobserve[:m_obs_i] <= k1))
 
 def step_already_done(base_dir: str, k: int) -> bool:
     # accept both zero-padded and plain
@@ -708,3 +723,33 @@ if __name__ == "__main__":
         allow_missing=args.allow_missing
     )
     print(f"[Finalize] Stacked dataset written: {out}")
+
+def icesee_fingerprint(params: dict, keys=("model_name","nd","nt","Nens","base_seed")) -> str:
+    sub = {k: params.get(k) for k in keys}
+    blob = json.dumps(sub, sort_keys=True, separators=(",",":"))
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()
+
+def h5_has_dataset_with_shape(path: str, dset: str, shape: tuple[int,...]) -> bool:
+    if not os.path.exists(path):
+        return False
+    try:
+        with h5py.File(path, "r") as f:
+            if dset not in f: return False
+            return tuple(f[dset].shape) == tuple(shape)
+    except Exception:
+        return False
+
+def h5_attr_equals(path: str, attr: str, expected: str) -> bool:
+    try:
+        with h5py.File(path, "r") as f:
+            return str(f.attrs.get(attr, "")) == str(expected)
+    except Exception:
+        return False
+
+def mark_h5_with_fingerprint(path: str, attr="icesee_fingerprint", value: str | None = None, extra: dict | None = None):
+    with h5py.File(path, "a") as f:
+        if value is not None:
+            f.attrs[attr] = value
+        if extra:
+            for k,v in extra.items():
+                f.attrs[k] = v

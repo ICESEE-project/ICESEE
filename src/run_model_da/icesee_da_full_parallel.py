@@ -34,7 +34,8 @@ from ICESEE.applications.supported_models import SupportedModels              # 
 from ICESEE.src.utils.tools import icesee_get_index, display_timing_default,display_timing_verbose, \
                                     save_all_data, finalize_stack, _extract_time_from_name, _sorted_step_files,\
                                     _last_completed_step, _ckpt_path, _atomic_write_json, save_checkpoint, load_checkpoint, \
-                                    compute_km_from_tobserve, step_already_done, reseed_for_step
+                                    compute_km_from_tobserve, step_already_done, reseed_for_step, icesee_fingerprint, h5_has_dataset_with_shape, \
+                                    h5_attr_equals, mark_h5_with_fingerprint
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
                               generate_pseudo_random_field_1d, \
@@ -67,6 +68,9 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
     force_fresh_start = model_kwargs.get("force_fresh_start", False) # ignore old files/ckpt
     checkpoint_every  = model_kwargs.get("checkpoint_every", 1)     # write ckpt every N steps
     base_seed         = model_kwargs.get("base_seed", 0)             # for reproducible reseed
+    nd               = model_kwargs.get("nd",params["nd"])      # model dimension
+    Nens             = model_kwargs.get("Nens",params["Nens"])  # number of ensemble members
+    nt               = model_kwargs.get("nt",params["nt"])      # number of time steps
 
 
     # start the timer
@@ -116,14 +120,22 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
     # --update model_kwargs with the file names
     model_kwargs.update({"true_nurged_file": _true_nurged, "synthetic_obs_file": _synthetic_obs})
 
+    # Build a reproducibility fingerprint from current config
+    fp = icesee_fingerprint({
+        "model_name": model,
+        "nd": nd,
+        "nt": nt,
+        "Nens": Nens,
+        "base_seed": base_seed,
+    })
+
+    # Should we reuse prior artifacts?
+    reuse_allowed = restart_enabled and not force_fresh_start
+
     # --- initialize seed for reproducibility ---
     ParallelManager().initialize_seed(comm_world, base_seed=base_seed)
 
     # --- intialize EnKF I/O handler class ---
-    nd = model_kwargs.get("nd",params["nd"])
-    nt = model_kwargs.get("nt",params["nt"])
-    Nens = model_kwargs.get("Nens",params["Nens"])
-    
     batch_size = model_kwargs.get("batch_size",100)
     # serial_file_creation = model_kwargs.get("serial_file_creation",True)
     serial_file_creation = True
@@ -175,47 +187,138 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                             })
 
         # --- Generate True and Nurged States -------------------------------------------------------------------
-        # -- time generation of true state ----
+        # ---- Generate True and Nurged States (skip on restart if valid) ----
         time_generation_true_and_wrong_state = MPI.Wtime()
-        # call the generate_true_wrong_state function
-        model_kwargs = generate_true_wrong_state(**model_kwargs)
-        # --- time generation of true state and nurged state ---
-        time_generation_true_and_wrong_state = MPI.Wtime() - time_generation_true_and_wrong_state
 
+        need_true = True
+        true_reason = None
+
+        if reuse_allowed and os.path.exists(_true_nurged):
+            if h5_has_dataset_with_shape(_true_nurged, "true_state", (nd, nt+1)) \
+            and h5_has_dataset_with_shape(_true_nurged, "nurged_state", (nd, nt+1)):
+                if h5_attr_equals(_true_nurged, "icesee_fingerprint", fp) \
+                or model_kwargs.get("allow_reuse_without_fingerprint", False):
+                    need_true = False
+                else:
+                    true_reason = "fingerprint mismatch/absent"
+            else:
+                true_reason = "dataset(s) missing or shape mismatch"
+        else:
+            true_reason = "file missing/fresh start"
+
+        if not need_true and rank_world == 0:
+            print("[ICESEE][RESTART] Using existing true/nurged states.")
+        elif need_true and rank_world == 0:
+            print(f"[ICESEE][RESTART] Regenerating true/nurged states ({true_reason}).")
+
+        if need_true:
+            model_kwargs = generate_true_wrong_state(**model_kwargs)
+            if rank_world == 0 and os.path.exists(_true_nurged):
+                mark_h5_with_fingerprint(_true_nurged, value=fp, extra={
+                    "dataset_name_true": "true_state",
+                    "dataset_name_nurged": "nurged_state",
+                })
+
+        time_generation_true_and_wrong_state = MPI.Wtime() - time_generation_true_and_wrong_state
         comm_world.Barrier()
 
         # --- Generate the Synthetic ObservationsObservations ---------------------------------------------------
-        # --- time generation of synthetic observations ---
+        # ---- Synthetic observations (skip if present & matching) ----
         time_generation_synthetic_obs = MPI.Wtime()
-        # call the generate_synthetic_observations function
-        if model_kwargs.get("generate_synthetic_obs", True):
-            synthetic_obs_zarr_path=f"{_modelrun_datasets}/synthetic_observations.zarr"
-            error_R_zarr_path=f"{_modelrun_datasets}/error_R.zarr"
+
+        # tobserve = None
+        # m_obs = None
+
+        syn_ok = False
+        if reuse_allowed and os.path.exists(_synthetic_obs):
+            syn_ok = True
+            # try:
+            #     with h5py.File(_synthetic_obs, "r") as f:
+            #         # must exist
+            #         if "tobserve" in f and "m_obs" in f:
+            #             tobserve = f["tobserve"][...]           # shape (m_obs,)
+            #             m_obs = int(f["m_obs"][0])
+            #             # basic sanity: increasing times, within [1..nt]
+            #             if tobserve.ndim == 1 and m_obs == len(tobserve) and m_obs >= 0:
+            #                 if np.all(np.diff(tobserve) >= 0) and int(tobserve[-1]) <= int(nt):
+            #                     # fingerprint (strict) or allow fallback if absent
+            #                     if h5_attr_equals(_synthetic_obs, "icesee_fingerprint", fp) \
+            #                     or model_kwargs.get("allow_reuse_without_fingerprint", False):
+            #                         syn_ok = True
+            # except Exception:
+            #     syn_ok = False
+
+        if model_kwargs.get("generate_synthetic_obs", True) and not syn_ok:
+            synthetic_obs_zarr_path = f"{_modelrun_datasets}/synthetic_observations.zarr"
+            error_R_zarr_path = f"{_modelrun_datasets}/error_R.zarr"
             model_kwargs.update({'synthetic_obs_zarr_path': synthetic_obs_zarr_path, 'error_R_zarr_path': error_R_zarr_path})
             tobserve, m_obs = enkf_parallel_io._create_synthetic_observations(**model_kwargs)
+            # if rank_world == 0:
+            #     with h5py.File(_synthetic_obs, "w") as f:
+            #         f.create_dataset("tobserve", data=np.asarray(tobserve, dtype=np.int64))
+            #         f.create_dataset("m_obs", data=np.asarray([m_obs], dtype=np.int64))
+            #         f.attrs["icesee_fingerprint"] = fp
         else:
-            tobserve, ind_m, m_obs = enkf_parallel_io.generate_observation_schedule(**model_kwargs)
+            if rank_world == 0:
+                print("[ICESEE][RESTART] Using existing synthetic observations.")
+            _, tobserve, m_obs = enkf_parallel_io.generate_observation_schedule(**model_kwargs)
+
         model_kwargs.update({"tobserve": tobserve, "m_obs": m_obs})
-        # --- time generation of synthetic observations ---
         time_generation_synthetic_obs = MPI.Wtime() - time_generation_synthetic_obs
+        comm_world.Barrier()
 
-        # Determine restart step
+        # ----- Decide restart step (supports explicit override) -----
         k_start = 0
-        if restart_enabled and not force_fresh_start:
-            # First preference: checkpoint file
-            if ckpt is not None and "last_done_k" in ckpt:
-                k_start = int(ckpt["last_done_k"] + 1)   # next step to compute
-            else:
-                # Otherwise infer from existing per-step files
-                last_k = _last_completed_step(_modelrun_datasets)
-                if last_k is not None:
-                    k_start = int(last_k + 1)
 
-        # Clamp to [0, nt)
-        nt = model_kwargs.get("nt", params["nt"])
-        k_start = min(max(0, k_start), nt)  # if all done, loop will be skipped
+        # User override (highest priority)
+        k_start_override = model_kwargs.get("k_start_override", None)
+        if k_start_override is not None:
+            if not (0 <= int(k_start_override) <= int(nt)):
+                raise ValueError(f"k_start_override={k_start_override} out of range [0, {nt}]")
+            k_start = int(k_start_override)
+        else:
+            # Normal restart logic
+            if restart_enabled and not force_fresh_start:
+                if ckpt is not None and "last_done_k" in ckpt:
+                    k_start = int(ckpt["last_done_k"] + 1)
+                else:
+                    last_k = _last_completed_step(_modelrun_datasets)
+                    if last_k is not None:
+                        k_start = int(last_k + 1)
 
-        # Compute km consistent with k_start and your (k+1==tobserve[km]) check
+        # Clamp
+        k_start = min(max(0, k_start), nt)
+
+        # (Optional) safety: ensure files before k_start exist contiguously
+        if model_kwargs.get("enforce_contiguous_history", True) and k_start > 0:
+            missing = []
+            for kk in range(k_start):
+                if not step_already_done(_modelrun_datasets, kk):
+                    missing.append(kk)
+            if missing:
+                raise RuntimeError(
+                    f"Cannot start at k={k_start}: missing completed steps {missing[:10]}{' ...' if len(missing)>10 else ''}. "
+                    "Either lower k_start_override or disable enforce_contiguous_history."
+                )
+
+        # (Optional) destructive but safe: truncate files AFTER k_start-1
+        if model_kwargs.get("truncate_after_k_start", False):
+            # delete any step files >= k_start
+            for fname in _sorted_step_files(_modelrun_datasets):
+                kk = _extract_time_from_name(fname)
+                if kk >= k_start:
+                    try: os.remove(fname)
+                    except Exception: pass
+            # clear checkpoint so we honor the override on subsequent restarts
+            if rank_world == 0:
+                ckpt_path = _ckpt_path(_modelrun_datasets)
+                if os.path.exists(ckpt_path):
+                    try: os.remove(ckpt_path)
+                    except Exception: pass
+        comm_world.Barrier()
+
+        # Recompute km consistent with your (k+1 == tobserve[km]) condition
+        # print(f"\n[ICESEE] Starting at k={k_start} (nt={nt}) on rank {rank_world}.\n")
         km = compute_km_from_tobserve(np.asarray(tobserve), k_start, m_obs)
         model_kwargs.update({"km": km})
 
@@ -228,15 +331,24 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
 
         comm_world.Barrier()
         #  --- generate the H file
-        rank = comm_world.Get_rank()
-        if rank == 0:
-            print("[ICESEE] Generating H matrix and saving to Zarr...")
-            H_matrix_zarr_path = f"{_modelrun_datasets}/H_matrix.zarr"
-            model_kwargs.update({'H_matrix_zarr_path': H_matrix_zarr_path})
-            enkf_parallel_io.H_matrix(**model_kwargs)
+        # ---- H matrix (skip if present & matching) ----
+        H_matrix_zarr_path = f"{_modelrun_datasets}/H_matrix.zarr"
+        if rank_world == 0:
+            need_H = True
+            meta_h5 = f"{_modelrun_datasets}/H_matrix_meta.h5"
+            if reuse_allowed and os.path.isdir(H_matrix_zarr_path) and tools.h5_attr_equals(meta_h5, "icesee_fingerprint", fp):
+                need_H = False
+                print("[ICESEE][RESTART] Using existing H matrix.")
+            if need_H:
+                print("[ICESEE] Generating H matrix and saving to Zarr...")
+                model_kwargs.update({'H_matrix_zarr_path': H_matrix_zarr_path})
+                enkf_parallel_io.H_matrix(**model_kwargs)
+                # record a tiny meta tag
+                with h5py.File(meta_h5, "w") as f:
+                    f.attrs["icesee_fingerprint"] = fp
+        comm_world.Barrier()
                     
         # --- Initialize the ensemble ---------------------------------------------------
-        comm_world.Barrier()
         Q_rho     = model_kwargs.get("Q_rho")
         len_scale = model_kwargs.get("length_scale")
         hdim  = params["nd"] // params["total_state_param_vars"]
@@ -249,10 +361,36 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         
         # -- time ensemble initialization ---
         time_ensemble_initialization = MPI.Wtime()
-        # call the ensemble_initialization function
-        model_kwargs, ensemble_vec, time_init_noise_generation, \
-        time_init_ensemble_mean_computation, time_init_file_writing, \
-        shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full = ensemble_initialization_full_parallel_run(**model_kwargs)
+
+        init_ok = reuse_allowed and tools.h5_has_dataset_with_shape(
+            os.path.join(_modelrun_datasets, "icesee_enkf_ens_0000.h5"),
+            "states", (nd, Nens)
+        )
+        if init_ok:
+            if rank_world == 0:
+                print("[ICESEE][RESTART] Skipping ensemble initialization (found step 0).")
+            
+            # load only dictionary essentials
+            if size_world <= params["Nens"]:
+                model_kwargs.update({'rank': sub_rank, 'color': color, 'comm': subcomm})
+                dim_list = comm_world.allgather(model_kwargs.get("nd", params["nd"]))
+                model_kwargs.update({"global_shape": model_kwargs.get("nd", params["nd"]), "dim_list": dim_list})
+            else:
+                model_kwargs.update({'rank': sub_rank, 'color': color, 'comm': subcomm})
+                model_kwargs.update({'ens_id': color}) # Nens = color
+                # gather all the vector dimensions from all processors
+                dim_list = subcomm.allgather(model_kwargs.get("nd", params["nd"]))
+                global_shape = sum(dim_list)
+                model_kwargs.update({"global_shape": global_shape, "dim_list": dim_list})
+            
+            time_init_file_writing = 0.0
+            time_init_noise_generation = 0.0
+            time_init_ensemble_mean_computation = 0.0
+        else:
+            # call the ensemble_initialization function
+            model_kwargs, ensemble_vec, time_init_noise_generation, \
+            time_init_ensemble_mean_computation, time_init_file_writing, \
+            shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full = ensemble_initialization_full_parallel_run(**model_kwargs)
         # --- time ensemble initialization ---
         time_ensemble_initialization = MPI.Wtime() - time_ensemble_initialization
 
@@ -330,8 +468,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         for k in range(k_start, model_kwargs.get("nt",params["nt"])): # resume from k_start
 
             # Idempotency guard: if output for this k exists, skip safely
-            if step_already_done(_modelrun_datasets, k):
-                # maintain km if this step was an observation time
+            if (not force_fresh_start) and step_already_done(_modelrun_datasets, k):
                 if (km < m_obs) and (k+1 == model_kwargs.get("tobserve")[km]):
                     km += 1
                     model_kwargs.update({"km": km})
@@ -434,7 +571,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         enkf_parallel_io.close()
 
         # call create enseble file to write all data to file
-        comm_world.Barrier()
+        # comm_world.Barrier()
         time_final_file_writing = MPI.Wtime()
         if rank_world == 0:
             if model_kwargs.get("create_ensemble_dataset", True):
@@ -461,11 +598,13 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         #                                         dataset_name='states',
         #                                         output_file='icesee_ensemble_dataset.h5'
         #                                     )
-        comm_world.Barrier()  
+        # comm_world.Barrier()  
         time_final_file_writing = MPI.Wtime() - time_final_file_writing
            
-        # ====== load data to be written to file ======
-        # print("[ICESEE] Saving data ...")
+        # comm_world.Barrier()  
+        # # ====== load data to be written to file ======
+        if rank_world == 0:
+            print("[ICESEE] Saving data ...")
         save_all_data(
             enkf_params=model_kwargs['enkf_params'],
             nofilter=True,
@@ -479,6 +618,47 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
             run_mode= np.array([params["execution_flag"]])
         )
 
+        # ───────── Collective finalize (safe across ranks) ─────────
+        # comm_world.Barrier()  # ensure all finished compute before finalize
+
+        t0_final = MPI.Wtime()
+        finalize_ok = True
+        finalize_err = ""
+
+        if rank_world == 0:
+            try:
+                if model_kwargs.get("create_ensemble_dataset", True):
+                    print("[ICESEE] Creating ensemble dataset...")
+                    out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
+                    print("VDS ready:", out_vds)
+
+                # Only remove heavy intermediates at the very end
+                # If you want to keep them for debugging, make this conditional
+                # e.g., model_kwargs.get("cleanup_intermediates", True)
+                cleanup_intermediates = model_kwargs.get("cleanup_intermediates", True)
+                if cleanup_intermediates:
+                    for item in os.listdir(_modelrun_datasets):
+                        if item.endswith(".zarr"):
+                            item_path = os.path.join(_modelrun_datasets, item)
+                            if os.path.isdir(item_path):
+                                shutil.rmtree(item_path, ignore_errors=True)
+                                print(f"[ICESEE] Removed {item_path}")
+
+            except Exception as e:
+                finalize_ok = False
+                finalize_err = f"{type(e).__name__}: {e}"
+
+        # Broadcast finalize status to all ranks so nobody hangs at a barrier
+        finalize_ok = comm_world.bcast(finalize_ok, root=0)
+        finalize_err = comm_world.bcast(finalize_err, root=0)
+
+        if not finalize_ok:
+            # Raise collectively so all ranks exit the same way
+            raise RuntimeError(f"[ICESEE][FINALIZE] Root finalize failed: {finalize_err}")
+
+        comm_world.Barrier()  # all ranks leave finalize together
+        time_final_file_writing = MPI.Wtime() - t0_final
+        # ──────── end collective finalize ────────
         # ─────────────────────────────────────────────────────────────
         #  End Timer and Aggregate Elapsed Time Across Processors
         # ─────────────────────────────────────────────────────────────
@@ -541,6 +721,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                 display_timing_default(total_elapsed_time, total_wall_time)
         else:
             None
+
     except Exception as e:
         # Handle exceptions and print error messages
         comm_world.Barrier()
