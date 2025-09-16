@@ -614,10 +614,6 @@ def get_grid_dimensions(nx, ny, ndim):
     
     return mx, my
 
-CKPT_DIRNAME = "_checkpoints"
-CKPT_BASENAME = "icesee_ckpt.json"
-FNAME_PATTERN = r'icesee_enkf_ens_(\d+)\.h5$'
-
 def _extract_time_from_name(fname: str) -> int:
     m = re.search(FNAME_PATTERN, os.path.basename(fname))
     if not m:
