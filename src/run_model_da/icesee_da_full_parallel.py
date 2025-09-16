@@ -272,7 +272,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
 
         # User override (highest priority)
         k_start_override = model_kwargs.get("k_start_override", None)
-        if k_start_override is not None:
+        if k_start_override is not None and not force_fresh_start:
             if not (0 <= int(k_start_override) <= int(nt)):
                 raise ValueError(f"k_start_override={k_start_override} out of range [0, {nt}]")
             k_start = int(k_start_override)
@@ -567,7 +567,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         # close the progress bar
         if rank_world == 0:
             pbar.close()
-        # comm_world.Barrier()
+        comm_world.Barrier()
         enkf_parallel_io.close()
 
         # call create enseble file to write all data to file
@@ -619,7 +619,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         )
 
         # ───────── Collective finalize (safe across ranks) ─────────
-        comm_world.Barrier()  # ensure all finished compute before finalize
+        # comm_world.Barrier()  # ensure all finished compute before finalize
 
         t0_final = MPI.Wtime()
         finalize_ok = True
@@ -632,14 +632,14 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                     out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
                     print("VDS ready:", out_vds)
                 # --- remove all .zarr files ---
-                cleanup_intermediates = model_kwargs.get("cleanup_intermediates", True)
-                if cleanup_intermediates:
-                    for item in os.listdir(_modelrun_datasets):
-                        if item.endswith(".zarr"):
-                            item_path = os.path.join(_modelrun_datasets, item)
-                            if os.path.isdir(item_path):
-                                shutil.rmtree(item_path, ignore_errors=True)
-                                print(f"[ICESEE] Removed {item_path}")
+                # cleanup_intermediates = model_kwargs.get("cleanup_intermediates", True)
+                # if cleanup_intermediates:
+                #     for item in os.listdir(_modelrun_datasets):
+                #         if item.endswith(".zarr"):
+                #             item_path = os.path.join(_modelrun_datasets, item)
+                #             if os.path.isdir(item_path):
+                #                 shutil.rmtree(item_path, ignore_errors=True)
+                #                 print(f"[ICESEE] Removed {item_path}")
 
             except Exception as e:
                 finalize_ok = False
