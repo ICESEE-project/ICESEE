@@ -7,7 +7,7 @@ physical-parameters:
 
 modeling-parameters:
   # Model parameters
-  num_years: 25          # Number of years to run the model (30-year assimilation period from paper)
+  num_years: 250          # Number of years to run the model (30-year assimilation period from paper)
   tinitial: 0.0           # Initial time
   timesteps_per_year: 0.5 # Number of timesteps per year (monthly for stability in SSA)
 
@@ -27,8 +27,8 @@ modeling-parameters:
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 50                      # Number of ensemble members (paper uses 50)
-  freq_obs: 4                 # Frequency of observations (annual, as per paper)
-  obs_max_time: 20            # Maximum time for observations (30 years)
+  freq_obs: 10                 # Frequency of observations (annual, as per paper)
+  obs_max_time: 200            # Maximum time for observations (30 years)
   obs_start_time: 5            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
@@ -44,7 +44,7 @@ enkf-parameters:
   # Statistical parameters
   sig_obs: [4, 5, 2]          # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
   sig_Q: [2, 1.0, 1.0]          # Process noise std dev (adjusted for H, Vx, Vy)
-  length_scale: [330,330,330]               # Length scale for covariance (5 km for friction, per paper)
+  length_scale: [430,420,440]               # Length scale for covariance (5 km for friction, per paper)
   
   seed: 1                       # Seed for random number generator
   inflation_factor: 1.10        # Inflation factor (optimal range 1.10–1.18 from paper)
@@ -79,7 +79,7 @@ enkf-parameters:
 
   # restart parameters (only available for fully parallel runs)
   restart_enabled: 1         # Enable restart functionality
-  force_fresh_start: 0       # Force fresh start even if checkpoints exist
+  force_fresh_start: 1       # Force fresh start even if checkpoints exist
   checkpoint_every: 5           # Frequency of checkpoints (every 5 assimilation cycles)
   base_seed: 42                 # Base seed for reproducibility
   k_start_override: 40       # Start overwrite from this assimilation cycle
