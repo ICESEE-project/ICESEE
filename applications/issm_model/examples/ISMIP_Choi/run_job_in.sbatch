@@ -5,7 +5,7 @@
 #SBATCH -n 192
 #SBATCH --ntasks-per-node=24
 #SBATCH --partition=cpu-large         # Partition name
-#SBATCH --mem=512G                     # Total memory per node
+#SBATCH --mem=256G                     # Total memory per node
 #SBATCH -pinferno
 #SBATCH -A gts-arobel3-atlas
 #SBATCH -osteadystate-%j.out
@@ -20,7 +20,8 @@ module load gcc/13
 #module load hdf5/1.12.3-ompi
 
 # Activate the virtual environment
-source ~/icesee-env/bin/activate
+#source ~/icesee-env/bin/activate
+export PYTHONPATH=/storage/home/hcoda1/8/bkyanjo3/r-arobel3-0:$PYTHONPATH
 
 #export ISSM_DIR=/storage/project/r-arobel3-0/bkyanjo3/ISSM-mpich-internal/ISSM
 #export LD_LIBRARY_PATH=/storage/home/hcoda1/8/bkyanjo3/r-arobel3-0/openmpi/lib:$LD_LIBRARY_PATH
@@ -32,6 +33,8 @@ alias matlab='matlab -r "addpath ${ISSM_DIR}/bin ${ISSM_DIR}/lib"'
 
 export LD_LIBRARY_PATH=/storage/home/hcoda1/8/bkyanjo3/r-arobel3-0/openmpi/lib:$LD_LIBRARY_PATH
 export PATH=/storage/home/hcoda1/8/bkyanjo3/r-arobel3-0/openmpi/bin:$PATH
+
+source  /storage/home/hcoda1/8/bkyanjo3/r-arobel3-0/spack_icesee_env.sh
 
 # ISSM environment
 #source $ISSM_DIR/etc/environment.sh
