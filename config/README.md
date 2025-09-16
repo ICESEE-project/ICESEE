@@ -36,6 +36,7 @@
 | `inflation_factor` | YAML configuration parameter for inflation factor | float | 1.0 | No | None | YAML |
 | `joint_estimated_params` | Variable used for joint estimated params in script logic | Unknown | Unknown | No | None | Variable |
 | `joint_estimation` | add joint estimation flag to params | Unknown | Unknown | No | None | Dictionary |
+| `k_start_override` | YAML configuration parameter for k start override | NoneType | None | No | None | YAML |
 | `length_scale` | YAML configuration parameter for length scale | list | [] | No | None | YAML |
 | `local_analysis` | YAML configuration parameter for local analysis | bool | False | No | None | YAML |
 | `localization_flag` | Controls localization flag behavior in script logic | bool | False | No | None | YAML |
