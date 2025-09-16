@@ -15,7 +15,10 @@ import numpy as np
 import logging
 import traceback
 from mpi4py import MPI
+import json, glob, tempfile
 
+CKPT_DIRNAME = "_checkpoints"
+CKPT_BASENAME = "icesee_ckpt.json"
 FNAME_PATTERN = r'icesee_enkf_ens_(\d+)\.h5$'  # matches ..._0000.h5, ..._12.h5, etc.
 
 def _extract_time(fname: str) -> int:
@@ -610,6 +613,75 @@ def get_grid_dimensions(nx, ny, ndim):
                 product = mx * my
     
     return mx, my
+
+CKPT_DIRNAME = "_checkpoints"
+CKPT_BASENAME = "icesee_ckpt.json"
+FNAME_PATTERN = r'icesee_enkf_ens_(\d+)\.h5$'
+
+def _extract_time_from_name(fname: str) -> int:
+    m = re.search(FNAME_PATTERN, os.path.basename(fname))
+    if not m:
+        raise ValueError(f"Bad filename (no time index): {fname}")
+    return int(m.group(1))
+
+def _sorted_step_files(base_dir: str) -> list[str]:
+    files = glob.glob(os.path.join(base_dir, "icesee_enkf_ens_*.h5"))
+    files.sort(key=_extract_time_from_name)
+    return files
+
+def _last_completed_step(base_dir: str) -> int | None:
+    """Return last completed time index (int) or None if none exist."""
+    files = _sorted_step_files(base_dir)
+    if not files:
+        return None
+    return _extract_time_from_name(files[-1])
+
+def _ckpt_path(base_dir: str) -> str:
+    return os.path.join(base_dir, CKPT_DIRNAME, CKPT_BASENAME)
+
+def _atomic_write_json(path: str, payload: dict):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    # atomic via temp + rename
+    fd, tmppath = tempfile.mkstemp(prefix=".tmp_ckpt_", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(payload, f, indent=2)
+            f.flush(); os.fsync(f.fileno())
+        os.replace(tmppath, path)
+    except Exception:
+        try: os.remove(tmppath)
+        except Exception: pass
+        raise
+
+def save_checkpoint(base_dir: str, **state):
+    """Rank 0 only: persist minimal restart info."""
+    _atomic_write_json(_ckpt_path(base_dir), state)
+
+def load_checkpoint(base_dir: str) -> dict | None:
+    path = _ckpt_path(base_dir)
+    if not os.path.exists(path):
+        return None
+    with open(path, "r") as f:
+        return json.load(f)
+
+def compute_km_from_tobserve(tobserve: np.ndarray, k_start: int, m_obs: int) -> int:
+    """km = number of observation times already passed at step k_start."""
+    # tobserve may be 1-based times in your code (since you check k+1 == tobserve[km]).
+    # We therefore count those <= (k_start+1).
+    return int(np.sum(tobserve[:m_obs] <= (k_start + 1)))
+
+def step_already_done(base_dir: str, k: int) -> bool:
+    # accept both zero-padded and plain
+    p1 = os.path.join(base_dir, f"icesee_enkf_ens_{k:04d}.h5")
+    p2 = os.path.join(base_dir, f"icesee_enkf_ens_{k}.h5")
+    return os.path.exists(p1) or os.path.exists(p2)
+
+def reseed_for_step(base_seed: int, rank_world: int, k: int):
+    """Deterministic per-step seeding (optional, keeps behavior reproducible on restart)."""
+    # Any scheme is fine as long as it's stable. This mixes step + rank.
+    seed = (base_seed * 1315423911 + 2654435761 * (k + 1) + rank_world) % (2**31 - 1)
+    np.random.seed(seed)
+    return seed
 
 if __name__ == "__main__":
     import argparse

@@ -76,3 +76,9 @@ enkf-parameters:
   execution_mode: 2                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
   create_ensemble_dataset: True # Create dataset for ensemble runs
   data_path: _modelrun_datasets
+
+  # restart parameters
+  restart_enabled: True         # Enable restart functionality
+  force_fresh_start: False      # Force fresh start even if checkpoints exist
+  checkpoint_every: 5           # Frequency of checkpoints (every 5 assimilation cycles)
+  base_seed: 42                 # Base seed for reproducibility

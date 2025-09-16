@@ -246,6 +246,10 @@ if not flag_jupyter:
         'observations_available': enkf_params.get('observations_available', False),
         'obs_data_path': enkf_params.get('obs_data_path', params.get('coupled_model_datasets_dir', 'data') + '/observations_data.h5'),
         'create_ensemble_dataset': enkf_params.get('create_ensemble_dataset', True),
+        'restart_enabled': enkf_params.get('restart_enabled', True),
+        'force_fresh_start': enkf_params.get('force_fresh_start', False),
+        'checkpoint_every': int(enkf_params.get('checkpoint_every', 1)),
+        'base_seed': int(enkf_params.get('base_seed', 42)),
     }
 
     # # update kwargs dictonary with params
