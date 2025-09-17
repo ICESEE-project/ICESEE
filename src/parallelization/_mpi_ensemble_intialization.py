@@ -478,9 +478,11 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
                     # ensemble_vec[:,ens] += noise
                     ensemble_vec += noise
-
+                      
+                    time_init_file_writing = MPI.Wtime()    
                     enkf_parallel_io.write_forecast(0, ensemble_vec, ensemble_id)
                     # enkf_parallel_io.datasets[0][:, ens] = ensemble_vec
+                    time_init_file_writing = MPI.Wtime() - time_init_file_writing
          
         else:
             if rank_world == 0:
@@ -549,6 +551,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
                 shape_ens = np.empty(2,dtype=np.int32)
                 # pos, gs_model, L_C
 
+            time_init_file_writing = MPI.Wtime()    
             # scatter  enkf_parallel_io.nd_local_world of the ensemble to all processors
             localshape = enkf_parallel_io.nd_local_world
             all_local_shapes = comm_world.gather(localshape)
@@ -564,6 +567,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
             local_ensemble = np.empty((localshape, params["Nens"]), dtype=np.float64)
             comm_world.Scatterv([ensemble_vec, counts_rows, displacement_rows, MPI.DOUBLE], local_ensemble, root=0)
             enkf_parallel_io.datasets[0][localshape, :] = local_ensemble
+            time_init_file_writing = MPI.Wtime() - time_init_file_writing
 
         comm_world.Barrier()
         time_init_ensemble_mean_computation = MPI.Wtime()
@@ -720,7 +724,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
 
     if params.get("default_run", False):
         return model_kwargs, None, time_init_noise_generation, \
-               time_init_ensemble_mean_computation, None, \
+               time_init_ensemble_mean_computation,time_init_file_writing, \
                 None, None, None, None
     else:
         return model_kwargs, ensemble_vec, time_init_noise_generation, \

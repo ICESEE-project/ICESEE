@@ -570,37 +570,6 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         comm_world.Barrier()
         enkf_parallel_io.close()
 
-        # call create enseble file to write all data to file
-        # comm_world.Barrier()
-        # time_final_file_writing = MPI.Wtime()
-        # if rank_world == 0:
-        #     if model_kwargs.get("create_ensemble_dataset", True):
-        #         print("[ICESEE] Creating ensemble dataset...")
-        #         # Option A: no-copy, instant
-        #         out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
-        #         print("VDS ready:", out_vds)
-                # Option B: portable single file
-                # out_h5 = finalize_stack(_modelrun_datasets, mode="h5", dset_name="states",
-                #                         allow_missing=False, compression="gzip", compression_opts=4)
-                
-            # --- remove all .zarr files ---
-            # for item in os.listdir(_modelrun_datasets):
-            #     if item.endswith(".zarr"):
-            #         item_path = os.path.join(_modelrun_datasets, item)
-            #         if os.path.isdir(item_path):
-            #             shutil.rmtree(item_path, ignore_errors=True)
-            #             print(f"[ICESEE] Removed {item_path}")
-
-        # Option C: using EnKF_parallel_io method (slower)
-        # enkf_parallel_io.create_ensemble_dataset_(
-        #                                         folder_path='_modelrun_datasets',
-        #                                         file_pattern='icesee_enkf_ens_*.h5',
-        #                                         dataset_name='states',
-        #                                         output_file='icesee_ensemble_dataset.h5'
-        #                                     )
-        # comm_world.Barrier()  
-        # time_final_file_writing = MPI.Wtime() - time_final_file_writing
-           
         # comm_world.Barrier()  
         # # ====== load data to be written to file ======
         if rank_world == 0:
@@ -620,7 +589,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
 
         # ───────── Collective finalize (safe across ranks) ─────────
         # comm_world.Barrier()  # ensure all finished compute before finalize
-
+        # print(f"[ICESEE] Rank {rank_world} entering finalize.")
         t0_final = MPI.Wtime()
         finalize_ok = True
         finalize_err = ""
@@ -632,14 +601,14 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                     out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
                     print("VDS ready:", out_vds)
                 # --- remove all .zarr files ---
-                # cleanup_intermediates = model_kwargs.get("cleanup_intermediates", True)
-                # if cleanup_intermediates:
-                #     for item in os.listdir(_modelrun_datasets):
-                #         if item.endswith(".zarr"):
-                #             item_path = os.path.join(_modelrun_datasets, item)
-                #             if os.path.isdir(item_path):
-                #                 shutil.rmtree(item_path, ignore_errors=True)
-                #                 print(f"[ICESEE] Removed {item_path}")
+                cleanup_intermediates = model_kwargs.get("cleanup_intermediates", True)
+                if cleanup_intermediates:
+                    for item in os.listdir(_modelrun_datasets):
+                        if item.endswith(".zarr"):
+                            item_path = os.path.join(_modelrun_datasets, item)
+                            if os.path.isdir(item_path):
+                                shutil.rmtree(item_path, ignore_errors=True)
+                                print(f"[ICESEE] Removed {item_path}")
 
             except Exception as e:
                 finalize_ok = False
@@ -652,50 +621,93 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         if not finalize_ok:
             # Raise collectively so all ranks exit the same way
             raise RuntimeError(f"[ICESEE][FINALIZE] Root finalize failed: {finalize_err}")
-
+        # print(f"[ICESEE] Rank {rank_world} finalize successful.")
         comm_world.Barrier()  # all ranks leave finalize together
+        # print(f"[ICESEE] Rank {rank_world} passed finalize barrier.\n")
         time_final_file_writing = MPI.Wtime() - t0_final
         # ──────── end collective finalize ────────
         # ─────────────────────────────────────────────────────────────
         #  End Timer and Aggregate Elapsed Time Across Processors
         # ─────────────────────────────────────────────────────────────
-        # --total elapsed time
-        global_end_time = MPI.Wtime()
-        global_elapsed_time = global_end_time - global_start_time
-        # Reduce elapsed time across all processors (sum across ranks)
-        total_elapsed_time = comm_world.allreduce(global_elapsed_time, op=MPI.SUM)
-        total_wall_time = comm_world.allreduce(global_elapsed_time, op=MPI.MAX)
+        # ── Collective timing reductions (exception-safe) ──
+        timing_ok = True
+        timing_err = ""
 
-        # -- timing true and wrong state generation
-        true_wrong_time = comm_world.allreduce(time_generation_true_and_wrong_state, op=MPI.MAX)
+        try:
+            # --total elapsed time
+            global_end_time = MPI.Wtime()
+            global_elapsed_time = global_end_time - global_start_time
 
-        # -- timing ensemble initialization
-        ensemble_init_time = comm_world.allreduce(time_ensemble_initialization, op=MPI.MAX)
+            # Reduce elapsed time across all processors (sum across ranks)
+            # print(f"\n[ICESEE] Rank {rank_world} starting elapsed time reduction.")
+            total_elapsed_time = comm_world.allreduce(global_elapsed_time, op=MPI.SUM)
+            # print(f"[ICESEE] Rank {rank_world} finished elapsed time reduction.\n")
 
-        # -- timing forecast step
-        forecast_step_time = comm_world.allreduce(time_forecast_step, op=MPI.MAX)
+            # print(f"\n[ICESEE] Rank {rank_world} starting wall time reduction.")  
+            total_wall_time = comm_world.allreduce(global_elapsed_time, op=MPI.MAX)
+            # print(f"[ICESEE] Rank {rank_world} finished wall time reduction.\n")
 
-        # -- timing forecast noise generation
-        forecast_noise_time = comm_world.allreduce(time_forecast_noise_generation, op=MPI.MAX)
+            # -- timing true and wrong state generation
+            # print(f"\n[ICESEE] Rank {rank_world} starting true/wrong state time reduction.")
+            true_wrong_time = comm_world.allreduce(time_generation_true_and_wrong_state, op=MPI.MAX)
+            # print(f"[ICESEE] Rank {rank_world} finished true/wrong state time reduction.\n")
 
-        # -- timing analysis step
-        analysis_step_time = comm_world.allreduce(time_analysis_step, op=MPI.MAX)
+            # -- timing ensemble initialization
+            # print(f"\n[ICESEE] Rank {rank_world} starting ensemble initialization time reduction.") 
+            ensemble_init_time = comm_world.allreduce(time_ensemble_initialization, op=MPI.MAX)
+            # print(f"[ICESEE] Rank {rank_world} finished ensemble initialization time reduction.\n")
 
-        # -- total assimilation time = ensemble init + forecast step + analysis step
-        assimilation_time = ensemble_init_time + forecast_step_time + analysis_step_time
+            # -- timing forecast step
+            # print(f"\n[ICESEE] Rank {rank_world} starting forecast step time reduction.")
+            forecast_step_time = comm_world.allreduce(time_forecast_step, op=MPI.MAX)
+            # print(f"[ICESEE] Rank {rank_world} finished forecast step time reduction.\n")
 
-        # --- time forecast file writing ---
-        forecast_file_time = comm_world.allreduce(time_forecast_file_writing, op=MPI.MAX)
+            # -- timing forecast noise generation
+            # print(f"\n[ICESEE] Rank {rank_world} starting forecast noise generation time reduction.")
+            forecast_noise_time = comm_world.allreduce(time_forecast_noise_generation, op=MPI.MAX)
+            # print(f"[ICESEE] Rank {rank_world} finished forecast noise generation time reduction.\n")
 
-        # --- time analysis file writing ---
-        analysis_file_time = comm_world.allreduce(time_analysis_file_writing, op=MPI.MAX)
+            # -- timing analysis step
+            # print(f"\n[ICESEE] Rank {rank_world} starting analysis step time reduction.")
+            analysis_step_time = comm_world.allreduce(time_analysis_step, op=MPI.MAX)
+            # print(f"[ICESEE] Rank {rank_world} finished analysis step time reduction.\n")
 
-        # total file writing time initialization file writing + forecast file writing + analysis file writing
-        init_file_time = comm_world.allreduce(time_init_file_writing, op=MPI.MAX)      
-        total_file_time = init_file_time + forecast_file_time + analysis_file_time + time_final_file_writing
+            # -- total assimilation time = ensemble init + forecast step + analysis step
+            assimilation_time = ensemble_init_time + forecast_step_time + analysis_step_time
+
+            # --- time forecast file writing ---
+            # print(f"\n[ICESEE] Rank {rank_world} starting forecast file writing time reduction.")
+            forecast_file_time = comm_world.allreduce(time_forecast_file_writing, op=MPI.MAX)
+            # print(f"[ICESEE] Rank {rank_world} finished forecast file writing time reduction.\n")
+
+            # --- time analysis file writing ---
+            # print(f"\n[ICESEE] Rank {rank_world} starting analysis file writing time reduction.")
+            analysis_file_time = comm_world.allreduce(time_analysis_file_writing, op=MPI.MAX)
+            # print(f"[ICESEE] Rank {rank_world} finished analysis file writing time reduction.\n")
+
+            # total file writing time initialization file writing + forecast file writing + analysis file writing
+            # print(f"\n[ICESEE] Rank {rank_world} starting initialization file writing time reduction.")
+            init_file_time = comm_world.allreduce(time_init_file_writing, op=MPI.MAX)      
+            # print(f"[ICESEE] Rank {rank_world} finished initialization file writing time reduction.\n")
+            total_file_time = init_file_time + forecast_file_time + analysis_file_time + time_final_file_writing
+        except Exception as e:
+            timing_ok = False
+            timing_err = f"{type(e).__name__}: {e}"
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
+
+        # Broadcast timing status to all ranks so nobody hangs at a barrier
+        timing_ok = comm_world.bcast(timing_ok, root=0)
+        timing_err = comm_world.bcast(timing_err, root=0)
+        if not timing_ok:
+            # Raise collectively so all ranks exit the same way
+            raise RuntimeError(f"[ICESEE][TIMING] Collective timing reduction failed: {timing_err}")
+        # ── end collective timing reductions ──
 
         # Display elapsed time on rank 0
+        # print(f"[ICESEE] Rank {rank_world} finished in {global_elapsed_time:.2f}s (wall {global_end_time - global_start_time:.2f}s).")
         comm_world.Barrier()
+        # print(f"[ICESEE] Rank {rank_world} passed timing barrier.")
         if rank_world == 0:
             verbose = model_kwargs.get("verbose", False)
             # if verbose:
