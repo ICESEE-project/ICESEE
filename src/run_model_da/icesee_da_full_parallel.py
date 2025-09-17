@@ -35,7 +35,7 @@ from ICESEE.src.utils.tools import icesee_get_index, display_timing_default,disp
                                     save_all_data, finalize_stack, _extract_time_from_name, _sorted_step_files,\
                                     _last_completed_step, _ckpt_path, _atomic_write_json, save_checkpoint, load_checkpoint, \
                                     compute_km_from_tobserve, step_already_done, reseed_for_step, icesee_fingerprint, h5_has_dataset_with_shape, \
-                                    h5_attr_equals, mark_h5_with_fingerprint
+                                    h5_attr_equals, mark_h5_with_fingerprint, env_flag
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
                               generate_pseudo_random_field_1d, \
@@ -152,7 +152,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
 
         # set modeel_nprocs adaptively
         # total_cores = os.cpu_count()
-        if model_kwargs.get('ICESEE_PERFORMANCE_TEST') or os.environ.get("ICESEE_PERFORMANCE_TEST"):
+        if model_kwargs.get('ICESEE_PERFORMANCE_TEST') or env_flag("ICESEE_PERFORMANCE_TEST", default=False):
             total_cores = size_world * model_nprocs
         else:
             # Get total cores from SLURM environment (more reliable than os.cpu_count())
