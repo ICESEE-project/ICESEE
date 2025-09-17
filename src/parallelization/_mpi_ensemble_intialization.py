@@ -9,6 +9,7 @@ import numpy as np
 import h5py
 import gc
 import zarr
+import os
 from mpi4py import MPI
 
 from ICESEE.src.utils.tools import icesee_get_index
@@ -218,7 +219,10 @@ def ensemble_initialization(**model_kwargs):
             if diff >= 0:
                 # split the diff amaongest all processors
                 min_model_nprocs = max(model_nprocs-1, 1) 
-                model_nprocs = max(min_model_nprocs, model_nprocs + (diff // size_world))
+                if model_kwargs.get('ICESEE_PERFORMANCE_TEST') or os.environ.get("ICESEE_PERFORMANCE_TEST"):
+                    model_nprocs = model_nprocs
+                else:
+                    model_nprocs = max(min_model_nprocs, model_nprocs + (diff // size_world))
             else:
                 model_nprocs = model_nprocs
 
@@ -587,7 +591,10 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
             if diff >= 0:
                 # split the diff amaongest all processors
                 min_model_nprocs = max(model_nprocs-1, 1) 
-                model_nprocs = max(min_model_nprocs, model_nprocs + (diff // size_world))
+                if model_kwargs.get('ICESEE_PERFORMANCE_TEST') or os.environ.get("ICESEE_PERFORMANCE_TEST"):
+                    model_nprocs = params.get("model_nprocs", 1)
+                else:
+                    model_nprocs = max(min_model_nprocs, model_nprocs + (diff // size_world))
             else:
                 model_nprocs = model_nprocs
 

@@ -109,7 +109,17 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         model_nprocs = params.get("model_nprocs", 1)
 
         # set modeel_nprocs adaptively
-        total_cores = os.cpu_count()
+         if model_kwargs.get('ICESEE_PERFORMANCE_TEST') or os.environ.get("ICESEE_PERFORMANCE_TEST"):
+            total_cores = size_world * model_nprocs
+        else:
+            # Get total cores from SLURM environment (more reliable than os.cpu_count())
+            try:
+                total_cores = int(os.environ.get("SLURM_NTASKS", os.cpu_count()))
+                slurm_nodes = int(os.environ.get("SLURM_JOB_NUM_NODES", 1))
+            except ValueError:
+                total_cores = os.cpu_count()  # Fallback if not in SLURM
+                slurm_nodes = 1
+                
         base_total_procs = size_world + (size_world * model_nprocs)  # MPI + MATLAB processes
         diff = total_cores - base_total_procs  # Available or deficit cores
 

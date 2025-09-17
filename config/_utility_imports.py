@@ -251,6 +251,7 @@ if not flag_jupyter:
         'checkpoint_every': int(enkf_params.get('checkpoint_every', 1)),
         'base_seed': int(enkf_params.get('base_seed', 42)),
         'k_start_override': enkf_params.get('k_start_override', None),
+        'ICESEE_PERFORMANCE_TEST': enkf_params.get('ICESEE_PERFORMANCE_TEST', False), # this is an environment variable
     }
 
     # # update kwargs dictonary with params
