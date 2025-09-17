@@ -550,10 +550,11 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
 
                 # ===== Global analysis step =====
                 if model_kwargs.get('global_analysis', True) or model_kwargs.get('local_analysis', False):
-                    # -- time global analysis step ---
-                    _time_analysis_step = MPI.Wtime()
+                   
                     obs_index = model_kwargs["obs_index"]
                     if (km < params["number_obs_instants"]) and (k+1 == obs_index[km]):
+                         # -- time global analysis step ---
+                         _time_analysis_step = MPI.Wtime()
                         # *- parallelize the getting Eta, D and HA steps
                         # if Nens >= size_world:
                         #     with h5py.File(input_file, "r", driver="mpio", comm=comm_world) as f:

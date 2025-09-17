@@ -53,6 +53,8 @@ def ensemble_initialization(**model_kwargs):
     size_world = comm_world.Get_size()
 
     time_init_noise_generation = 0.0
+    time_init_file_writing     = 0.0
+    time_init_ensemble_mean_computation = 0.0
 
     if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
         if params["default_run"] and size_world <= params["Nens"] and not (model_kwargs.get("sequential_ensemble_initialization", False)):
@@ -238,14 +240,14 @@ def ensemble_initialization(**model_kwargs):
             # write the ensemble to the file
 
             # -- time ensemble mean computation ---
-            time_init_ensemble_mean_computation = MPI.Wtime()
+            _time_init_ensemble_mean_computation = MPI.Wtime()
             ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
-            time_init_ensemble_mean_computation = MPI.Wtime() - time_init_ensemble_mean_computation
+            time_init_ensemble_mean_computation += MPI.Wtime() - _time_init_ensemble_mean_computation
 
             # ---time file writing ---
-            time_init_file_writing = MPI.Wtime()
+            _time_init_file_writing = MPI.Wtime()
             parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
-            time_init_file_writing = MPI.Wtime() - time_init_file_writing
+            time_init_file_writing += MPI.Wtime() - _time_init_file_writing
 
         # comm_world.Bcast(ensemble_vec, root=0)
         # hdim = params["nd"] // params["total_state_param_vars"]
@@ -343,9 +345,9 @@ def ensemble_initialization(**model_kwargs):
             ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
             time_init_ensemble_mean_computation = MPI.Wtime() - time_init_ensemble_mean_computation
 
-            time_init_file_writing = MPI.Wtime()
+            _time_init_file_writing = MPI.Wtime()
             parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
-            time_init_file_writing = MPI.Wtime() - time_init_file_writing
+            time_init_file_writing += MPI.Wtime() - _time_init_file_writing
             
         elif params["sequential_run"]:
             comm_world.Barrier()
@@ -426,6 +428,8 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
     size_world   = comm_world.Get_size()
 
     time_init_noise_generation = 0.0
+    time_init_file_writing     = 0.0
+    time_init_ensemble_mean_computation = 0.0
 
     if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
         if params["default_run"] and size_world <= params["Nens"] and not (model_kwargs.get("sequential_ensemble_initialization", False)):
@@ -478,9 +482,11 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
                     # ensemble_vec[:,ens] += noise
                     ensemble_vec += noise
-
+                      
+                    _time_init_file_writing = MPI.Wtime()    
                     enkf_parallel_io.write_forecast(0, ensemble_vec, ensemble_id)
                     # enkf_parallel_io.datasets[0][:, ens] = ensemble_vec
+                    time_init_file_writing += MPI.Wtime() - _time_init_file_writing
          
         else:
             if rank_world == 0:
@@ -549,6 +555,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
                 shape_ens = np.empty(2,dtype=np.int32)
                 # pos, gs_model, L_C
 
+            _time_init_file_writing = MPI.Wtime()    
             # scatter  enkf_parallel_io.nd_local_world of the ensemble to all processors
             localshape = enkf_parallel_io.nd_local_world
             all_local_shapes = comm_world.gather(localshape)
@@ -564,12 +571,15 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
             local_ensemble = np.empty((localshape, params["Nens"]), dtype=np.float64)
             comm_world.Scatterv([ensemble_vec, counts_rows, displacement_rows, MPI.DOUBLE], local_ensemble, root=0)
             enkf_parallel_io.datasets[0][localshape, :] = local_ensemble
+            time_init_file_writing += MPI.Wtime() - _time_init_file_writing
 
         comm_world.Barrier()
-        time_init_ensemble_mean_computation = MPI.Wtime()
+        _time_init_ensemble_mean_computation = MPI.Wtime()
         # enkf_parallel_io.compute_forecast_mean_chunked(0)
         enkf_parallel_io.compute_forecast_mean_chunked_v2(0)
-        time_init_ensemble_mean_computation = MPI.Wtime() - time_init_ensemble_mean_computation
+        # ens_mean = enkf_parallel_io.compute_forecast_mean(0)
+        # ens_mean = .datasets[0][:, :].mean(axis=1)
+        time_init_ensemble_mean_computation += MPI.Wtime() - _time_init_ensemble_mean_computation
 
         # now reset the model_nprocs
         if rank_world == 0:
@@ -674,11 +684,11 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
             
             time_init_ensemble_mean_computation = MPI.Wtime()
             ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
-            time_init_ensemble_mean_computation = MPI.Wtime() - time_init_ensemble_mean_computation
+            time_init_ensemble_mean_computation += MPI.Wtime() - _time_init_ensemble_mean_computation
 
-            time_init_file_writing = MPI.Wtime()
+            _time_init_file_writing = MPI.Wtime()
             parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
-            time_init_file_writing = MPI.Wtime() - time_init_file_writing
+            time_init_file_writing += MPI.Wtime() - _time_init_file_writing
             
         elif params["sequential_run"]:
             comm_world.Barrier()
@@ -718,7 +728,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
 
     if params.get("default_run", False):
         return model_kwargs, None, time_init_noise_generation, \
-               time_init_ensemble_mean_computation, None, \
+               time_init_ensemble_mean_computation,time_init_file_writing, \
                 None, None, None, None
     else:
         return model_kwargs, ensemble_vec, time_init_noise_generation, \

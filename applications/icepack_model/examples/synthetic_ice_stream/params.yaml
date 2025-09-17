@@ -44,7 +44,7 @@ enkf-parameters:
   generate_true_state:    1  # Generate true state for synthetic observations
   generate_nurged_state:  1  # Generate nudged state for synthetic observations
   use_ensemble_pertubations: 1 # Use ensemble perturbations for ensemble state
-  sequential_ensemble_initialization: 1  # Sequential ensemble initialization (True for sequential, False for parallel)
+  sequential_ensemble_initialization: 0  # Sequential ensemble initialization (True for sequential, False for parallel)
 
   # Statistical parameters (based on the number of state variables)
   sig_model: [0.1,0.1,0.1] # model error standard deviation
@@ -80,3 +80,8 @@ enkf-parameters:
   execution_mode: 1                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
   data_path: _modelrun_datasets
  
+  # restart parameters (only suppoertd for fully parallel runs)
+  restart_enabled: 1        # Enable restart functionality
+  force_fresh_start: 0     # Force fresh start even if checkpoints exist
+  checkpoint_every: 5           # Frequency of checkpoints (every 5 assimilation cycles)
+  base_seed: 42 

@@ -15,6 +15,7 @@ import h5py
 import numpy as np
 from mpi4py import MPI
 import os
+import re
 import glob
 import gc
 import zarr
@@ -24,6 +25,7 @@ import shutil
 from numcodecs import blosc
 import time
 import functools
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 blosc.use_threads = False
 
@@ -165,15 +167,17 @@ class EnKF_fully_parallel_IO:
 
             if MPI.COMM_WORLD.Get_rank() == 0:
                 for t in range(t_start, t_start + nfiles):
-                    fname = f"{self.base_path}/{self.file_prefix}_{t:04d}.h5"
+                    fname = f"{self.base_path}/{self.file_prefix}_ens_{t:04d}.h5"
                     with h5py.File(fname, 'w') as f:
-                        row_chunk = min(1024, self.nd)
+                        # row_chunk = min(1024, self.nd)
+                        row_chunk = self.nd_local_world
                         col_chunk = 1
                         f.create_dataset(
                             'states', (self.nd, self.nens),
                             chunks=(row_chunk, col_chunk),
                             # compression="gzip", compression_opts=4,
-                            compression="lzf",
+                            # compression="lzf",
+                            compression=None,
                             dtype='f8'
                         )
                         # f.create_dataset(
@@ -185,7 +189,7 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Barrier()
 
             for t in range(t_start, t_start + nfiles):
-                fname = f"{self.base_path}/{self.file_prefix}_{t:04d}.h5"
+                fname = f"{self.base_path}/{self.file_prefix}_ens_{t:04d}.h5"
                 f = h5py.File(fname, 'a', driver='mpio', comm=self.comm)
                 # f = h5py.File(fname, 'a', driver='mpio', comm=self.mpi_comm)
                 f.atomic = False
@@ -211,13 +215,15 @@ class EnKF_fully_parallel_IO:
                 f = h5py.File(fname, 'w', driver='mpio', comm=self.comm)
                 # f = h5py.File(fname, 'w', driver='mpio', comm=self.mpi_comm)
                 f.atomic = False
-                row_chunk = min(1024, self.nd)
+                # row_chunk = min(1024, self.nd)
+                row_chunk = self.nd_local_world
                 col_chunk = 1
                 dset = f.create_dataset(
                     'states', (self.nd, self.nens),
                     chunks=(row_chunk, col_chunk),
                     # compression="gzip", compression_opts=4,
-                    compression="lzf",
+                    # compression="lzf",
+                    compression=None,
                     dtype='f8'
                 )
                 self.files.append(f)
@@ -321,64 +327,68 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
+    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD) 
     def read_forecast(self, t, ens_idx):
-        try:
-            self._ensure_batch(t)
-            batch_idx = t - self.current_batch_start
-            start = MPI.Wtime()
-            data = self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx]
-            # print(f"[ICESEE] Finished reading forecast ensemble {ens_idx} ensemble shape: {data.shape} norm {np.linalg.norm(data)}")
-            read_time = MPI.Wtime() - start
-            return data
-        except Exception as e:
-            print(f"Error occurred in read_forecast: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
+        # try:
+        self._ensure_batch(t)
+        batch_idx = t - self.current_batch_start
+        start = MPI.Wtime()
+        data = self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx]
+        # print(f"[ICESEE] Finished reading forecast ensemble {ens_idx} ensemble shape: {data.shape} norm {np.linalg.norm(data)}")
+        read_time = MPI.Wtime() - start
+        return data
+        # except Exception as e:
+        #     print(f"Error occurred in read_forecast: {e}")
+        #     tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+        #     print(f"Traceback details:\n{tb_str}")
+        #     self.mpi_comm.Abort(1)
 
+    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD) 
     def write_forecast(self, t, data, ens_idx):
-        try:
-            self._ensure_batch(t)
-            batch_idx = t - self.current_batch_start
-            start = MPI.Wtime()
-            self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx] = data
-            self.files[batch_idx].flush()  # Ensure data is written to disk
-            write_time = MPI.Wtime() - start
-        except Exception as e:
-            print(f"Error occurred in write_forecast: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
+        # try:
+        self._ensure_batch(t)
+        batch_idx = t - self.current_batch_start
+        start = MPI.Wtime()
+        self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx] = data
+        self.files[batch_idx].flush()  # Ensure data is written to disk
+        write_time = MPI.Wtime() - start
+        # except Exception as e:
+        #     print(f"Error occurred in write_forecast: {e}")
+        #     tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+        #     print(f"Traceback details:\n{tb_str}")
+        #     self.mpi_comm.Abort(1)
 
+    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD) 
     def read_analysis(self, t, ens_idx):
-        try:
-            self._ensure_batch(t)
-            batch_idx = t - self.current_batch_start
-            start = MPI.Wtime()
-            data = self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx]
-            # print(f"[ICESEE] Finished reading analysisensemble {ens_idx} ensemble shape: {data.shape} norm {np.linalg.norm(data)}")
-            read_time = MPI.Wtime() - start
-            return data
-        except Exception as e:
-            print(f"Error occurred in read_analysis: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
+        # try:
+        self._ensure_batch(t)
+        batch_idx = t - self.current_batch_start
+        start = MPI.Wtime()
+        data = self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx]
+        # print(f"[ICESEE] Finished reading analysisensemble {ens_idx} ensemble shape: {data.shape} norm {np.linalg.norm(data)}")
+        read_time = MPI.Wtime() - start
+        return data
+        # except Exception as e:
+        #     print(f"Error occurred in read_analysis: {e}")
+        #     tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+        #     print(f"Traceback details:\n{tb_str}")
+        #     self.mpi_comm.Abort(1)
 
+    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD) 
     def write_analysis(self, t, data, ens_idx):
-        try:
-            self._ensure_batch(t)
-            batch_idx = t - self.current_batch_start
-            start = MPI.Wtime()
-            # self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx] = data
-            self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx] = data
-            self.files[batch_idx].flush()  # Ensure data is written to disk
-            write_time = MPI.Wtime() - start
-        except Exception as e:
-            print(f"Error occurred in write_analysis: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
+        # try:
+        self._ensure_batch(t)
+        batch_idx = t - self.current_batch_start
+        start = MPI.Wtime()
+        # self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx] = data
+        self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx] = data
+        self.files[batch_idx].flush()  # Ensure data is written to disk
+        write_time = MPI.Wtime() - start
+        # except Exception as e:
+        #     print(f"Error occurred in write_analysis: {e}")
+        #     tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+        #     print(f"Traceback details:\n{tb_str}")
+        #     self.mpi_comm.Abort(1)
 
     def write_matrix(self, t, dataset_name, data, ens_idx):
         try:
@@ -559,9 +569,11 @@ class EnKF_fully_parallel_IO:
 
             # ---- Running sum while reading ensembles ------------------------------
             local_sum = np.zeros(max(local_rows, 0), dtype='f8')
+            batch_idx = k - self.current_batch_start
             for ens_idx in range(self.nens):
                 if local_rows > 0:
-                    v = self.read_analysis(k, ens_idx)
+                    # v = self.read_analysis(k, ens_idx)
+                    v = self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx]
                     v = np.asarray(v, dtype='f8')
                     if v.ndim != 1 or v.size != local_rows:
                         v = v.reshape(-1)
@@ -845,7 +857,7 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Abort(1)
     
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
-    def _create_synthetic_observations_(self, **kwargs):
+    def _create_synthetic_observations(self, **kwargs):
         synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path')
         error_R_zarr_path = kwargs.get('error_R_zarr_path')
         nd = self.nd
@@ -867,11 +879,14 @@ class EnKF_fully_parallel_IO:
             print("[ICESEE] Generating synthetic observations ...")
             obs_file = f"{self.base_path}/synthetic_obs.h5"
             # Remove existing file to avoid corruption
-            if os.path.exists(obs_file):
-                print(f"[ICESEE] Removing existing {obs_file}...")
-                os.remove(obs_file)
+            # if os.path.exists(obs_file):
+            #     print(f"[ICESEE] Removing existing {obs_file}...")
+            #     os.remove(obs_file)
             
-            statevec_true = zarr.open_array(store=f"{self.base_path}/statevec_true.zarr", mode='r+')
+            # statevec_true = zarr.open_array(store=f"{self.base_path}/statevec_true.zarr", mode='r+')
+            # read from HDF5 directly to avoid Zarr overhead for small nd
+            with h5py.File(f"{self.base_path}/true_nurged_states.h5", 'r') as f:
+                statevec_true = f['true_state'][:]
             _, indx_map, _ = icesee_get_index(**kwargs)
             
             try:
@@ -900,11 +915,11 @@ class EnKF_fully_parallel_IO:
                 print(f"[ICESEE] Error in HDF5 operations: {e}")
                 raise
         self.mpi_comm.Barrier()
-        return obs_t, m_obs
+        return ind_m, m_obs
         
 
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
-    def _create_synthetic_observations(self, **kwargs):
+    def _create_synthetic_observations_(self, **kwargs):
         try:
             synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path')
             error_R_zarr_path = kwargs.get('error_R_zarr_path')
@@ -1020,7 +1035,7 @@ class EnKF_fully_parallel_IO:
                                         hu_obs[local_indices, km] = result
                     self.mpi_comm.Barrier()
 
-            return obs_t, m_obs
+            return ind_m, m_obs
         except Exception as e:
             print(f"Error in _create_synthetic_observations: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
@@ -1034,7 +1049,7 @@ class EnKF_fully_parallel_IO:
             m_obs = kwargs.get('m_obs')
             m = m_obs * 2 + 1
             obs_t, ind_m, _m_obs = self.generate_observation_schedule(**kwargs)
-            print(f"\n[ICESEE] Creating H matrix of shape ({m}, {nd}) and m_obs={m_obs} ... computed m_obs={_m_obs}\n")
+            # print(f"\n[ICESEE] Creating H matrix of shape ({m}, {nd}) and m_obs={m_obs} ... computed m_obs={_m_obs}\n")
             di = int((nd - 2) / (2 * m_obs))
 
             H_matrix_file = zarr.create_array(store=zarr_path, shape=(m, nd), chunks=(min(50, m), min(1000, nd)), dtype='f8', overwrite=True)
@@ -1134,7 +1149,7 @@ class EnKF_fully_parallel_IO:
             # ---- Eta and D'
             # Eta = HA - Hmean[:, None]
             Eta = HA_global - Hmean_global[:, None]                   # (m, Nens)
-            print(f"\n[Rank {self.mpi_comm.Get_rank()}] H_local norm : {np.linalg.norm(H_local)}, ens_mean_local norm: {np.linalg.norm(ens_mean_local)}, synthetic_obs_local norm: {np.linalg.norm(synthetic_obs_local)}\n")
+            # print(f"\n[Rank {self.mpi_comm.Get_rank()}] H_local norm : {np.linalg.norm(H_local)}, ens_mean_local norm: {np.linalg.norm(ens_mean_local)}, synthetic_obs_local norm: {np.linalg.norm(synthetic_obs_local)}\n")
 
             # D' = (d - Hmean) broadcast across columns
             d_minus_Hmean = (d_global - Hmean_global)                 # (m,)
@@ -1174,13 +1189,13 @@ class EnKF_fully_parallel_IO:
                 ens_mean_local = f['mean'][self.nd_start_world:self.nd_end_world, k ]  # (local_nd,)
 
             # --- Synthetic obs (once)
-            synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
-            synthetic_obs_local = synthetic_obs[self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
+            # synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
+            # synthetic_obs_local = synthetic_obs[self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
 
             # *--with open synthetic obs h5file *---rememdy for now---*
-            # obs_file = f"{self.base_path}/synthetic_obs.h5"
-            # with h5py.File(obs_file, 'r', driver='mpio', comm=self.mpi_comm) as f:
-            #     synthetic_obs_local = f['hu_obs'][self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
+            obs_file = f"{self.base_path}/synthetic_obs.h5"
+            with h5py.File(obs_file, 'r', driver='mpio', comm=self.mpi_comm) as f:
+                synthetic_obs_local = f['hu_obs'][self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
             # *---rememdy for now---*
 
             # print(f"\n[Rank {self.mpi_comm.Get_rank()}] H_local norm : {np.linalg.norm(H_local)}, ens_mean_local norm: {np.linalg.norm(ens_mean_local)}, synthetic_obs_local norm: {np.linalg.norm(synthetic_obs_local)}\n")
@@ -1196,11 +1211,16 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Allreduce(Hmean_local, Hmean_global, op=MPI.SUM)  # 2nd collective
 
             # --- Read all ensemble states locally and batch into a matrix
+            _local_analysis_time = MPI.Wtime()
             # Shape: (local_nd, Nens)
-            States_local = np.empty((local_nd, Nens), dtype=H_local.dtype, order='C')
+            # States_local = np.empty((local_nd, Nens), dtype=H_local.dtype, order='C')
+            States_local =zarr.zeros((local_nd, Nens), dtype=H_local.dtype, store=f"{self.base_path}/States_local_{self.mpi_comm.Get_rank()}.zarr", chunks=(local_nd, 1), overwrite=True)
             for j in range(Nens):
                 # States_local[:, j] = self.read_analysis(k, j)  # each returns local slice (local_nd,) 
                 States_local[:, j] = self.read_analysis(k, j)  # each returns local slice (local_nd,)
+            _local_analysis_time = MPI.Wtime() - _local_analysis_time
+            kwargs["time_analysis_file_writing"] += _local_analysis_time
+
 
             # --- HA for all ensemble members in one GEMM + one Allreduce on the whole matrix
             # local (m, local_nd) @ (local_nd, Nens) -> (m, Nens)
@@ -1221,9 +1241,9 @@ class EnKF_fully_parallel_IO:
             # --- D' = (d - Hmean)[:, None], same for all ensemble members
             Dprime = (d_global - Hmean_global)[:, None] * np.ones((1, Nens), dtype=HA.dtype)
 
-            print(f"\n[Rank {self.mpi_comm.Get_rank()}] norms H: {np.linalg.norm(H_matrix)},  ens_mean:{np.linalg.norm(np.mean(States_local, axis=1))}, d: {np.linalg.norm(d_local)} D: {np.linalg.norm(d_global.reshape(-1,1) + Eta)}, HA: {np.linalg.norm(HA)}, Eta: {np.linalg.norm(Eta)}, ensemble_vec: {np.linalg.norm(States_local)} \n")
+            # print(f"\n[Rank {self.mpi_comm.Get_rank()}] norms H: {np.linalg.norm(H_matrix)},  ens_mean:{np.linalg.norm(np.mean(States_local, axis=1))}, d: {np.linalg.norm(d_local)} D: {np.linalg.norm(d_global.reshape(-1,1) + Eta)}, HA: {np.linalg.norm(HA)}, Eta: {np.linalg.norm(Eta)}, ensemble_vec: {np.linalg.norm(States_local)} \n")
 
-            return Dprime, Eta, HA
+            return Dprime, Eta, HA, kwargs
         except Exception as e:
             print(f"Error in compute_X5_utils: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
@@ -1238,7 +1258,7 @@ class EnKF_fully_parallel_IO:
             m = kwargs.get('m_obs') * 2 + 1
             Nens = self.nens
 
-            Dprime, Eta, HA = self.compute_X5_utils(**kwargs)
+            Dprime, Eta, HA, kwargs = self.compute_X5_utils(**kwargs)
             # print(f"\n [Rank {self.mpi_comm.Get_rank()}] Dprime norm: {np.linalg.norm(Dprime)}, Eta norm: {np.linalg.norm(Eta)}, HA norm: {np.linalg.norm(HA)} \n")
             # Dprime, Eta, HA = self.compute_X5_utils_batch(**kwargs)
 
@@ -1307,7 +1327,7 @@ class EnKF_fully_parallel_IO:
             # print(f"[ICESEE] Rank: {self.mpi_comm.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
             del X4; gc.collect()
 
-            return X5
+            return X5, kwargs
 
         except Exception as e:
             print(f"Error in compute_X5_root_optimized: {e}")
@@ -1334,7 +1354,7 @@ class EnKF_fully_parallel_IO:
 
             # call the compute X5 function
             # X5 = self.compute_X5_(k, **kwargs)
-            X5 = self.compute_X5_modified(**kwargs)
+            X5, kwargs = self.compute_X5_modified(**kwargs)
             # compute column sums for X5
 
             # ---
@@ -1361,9 +1381,11 @@ class EnKF_fully_parallel_IO:
             pertubations = zarr.create_array(store=pertubations_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
             analysis_updates = zarr.create_array(store=analysis_updates_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
 
+            _local_analysis_time0 = MPI.Wtime()
             for i in range(Nens):
                 # all_states_zarr[:, i] = self.read_analysis(k, i)
                 all_states_zarr[:, i] = self.read_analysis(k, i)
+            _local_analysis_time0 = MPI.Wtime() - _local_analysis_time0
 
             # Compute analysis updates for all paucall ensembles using matrix multiplication
             analysis_updates = all_states_zarr @ X5  # Matrix multiplication
@@ -1393,10 +1415,14 @@ class EnKF_fully_parallel_IO:
                     analysis_updates[start:end, :] = np.maximum(analysis_updates[start:end, :], min_thickness)
 
             # Write back all analysis updates
+            _local_analysis_time1 = MPI.Wtime()
             for j in range(Nens):
                 self.write_analysis(k, analysis_updates[:, j], j)
+            _local_analysis_time1 = MPI.Wtime() - _local_analysis_time1
+            kwargs["time_analysis_file_writing"] += (_local_analysis_time0 + _local_analysis_time1)
 
             # compute the anlysis mean and write to h5 file
+            _time_analysis_mean = MPI.Wtime()
             yi = np.sum(X5, axis=1)
             analysis_mean = np.dot(all_states_zarr, yi) / Nens
             # print(f"[Rank {self.mpi_comm.Get_rank()}]  shape: {analysis_mean.shape} shape_ {self.nd_end_world - self.nd_start_world}")
@@ -1411,7 +1437,7 @@ class EnKF_fully_parallel_IO:
                         )
                 comm.Barrier()
                 f['mean'][self.nd_start_world:self.nd_end_world, k] = analysis_mean
-
+            kwargs["time_analysis_ensemble_mean_generation"] += (MPI.Wtime() - _time_analysis_mean)
             # print(f"\n[ICESEE] Rank {rank} completed analysis update for time step {k+1}/{nt} analysis_mean norm {np.linalg.norm(analysis_mean)}\n")
 
             # clean up zarr file
@@ -1424,6 +1450,7 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Barrier()
             # del all_states_zarr
             gc.collect()
+            return kwargs
             # ----**** --------------------------------------------------------
 
         except Exception as e:
@@ -1440,3 +1467,359 @@ class EnKF_fully_parallel_IO:
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
+
+    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD)
+    def create_ensemble_dataset_(self, folder_path='_modelrun_datasets', file_pattern='icesee_enkf_ens_*.h5', dataset_name='states', output_file='icesee_ensemble_dataset.h5'):
+        """
+        Create a (nd, nens, nt) dataset from HDF5 files in parallel, writing directly to an output HDF5 file.
+        
+        Parameters:
+        - folder_path: Directory containing the HDF5 files (default: '_modelrun_datasets').
+        - file_pattern: Pattern to match HDF5 files (default: 'icesee_enkf_0*.h5').
+        - dataset_name: Name of the dataset within each HDF5 file (default: 'states').
+        - output_file: Name of the output HDF5 file (default: 'ensemble_dataset.h5').
+        
+        Returns:
+        - None (saves dataset to HDF5 file).
+        """
+
+        rank = self.mpi_comm.Get_rank()
+        # rank = self.rank
+        # size = self.mpi_comm.Get_size()
+        try:
+            # Get list of files matching the pattern (all ranks)
+            file_list = sorted(glob.glob(os.path.join(folder_path, file_pattern)),
+                            key=lambda x: int(re.search(r'\d+', os.path.basename(x)).group()))
+            
+            if not file_list:
+                print(f"[Rank {self.rank}] No files found matching pattern {file_pattern} in {folder_path}")
+                self.mpi_comm.Abort(1)
+            
+            # Extract time indices from filenames
+            time_indices = [int(re.search(r'\d+', os.path.basename(f)).group()) for f in file_list]
+            nt = len(file_list)
+            
+            # Verify dimensions
+            if nt != self.nt:
+                print(f"[Rank {self.rank}] Warning: Number of files ({nt}) does not match expected nt ({self.nt})")
+            
+            # Load first file to determine dimensions (only rank 0 to avoid redundant I/O)
+            if rank == 0:
+                with h5py.File(file_list[0], 'r') as f:
+                    if dataset_name not in f:
+                        raise KeyError(f"Dataset '{dataset_name}' not found in {file_list[0]}. Available datasets: {list(f.keys())}")
+                    first_data = f[dataset_name][:]
+                    nd, nens = first_data.shape
+                    if nd != self.nd or nens != self.nens:
+                        raise ValueError(f"Shape mismatch in {file_list[0]}: expected ({self.nd}, {self.nens}), got ({nd}, {nens})")
+            else:
+                first_data = None
+            
+            # Broadcast dimensions to ensure consistency
+            dims = np.array([self.nd, self.nens], dtype='i8') if rank == 0 else np.zeros(2, dtype='i8')
+            self.mpi_comm.Bcast(dims, root=0)
+            nd, nens = int(dims[0]), int(dims[1])  # Convert to Python integers
+            nt = int(nt)  # Ensure nt is a Python integer
+            
+            # Debug: Print shape values
+            # print(f"[Rank {self.rank}] Creating HDF5 dataset with shape: ({nd}, {nens}, {nt})")
+            
+            # Initialize output HDF5 file with MPI I/O (all ranks participate)
+            output_file_path = os.path.join(folder_path, output_file)
+            if self.rank == 0:
+                # Clean up existing output file
+                if os.path.exists(output_file_path):
+                    os.remove(output_file_path)
+            self.mpi_comm.Barrier()
+            
+            try:
+                with h5py.File(output_file_path, 'w', driver='mpio', comm=self.mpi_comm) as f:
+                    # Create dataset with chunking
+                    dset = f.create_dataset(
+                        'ensemble_data',
+                        shape=(nd, nens, nt),
+                        chunks=(self.nd_local, nens, 1),
+                        dtype='f8',
+                        compression=None
+                    )
+                    
+                    # Load data in parallel using ThreadPoolExecutor within each MPI rank
+                    def load_single_file(file_path, dataset_name):
+                        with h5py.File(file_path, 'r') as f:
+                            if dataset_name not in f:
+                                raise KeyError(f"Dataset '{dataset_name}' not found in {file_path}. Available datasets: {list(f.keys())}")
+                            return f[dataset_name][self.nd_start:self.nd_end, :]
+                    
+                    # print(f"[Rank {self.rank}] Starting to load and write data...")
+                    # Each rank processes all files for its nd_local portion
+                    with ThreadPoolExecutor(max_workers=None) as executor:
+                        future_to_index = {
+                            executor.submit(load_single_file, file_path, dataset_name): i
+                            for i, file_path in enumerate(file_list)
+                        }
+                        
+                        for future in as_completed(future_to_index):
+                            t = future_to_index[future]
+                            try:
+                                loaded_data = future.result()
+                                if loaded_data.shape != (self.nd_local, nens):
+                                    raise ValueError(f"[Rank {self.rank}] Shape mismatch in {file_list[t]}: expected ({self.nd_local}, {nens}), got {loaded_data.shape}")
+                                dset[self.nd_start:self.nd_end, :, t] = loaded_data
+                            except Exception as exc:
+                                print(f"[Rank {self.rank}] File {file_list[t]} generated an exception: {exc}")
+                                self.mpi_comm.Abort(1)
+                    # print(f"[Rank {self.rank}] Finished loading and writing data.")
+                    # Only rank 0 writes time_indices
+                    # if rank == 0:
+                    #     f.create_dataset('time_indices', data=time_indices)
+                    
+                    # Flush to ensure all writes are complete
+                    # f.flush()
+            
+            except Exception as e:
+                print(f"[Rank {self.rank}] Failed to create or write to HDF5 file at {output_file_path}: {str(e)}")
+                self.mpi_comm.Abort(1)
+            
+            self.mpi_comm.Barrier()
+            if rank == 0:
+                print(f"[Rank {self.rank}] Dataset saved to {output_file_path}")
+        
+        except Exception as e:
+            print(f"[Rank {self.rank}] Error in create_ensemble_dataset: {str(e)}")
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
+            self.mpi_comm.Abort(1)
+
+
+    def create_ensemble_dataset_procs(self, folder_path='_modelrun_datasets', file_pattern='icesee_enkf_ens_*.h5', dataset_name='states', output_file='icesee_ensemble_dataset.h5'):
+        rank = self.mpi_comm.Get_rank()
+        size = self.mpi_comm.Get_size()
+
+        try:
+            # Verify h5py MPI support
+            if not h5py.get_config().mpi:
+                print(f"[Rank {rank}] Error: h5py not compiled with MPI support.")
+                self.mpi_comm.Abort(1)
+
+            # Rank 0 collects and broadcasts file list
+            if rank == 0:
+                file_list = sorted(glob.glob(os.path.join(folder_path, file_pattern)),
+                                key=lambda x: int(re.search(r'\d+', os.path.basename(x)).group()))
+            else:
+                file_list = None
+            file_list = self.mpi_comm.bcast(file_list, root=0)
+
+            if not file_list:
+                print(f"[Rank {rank}] No files found matching {file_pattern} in {folder_path}")
+                self.mpi_comm.Abort(1)
+
+            nt = len(file_list)
+            if nt != self.nt:
+                print(f"[Rank {rank}] Warning: Number of files ({nt}) does not match expected nt ({self.nt})")
+
+            # Get dimensions from first file (rank 0)
+            if rank == 0:
+                with h5py.File(file_list[0], 'r') as f:
+                    if dataset_name not in f:
+                        raise KeyError(f"Dataset '{dataset_name}' not found in {file_list[0]}")
+                    nd, nens = f[dataset_name].shape
+                    if nd != self.nd or nens != self.nens:
+                        raise ValueError(f"Shape mismatch in {file_list[0]}: expected ({self.nd}, {self.nens}), got ({nd}, {nens})")
+            else:
+                nd, nens = 0, 0
+
+            # Broadcast dimensions
+            dims = np.array([nd, nens], dtype='i8') if rank == 0 else np.zeros(2, dtype='i8')
+            self.mpi_comm.Bcast(dims, root=0)
+            nd, nens = int(dims[0]), int(dims[1])
+
+            # Distribute files across ranks
+            files_per_rank = nt // size
+            remainder = nt % size
+            start_idx = rank * files_per_rank + min(rank, remainder)
+            end_idx = start_idx + files_per_rank + (1 if rank < remainder else 0)
+            local_files = file_list[start_idx:end_idx]
+
+            # Initialize output file
+            output_file_path = os.path.join(folder_path, output_file)
+            if rank == 0 and os.path.exists(output_file_path):
+                os.remove(output_file_path)
+            self.mpi_comm.Barrier()
+
+            with h5py.File(output_file_path, 'w', driver='mpio', comm=self.mpi_comm) as f:
+                dset = f.create_dataset(
+                    'ensemble_data',
+                    shape=(nd, nens, nt),
+                    chunks=(min(self.nd_local, 1000), nens, 1),
+                    dtype='f8',
+                    compression=None  # No compression for independent I/O
+                )
+
+                # Load and write data
+                def load_file_chunk(file_path, dataset_name, nd_start, nd_end):
+                    with h5py.File(file_path, 'r') as f:
+                        return f[dataset_name][nd_start:nd_end, :]
+
+                for t_global in range(start_idx, end_idx):
+                    file_idx = t_global - start_idx
+                    data = np.zeros((self.nd_local, nens), dtype='f8')
+                    chunk_size_nd = min(self.nd_local, 1000)
+                    for start in range(0, self.nd_local, chunk_size_nd):
+                        end = min(start + chunk_size_nd, self.nd_local)
+                        data[start:end, :] = load_file_chunk(
+                            local_files[file_idx], dataset_name, self.nd_start + start, self.nd_start + end
+                        )
+                    dset[self.nd_start:self.nd_end, :, t_global] = data
+
+                # Write time indices (rank 0)
+                if rank == 0:
+                    f.create_dataset('time_indices', data=[int(re.search(r'\d+', os.path.basename(f)).group()) for f in file_list])
+
+            self.mpi_comm.Barrier()
+            if rank == 0:
+                print(f"[Rank {rank}] Dataset saved to {output_file_path}")
+
+        except Exception as e:
+            print(f"[Rank {rank}] Error: {str(e)}")
+            print(f"Traceback:\n{''.join(traceback.format_exception(*sys.exc_info()))}")
+            self.mpi_comm.Abort(1)
+
+    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD)
+    def create_ensemble_dataset(self, folder_path='_modelrun_datasets', file_pattern='icesee_enkf_ens_*.h5', dataset_name='states', output_file='icesee_ensemble_dataset.h5'):
+        rank = self.mpi_comm.Get_rank()
+        size = self.mpi_comm.Get_size()
+
+        try:
+            # Check h5py MPI support
+            if not h5py.get_config().mpi:
+                print(f"[Rank {rank}] Warning: h5py not MPI-enabled. Using serial I/O.")
+                if rank == 0:
+                    file_list = sorted(glob.glob(os.path.join(folder_path, file_pattern)),
+                                    key=lambda x: int(re.search(r'icesee_enkf_ens_(\d+).h5', os.path.basename(x)).group(1)))
+                    if not file_list:
+                        raise FileNotFoundError(f"No files found in {folder_path}")
+                    
+                    nt = len(file_list)
+                    if nt != self.nt:
+                        raise ValueError(f"File count ({nt}) != self.nt ({self.nt})")
+                    
+                    with h5py.File(file_list[0], 'r') as f:
+                        if dataset_name not in f:
+                            raise KeyError(f"Dataset '{dataset_name}' not in {file_list[0]}")
+                        nd, nens = f[dataset_name].shape
+                        if nd != self.nd or nens != self.nens:
+                            raise ValueError(f"Shape mismatch in {file_list[0]}: expected ({self.nd}, {self.nens}), got ({nd}, {nens})")
+                    
+                    output_file_path = os.path.join(folder_path, output_file)
+                    if os.path.exists(output_file_path):
+                        os.remove(output_file_path)
+                    
+                    with h5py.File(output_file_path, 'w') as f:
+                        dset = f.create_dataset('ensemble_data', shape=(nd, nens, nt), chunks=(min(nd, 1000), nens, 1),
+                                            dtype='f8', compression='gzip', compression_opts=4)
+                        for t in range(nt):
+                            with h5py.File(file_list[t], 'r') as f_in:
+                                dset[:, :, t] = f_in[dataset_name][:, :]
+                        f.create_dataset('time_indices', data=[int(re.search(r'icesee_enkf_ens_(\d+).h5', os.path.basename(f)).group(1)) for f in file_list])
+                    
+                    print(f"[Rank {rank}] Saved to {output_file_path}")
+                self.mpi_comm.Barrier()
+                return
+
+            # Collect file list
+            if rank == 0:
+                if not os.path.isdir(folder_path):
+                    raise FileNotFoundError(f"Directory {folder_path} not found")
+                file_list = sorted(glob.glob(os.path.join(folder_path, file_pattern)),
+                                key=lambda x: int(re.search(r'icesee_enkf_ens_(\d+).h5', os.path.basename(x)).group(1)))
+                if not file_list:
+                    raise FileNotFoundError(f"No files found in {folder_path}")
+            else:
+                file_list = None
+            file_list = self.mpi_comm.bcast(file_list, root=0)
+            if not file_list:
+                raise ValueError(f"[Rank {rank}] Empty file list received")
+
+            nt = len(file_list)
+            if nt != self.nt:
+                raise ValueError(f"[Rank {rank}] File count ({nt}) != self.nt ({self.nt})")
+
+            # Get dimensions
+            if rank == 0:
+                with h5py.File(file_list[0], 'r') as f:
+                    if dataset_name not in f:
+                        raise KeyError(f"Dataset '{dataset_name}' not in {file_list[0]}")
+                    nd, nens = f[dataset_name].shape
+                    if nd != self.nd or nens != self.nens:
+                        raise ValueError(f"Shape mismatch in {file_list[0]}: expected ({self.nd}, {self.nens}), got ({nd}, {nens})")
+            else:
+                nd, nens = 0, 0
+            dims = np.array([nd, nens], dtype='i8') if rank == 0 else np.zeros(2, dtype='i8')
+            self.mpi_comm.Bcast(dims, root=0)
+            nd, nens = int(dims[0]), int(dims[1])
+            if nd <= 0 or nens <= 0:
+                raise ValueError(f"[Rank {rank}] Invalid dimensions: nd={nd}, nens={nens}")
+
+            # Distribute files
+            files_per_rank = nt // size
+            remainder = nt % size
+            start_idx = rank * files_per_rank + min(rank, remainder)
+            end_idx = start_idx + files_per_rank + (1 if rank < remainder else 0)
+            local_files = file_list[start_idx:end_idx]
+            print(f"[Rank {rank}] Assigned {len(local_files)} files")
+
+            # Validate hyperslab parameters
+            if self.nd_end > nd or self.nd_start < 0 or self.nd_start >= self.nd_end:
+                raise ValueError(f"[Rank {rank}] Invalid hyperslab: nd_start={self.nd_start}, nd_end={self.nd_end}, nd={nd}")
+
+            # Initialize output file
+            output_file_path = os.path.join(folder_path, output_file)
+            if rank == 0 and os.path.exists(output_file_path):
+                os.remove(output_file_path)
+            self.mpi_comm.Barrier()
+
+            # Create dataset with MPI-IO
+            with h5py.File(output_file_path, 'w', driver='mpio', comm=self.mpi_comm) as f:
+                dset = f.create_dataset('ensemble_data', shape=(nd, nens, nt), chunks=(min(self.nd_local, 1000), nens, 1),
+                                    dtype='f8', compression='gzip', compression_opts=4)
+
+                for t in range(nt):
+                    if start_idx <= t < end_idx:
+                        file_idx = t - start_idx
+                        with h5py.File(local_files[file_idx], 'r') as f_in:
+                            data = f_in[dataset_name][self.nd_start:self.nd_end, :]
+                        with dset.collective:
+                            dset[self.nd_start:self.nd_end, :, t] = data
+                    self.mpi_comm.Barrier()
+
+            # if rank == 0:
+            #     f.create_dataset('time_indices', data=[int(re.search(r'icesee_enkf_ens_(\d+).h5', os.path.basename(f)).group(1)) for f in file_list])
+
+            if rank == 0:
+                print(f"[Rank {rank}] Saved to {output_file_path}")
+
+        except Exception as e:
+            print(f"[Rank {rank}] ERROR in create_ensemble_dataset: {e}", file=sys.stderr)
+            print("Traceback:\n" + "".join(traceback.format_exception(*sys.exc_info())), file=sys.stderr)
+            if rank == 0:
+                print(f"[Rank {rank}] Attempting rollback with processes parallel I/O method...", file=sys.stderr)
+            try:
+                self.create_ensemble_dataset_(
+                        folder_path=folder_path,
+                        file_pattern=file_pattern,
+                        dataset_name=dataset_name,
+                        output_file=output_file
+                    )
+            except Exception as e1:
+                if rank == 0:
+                    print(f"[Rank {rank}] Rollback with processes parallel I/O method failed, trying threaded parallel I/O method...", file=sys.stderr)
+                try:
+                    self.create_ensemble_dataset_procs(
+                    folder_path=folder_path,
+                    file_pattern=file_pattern,
+                    dataset_name=dataset_name,
+                    output_file=output_file
+                    )
+                except Exception as e2:
+                    print(f"[Rank {rank}] Rollback failed: {e2}", file=sys.stderr)
+                    self.mpi_comm.Abort(1)

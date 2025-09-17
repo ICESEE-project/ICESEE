@@ -362,7 +362,7 @@ def parallel_forecast_step_default_run(**model_kwargs):
     # --- compute the mean
     _time_forecast_ensemble_mean_generation = MPI.Wtime()
     ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], Nens, comm_world, root=0)
-    time_forecast_ensemble_generation += MPI.Wtime() - _time_forecast_ensemble_mean_generation
+    time_forecast_ensemble_mean_generation += MPI.Wtime() - _time_forecast_ensemble_mean_generation
 
     # update model_kwargs with timing variables and other parameters
     model_kwargs.update({
@@ -447,9 +447,11 @@ def parallel_forecast_step_default_full_parallel_run(**model_kwargs):
                 # Ensure all ranks in the subcommunicator are synchronized before running
                 subcomm.Barrier()
                 ens = ensemble_id
+                _local_time_forecast_file_writing_0 = MPI.Wtime()
                 # ---- read from file ----
                 ensemble_vec = enkf_parallel_io.read_forecast(k, ens)
                 # ---- end of read from file ----
+                time_forecast_file_writing_0 = MPI.Wtime() - _local_time_forecast_file_writing_0
 
                 # Call the forecast step function
                 # hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
@@ -525,8 +527,11 @@ def parallel_forecast_step_default_full_parallel_run(**model_kwargs):
                 del noise_all, q0, noise_, W
                 time_forecast_noise_generation += MPI.Wtime() - _time_forecast_noise_generation
 
+                #  time forecast file writing
+                _time_forecast_file_writing = MPI.Wtime()
                 # enkf_parallel_io.write_forecast(k + 1 if k < nt - 1 else k, ensemble_vec, ens)
                 enkf_parallel_io.write_forecast(k + 1 if k < nt - 1 else k, ensemble_vec, ens)
+                time_forecast_file_writing += MPI.Wtime() - _time_forecast_file_writing + time_forecast_file_writing_0
 
                 shape_ens = np.array(ensemble_vec.shape, dtype=np.int32)
 
@@ -653,7 +658,7 @@ def parallel_forecast_step_default_full_parallel_run(**model_kwargs):
     _time_forecast_ensemble_mean_generation = MPI.Wtime()
     # enkf_parallel_io.compute_forecast_mean_chunked(k + 1 if k < nt - 1 else k)
     enkf_parallel_io.compute_forecast_mean_chunked_v2(k + 1 if k < nt - 1 else k)
-    time_forecast_ensemble_generation += MPI.Wtime() - _time_forecast_ensemble_mean_generation
+    time_forecast_ensemble_mean_generation += MPI.Wtime() - _time_forecast_ensemble_mean_generation
 
     # update model_kwargs with timing variables and other parameters
     model_kwargs.update({
