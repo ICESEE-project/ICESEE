@@ -379,6 +379,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
     time_forecast_file_writing = 0.0
     time_analysis_file_writing = 0.0
     time_forecast_ensemble_mean_generation = 0.0
+    time_analysis_ensemble_mean_generation = 0.0
 
     # specified decorrelation length scale, tau,
     min_tau = 200
@@ -996,6 +997,10 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
     init_file_time = comm_world.allreduce(time_init_file_writing, op=MPI.MAX)
     total_file_time = init_file_time + forecast_file_time + analysis_file_time
 
+    time_analysis_ensemble_mean = comm_world.allreduce(time_analysis_ensemble_mean_generation, op=MPI.MAX)
+    time_forecast_ensemble_mean= comm_world.allreduce(time_forecast_ensemble_mean_generation, op=MPI.MAX)
+    time_init_ensemble_mean = comm_world.allreduce(time_init_ensemble_mean_computation, op=MPI.MAX)
+
     # Display elapsed time on rank 0
     comm_world.Barrier()
     if rank_world == 0:
@@ -1014,7 +1019,11 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
             forecast_file_time=forecast_file_time,
             analysis_file_time=analysis_file_time,
             total_file_time=total_file_time,
-            forecast_noise_time=forecast_noise_time, comm=comm_world
+            forecast_noise_time=forecast_noise_time, 
+            time_init_ensemble_mean_computation=time_init_ensemble_mean,
+            time_forecast_ensemble_mean_computation=time_forecast_ensemble_mean,
+            time_analysis_ensemble_mean_computation=time_analysis_ensemble_mean,
+            comm=comm_world
         )
         else:
             display_timing_default(total_elapsed_time, total_wall_time)
