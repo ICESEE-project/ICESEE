@@ -428,6 +428,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         time_forecast_file_writing = 0.0
         time_analysis_file_writing = 0.0
         time_forecast_ensemble_mean_generation = 0.0
+        time_analysis_ensemble_mean_generation = 0.0
 
         # specified decorrelation length scale, tau,
         min_tau = 200
@@ -506,6 +507,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                                     "time_forecast_file_writing": time_forecast_file_writing,
                                     "time_analysis_file_writing": time_analysis_file_writing,
                                     "time_forecast_ensemble_mean_generation": time_forecast_ensemble_mean_generation,
+                                    "time_analysis_ensemble_mean_generation": time_analysis_ensemble_mean_generation,
                                     "state_block_size": state_block_size, "noise": noise, "rng": None, "rank_seed": None,})
                 
                 if params["default_run"]:
@@ -523,18 +525,20 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
 
                     # ===== Global analysis step =====
                     if model_kwargs.get('global_analysis', True) or model_kwargs.get('local_analysis', False):
-                        # -- time global analysis step ---
-                        _time_analysis_step = MPI.Wtime()
+                        
                         tobserve = model_kwargs.get("tobserve")
                         m_obs = model_kwargs.get("m_obs", params["number_obs_instants"])
-
                         if (km < m_obs) and (k+1 == tobserve[km]):
+                            # -- time global analysis step ---
+                            _time_analysis_step = MPI.Wtime()
                             model_kwargs.update({'km': km, 'k': k})
         
                             # call the analysis update function
                             if EnKF_flag:
-                                enkf_parallel_io.compute_analysis_update(**model_kwargs)
-                        
+                                model_kwargs = enkf_parallel_io.compute_analysis_update(**model_kwargs)
+                                time_analysis_ensemble_mean_generation = model_kwargs.get("time_analysis_ensemble_mean_generation", 0.0)
+                                time_analysis_file_writing = model_kwargs.get("time_analysis_file_writing", 0.0)
+                            
                             # update the observation index
                             km += 1
         #                    
@@ -690,6 +694,11 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
             init_file_time = comm_world.allreduce(time_init_file_writing, op=MPI.MAX)      
             # print(f"[ICESEE] Rank {rank_world} finished initialization file writing time reduction.\n")
             total_file_time = init_file_time + forecast_file_time + analysis_file_time + time_final_file_writing
+
+            time_analysis_ensemble_mean = comm_world.allreduce(time_analysis_ensemble_mean_generation, op=MPI.MAX)
+            time_forecast_ensemble_mean= comm_world.allreduce(time_forecast_ensemble_mean_generation, op=MPI.MAX)
+            time_init_ensemble_mean = comm_world.allreduce(time_init_ensemble_mean_computation, op=MPI.MAX)
+            # print(f"[ICESEE] Rank {rank_world}
         except Exception as e:
             timing_ok = False
             timing_err = f"{type(e).__name__}: {e}"
@@ -724,7 +733,11 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                 forecast_file_time=forecast_file_time,
                 analysis_file_time=analysis_file_time,
                 total_file_time=total_file_time,
-                forecast_noise_time=forecast_noise_time, comm=comm_world
+                forecast_noise_time=forecast_noise_time, 
+                time_init_ensemble_mean_computation=time_init_ensemble_mean,
+                time_forecast_ensemble_mean_computation=time_forecast_ensemble_mean,
+                time_analysis_ensemble_mean_computation=time_analysis_ensemble_mean,
+                comm=comm_world
             )
             else:
                 display_timing_default(total_elapsed_time, total_wall_time)

@@ -497,7 +497,11 @@ def display_timing_verbose(
     forecast_file_time: float,
     analysis_file_time: float,
     total_file_time: float,
-    forecast_noise_time: float, comm: MPI.Comm = None
+    forecast_noise_time: float,
+    time_init_ensemble_mean_computation: float,
+    time_forecast_ensemble_mean_computation: float,
+    time_analysis_ensemble_mean_computation: float,
+    comm: MPI.Comm = None
 ) -> None:
     """Display all timing metrics in a table with strict aligned formatting using logging, all in gray."""
     # from mpi4py import MPI
@@ -525,7 +529,10 @@ def display_timing_verbose(
         ("Forecast File I/O Time", format_time(forecast_file_time)),
         ("Analysis File I/O Time", format_time(analysis_file_time)),
         ("Total File I/O Time", format_time(total_file_time)),
-        ("Forecast Noise Time", format_time(forecast_noise_time))
+        ("Forecast Noise Time", format_time(forecast_noise_time)),
+        ("Init Ensemble Mean Computation", format_time(time_init_ensemble_mean_computation)),
+        ("Forecast Ensemble Mean Computation", format_time(time_forecast_ensemble_mean_computation)),
+        ("Analysis Ensemble Mean Computation", format_time(time_analysis_ensemble_mean_computation)),
     ]
     
     # Calculate max width based on the longest metric label and value

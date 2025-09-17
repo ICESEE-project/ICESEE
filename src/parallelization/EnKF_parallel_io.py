@@ -1211,11 +1211,16 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Allreduce(Hmean_local, Hmean_global, op=MPI.SUM)  # 2nd collective
 
             # --- Read all ensemble states locally and batch into a matrix
+            _local_analysis_time = MPI.Wtime()
             # Shape: (local_nd, Nens)
-            States_local = np.empty((local_nd, Nens), dtype=H_local.dtype, order='C')
+            # States_local = np.empty((local_nd, Nens), dtype=H_local.dtype, order='C')
+            States_local =zarr.zeros((local_nd, Nens), dtype=H_local.dtype, store=f"{self.base_path}/States_local_{self.mpi_comm.Get_rank()}.zarr", chunks=(local_nd, 1), overwrite=True)
             for j in range(Nens):
                 # States_local[:, j] = self.read_analysis(k, j)  # each returns local slice (local_nd,) 
                 States_local[:, j] = self.read_analysis(k, j)  # each returns local slice (local_nd,)
+            _local_analysis_time = MPI.Wtime() - _local_analysis_time
+            kwargs["time_analysis_file_writing"] += _local_analysis_time
+
 
             # --- HA for all ensemble members in one GEMM + one Allreduce on the whole matrix
             # local (m, local_nd) @ (local_nd, Nens) -> (m, Nens)
@@ -1238,7 +1243,7 @@ class EnKF_fully_parallel_IO:
 
             # print(f"\n[Rank {self.mpi_comm.Get_rank()}] norms H: {np.linalg.norm(H_matrix)},  ens_mean:{np.linalg.norm(np.mean(States_local, axis=1))}, d: {np.linalg.norm(d_local)} D: {np.linalg.norm(d_global.reshape(-1,1) + Eta)}, HA: {np.linalg.norm(HA)}, Eta: {np.linalg.norm(Eta)}, ensemble_vec: {np.linalg.norm(States_local)} \n")
 
-            return Dprime, Eta, HA
+            return Dprime, Eta, HA, kwargs
         except Exception as e:
             print(f"Error in compute_X5_utils: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
@@ -1253,7 +1258,7 @@ class EnKF_fully_parallel_IO:
             m = kwargs.get('m_obs') * 2 + 1
             Nens = self.nens
 
-            Dprime, Eta, HA = self.compute_X5_utils(**kwargs)
+            Dprime, Eta, HA, kwargs = self.compute_X5_utils(**kwargs)
             # print(f"\n [Rank {self.mpi_comm.Get_rank()}] Dprime norm: {np.linalg.norm(Dprime)}, Eta norm: {np.linalg.norm(Eta)}, HA norm: {np.linalg.norm(HA)} \n")
             # Dprime, Eta, HA = self.compute_X5_utils_batch(**kwargs)
 
@@ -1322,7 +1327,7 @@ class EnKF_fully_parallel_IO:
             # print(f"[ICESEE] Rank: {self.mpi_comm.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
             del X4; gc.collect()
 
-            return X5
+            return X5, kwargs
 
         except Exception as e:
             print(f"Error in compute_X5_root_optimized: {e}")
@@ -1349,7 +1354,7 @@ class EnKF_fully_parallel_IO:
 
             # call the compute X5 function
             # X5 = self.compute_X5_(k, **kwargs)
-            X5 = self.compute_X5_modified(**kwargs)
+            X5, kwargs = self.compute_X5_modified(**kwargs)
             # compute column sums for X5
 
             # ---
@@ -1376,9 +1381,11 @@ class EnKF_fully_parallel_IO:
             pertubations = zarr.create_array(store=pertubations_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
             analysis_updates = zarr.create_array(store=analysis_updates_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
 
+            _local_analysis_time0 = MPI.Wtime()
             for i in range(Nens):
                 # all_states_zarr[:, i] = self.read_analysis(k, i)
                 all_states_zarr[:, i] = self.read_analysis(k, i)
+            _local_analysis_time0 = MPI.Wtime() - _local_analysis_time0
 
             # Compute analysis updates for all paucall ensembles using matrix multiplication
             analysis_updates = all_states_zarr @ X5  # Matrix multiplication
@@ -1408,10 +1415,14 @@ class EnKF_fully_parallel_IO:
                     analysis_updates[start:end, :] = np.maximum(analysis_updates[start:end, :], min_thickness)
 
             # Write back all analysis updates
+            _local_analysis_time1 = MPI.Wtime()
             for j in range(Nens):
                 self.write_analysis(k, analysis_updates[:, j], j)
+            _local_analysis_time1 = MPI.Wtime() - _local_analysis_time1
+            kwargs["time_analysis_file_writing"] += (_local_analysis_time0 + _local_analysis_time1)
 
             # compute the anlysis mean and write to h5 file
+            _time_analysis_mean = MPI.Wtime()
             yi = np.sum(X5, axis=1)
             analysis_mean = np.dot(all_states_zarr, yi) / Nens
             # print(f"[Rank {self.mpi_comm.Get_rank()}]  shape: {analysis_mean.shape} shape_ {self.nd_end_world - self.nd_start_world}")
@@ -1426,7 +1437,7 @@ class EnKF_fully_parallel_IO:
                         )
                 comm.Barrier()
                 f['mean'][self.nd_start_world:self.nd_end_world, k] = analysis_mean
-
+            kwargs["time_analysis_ensemble_mean_generation"] += (MPI.Wtime() - _time_analysis_mean)
             # print(f"\n[ICESEE] Rank {rank} completed analysis update for time step {k+1}/{nt} analysis_mean norm {np.linalg.norm(analysis_mean)}\n")
 
             # clean up zarr file
@@ -1439,6 +1450,7 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Barrier()
             # del all_states_zarr
             gc.collect()
+            return kwargs
             # ----**** --------------------------------------------------------
 
         except Exception as e:
