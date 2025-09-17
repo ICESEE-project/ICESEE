@@ -760,3 +760,16 @@ def mark_h5_with_fingerprint(path: str, attr="icesee_fingerprint", value: str | 
         if extra:
             for k,v in extra.items():
                 f.attrs[k] = v
+
+def env_flag(name: str, default: bool = False) -> bool:
+    """Interpret environment variable flags like 0/1, true/false, on/off."""
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    val = str(val).strip().lower()
+    if val in ("1", "true", "yes", "on"):
+        return True
+    if val in ("0", "false", "no", "off"):
+        return False
+    # fallback: any non-empty string means True
+    return True
