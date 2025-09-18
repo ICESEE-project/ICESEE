@@ -41,9 +41,6 @@ NENS=64
 MODEL_NPROCS=4
 NP_LIST="64 32 16 8 4 2 1"
 
-OUTROOT="runs_perf_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$OUTROOT"
-
 OUTROOT="strong_scaling_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$OUTROOT"
 
