@@ -11,6 +11,7 @@
 | `--sequential_run` | sequential run | str | None | No | None | CLI |
 | `--verbose` | verbose output | str | None | No | None | CLI |
 | `-F` | Path to YAML parameter file (default: params.yaml) | str | params.yaml | No | None | CLI |
+| `ICESEE_PERFORMANCE_TEST` | this is an environment variable | bool | False | No | None | YAML |
 | `Nens` | Parameter for nens in dictionary | Unknown | Computed | No | None | Dictionary |
 | `Q_rho` | YAML configuration parameter for q rho | float | 1.0 | No | None | YAML |
 | `base_seed` | YAML configuration parameter for base seed | int | 42 | No | None | YAML |
