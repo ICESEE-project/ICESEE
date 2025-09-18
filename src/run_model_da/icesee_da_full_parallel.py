@@ -136,6 +136,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
     ParallelManager().initialize_seed(comm_world, base_seed=base_seed)
 
     # --- intialize EnKF I/O handler class ---
+    time_file_io_initialization = MPI.Wtime()
     batch_size = model_kwargs.get("batch_size",100)
     # serial_file_creation = model_kwargs.get("serial_file_creation",True)
     serial_file_creation = True
@@ -144,6 +145,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                                              batch_size=batch_size)
     # Update model_kwargs with the EnKF I/O handler
     model_kwargs.update({"enkf_parallel_io": enkf_parallel_io})
+    time_file_io_initialization = MPI.Wtime() - time_file_io_initialization
 
     try:
 
@@ -582,7 +584,9 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         if rank_world == 0:
             pbar.close()
         comm_world.Barrier()
+        time_file_io_closing = MPI.Wtime()
         enkf_parallel_io.close()
+        time_file_io_initialization += MPI.Wtime() - time_file_io_closing
 
         # comm_world.Barrier()  
         # # ====== load data to be written to file ======
@@ -607,9 +611,10 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         t0_final = MPI.Wtime()
         finalize_ok = True
         finalize_err = ""
-
+        
         if rank_world == 0:
             try:
+                # --- create the ensemble dataset ---
                 if model_kwargs.get("create_ensemble_dataset", True):
                     print("[ICESEE] Creating ensemble dataset...")
                     out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
@@ -703,7 +708,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
             # print(f"\n[ICESEE] Rank {rank_world} starting initialization file writing time reduction.")
             init_file_time = comm_world.allreduce(time_init_file_writing, op=MPI.MAX)      
             # print(f"[ICESEE] Rank {rank_world} finished initialization file writing time reduction.\n")
-            total_file_time = init_file_time + forecast_file_time + analysis_file_time + time_final_file_writing
+            total_file_time = init_file_time + forecast_file_time + analysis_file_time + time_final_file_writing + time_file_io_initialization
 
             time_analysis_ensemble_mean = comm_world.allreduce(time_analysis_ensemble_mean_generation, op=MPI.MAX)
             time_forecast_ensemble_mean= comm_world.allreduce(time_forecast_ensemble_mean_generation, op=MPI.MAX)
