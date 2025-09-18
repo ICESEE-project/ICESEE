@@ -584,7 +584,9 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         if rank_world == 0:
             pbar.close()
         comm_world.Barrier()
+        time_file_io_closing = MPI.Wtime()
         enkf_parallel_io.close()
+        time_file_io_initialization += MPI.Wtime() - time_file_io_closing
 
         # comm_world.Barrier()  
         # # ====== load data to be written to file ======
@@ -609,9 +611,10 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         t0_final = MPI.Wtime()
         finalize_ok = True
         finalize_err = ""
-
+        
         if rank_world == 0:
             try:
+                # --- create the ensemble dataset ---
                 if model_kwargs.get("create_ensemble_dataset", True):
                     print("[ICESEE] Creating ensemble dataset...")
                     out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
