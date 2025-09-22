@@ -251,8 +251,12 @@ if not flag_jupyter:
         'checkpoint_every': int(enkf_params.get('checkpoint_every', 1)),
         'base_seed': int(enkf_params.get('base_seed', 42)),
         'k_start_override': enkf_params.get('k_start_override', None),
-        'ICESEE_PERFORMANCE_TEST': enkf_params.get('ICESEE_PERFORMANCE_TEST', False), # this is an environment variable
+        'ICESEE_PERFORMANCE_TEST': bool(enkf_params.get('ICESEE_PERFORMANCE_TEST', False)), # this is an environment variable
+        'h5_file_compression': enkf_params.get('h5_file_compression', None), # e.g., 'gzip' or 'lzf' or 'szip' or None
+        'h5_file_compression_level': int(enkf_params.get('h5_file_compression_level', 4)), # 0-9 for gzip, 1-9 for szip, ignored for lzf and None
+        'h5_file_chunk_size': int(enkf_params.get('h5_file_chunk_size', 1000)),
     }
+
 
     # # update kwargs dictonary with params
     kwargs.update({'physical_params': physical_params})

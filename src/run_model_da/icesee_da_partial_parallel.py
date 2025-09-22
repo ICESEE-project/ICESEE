@@ -109,7 +109,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         model_nprocs = params.get("model_nprocs", 1)
 
         # set modeel_nprocs adaptively
-         if model_kwargs.get('ICESEE_PERFORMANCE_TEST') or os.environ.get("ICESEE_PERFORMANCE_TEST"):
+        if model_kwargs.get('ICESEE_PERFORMANCE_TEST') or os.environ.get("ICESEE_PERFORMANCE_TEST"):
             total_cores = size_world * model_nprocs
         else:
             # Get total cores from SLURM environment (more reliable than os.cpu_count())
@@ -119,7 +119,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
             except ValueError:
                 total_cores = os.cpu_count()  # Fallback if not in SLURM
                 slurm_nodes = 1
-                
+
         base_total_procs = size_world + (size_world * model_nprocs)  # MPI + MATLAB processes
         diff = total_cores - base_total_procs  # Available or deficit cores
 
@@ -564,8 +564,8 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                    
                     obs_index = model_kwargs["obs_index"]
                     if (km < params["number_obs_instants"]) and (k+1 == obs_index[km]):
-                         # -- time global analysis step ---
-                         _time_analysis_step = MPI.Wtime()
+                        # -- time global analysis step ---
+                        _time_analysis_step = MPI.Wtime()
                         # *- parallelize the getting Eta, D and HA steps
                         # if Nens >= size_world:
                         #     with h5py.File(input_file, "r", driver="mpio", comm=comm_world) as f:

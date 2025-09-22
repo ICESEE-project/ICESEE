@@ -75,7 +75,9 @@ def retry_on_failure(
     return decorator
 
 class EnKF_fully_parallel_IO:
-    def __init__(self, file_prefix, nd, nens, nt, subcomm, mpi_comm, params, serial_file_creation=False, base_path="enkf_data", batch_size=50):
+    def __init__(self, file_prefix, nd, nens, nt, subcomm, mpi_comm, params, \
+                 serial_file_creation=False, base_path="enkf_data", batch_size=50,\
+                 h5_file_compression=None, h5_file_compression_level=4, h5_file_chunk_size=1000):
         try:
             self.nd = nd
             self.nens = nens
@@ -90,6 +92,9 @@ class EnKF_fully_parallel_IO:
             self.size = self.comm.Get_size() if nens >= mpi_comm.Get_size() else mpi_comm.Get_size()
             self.subcomm = subcomm
             self.serial_file_creation = serial_file_creation
+            self.h5_file_compression = h5_file_compression
+            self.h5_file_compression_level = h5_file_compression_level
+            self.h5_file_chunk_size = h5_file_chunk_size
 
             # # Divide nd among ranks
             # nd_local_base = nd // self.size

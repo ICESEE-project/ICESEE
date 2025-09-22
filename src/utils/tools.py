@@ -414,7 +414,8 @@ def display_timing_default(computational_time: float, wallclock_time: float) -> 
     wall_time_str = format_time(wallclock_time)
     
     # Content lines (no trailing spaces after emojis)
-    title = "[ICESEE] Performance Metrics"
+    # title = "[ICESEE] Performance Metrics"
+    title = f"[ICESEE] Metrics on {MPI.COMM_WORLD.Get_size()} ranks"
     comp_line = f"Computational Time (Σ): {comp_time_str} (DAY:HR:MIN:SEC.ms) ⏱️"
     wall_line = f"Wall-Clock Time (max):  {wall_time_str} (DAY:HR:MIN:SEC.ms) 🕒"
     
@@ -501,7 +502,8 @@ def display_timing_verbose(
     time_init_ensemble_mean_computation: float,
     time_forecast_ensemble_mean_computation: float,
     time_analysis_ensemble_mean_computation: float,
-    comm: MPI.Comm = None
+    comm: MPI.Comm = None,
+    model_nprocs: int = 1
 ) -> None:
     """Display all timing metrics in a table with strict aligned formatting using logging, all in gray."""
     # from mpi4py import MPI
@@ -517,7 +519,7 @@ def display_timing_verbose(
 
     # Formatted time strings with metrics and values
     time_entries = [
-        ("[ICESEE] Performance Metrics       (DAY:HR:MIN:SEC.ms)",),  # Bold header
+        (f"[ICESEE] Performance Metrics ({MPI.COMM_WORLD.Get_size()*model_nprocs} ranks)     (DAY:HR:MIN:SEC.ms)",),  # Bold header
         ("Computational Time (Σ)", format_time(computational_time)),
         ("Wall-Clock Time (max)", format_time(wallclock_time)),
         ("True/Wrong State Time", format_time(true_wrong_time)),

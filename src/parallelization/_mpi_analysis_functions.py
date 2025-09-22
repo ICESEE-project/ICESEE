@@ -107,7 +107,7 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
         HA[:,ens] = np.dot(H, ensemble_vec[:,ens])
     # ---------------------------------------
 
-    print(f"\n[Rank {comm_world.Get_rank()}] norms H: {np.linalg.norm(H)}, ens_mean: {np.linalg.norm(np.mean(ensemble_vec, axis=1))}, d: {np.linalg.norm(d)} D: {np.linalg.norm(D)}, HA: {np.linalg.norm(HA)}, Eta: {np.linalg.norm(Eta)} ensemble_vec: {np.linalg.norm(ensemble_vec)}\n")
+    # print(f"\n[Rank {comm_world.Get_rank()}] norms H: {np.linalg.norm(H)}, ens_mean: {np.linalg.norm(np.mean(ensemble_vec, axis=1))}, d: {np.linalg.norm(d)} D: {np.linalg.norm(D)}, HA: {np.linalg.norm(HA)}, Eta: {np.linalg.norm(Eta)} ensemble_vec: {np.linalg.norm(ensemble_vec)}\n")
 
     # --- compute the innovations D` = D-HA
     Dprime = D - HA # mxNens

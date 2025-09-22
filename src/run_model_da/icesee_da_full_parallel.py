@@ -138,11 +138,15 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
     # --- intialize EnKF I/O handler class ---
     time_file_io_initialization = MPI.Wtime()
     batch_size = model_kwargs.get("batch_size",100)
-    # serial_file_creation = model_kwargs.get("serial_file_creation",True)
-    serial_file_creation = True
+    serial_file_creation = model_kwargs.get("serial_file_creation",True)
+    h5_file_compression = model_kwargs.get("h5_file_compression",None)
+    h5_file_compression_level = model_kwargs.get("h5_file_compression_level",4)
+    h5_file_chunk_size = model_kwargs.get("h5_file_chunk_size",1000)
     enkf_parallel_io = EnKF_fully_parallel_IO('icesee_enkf', nd, Nens, nt, subcomm, comm_world, \
                                              params, serial_file_creation, base_path=_modelrun_datasets, \
-                                             batch_size=batch_size)
+                                             batch_size=batch_size, h5_file_compression=h5_file_compression, \
+                                             h5_file_compression_level=h5_file_compression_level, \
+                                             h5_file_chunk_size=h5_file_chunk_size)
     # Update model_kwargs with the EnKF I/O handler
     model_kwargs.update({"enkf_parallel_io": enkf_parallel_io})
     time_file_io_initialization = MPI.Wtime() - time_file_io_initialization
@@ -419,10 +423,10 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         # Initialize progress bar on the root process
         if rank_world == 0:
             nt = model_kwargs.get("nt", params["nt"])
-            print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {size_world} MPI ranks.")
+            print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {size_world*params['model_nprocs']} MPI ranks.")
             pbar = tqdm(
                 total=nt,
-                desc=f"[ICESEE] Assimilation progress ({size_world} ranks)",
+                desc=f"[ICESEE] Assimilation progress ({size_world*params['model_nprocs']} ranks)",
                 position=0,
                 leave=True,
                 dynamic_ncols=True,
@@ -752,7 +756,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                 time_init_ensemble_mean_computation=time_init_ensemble_mean,
                 time_forecast_ensemble_mean_computation=time_forecast_ensemble_mean,
                 time_analysis_ensemble_mean_computation=time_analysis_ensemble_mean,
-                comm=comm_world
+                comm=comm_world, model_nprocs=params['model_nprocs']
             )
             else:
                 display_timing_default(total_elapsed_time, total_wall_time)
