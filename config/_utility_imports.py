@@ -177,7 +177,7 @@ if not flag_jupyter:
         params['data_path'] = enkf_params.get('data_path', '_modelrun_datasets')
 
     if model_nprocs == 0:
-        params['model_nprocs'] = enkf_params.get('model_nprocs', 1) 
+        params['model_nprocs'] = enkf_params.get('model_nprocs', 0) 
     
     if run_flag:
         execution_flag = params.get('execution_flag')
