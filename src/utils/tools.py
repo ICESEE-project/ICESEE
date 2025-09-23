@@ -519,7 +519,7 @@ def display_timing_verbose(
 
     # Formatted time strings with metrics and values
     time_entries = [
-        (f"[ICESEE] Performance Metrics ({MPI.COMM_WORLD.Get_size()*model_nprocs} ranks)     (DAY:HR:MIN:SEC.ms)",),  # Bold header
+        (f"[ICESEE] Performance Metrics ({MPI.COMM_WORLD.Get_size()*(model_nprocs+1)} ranks)     (DAY:HR:MIN:SEC.ms)",),  # Bold header
         ("Computational Time (Σ)", format_time(computational_time)),
         ("Wall-Clock Time (max)", format_time(wallclock_time)),
         ("True/Wrong State Time", format_time(true_wrong_time)),
