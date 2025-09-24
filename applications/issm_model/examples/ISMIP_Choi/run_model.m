@@ -428,7 +428,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             save(filename, 'md', '-v7.3');
 
             % Save ensemble outputs in HDF5
-            fields = {'Thickness', 'bed', 'coefficient'};
+            fields = {'Thickness','bed', 'coefficient'};
             result_0 = md.results.TransientSolution(end);
             result_1 = md.geometry;
             result_2 = md.friction;
@@ -436,7 +436,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_out_%d.h5', ens_id));
 
             data = {'Thickness', result_0, 'Thickness';
-                    'Surface', result_0, 'Surface';
+                    % 'Surface', result_0, 'Surface';
                     'bed', result_1, 'bed';
                     'coefficient', result_2, 'coefficient'};
 
@@ -511,6 +511,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
             md.geometry.thickness = h5read(filename, '/Thickness');
             % md.geometry.surface   = h5read(filename, '/Surface');
+            
             md.geometry.bed = h5read(filename, '/bed');
             md.friction.coefficient = h5read(filename, '/coefficient');
 
@@ -581,13 +582,11 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % Save ensemble outputs in HDF5
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
 
-            fields = {'Thickness', 'bed', 'coefficient'};
             result_0 = md.results.TransientSolution(end);
             result_1 = md.geometry;
             result_2 = md.friction;
 
             data = {'Thickness', result_0, 'Thickness';
-                    % 'Surface', result_0, 'Surface';
                     'bed', result_1, 'bed';
                     'coefficient', result_2, 'coefficient'};
 

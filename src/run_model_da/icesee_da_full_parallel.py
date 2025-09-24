@@ -423,10 +423,10 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         # Initialize progress bar on the root process
         if rank_world == 0:
             nt = model_kwargs.get("nt", params["nt"])
-            print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {size_world*params['model_nprocs']} MPI ranks.")
+            print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {size_world*(params['model_nprocs']+1)} MPI ranks.")
             pbar = tqdm(
                 total=nt,
-                desc=f"[ICESEE] Assimilation progress ({size_world*params['model_nprocs']} ranks)",
+                desc=f"[ICESEE] Assimilation progress ({size_world*(params['model_nprocs']+1)} ranks)",
                 position=0,
                 leave=True,
                 dynamic_ncols=True,
@@ -515,6 +515,8 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                                     "dt": dt, 
                                     "Lx": Lx, 
                                     "Ly": Ly, 
+                                    "km": km,
+                                    "k": k,
                                     "len_scale": len_scale,
                                     "model_module": model_module,
                                     "time_forecast_step": time_forecast_step,

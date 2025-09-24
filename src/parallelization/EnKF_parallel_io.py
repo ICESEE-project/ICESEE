@@ -1428,20 +1428,21 @@ class EnKF_fully_parallel_IO:
 
             # compute the anlysis mean and write to h5 file
             _time_analysis_mean = MPI.Wtime()
-            yi = np.sum(X5, axis=1)
-            analysis_mean = np.dot(all_states_zarr, yi) / Nens
-            # print(f"[Rank {self.mpi_comm.Get_rank()}]  shape: {analysis_mean.shape} shape_ {self.nd_end_world - self.nd_start_world}")
-            file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-            with h5py.File(file_path, 'a', driver='mpio', comm=self.mpi_comm) as f:
-                if 'mean' not in f:
-                    if rank == 0:
-                        f.create_dataset(
-                            'mean', (self.nd, self.nt),
-                            chunks=(min(self.nd, 1000), 1),
-                            dtype='f8'
-                        )
-                comm.Barrier()
-                f['mean'][self.nd_start_world:self.nd_end_world, k] = analysis_mean
+            if kwargs.get('compute_analysis_mean', False):
+                yi = np.sum(X5, axis=1)
+                analysis_mean = np.dot(all_states_zarr, yi) / Nens
+                # print(f"[Rank {self.mpi_comm.Get_rank()}]  shape: {analysis_mean.shape} shape_ {self.nd_end_world - self.nd_start_world}")
+                file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
+                with h5py.File(file_path, 'a', driver='mpio', comm=self.mpi_comm) as f:
+                    if 'mean' not in f:
+                        if rank == 0:
+                            f.create_dataset(
+                                'mean', (self.nd, self.nt),
+                                chunks=(min(self.nd, 1000), 1),
+                                dtype='f8'
+                            )
+                    comm.Barrier()
+                    f['mean'][self.nd_start_world:self.nd_end_world, k] = analysis_mean
             kwargs["time_analysis_ensemble_mean_generation"] += (MPI.Wtime() - _time_analysis_mean)
             # print(f"\n[ICESEE] Rank {rank} completed analysis update for time step {k+1}/{nt} analysis_mean norm {np.linalg.norm(analysis_mean)}\n")
 
