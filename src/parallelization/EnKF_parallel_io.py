@@ -541,7 +541,7 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
     
-    def compute_forecast_mean_chunked_v2(self, k):
+    def compute_forecast_mean_chunked_v2(self, k, flag=None):
         """
         Simple & hang-free:
         - running sum in RAM (length = local_rows)
@@ -590,11 +590,20 @@ class EnKF_fully_parallel_IO:
             # ---- Parallel HDF5: collective create + collective write -------------
             file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
 
+            if flag == 'initial':
+                if rank == 0 and k==0: # remove old file if any
+                    try:
+                        shutil.rmtree(file_path)
+                    except OSError:
+                        pass
+                comm.Barrier()
+
             # Dataset transfer property list: COLLECTIVE for the write
             dxpl = h5p.create(h5p.DATASET_XFER)
             dxpl.set_dxpl_mpio(h5fd.MPIO_COLLECTIVE)
 
             with h5py.File(file_path, 'a', driver='mpio', comm=comm) as f:
+    
                 # --- Collective dataset creation: ALL ranks must take the same branch
                 exists_local = ('mean' in f)
                 # If any rank sees it, treat as exists for all to avoid split branches
@@ -835,31 +844,60 @@ class EnKF_fully_parallel_IO:
 
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
     def generate_observation_schedule(self, **kwargs):
-        try:
-            t = np.array(kwargs["t"])
-            freq_obs = self.params["freq_obs"]
-            obs_start_time = self.params["obs_start_time"]
-            obs_max_time = self.params["obs_max_time"]
+        # try:
+        t = np.array(kwargs["t"])
+        freq_obs = self.params["freq_obs"]
+        obs_start_time = self.params["obs_start_time"]
+        obs_max_time = self.params["obs_max_time"]
 
-            max_t = np.max(t)
-            obs_max_time = min(obs_max_time, max_t)
+        max_t = np.max(t)
+        obs_max_time = min(obs_max_time, max_t)
 
-            obs_t = np.arange(obs_start_time, obs_max_time + freq_obs, freq_obs)
-            obs_t = obs_t[obs_t <= obs_max_time]
+        obs_t = np.arange(obs_start_time, obs_max_time + freq_obs, freq_obs)
+        obs_t = obs_t[obs_t <= obs_max_time]
 
-            obs_idx = []
-            for time in obs_t:
-                idx = np.argmin(np.abs(t - time))
-                obs_idx.append(idx)
-            obs_idx = np.array(obs_idx, dtype=int)
+        obs_idx = []
+        for time in obs_t:
+            idx = np.argmin(np.abs(t - time))
+            obs_idx.append(idx)
+        obs_idx = np.array(obs_idx, dtype=int)
 
-            num_observations = len(obs_idx)
-            return obs_t, obs_idx, num_observations
-        except Exception as e:
-            print(f"Error occurred in generate_observation_schedule: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
+        num_observations = len(obs_idx)
+        if len(obs_idx) != num_observations:
+            print(f"[WARNING] obs_idx length {len(obs_idx)} does not match num_observations {num_observations}")
+        # print(f"[DEBUG] obs_t: {obs_t}, obs_idx: {obs_idx}, num_observations: {num_observations}")
+        return obs_t, obs_idx, num_observations
+        # except Exception as e:
+        #     print(f"Error occurred in generate_observation_schedule: {e}")
+        #     tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+        #     print(f"Traceback details:\n{tb_str}")
+        #     self.mpi_comm.Abort(1)
+    # def generate_observation_schedule(self, **kwargs):
+    #     try:
+    #         t = np.array(kwargs["t"])
+    #         freq_obs = self.params["freq_obs"]
+    #         obs_start_time = self.params["obs_start_time"]
+    #         obs_max_time = self.params["obs_max_time"]
+
+    #         max_t = np.max(t)
+    #         obs_max_time = min(obs_max_time, max_t)
+
+    #         obs_t = np.arange(obs_start_time, obs_max_time + freq_obs, freq_obs)
+    #         obs_t = obs_t[obs_t <= obs_max_time]
+
+    #         obs_idx = []
+    #         for time in obs_t:
+    #             idx = np.argmin(np.abs(t - time))
+    #             obs_idx.append(idx)
+    #         obs_idx = np.array(obs_idx, dtype=int)
+
+    #         num_observations = len(obs_idx)
+    #         return obs_t, obs_idx, num_observations
+    #     except Exception as e:
+    #         print(f"Error occurred in generate_observation_schedule: {e}")
+    #         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+    #         print(f"Traceback details:\n{tb_str}")
+    #         self.mpi_comm.Abort(1)
     
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
     def _create_synthetic_observations(self, **kwargs):
@@ -896,23 +934,29 @@ class EnKF_fully_parallel_IO:
             
             try:
                 with h5py.File(obs_file, 'a') as f:
+                    if 'hu_obs' in f or 'error_R' in f:
+                        print(f"[ICESEE] Warning: {obs_file} already contains 'hu_obs' or 'error_R'. Overwriting datasets.")
+                        del f['hu_obs']
+                        del f['error_R']
+
                     if 'hu_obs' not in f:
-                        f.create_dataset('hu_obs', (nd, m), chunks=(min(1000, nd), min(50, m)), dtype='f8')
+                        f.create_dataset('hu_obs', (nd, m_obs), chunks=(min(1000, nd), min(50, m_obs)), dtype='f8')
                     if 'error_R' not in f:
-                        f.create_dataset('error_R', (nd, m_R), chunks=(min(1000, nd), min(50, m_R)), dtype='f8')
+                        f.create_dataset('error_R', (nd, m_obs * 2 + 1), chunks=(min(1000, nd), min(50, m_obs * 2 + 1)), dtype='f8')
                     hu_obs = f['hu_obs']
                     error_R = f['error_R']
-                    print(f"[ICESEE] error_R shape: {error_R.shape}, dtype: {error_R.dtype}")
+                    # print(f"[ICESEE] error_R shape: {error_R.shape},  m_R: {m_R}, m: {m}, nd: {nd}, hdim: {hdim}")
 
                     for i, sig in enumerate(self.params["sig_obs"]):
                         start_idx = i * hdim
                         end_idx = start_idx + hdim
-                        error_R[start_idx:end_idx, :] = np.ones((hdim, m_R)) * sig
+                        error_R[start_idx:end_idx, :] = np.ones((hdim, 1)) * sig
 
                     km = 0
                     for step in range(nt):
                         if (km < m_obs) and (step + 1 == ind_m[km]):
                             for key in kwargs['vec_inputs']:
+                                print(f"[ICESEE] Generating obs at time step {step+1} for key {key} at obs index {km}")
                                 hu_obs[indx_map[key], km] = statevec_true[indx_map[key], step + 1] + \
                                                             np.random.normal(0, error_R[indx_map[key], km], len(indx_map[key]))
                             km += 1
