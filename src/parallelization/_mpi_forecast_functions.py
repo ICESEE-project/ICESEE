@@ -663,7 +663,7 @@ def parallel_forecast_step_default_full_parallel_run(**model_kwargs):
     tobserve = model_kwargs.get("tobserve")
     m_obs = model_kwargs.get("m_obs", params["number_obs_instants"])
     if (km < m_obs) and (k+1 == tobserve[km]):
-        enkf_parallel_io.compute_forecast_mean_chunked_v2(k + 1 if k < nt - 1 else k)
+        enkf_parallel_io.compute_forecast_mean_chunked_v2(k + 1 if k < nt - 1 else k, flag='initial')
     time_forecast_ensemble_mean_generation += MPI.Wtime() - _time_forecast_ensemble_mean_generation
 
     # update model_kwargs with timing variables and other parameters
