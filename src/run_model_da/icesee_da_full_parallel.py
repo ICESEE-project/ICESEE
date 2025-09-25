@@ -35,7 +35,7 @@ from ICESEE.src.utils.tools import icesee_get_index, display_timing_default,disp
                                     save_all_data, finalize_stack, _extract_time_from_name, _sorted_step_files,\
                                     _last_completed_step, _ckpt_path, _atomic_write_json, save_checkpoint, load_checkpoint, \
                                     compute_km_from_tobserve, step_already_done, reseed_for_step, icesee_fingerprint, h5_has_dataset_with_shape, \
-                                    h5_attr_equals, mark_h5_with_fingerprint
+                                    h5_attr_equals, mark_h5_with_fingerprint, env_flag
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
                               generate_pseudo_random_field_1d, \
@@ -136,14 +136,20 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
     ParallelManager().initialize_seed(comm_world, base_seed=base_seed)
 
     # --- intialize EnKF I/O handler class ---
+    time_file_io_initialization = MPI.Wtime()
     batch_size = model_kwargs.get("batch_size",100)
-    # serial_file_creation = model_kwargs.get("serial_file_creation",True)
-    serial_file_creation = True
+    serial_file_creation = model_kwargs.get("serial_file_creation",True)
+    h5_file_compression = model_kwargs.get("h5_file_compression",None)
+    h5_file_compression_level = model_kwargs.get("h5_file_compression_level",4)
+    h5_file_chunk_size = model_kwargs.get("h5_file_chunk_size",1000)
     enkf_parallel_io = EnKF_fully_parallel_IO('icesee_enkf', nd, Nens, nt, subcomm, comm_world, \
                                              params, serial_file_creation, base_path=_modelrun_datasets, \
-                                             batch_size=batch_size)
+                                             batch_size=batch_size, h5_file_compression=h5_file_compression, \
+                                             h5_file_compression_level=h5_file_compression_level, \
+                                             h5_file_chunk_size=h5_file_chunk_size)
     # Update model_kwargs with the EnKF I/O handler
     model_kwargs.update({"enkf_parallel_io": enkf_parallel_io})
+    time_file_io_initialization = MPI.Wtime() - time_file_io_initialization
 
     try:
 
@@ -151,7 +157,17 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         model_nprocs = params.get("model_nprocs", 1)
 
         # set modeel_nprocs adaptively
-        total_cores = os.cpu_count()
+        # total_cores = os.cpu_count()
+        if model_kwargs.get('ICESEE_PERFORMANCE_TEST') or env_flag("ICESEE_PERFORMANCE_TEST", default=False):
+            total_cores = size_world * model_nprocs
+        else:
+            # Get total cores from SLURM environment (more reliable than os.cpu_count())
+            try:
+                total_cores = int(os.environ.get("SLURM_NTASKS", os.cpu_count()))
+                slurm_nodes = int(os.environ.get("SLURM_JOB_NUM_NODES", 1))
+            except ValueError:
+                total_cores = os.cpu_count()  # Fallback if not in SLURM
+                slurm_nodes = 1
         base_total_procs = size_world + (size_world * model_nprocs)  # MPI + MATLAB processes
         diff = total_cores - base_total_procs  # Available or deficit cores
 
@@ -407,10 +423,10 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         # Initialize progress bar on the root process
         if rank_world == 0:
             nt = model_kwargs.get("nt", params["nt"])
-            print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {size_world} MPI ranks.")
+            print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {size_world*(params['model_nprocs']+1)} MPI ranks.")
             pbar = tqdm(
                 total=nt,
-                desc=f"[ICESEE] Assimilation progress ({size_world} ranks)",
+                desc=f"[ICESEE] Assimilation progress ({size_world*(params['model_nprocs']+1)} ranks)",
                 position=0,
                 leave=True,
                 dynamic_ncols=True,
@@ -499,6 +515,8 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                                     "dt": dt, 
                                     "Lx": Lx, 
                                     "Ly": Ly, 
+                                    "km": km,
+                                    "k": k,
                                     "len_scale": len_scale,
                                     "model_module": model_module,
                                     "time_forecast_step": time_forecast_step,
@@ -572,7 +590,9 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         if rank_world == 0:
             pbar.close()
         comm_world.Barrier()
+        time_file_io_closing = MPI.Wtime()
         enkf_parallel_io.close()
+        time_file_io_initialization += MPI.Wtime() - time_file_io_closing
 
         # comm_world.Barrier()  
         # # ====== load data to be written to file ======
@@ -597,9 +617,10 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         t0_final = MPI.Wtime()
         finalize_ok = True
         finalize_err = ""
-
+        
         if rank_world == 0:
             try:
+                # --- create the ensemble dataset ---
                 if model_kwargs.get("create_ensemble_dataset", True):
                     print("[ICESEE] Creating ensemble dataset...")
                     out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
@@ -693,7 +714,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
             # print(f"\n[ICESEE] Rank {rank_world} starting initialization file writing time reduction.")
             init_file_time = comm_world.allreduce(time_init_file_writing, op=MPI.MAX)      
             # print(f"[ICESEE] Rank {rank_world} finished initialization file writing time reduction.\n")
-            total_file_time = init_file_time + forecast_file_time + analysis_file_time + time_final_file_writing
+            total_file_time = init_file_time + forecast_file_time + analysis_file_time + time_final_file_writing + time_file_io_initialization
 
             time_analysis_ensemble_mean = comm_world.allreduce(time_analysis_ensemble_mean_generation, op=MPI.MAX)
             time_forecast_ensemble_mean= comm_world.allreduce(time_forecast_ensemble_mean_generation, op=MPI.MAX)
@@ -737,7 +758,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                 time_init_ensemble_mean_computation=time_init_ensemble_mean,
                 time_forecast_ensemble_mean_computation=time_forecast_ensemble_mean,
                 time_analysis_ensemble_mean_computation=time_analysis_ensemble_mean,
-                comm=comm_world
+                comm=comm_world, model_nprocs=params['model_nprocs']
             )
             else:
                 display_timing_default(total_elapsed_time, total_wall_time)

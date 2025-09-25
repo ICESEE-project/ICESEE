@@ -109,7 +109,17 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         model_nprocs = params.get("model_nprocs", 1)
 
         # set modeel_nprocs adaptively
-        total_cores = os.cpu_count()
+        if model_kwargs.get('ICESEE_PERFORMANCE_TEST') or os.environ.get("ICESEE_PERFORMANCE_TEST"):
+            total_cores = size_world * model_nprocs
+        else:
+            # Get total cores from SLURM environment (more reliable than os.cpu_count())
+            try:
+                total_cores = int(os.environ.get("SLURM_NTASKS", os.cpu_count()))
+                slurm_nodes = int(os.environ.get("SLURM_JOB_NUM_NODES", 1))
+            except ValueError:
+                total_cores = os.cpu_count()  # Fallback if not in SLURM
+                slurm_nodes = 1
+
         base_total_procs = size_world + (size_world * model_nprocs)  # MPI + MATLAB processes
         diff = total_cores - base_total_procs  # Available or deficit cores
 
@@ -361,14 +371,14 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
     # tqdm progress bar
     # Initialize progress bar on the root process
     if rank_world == 0:
-        nt = model_kwargs.get("nt", params["nt"])
-        print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {size_world} MPI ranks.")
-        pbar = tqdm(
-            total=nt,
-            desc=f"[ICESEE] Assimilation progress ({size_world} ranks)",
-            position=0,
-            leave=True,
-            dynamic_ncols=True
+            nt = model_kwargs.get("nt", params["nt"])
+            print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {size_world*(params['model_nprocs']+1)} MPI ranks.")
+            pbar = tqdm(
+                total=nt,
+                desc=f"[ICESEE] Assimilation progress ({size_world*(params['model_nprocs']+1)} ranks)",
+                position=0,
+                leave=True,
+                dynamic_ncols=True
         )
 
     # ==== Time loop =======================================================================================
@@ -379,6 +389,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
     time_forecast_file_writing = 0.0
     time_analysis_file_writing = 0.0
     time_forecast_ensemble_mean_generation = 0.0
+    time_analysis_ensemble_mean_generation = 0.0
 
     # specified decorrelation length scale, tau,
     min_tau = 200
@@ -553,8 +564,8 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                    
                     obs_index = model_kwargs["obs_index"]
                     if (km < params["number_obs_instants"]) and (k+1 == obs_index[km]):
-                         # -- time global analysis step ---
-                         _time_analysis_step = MPI.Wtime()
+                        # -- time global analysis step ---
+                        _time_analysis_step = MPI.Wtime()
                         # *- parallelize the getting Eta, D and HA steps
                         # if Nens >= size_world:
                         #     with h5py.File(input_file, "r", driver="mpio", comm=comm_world) as f:
@@ -996,6 +1007,10 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
     init_file_time = comm_world.allreduce(time_init_file_writing, op=MPI.MAX)
     total_file_time = init_file_time + forecast_file_time + analysis_file_time
 
+    time_analysis_ensemble_mean = comm_world.allreduce(time_analysis_ensemble_mean_generation, op=MPI.MAX)
+    time_forecast_ensemble_mean= comm_world.allreduce(time_forecast_ensemble_mean_generation, op=MPI.MAX)
+    time_init_ensemble_mean = comm_world.allreduce(time_init_ensemble_mean_computation, op=MPI.MAX)
+
     # Display elapsed time on rank 0
     comm_world.Barrier()
     if rank_world == 0:
@@ -1014,7 +1029,11 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
             forecast_file_time=forecast_file_time,
             analysis_file_time=analysis_file_time,
             total_file_time=total_file_time,
-            forecast_noise_time=forecast_noise_time, comm=comm_world
+            forecast_noise_time=forecast_noise_time, 
+            time_init_ensemble_mean_computation=time_init_ensemble_mean,
+            time_forecast_ensemble_mean_computation=time_forecast_ensemble_mean,
+            time_analysis_ensemble_mean_computation=time_analysis_ensemble_mean,
+            comm=comm_world
         )
         else:
             display_timing_default(total_elapsed_time, total_wall_time)

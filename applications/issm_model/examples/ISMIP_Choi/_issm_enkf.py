@@ -77,8 +77,8 @@ def generate_true_state(**kwargs):
     with h5py.File(input_filename, 'r') as f:
         # -- fetch state variables
         for k in range(1, kwargs.get('nt') + 1):
-            key = f'Thickness_{k}'
-            statevec_true[indx_map['Thickness'], k-1] = f[key][0]
+            key_thickness = f'Thickness_{k}'
+            statevec_true[indx_map['Thickness'], k-1] = f[key_thickness][0]
             statevec_true[indx_map['bed'], k-1] = f['bed'][0]
             statevec_true[indx_map['coefficient'], k-1] = f['coefficient'][0]
 
@@ -164,8 +164,8 @@ def generate_nurged_state(**kwargs):
     with h5py.File(nurged_filename, 'r', driver='mpio', comm=comm) as f:
         # -- fetch state variables
         for k in range(1, kwargs.get('nt') + 1):
-            key = f'Thickness_{k}'
-            statevec_nurged[indx_map['Thickness'], k-1] = f[key][0]
+            key_thickness = f'Thickness_{k}'
+            statevec_nurged[indx_map['Thickness'], k-1] = f[key_thickness][0]
             statevec_nurged[indx_map['bed'], k-1] = f['bed'][0]
             statevec_nurged[indx_map['coefficient'], k-1] = f['coefficient'][0]
 

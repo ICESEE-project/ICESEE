@@ -67,8 +67,10 @@ def initialize_model(**kwargs):
         return None
     # --get the size of the state vector from the output file
     with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
-        for key in vec_inputs:
-            nd = f[key][0].shape[0]
+        var = f[vec_inputs[0]]
+        nd = var[0].shape[0]
+        # for key in vec_inputs:
+        #     nd = f[key][0].shape[0]
         return nd
 
     
@@ -197,6 +199,7 @@ def run_model(ensemble, **kwargs):
     updated_state = {}
     with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
         updated_state['Thickness'] = f['Thickness'][0]
+        
         # --Joint Estimations--
         if kwargs["joint_estimation"]:
             updated_state['bed'] = f['bed'][0]

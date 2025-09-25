@@ -11,6 +11,7 @@
 | `--sequential_run` | sequential run | str | None | No | None | CLI |
 | `--verbose` | verbose output | str | None | No | None | CLI |
 | `-F` | Path to YAML parameter file (default: params.yaml) | str | params.yaml | No | None | CLI |
+| `ICESEE_PERFORMANCE_TEST` | this is an environment variable | bool | False | No | None | YAML |
 | `Nens` | Parameter for nens in dictionary | Unknown | Computed | No | None | Dictionary |
 | `Q_rho` | YAML configuration parameter for q rho | float | 1.0 | No | None | YAML |
 | `base_seed` | YAML configuration parameter for base seed | int | 42 | No | None | YAML |
@@ -33,6 +34,9 @@
 | `generate_synthetic_obs` | YAML configuration parameter for generate synthetic obs | bool | True | No | None | YAML |
 | `generate_true_state` | YAML configuration parameter for generate true state | bool | True | No | None | YAML |
 | `global_analysis` | YAML configuration parameter for global analysis | bool | True | No | None | YAML |
+| `h5_file_chunk_size` | YAML configuration parameter for h5 file chunk size | int | 1000 | No | None | YAML |
+| `h5_file_compression` | e.g., 'gzip' or 'lzf' or 'szip' or None | NoneType | None | No | None | YAML |
+| `h5_file_compression_level` | 0-9 for gzip, 1-9 for szip, ignored for lzf and None | int | 4 | No | None | YAML |
 | `inflation_factor` | YAML configuration parameter for inflation factor | float | 1.0 | No | None | YAML |
 | `joint_estimated_params` | Variable used for joint estimated params in script logic | Unknown | Unknown | No | None | Variable |
 | `joint_estimation` | add joint estimation flag to params | Unknown | Unknown | No | None | Dictionary |
