@@ -956,7 +956,7 @@ class EnKF_fully_parallel_IO:
                     for step in range(nt):
                         if (km < m_obs) and (step + 1 == ind_m[km]):
                             for key in kwargs['vec_inputs']:
-                                print(f"[ICESEE] Generating obs at time step {step+1} for key {key} at obs index {km}")
+                                # print(f"[ICESEE] Generating obs at time step {step+1} for key {key} at obs index {km}")
                                 hu_obs[indx_map[key], km] = statevec_true[indx_map[key], step + 1] + \
                                                             np.random.normal(0, error_R[indx_map[key], km], len(indx_map[key]))
                             km += 1
