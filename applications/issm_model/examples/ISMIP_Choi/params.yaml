@@ -7,7 +7,7 @@ physical-parameters:
 
 modeling-parameters:
   # Model parameters
-  num_years: 250          # Number of years to run the model (30-year assimilation period from paper)
+  num_years: 40          # Number of years to run the model (30-year assimilation period from paper)
   tinitial: 0.0           # Initial time
   timesteps_per_year: 0.5 # Number of timesteps per year (monthly for stability in SSA)
 
@@ -27,9 +27,9 @@ modeling-parameters:
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 50                      # Number of ensemble members (paper uses 50)
-  freq_obs: 10                 # Frequency of observations (annual, as per paper)
-  obs_max_time: 200            # Maximum time for observations (30 years)
-  obs_start_time: 5            # Start time for observations (start of simulation)
+  freq_obs: 2                 # Frequency of observations (annual, as per paper)
+  obs_max_time: 38            # Maximum time for observations (30 years)
+  obs_start_time: 2            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state:    1  # Generate true state for synthetic observations
@@ -76,6 +76,13 @@ enkf-parameters:
   execution_mode: 2                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
   create_ensemble_dataset: True # Create dataset for ensemble runs
   data_path: _modelrun_datasets
+  ICESEE_PERFORMANCE_TEST: True
+
+  # HDF5 file parameters for the full parallel runs
+  h5_file_compression: None    # None, "gzip" or "lzf" 
+  h5_file_compression_level: 4   # Compression level (1-9 for gzip only)
+  h5_file_chunk_size: 1000       # Chunk size for HDF5
+  serial_file_creation: True  # Create HDF5 files in serial (True) or parallel (False)
 
   # restart parameters (only available for fully parallel runs)
   restart_enabled: 1         # Enable restart functionality
