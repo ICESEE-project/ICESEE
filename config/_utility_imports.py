@@ -167,6 +167,7 @@ if not flag_jupyter:
         'joint_estimated_params': enkf_params.get('joint_estimated_params', []),
         'coupled_model_datasets_dir': enkf_params.get('coupled_model_datasets', 'data'),
         'vec_inputs': enkf_params['vec_inputs'],
+        'collective_threshold': int(enkf_params.get('collective_threshold', 16)), # threshold for switching to collective I/O
     })
 
     # --- incase CL args not provided ---
