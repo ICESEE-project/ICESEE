@@ -46,6 +46,12 @@ def _time_to_seconds(s):
     d,h,m,sec = as_int(d),as_int(h),as_int(m),as_float(rest)
     return (((d*24)+h)*60 + m)*60 + sec
 
+def _time_to_minutes(s):
+    return _time_to_seconds(s) / 60.0
+
+def _time_to_hours(s):
+    return _time_to_seconds(s) / 3600.0
+
 def _find_time(window_lines, label_regex):
     for w in window_lines:
         if re.search(label_regex, w, re.I):
@@ -53,10 +59,11 @@ def _find_time(window_lines, label_regex):
             if not tm:
                 tm = re.search(r"(\d+:\d{2}:\d{2}:\d{2}\.\d{3})", w)
             if tm:
-                return _time_to_seconds(tm.group(1))
+                # return _time_to_seconds(tm.group(1))
+                return _time_to_minutes(tm.group(1))
     return None
 
-def _parse_log(log_path: str) -> pd.DataFrame:
+def _parse_log(log_path: str, model_np: int) -> pd.DataFrame:
     p = Path(log_path)
     text = p.read_text(errors="ignore")
     text = ANSI.sub("", text)  # remove ANSI escape codes
@@ -78,6 +85,9 @@ def _parse_log(log_path: str) -> pd.DataFrame:
             m = re.search(r"Metrics on\s+(\d+)\s+ranks", header)
         if m:
             ranks = int(m.group(1))
+
+        np = ranks/(model_np+1)
+        ranks = int(np)
 
         wall = _find_time(window, r"Wall-Clock Time|Wall[- ]Clock Time")
         comp = _find_time(window, r"Computational Time")
@@ -135,6 +145,7 @@ def _compute_scaling(df: pd.DataFrame, scaling_type: str) -> pd.DataFrame:
         return out
 
     N0 = int(valid["ranks"].min())
+    # N0=1
     T0 = float(valid.loc[valid["ranks"] == N0, base_col].iloc[0])
 
     out["baseline_ranks"] = N0
@@ -146,25 +157,62 @@ def _compute_scaling(df: pd.DataFrame, scaling_type: str) -> pd.DataFrame:
         out["speedup"] = (out["ranks"] / N0) * out["efficiency"]
     else:  # strong scaling
         out["speedup"] = out["baseline_time_s"] / out["metric_time_s"]
-        out["efficiency"] = out["speedup"] / (out["ranks"] / N0)
+        # out["efficiency"] = out["speedup"] / (out["ranks"] / N0)
+        out["efficiency"] = (out["speedup"] / out["ranks"])*100
+        # out["efficiency"] = (out["baseline_time_s"] / out["metric_time_s"]) / (out["ranks"] / N0) * 100
 
     out["base_metric_col"] = base_col
     return out
 
-def _line_plot(x, y, xlabel, ylabel, title, out_path):
-    fig = plt.figure()
-    plt.plot(x, y, marker="o")
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    plt.title(title)
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+def _line_plot(x, y, xlabel, ylabel, title, out_path,flag=None):
+    fig = plt.figure(figsize=(4.5, 4.5), dpi=300)
+    # plt.plot(x, y, marker="o")
+    if flag=='efficiency':
+        ideal_efficiency = x/x
+        plt.semilogx(x, y, 'o-b', markersize=6, linewidth=2, label='Measured')
+        plt.semilogx(x, ideal_efficiency*100,  '--', markersize=8, linewidth=2, color='red',label='Ideal')
+        plt.legend(['Measured','Ideal'], prop={'size': 10, 'weight': 'bold'})
+    elif flag=='speedup':
+        # npp = [2**i for i in range(0,len(x)+1)]
+        # ideal_speedup = y[0]/npp
+        # print(f"ideal_speedup: {ideal_speedup}, y: {y}, x: {x}")
+        plt.loglog(x, y, 'o-b', markersize=6, linewidth=2, label='Measured')
+        # plt.loglog(x, ideal_speedup, '--', markersize=8, linewidth=2, color='red', label='Ideal')
+        # plt.legend(['Measured','Ideal'], prop={'size': 10, 'weight': 'bold'})
+    else:
+        plt.loglog(x, y, 'o-b', markersize=6, linewidth=2, label='Measured')
+        npp = [2**i for i in range(0,len(x))]
+        ideal_time= y[0]/npp
+        # ideal_time= y[0]/x
+        plt.loglog(x, ideal_time, '--', markersize=8, linewidth=2, color='red',label='Ideal')
+        plt.legend(['Measured','Ideal'], prop={'size': 10, 'weight': 'bold'})
+        
+    plt.xlabel(xlabel, fontdict={'fontsize': 12, 'fontweight': 'bold'})
+    plt.ylabel(ylabel, fontdict={'fontsize': 12, 'fontweight': 'bold'})
+    plt.title(title, fontdict={'fontsize': 14, 'fontweight': 'bold'})
+    plt.xticks(fontweight='bold')
+    plt.yticks(fontweight='bold')
+    plt.grid()
+    # np = x.tolist()   
+    pstr = ([f'{N:d}' for N in x])
+    plt.xticks(x,pstr)
+    if flag != 'efficiency' and flag != 'speedup':
+        plt.yticks(y,[f'{N:.2f}' for N in y])
+
+    if flag == 'speedup':
+         ideal_speedup = y[0]/x
+         plt.yticks(y,[f'{N:.2f}' for N in ideal_speedup])
+    
+    plt.gca().minorticks_off()
+
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
-def analyze_icesee(log_path: str, scaling_type: str = "strong_scaling"):
+def analyze_icesee(log_path: str, scaling_type: str = "strong_scaling", model_np: int = 1):
     out_dir = Path("icesee_perf_outputs")
     out_dir.mkdir(exist_ok=True, parents=True)
 
-    df = _parse_log(log_path)
+    df = _parse_log(log_path, model_np=model_np)  
     if df.empty:
         raise RuntimeError("No timing blocks found in the log. Check formatting or path.")
 
@@ -180,28 +228,30 @@ def analyze_icesee(log_path: str, scaling_type: str = "strong_scaling"):
         "Ranks (MPI processes)",
         f"Speedup (relative to N0={int(metrics['baseline_ranks'].iloc[0])})",
         f"{scaling_type.replace('_',' ').title()}: Speedup (metric: {metrics['base_metric_col'].iloc[0].replace('_s','')})",
-        out_dir / f"{scaling_type}_speedup.png"
+        out_dir / f"{scaling_type}_speedup.png",
+        flag='speedup'
     )
     _line_plot(
         metrics["ranks"], metrics["efficiency"],
         "Ranks (MPI processes)",
         "Parallel Efficiency",
         f"{scaling_type.replace('_',' ').title()}: Parallel Efficiency (metric: {metrics['base_metric_col'].iloc[0].replace('_s','')})",
-        out_dir / f"{scaling_type}_efficiency.png"
+        out_dir / f"{scaling_type}_efficiency.png",
+        flag='efficiency'
     )
 
     # Per-phase timing (each on its own figure)
     if "forecast_s" in metrics:
         _line_plot(
             metrics["ranks"], metrics["forecast_s"],
-            "Ranks (MPI processes)", "Time (s)",
+            "Ranks (MPI processes)", "Time (mins)",
             "Forecast Step Time vs Ranks",
             out_dir / f"{scaling_type}_forecast_time.png"
         )
     if "analysis_s" in metrics:
         _line_plot(
             metrics["ranks"], metrics["analysis_s"],
-            "Ranks (MPI processes)", "Time (s)",
+            "Ranks (MPI processes)", "Time (mins)",
             "Analysis Step Time vs Ranks",
             out_dir / f"{scaling_type}_analysis_time.png"
         )
@@ -217,7 +267,7 @@ def analyze_icesee(log_path: str, scaling_type: str = "strong_scaling"):
     if io_series is not None:
         _line_plot(
             metrics["ranks"], io_series,
-            "Ranks (MPI processes)", "Time (s)",
+            "Ranks (MPI processes)", "Time (mins)",
             io_title,
             out_dir / f"{scaling_type}_io_time.png"
         )
