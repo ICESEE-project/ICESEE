@@ -1,33 +1,13 @@
-% -----------------------------------------------------------
+%% -----------------------------------------------------------
 % @author: 	Brian Kyanjo
 % @date: 		2025-04-30
 % @brief: 	Reads and plot results from both ISSM and ICESEE
 % ------------------------------------------------------------
 
-%% Make the $ISSM_DIR environment variable available
-% issm_dir = getenv('ISSM_DIR');  % Retrieve the ISSM_DIR environment variable
-% % addpath(genpath(issm_dir));     % Add the ISSM directory and its subdirectories to the MATLAB path
-% 
-% % path to the results
-% results_dir = fullfile(issm_dir, 'examples', 'ISMIP_Choi', 'Models','ens_id_0');  % Path to the results directory
-% forecast_dir = fullfile(issm_dir, 'examples', 'ISMIP_Choi', 'Models','ens_id_0')
-% 
-% %% plot surface velocities
-% % Load the ISSM results
-% md_true = loadmodel(fullfile(results_dir, 'true_state.mat'));  % Load the ISSM results from a .mat file
-% md_nurged = loadmodel(fullfile(results_dir, 'enkf_state.mat'));  % Load the ISSM results from a .mat file 
-% plotmodel(md_true, 'data', md_true.results.TransientSolution.Vel, 'layer', 5, 'figure', 5);
-% plotmodel(md_nurged, 'data', md_nurged.results.TransientSolution.Vel, 'layer', 5, 'figure', 6);
+close all; clear all
 
-%% ICESEE results
-% Get the Python version
-% pyversion = py.sys.version;
-% 
-% % Add the configuration directory to the Python path
-% py.sys.path().append('../../config');
-% 
-% % Import the Python module _utility_imports
-% utility_imports = py.importlib.import_module('_utility_imports');
+data_file_paths='data3/_modelrun_datasets';
+% data_file_paths='data/new_data/_modelrun_datasets';
 
 % Load the essential data
 results_dir = 'results';
@@ -39,18 +19,24 @@ tm_m        = h5read(file_path,'/obs_max_time');
 run_mode    = h5read(file_path,'/run_mode');
 
 % load the true and nurged states
-file_path            = 'data/new_data/_modelrun_datasets/true_nurged_states.h5';
+file_path            = fullfile(data_file_paths, 'true_nurged_states.h5');
 model_true_state     = h5read(file_path,'/true_state')';
 model_nurged_state   = h5read(file_path, '/nurged_state')';
 
 % load observation data
-file_path  = 'data/new_data/_modelrun_datasets/synthetic_obs.h5';
+file_path  = fullfile(data_file_paths, 'synthetic_obs.h5');
 w          = h5read(file_path, '/hu_obs')'; 
 
 % load the ensemble data
-file_path         = 'data/new_data/_modelrun_datasets/icesee_ensemble_data.h5';
+file_path         = fullfile(data_file_paths, 'icesee_ensemble_data.h5');
 ensemble_vec_full = h5read(file_path, '/ensemble'); 
 ensemble_vec_mean = h5read(file_path, '/ensemble_mean')';
+
+% Or read from .mat files (from the ISSM side)
+% file_path_true= fullfile("issm_data","true_state.mat");
+% file_path_nurged= fullfile("issm_data","nurged_state.mat");
+% md_true_= loadmodel(file_path_true);
+% md_nurged_= loadmodel(file_path_nurged);
 
 % Process and plot
 [ndim, nt] = size(model_true_state);
@@ -65,48 +51,215 @@ md_mean = md; md_ens = md;
 x = md.mesh.x;
 y = md.mesh.y;
 k =  nt-1;
+% k=1;
+
 True_fcoeff = model_true_state(2*hdim+1:3*hdim, k);
 True_bed = model_true_state(hdim+1:2*hdim,  k);
 True_thickness= model_true_state(1:hdim,  k);
 md_true.geometry.bed=True_bed;
 md_true.geometry.thickness=True_thickness;
 md_true.friction.coefficient=True_fcoeff;
-% figure;
-% plotmodel(md_true, 'data', md_true.geometry.thickness, 'title', 'Ice Thickness'); hold off;
-% figure; 
-% plotmodel(md_true, 'data', md_true.geometry.bed, 'title', 'Bed Topography');
-% plotmodel(md_true, 'data', md_true.friction.coefficient, 'title', 'Friction Coefficient');
 
-file_path_true= fullfile("issm_data","true_state.mat");
-file_path_nurged= fullfile("issm_data","nurged_state.mat");
-md_true_= loadmodel(file_path_true);
-md_nurged_= loadmodel(file_path_nurged);
+% nurged state
+nurged_fcoeff = model_nurged_state(2*hdim+1:3*hdim, k);
+nurged_bed = model_nurged_state(hdim+1:2*hdim,  k);
+nurged_thickness= model_nurged_state(1:hdim,  k);
+md_nurged.geometry.bed=nurged_bed;
+md_nurged.geometry.thickness=nurged_thickness;
+md_nurged.friction.coefficient=nurged_fcoeff;   
+ 
+% update ens loads
+md_ens.geometry.bed=ensemble_vec_mean(hdim+1:2*hdim, k);
+md_ens.geometry.thickness=ensemble_vec_mean(1:hdim,  k);
+md_ens.friction.coefficient=ensemble_vec_mean(2*hdim+1:3*hdim, k);
+% plotmodel(md_true, 'data', md_true.geometry.thickness-md_ens.geometry.thickness, 'title', 'Ice Thickness'); hold off;
 
-% load grounding lines 
+% fetch groundingline
+% md_true.mask.ocean_levelset=md_true_.results.TransientSolution(k).MaskOceanLevelset;
+% md_nurged.mask.ocean_levelset=md_nurged_.results.TransientSolution(k).MaskOceanLevelset;
+di =  md.materials.rho_ice / md.materials.rho_water;
+md_true.mask.ocean_levelset= md_true.geometry.thickness + md_true.geometry.bed/di;
+md_nurged.mask.ocean_levelset= md_nurged.geometry.thickness + md_nurged.geometry.bed/di;
+md_ens.mask.ocean_levelset= md_ens.geometry.thickness + md_ens.geometry.bed/di;
 
-for i=1:500
-    gl_data_true{i} = md_true_.results.TransientSolution(i).MaskOceanLevelset;
-    gl_data_nurged{i} = md_nurged_.results.TransientSolution(i).MaskOceanLevelset;
 
-    di =  md.materials.rho_ice / md.materials.rho_water;
-    Hcritical = -di * model_true_state(hdim+1:2*hdim,  i);
-    ice_thickness = model_true_state(1:hdim,  i);
-    % get the position at which H<=Hcritical
-    pos = find((ice_thickness <= Hcritical) & (ice_thickness > 0));
-    % gl_data{i} = md_true_.mesh.x(pos)
-    gl_data{i} = model_true_state(1:hdim,  i) + model_true_state(hdim+1:2*hdim,  i)/di;
-    % plotmodel(md_true_, 'data', gl_data{i}, 'title', sprintf('True Grounding Line Position at time %d', i)); hold off;
+% thickness
+plot_triptych(md_true, md_nurged, md_ens, ...
+              'geometry.thickness', sprintf('Ice Thickness after %d years', (k-1)*0.5), parula, 'm');   
+% bed topography
+plot_triptych(md_true, md_nurged, md_ens, ...
+              'geometry.bed', sprintf('Bed Elevation after %d years', (k-1)*0.5), parula, 'm');
+%
+% % Frcition coefficient
+plot_triptych(md_true, md_nurged, md_ens, ...
+              'friction.coefficient', sprintf('Friction Coefficient after %d years', (k-1)*0.5), parula, '');
+%
+% % grounding line
+% plot_triptych(md_true, md_nurged, md_ens, ...
+%               'results.TransientSolution(499).MaskOceanLevelset', ...
+%               'Grounding Line', gray, '');
+plot_triptych(md_true, md_nurged, md_ens, ...
+              'mask.ocean_levelset', ...
+              sprintf('Grounding Line after %d years', (k-1)*0.5), parula, '');
 
-    gl_data_ens{i}=ensemble_vec_mean(1:hdim, i) + ensemble_vec_mean(hdim+1:2*hdim, i)/di;
-    plotmodel(md_true_, 'data', gl_data_ens{i}, 'title', sprintf('Ensemble Mean Grounding Line Position at time %d', i)); hold off;
-    
+% create a movie for the groundingline for every 10 yrs
+% Setup video writer (optional)
+make_movie = false;
+if make_movie
+    if make_movie
+        v = VideoWriter('groundingline_triptych.mp4','MPEG-4');
+        v.FrameRate = 10;  % frames per second
+        open(v);
+    end
 
-    % plotmodel(md_nurged_, 'data', gl, 'title', sprintf('Nurged Ice Thickness + Bed at time %d', i)); hold off;
-    % subplots(2,1,1);
-    % plotmodel(md_nurged_, 'data', gl_data_nurged{i}, 'title', sprintf('Nurged Grounding Line Position at time %d', i)); hold off;
-    % subplots(2,1,2);
-    % plotmodel(md_true, 'data', gl_data_true{i}, 'title', sprintf('Grounding Line Position at time %d', i)); hold off;
+    % Precompute density ratio
+    di = md.materials.rho_ice / md.materials.rho_water;
+
+    for k = 1:20:500
+        
+        % Update ensemble model from state vector
+        md_ens.geometry.bed        = ensemble_vec_mean(hdim+1:2*hdim, k);
+        md_ens.geometry.thickness  = ensemble_vec_mean(1:hdim, k);
+        md_ens.friction.coefficient= ensemble_vec_mean(2*hdim+1:3*hdim, k);
+
+        % Compute flotation mask for ensemble
+        md_ens.mask.ocean_levelset = md_ens.geometry.thickness + md_ens.geometry.bed/di;
+
+        % Fetch true & nudged grounding lines
+        md_true.mask.ocean_levelset   = md_true_.results.TransientSolution(k).MaskOceanLevelset;
+        md_nurged.mask.ocean_levelset = md_nurged_.results.TransientSolution(k).MaskOceanLevelset;
+
+        % Plot triptych
+        plot_triptych(md_true, md_nurged, md_ens, ...
+                    'mask.ocean_levelset', ...
+                    sprintf('Grounding Line after %d years', (k-1)*0.5), ...
+                    parula, '');
+
+        drawnow;
+
+        % Capture frame if making movie
+        if make_movie
+            frame = getframe(gcf);
+            writeVideo(v, frame);
+        else
+            pause(0.1); % interactive view
+        end
+    end
+
+    if make_movie
+        close(v);
+    end
 end
-% figure;
-% plotmodel(md_true, 'data', gl_data_true{500}, 'title', 'Grounding Line Position at Final Time'); hold off;
+
+
+%% -- helper functions -- %%
+function plot_triptych(md_true, md_nurged, md_ens, field, field_title, cmap, units)
+% Compare true, nudged, assimilated, and difference with two separate colorbars
+    if nargin < 6 || isempty(cmap), cmap = parula; end
+    if nargin < 7, units = ''; end
+    units_str = iff(~isempty(units), [' (' units ')'], '');
+
+    % --- Data ---
+    data_true   = get_nested_field(md_true, field);
+    data_nurged = get_nested_field(md_nurged, field);
+    data_ens    = get_nested_field(md_ens, field);
+    diff_data   = data_ens - data_true;
+
+    % --- Limits ---
+    cmin   = min([data_true(:); data_nurged(:); data_ens(:)]);
+    cmax   = max([data_true(:); data_nurged(:); data_ens(:)]);
+    maxAbs = max(abs(diff_data(:)));
+
+    figure('Position',[100 100 1200 900]); clf;
+
+    % 1) True
+    plotmodel(md_true,  'data',data_true,   'title',['True ' field_title], ...
+              'subplot',[4,1,1],'caxis',[cmin cmax],'colorbar','off');
+    % 2) Wrong/Nudged
+    plotmodel(md_nurged,'data',data_nurged, 'title',['Wrong ' field_title], ...
+              'subplot',[4,1,2],'caxis',[cmin cmax],'colorbar','off');
+    % 3) Assimilated
+    plotmodel(md_ens,   'data',data_ens,    'title',['Assimilated ' field_title], ...
+              'subplot',[4,1,3],'caxis',[cmin cmax],'colorbar','off');
+    % 4) Difference
+    plotmodel(md_true,  'data',diff_data, ...
+              'title',['Assimilated - True ' field_title], ...
+              'subplot',[4,1,4],'caxis',[-maxAbs maxAbs],'colorbar','off');
+
+    % --- Axes layout ---
+    axs = flipud(findall(gcf,'Type','axes'));          % [1]=top ... [4]=bottom
+    gap = 0.05; top = 0.95; bottom = 0.08;
+    height = (top-bottom - 3*gap)/4;
+    for i = 1:4
+        pos = [0.10, bottom+(4-i)*(height+gap), 0.70, height];
+        set(axs(i),'Position',pos);
+        xlabel(axs(i),'X (km)','FontSize',12);
+        ylabel(axs(i),'Y (km)','FontSize',12);
+    end
+
+    % ===== Colorbars & colormaps (correctly bound) =====
+    % Top three axes use the SAME colormap & natural range
+    for i = 1:3
+        colormap(axs(i), cmap);
+        caxis(axs(i), [cmin cmax]);
+    end
+    % Build one colorbar tied to the middle axis (represents top three)
+    cb1 = colorbar(axs(2), 'Position',[0.83 0.35 0.03 0.55]);  % spans top strip
+    static_field = regexprep(field_title, '\s+after.*', '');
+    ylabel(cb1,[static_field units_str],'FontSize',14,'FontWeight','bold');
+    cb1.FontSize = 12;
+
+    % Difference axis gets its own diverging colormap & symmetric range
+    ax_diff = axs(4);
+    colormap(ax_diff, redblue(256));      % blue–white–red
+    caxis(ax_diff, [-maxAbs maxAbs]);
+    pos_diff = get(ax_diff,'Position');
+    cb2 = colorbar(ax_diff,'Position',[0.83 pos_diff(2) 0.03 pos_diff(4)]);
+    ylabel(cb2,['Difference ' units_str],'FontSize',14,'FontWeight','bold');
+    cb2.FontSize = 12;
+end
+
+% ---------- helpers ----------
+function out = get_nested_field(s, field)
+    parts = strsplit(field,'.'); out = s;
+    for i = 1:numel(parts)
+        tok = parts{i};
+        t = regexp(tok,'(.+)\((\d+)\)$','tokens');
+        if ~isempty(t), out = out.(t{1}{1})(str2double(t{1}{2}));
+        else,           out = out.(tok);
+        end
+    end
+end
+
+function y = iff(c,a,b); if c, y=a; else, y=b; end; end
+
+function cmap = redblue(n)
+% Diverging blue–white–red, white at zero
+    if nargin<1, n=256; end
+    m = n/2;
+    r = [linspace(0,1,m) , ones(1,m)];
+    g = [linspace(0,1,m) , linspace(1,0,m)];
+    b = [ones(1,m)       , linspace(1,0,m)];
+    cmap = [r(:) g(:) b(:)];
+end
+
+% function data = get_nested_field(s, field)
+% %GET_NESTED_FIELD Safely extracts nested field from a struct/model
+% %   field is a string like 'geometry.thickness' or 'results.TransientSolution(10).MaskOceanLevelset'
+
+%     parts = strsplit(field,'.');
+%     data = s;
+%     for i = 1:numel(parts)
+%         % Handle parentheses like 'TransientSolution(10)'
+%         token = parts{i};
+%         idx = regexp(token,'(.+)\((\d+)\)$','tokens');
+%         if ~isempty(idx)
+%             base = idx{1}{1};
+%             k = str2double(idx{1}{2});
+%             data = data.(base)(k);
+%         else
+%             data = data.(token);
+%         end
+%     end
+% end
 
