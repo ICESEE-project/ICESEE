@@ -129,6 +129,7 @@ def compute_scaling(df: pd.DataFrame, scaling_type: str, column: str) -> pd.Data
 
 def plot_line(x, y, xlabel, ylabel, title, out_path, ideal=None, logx=True, logy=False, _loglog=False, model_np=1):
     fig = plt.figure(figsize=(4.5, 4.5), dpi=300)
+    np=x
     x = x*(model_np+1)  # convert back to total ranks for plotting
     if _loglog:
         plt.loglog(x, y, marker="o", markersize=6, linewidth=2, color='b',label="Measured")
@@ -137,8 +138,9 @@ def plot_line(x, y, xlabel, ylabel, title, out_path, ideal=None, logx=True, logy
             plt.loglog(x, ideal, linestyle="--", markersize=6, linewidth=2, color='r',label="Ideal")
             plt.legend(['Measured','Ideal'], prop={'size': 10, 'weight': 'bold'})
             # speed_up = np.arange(1, len(x)+1)
-            plt.yticks(y,[f'{N:.2f}' for N in y])
-            # plt.ylim(0, max(ideal)*1.1)
+            # plt.yticks(y,[f'{N:.2f}' for N in y])
+            # over ride yticks to show speedup values
+            # plt.yticks(y,[f'{N:d}' for N in y])
     elif logx:
         plt.semilogx(x, y, marker="o", markersize=6, linewidth=2, color='b',label="Measured")
         if ideal is not None:
@@ -170,9 +172,18 @@ def plot_line(x, y, xlabel, ylabel, title, out_path, ideal=None, logx=True, logy
 def plot_stacked_bars(df: pd.DataFrame, title: str, out_path: Path, model_np=1):
     # Copy & select relevant columns
     bars = (
-        df.copy()[["ranks", "analysis_m", "forecast_m", "ens_init_m", "io_m"]]
+        df.copy()[["ranks", "analysis_m", "forecast_m", "ens_init_m", "io_m","io_i_m", "io_f_m", "io_a_m"]]
         .sort_values("ranks")
     )
+
+    # subtract off IO from analysis/forecast/ens_init if detailed IO columns are available
+    # if not bars[["io_i_m", "io_f_m", "io_a_m"]].isnull().all().all():
+    #     bars["analysis_m"] = bars["analysis_m"] - bars["io_a_m"].fillna(0.0)
+    #     bars["forecast_m"] = bars["forecast_m"] - bars["io_f_m"].fillna(0.0)
+    #     bars["ens_init_m"] = bars["ens_init_m"] - bars["io_i_m"].fillna(0.0)
+    #     bars.loc[bars["analysis_m"] < 0.0, "analysis_m"] = 0.0
+    #     bars.loc[bars["forecast_m"] < 0.0, "forecast_m"] = 0.0
+    #     bars.loc[bars["ens_init_m"] < 0.0, "ens_init_m"] = 0.0
 
     # Total ranks for labeling
     ranks = bars["ranks"].to_numpy()
@@ -189,7 +200,7 @@ def plot_stacked_bars(df: pd.DataFrame, title: str, out_path: Path, model_np=1):
         "analysis_m": "Analysis",
         "forecast_m": "Forecast",
         "ens_init_m": "Ens Init",
-        "io_m": "Io",
+        "io_m": "I/O",
     }
 
     fig, ax = plt.subplots(figsize=(12, 6.5), dpi=160)
@@ -205,7 +216,8 @@ def plot_stacked_bars(df: pd.DataFrame, title: str, out_path: Path, model_np=1):
 
     # Styling
     ax.set_xlabel("Ranks (MPI processes)", fontdict={"fontsize": 18, "fontweight": "bold"})
-    ax.set_ylabel("Time Breakdown (%)",   fontdict={"fontsize": 18, "fontweight": "bold"})
+    # ax.set_ylabel("Time Breakdown (%)",   fontdict={"fontsize": 18, "fontweight": "bold"})
+    ax.set_ylabel("Time (mins)",   fontdict={"fontsize": 18, "fontweight": "bold"})
     ax.set_title(title,                   fontdict={"fontsize": 16, "fontweight": "bold"})
     ax.grid(True, axis="y", linestyle="--", alpha=0.6)
 
@@ -216,7 +228,12 @@ def plot_stacked_bars(df: pd.DataFrame, title: str, out_path: Path, model_np=1):
     plt.xticks(fontweight='bold')
     plt.yticks(fontweight='bold')
 
-    ax.set_ylim(0, 105)
+    # overwrite y-ticks to show minutes instead of percentage
+    yticks = ax.get_yticks()
+    yticklabels = [f"{(N/100)*totals.max():.0f}" for N in yticks]
+    ax.set_yticklabels(yticklabels, fontsize=18, fontweight="bold")
+    
+    # ax.set_ylim(0, 105)
     ax.legend(loc="upper right", prop={"size": 18, "weight": "bold"})
     ax.margins(x=0.06)
     fig.tight_layout()
@@ -394,16 +411,22 @@ def analyze_icesee(log_path: str, scaling_type: str = "strong_scaling", model_np
     if df.empty:
         raise RuntimeError("No timing blocks found in the log. Check formatting or path.")
 
-    # --- Only do wallclock & forecast speedup/efficiency ---
+    # --- Only do wallclock, forecast, analysis, & I/O     speedup/efficiency ---
     wall_metrics = compute_scaling(df, scaling_type, "wall_m")
     fcast_metrics = compute_scaling(df, scaling_type, "forecast_m")
+    analysis_metrics = compute_scaling(df, scaling_type, "analysis_m")
+    io_metrics = compute_scaling(df, scaling_type, "io_m")
 
     # Save CSVs
     wall_csv = out_dir / f"{scaling_type}_wallclock_scaling.csv"
     fcast_csv = out_dir / f"{scaling_type}_forecast_scaling.csv"
+    analysis_csv = out_dir / f"{scaling_type}_analysis_scaling.csv"
+    io_csv = out_dir / f"{scaling_type}_io_scaling.csv"
     df_csv = out_dir / f"{scaling_type}_raw_times.csv"
     wall_metrics.to_csv(wall_csv, index=False)
     fcast_metrics.to_csv(fcast_csv, index=False)
+    analysis_metrics.to_csv(analysis_csv, index=False)
+    io_metrics.to_csv(io_csv, index=False)
     df.to_csv(df_csv, index=False)
 
     # --- Plots: speedup & efficiency for each (wallclock and forecast) ---
@@ -439,6 +462,36 @@ def analyze_icesee(log_path: str, scaling_type: str = "strong_scaling", model_np
               f"{scaling_type.replace('_',' ').title()}: Forecast Efficiency",
               out_dir / f"{scaling_type}_forecast_efficiency.png",
               ideal=ideal_eff_f, logx=True, logy=False, model_np=model_np)
+    
+    # analysis
+    N0a = analysis_metrics["baseline_ranks"].iloc[0] if "baseline_ranks" in analysis_metrics else Nf.min()
+    ideal_speedup_a = Nf / N0a
+    plot_line(Nf, analysis_metrics["speedup"].values,
+              "Ranks (MPI processes)", "Speedup",
+              f"{scaling_type.replace('_',' ').title()}: Analysis Speedup",
+              out_dir / f"{scaling_type}_analysis_speedup.png",
+              ideal=ideal_speedup_a, logx=False, logy=False, _loglog=True, model_np=model_np)
+    ideal_eff_a = [100.0]*len(Nf)
+    plot_line(Nf, analysis_metrics["efficiency"].values,
+              "Ranks (MPI processes)", "Efficiency (%)",
+              f"{scaling_type.replace('_',' ').title()}: Analysis Efficiency",
+              out_dir / f"{scaling_type}_analysis_efficiency.png",
+              ideal=ideal_eff_a, logx=True, logy=False, model_np=model_np)
+    
+    # I/O
+    N0i = io_metrics["baseline_ranks"].iloc[0] if "baseline_ranks" in io_metrics else Nf.min()
+    ideal_speedup_i = Nf / N0i
+    plot_line(Nf, io_metrics["speedup"].values,
+              "Ranks (MPI processes)", "Speedup",
+              f"{scaling_type.replace('_',' ').title()}: I/O Speedup",
+              out_dir / f"{scaling_type}_io_speedup.png",
+              ideal=ideal_speedup_i, logx=False, logy=False, _loglog=True, model_np=model_np)
+    ideal_eff_i = [100.0]*len(Nf)
+    plot_line(Nf, io_metrics["efficiency"].values,
+              "Ranks (MPI processes)", "Efficiency (%)",
+              f"{scaling_type.replace('_',' ').title()}: I/O Efficiency",
+              out_dir / f"{scaling_type}_io_efficiency.png",
+              ideal=ideal_eff_i, logx=True, logy=False, model_np=model_np)
 
     # --- Stacked bars ---
     plot_stacked_bars(df, f"{scaling_type.replace('_', ' ').title()}: Time Breakdown", out_dir / f"{scaling_type}_stacked_breakdown.png", model_np=model_np)

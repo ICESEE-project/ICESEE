@@ -166,7 +166,8 @@ class EnKF_fully_parallel_IO:
                     with h5py.File(fname, 'w') as f:
                         # row_chunk = min(1024, self.nd)
                         row_chunk = self.nd_local_world
-                        col_chunk = min(32, self.nens)
+                        # col_chunk = min(32, self.nens)
+                        col_chunk = 1
                         f.create_dataset(
                             'states', (self.nd, self.nens),
                             chunks=(row_chunk, col_chunk),
@@ -207,7 +208,8 @@ class EnKF_fully_parallel_IO:
                 f.atomic = False
                 # row_chunk = min(1024, self.nd)
                 row_chunk = self.nd_local_world
-                col_chunk = min(32, self.nens)
+                # col_chunk = min(32, self.nens)
+                col_chunk = 1
                 dset = f.create_dataset(
                     'states', (self.nd, self.nens),
                     chunks=(row_chunk, col_chunk),
@@ -306,9 +308,9 @@ class EnKF_fully_parallel_IO:
         self._ensure_batch(t)
         batch_idx = t - self.current_batch_start
         start = MPI.Wtime()
-        # data = self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx]
-        data = self._rw_select(self.datasets[batch_idx],
-                       self.nd_start, self.nd_local, ens_idx, 1, write=False).reshape(-1)
+        data = self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx]
+        # data = self._rw_select(self.datasets[batch_idx],
+        #                self.nd_start, self.nd_local, ens_idx, 1, write=False).reshape(-1)
 
         return data
        
@@ -317,10 +319,10 @@ class EnKF_fully_parallel_IO:
     def write_forecast(self, t, data, ens_idx):
         self._ensure_batch(t)
         batch_idx = t - self.current_batch_start
-        # ds = self.datasets[batch_idx]
-        # ds[self.nd_start:self.nd_end, ens_idx] = data
-        self._rw_select(self.datasets[batch_idx],
-                self.nd_start, self.nd_local, ens_idx, 1, buf=data, write=True)
+        ds = self.datasets[batch_idx]
+        ds[self.nd_start:self.nd_end, ens_idx] = data
+        # self._rw_select(self.datasets[batch_idx],
+        #         self.nd_start, self.nd_local, ens_idx, 1, buf=data, write=True)
 
     @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD) 
     def read_analysis(self, t, ens_idx):
@@ -328,9 +330,9 @@ class EnKF_fully_parallel_IO:
         self._ensure_batch(t)
         batch_idx = t - self.current_batch_start
         start = MPI.Wtime()
-        # data = self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx]
-        data = self._rw_select(self.datasets[batch_idx],
-                       self.nd_start_world, self.nd_local_world, ens_idx, 1, write=False).reshape(-1)
+        data = self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx]
+        # data = self._rw_select(self.datasets[batch_idx],
+        #                self.nd_start_world, self.nd_local_world, ens_idx, 1, write=False).reshape(-1)
         # print(f"[ICESEE] Finished reading analysisensemble {ens_idx} ensemble shape: {data.shape} norm {np.linalg.norm(data)}")
         read_time = MPI.Wtime() - start
         return data
@@ -343,9 +345,9 @@ class EnKF_fully_parallel_IO:
         batch_idx = t - self.current_batch_start
         start = MPI.Wtime()
         # self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx] = data
-        # self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx] = data
-        self._rw_select(self.datasets[batch_idx],
-                self.nd_start_world, self.nd_local_world, ens_idx, 1, buf=data, write=True)
+        self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx] = data
+        # self._rw_select(self.datasets[batch_idx],
+        #         self.nd_start_world, self.nd_local_world, ens_idx, 1, buf=data, write=True)
 
     def compute_forecast_mean_chunked_v2(self, k, flag=None):
         """

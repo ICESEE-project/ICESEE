@@ -4,10 +4,11 @@
 % @brief: 	Reads and plot results from both ISSM and ICESEE
 % ------------------------------------------------------------
 
-close all; clear all
+% close all; clear all
 
-data_file_paths='data3/_modelrun_datasets';
+% data_file_paths='data3/_modelrun_datasets';
 % data_file_paths='data/new_data/_modelrun_datasets';
+data_file_paths='_modelrun_datasets';
 
 % Load the essential data
 results_dir = 'results';
@@ -50,7 +51,7 @@ md_mean = md; md_ens = md;
 
 x = md.mesh.x;
 y = md.mesh.y;
-k =  nt-1;
+k = nt-1;
 % k=1;
 
 True_fcoeff = model_true_state(2*hdim+1:3*hdim, k);

@@ -623,8 +623,14 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                 # --- create the ensemble dataset ---
                 if model_kwargs.get("create_ensemble_dataset", True):
                     print("[ICESEE] Creating ensemble dataset...")
-                    out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
-                    print("VDS ready:", out_vds)
+                    # Option A: no-copy, instant
+                    # out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
+                    # print("VDS ready:", out_vds)
+
+                    # Option B: portable single file
+                    out_h5 = finalize_stack(_modelrun_datasets, mode="h5", dset_name="states",
+                                            allow_missing=False, compression="gzip", compression_opts=4)
+                    print("Materialized file:", out_h5)
                 # --- remove all .zarr files ---
                 cleanup_intermediates = model_kwargs.get("cleanup_intermediates", True)
                 if cleanup_intermediates:

@@ -530,6 +530,7 @@ def parallel_forecast_step_default_full_parallel_run(**model_kwargs):
                 #  time forecast file writing
                 _time_forecast_file_writing = MPI.Wtime()
                 # enkf_parallel_io.write_forecast(k + 1 if k < nt - 1 else k, ensemble_vec, ens)
+                # ensemble_vec_block = 
                 enkf_parallel_io.write_forecast(k + 1 if k < nt - 1 else k, ensemble_vec, ens)
                 time_forecast_file_writing += MPI.Wtime() - _time_forecast_file_writing + time_forecast_file_writing_0
 
