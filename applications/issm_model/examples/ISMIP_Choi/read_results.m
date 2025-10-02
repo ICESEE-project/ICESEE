@@ -85,14 +85,14 @@ md_ens.mask.ocean_levelset= md_ens.geometry.thickness + md_ens.geometry.bed/di;
 
 % thickness
 plot_triptych(md_true, md_nurged, md_ens, ...
-              'geometry.thickness', sprintf('Ice Thickness after %d years', (k-1)*0.5), parula, 'm');   
+              'geometry.thickness', sprintf('Ice Thickness after %d years', round((k-1)*0.5)), parula, 'm');   
 % bed topography
 plot_triptych(md_true, md_nurged, md_ens, ...
-              'geometry.bed', sprintf('Bed Elevation after %d years', (k-1)*0.5), parula, 'm');
+              'geometry.bed', sprintf('Bed Elevation after %d years', round((k-1)*0.5)), parula, 'm');
 %
 % % Frcition coefficient
 plot_triptych(md_true, md_nurged, md_ens, ...
-              'friction.coefficient', sprintf('Friction Coefficient after %d years', (k-1)*0.5), parula, '');
+              'friction.coefficient', sprintf('Friction Coefficient after %d years', round((k-1)*0.5)), parula, '');
 %
 % % grounding line
 % plot_triptych(md_true, md_nurged, md_ens, ...
@@ -100,7 +100,7 @@ plot_triptych(md_true, md_nurged, md_ens, ...
 %               'Grounding Line', gray, '');
 plot_triptych(md_true, md_nurged, md_ens, ...
               'mask.ocean_levelset', ...
-              sprintf('Grounding Line after %d years', (k-1)*0.5), parula, '');
+              sprintf('Grounding Line after %d years', round((k-1)*0.5)), parula, '');
 
 % create a movie for the groundingline for every 10 yrs
 % Setup video writer (optional)
@@ -132,7 +132,7 @@ if make_movie
         % Plot triptych
         plot_triptych(md_true, md_nurged, md_ens, ...
                     'mask.ocean_levelset', ...
-                    sprintf('Grounding Line after %d years', (k-1)*0.5), ...
+                    sprintf('Grounding Line after %d years', round((k-1)*0.5)), ...
                     parula, '');
 
         drawnow;
@@ -155,6 +155,7 @@ end
 %% -- helper functions -- %%
 function plot_triptych(md_true, md_nurged, md_ens, field, field_title, cmap, units)
 % Compare true, nudged, assimilated, and difference with two separate colorbars
+
     if nargin < 6 || isempty(cmap), cmap = parula; end
     if nargin < 7, units = ''; end
     units_str = iff(~isempty(units), [' (' units ')'], '');
@@ -170,96 +171,88 @@ function plot_triptych(md_true, md_nurged, md_ens, field, field_title, cmap, uni
     cmax   = max([data_true(:); data_nurged(:); data_ens(:)]);
     maxAbs = max(abs(diff_data(:)));
 
-    figure('Position',[100 100 1200 900]); clf;
+    figure('Position',[100 100 1000 800]); clf;
 
     % 1) True
-    plotmodel(md_true,  'data',data_true,   'title',['True ' field_title], ...
-              'subplot',[4,1,1],'caxis',[cmin cmax],'colorbar','off');
-    % 2) Wrong/Nudged
-    plotmodel(md_nurged,'data',data_nurged, 'title',['Wrong ' field_title], ...
-              'subplot',[4,1,2],'caxis',[cmin cmax],'colorbar','off');
+    plotmodel(md_true,'data',data_true,'title',['True ' field_title], ...
+        'subplot',[4,1,1],'caxis',[cmin cmax],'colorbar','off');
+
+    % 2) Wrong
+    plotmodel(md_nurged,'data',data_nurged,'title',['Wrong ' field_title], ...
+        'subplot',[4,1,2],'caxis',[cmin cmax],'colorbar','off');
+
     % 3) Assimilated
-    plotmodel(md_ens,   'data',data_ens,    'title',['Assimilated ' field_title], ...
-              'subplot',[4,1,3],'caxis',[cmin cmax],'colorbar','off');
+    plotmodel(md_ens,'data',data_ens,'title',['Assimilated ' field_title], ...
+        'subplot',[4,1,3],'caxis',[cmin cmax],'colorbar','off');
+
     % 4) Difference
-    plotmodel(md_true,  'data',diff_data, ...
-              'title',['Assimilated - True ' field_title], ...
-              'subplot',[4,1,4],'caxis',[-maxAbs maxAbs],'colorbar','off');
+    plotmodel(md_true,'data',diff_data, ...
+        'title',['Assimilated - True ' field_title], ...
+        'subplot',[4,1,4],'caxis',[-maxAbs maxAbs],'colorbar','off');
 
     % --- Axes layout ---
-    axs = flipud(findall(gcf,'Type','axes'));          % [1]=top ... [4]=bottom
-    gap = 0.05; top = 0.95; bottom = 0.08;
+    axs = flipud(findall(gcf,'Type','axes'));   % 1..4 top->bottom
+    gap = -0.255; top = 0.94; bottom = 0.08;    % tightened spacing
     height = (top-bottom - 3*gap)/4;
+
     for i = 1:4
         pos = [0.10, bottom+(4-i)*(height+gap), 0.70, height];
-        set(axs(i),'Position',pos);
-        xlabel(axs(i),'X (km)','FontSize',12);
-        ylabel(axs(i),'Y (km)','FontSize',12);
+        set(axs(i),'Position',pos, ...
+            'FontWeight','bold','LineWidth',1.5,'Box','on', ...
+            'TickDir','out','TickLength',[0.005 0.005], ...
+            'Layer','top');
+        ylabel(axs(i),'Y (km)','FontSize',12,'FontWeight','bold');
+        if i < 4
+            set(axs(i),'XTickLabel',[]);  % only bottom plot shows X
+        else
+            xlabel(axs(i),'X (km)','FontSize',12,'FontWeight','bold');
+        end
     end
 
-    % ===== Colorbars & colormaps (correctly bound) =====
-    % Top three axes use the SAME colormap & natural range
-    for i = 1:3
-        colormap(axs(i), cmap);
-        caxis(axs(i), [cmin cmax]);
-    end
-    % Build one colorbar tied to the middle axis (represents top three)
-    cb1 = colorbar(axs(2), 'Position',[0.83 0.35 0.03 0.55]);  % spans top strip
-    static_field = regexprep(field_title, '\s+after.*', '');
-    ylabel(cb1,[static_field units_str],'FontSize',14,'FontWeight','bold');
-    cb1.FontSize = 12;
 
-    % Difference axis gets its own diverging colormap & symmetric range
+    % --- First colorbar (shortened for top 3) ---
+    for i = 1:3, colormap(axs(i), cmap); caxis(axs(i), [cmin cmax]); end
+    cb1 = colorbar(axs(2),'Position',[0.83 0.415 0.025 0.35]); % shorter
+    static_field = regexprep(field_title,'\s+after.*','');
+    ylabel(cb1,[static_field units_str],'FontSize',13,'FontWeight','bold');
+    cb1.FontSize = 11;
+    set(cb1,'Box','on','LineWidth',1.2);
+
+    % --- Second colorbar (shortened for difference) ---
     ax_diff = axs(4);
-    colormap(ax_diff, redblue(256));      % blue–white–red
-    caxis(ax_diff, [-maxAbs maxAbs]);
+    colormap(ax_diff, redblue(256));
+    caxis(ax_diff,[-maxAbs maxAbs]);
     pos_diff = get(ax_diff,'Position');
-    cb2 = colorbar(ax_diff,'Position',[0.83 pos_diff(2) 0.03 pos_diff(4)]);
-    ylabel(cb2,['Difference ' units_str],'FontSize',14,'FontWeight','bold');
-    cb2.FontSize = 12;
+    cb2 = colorbar(ax_diff,'Position',[0.83 pos_diff(2)+0.14 0.025 pos_diff(4)-0.28]);
+    % ylabel(cb2, ['$\mathbf{\Delta}$' static_field units_str], ...
+    %    'Interpreter','latex', ...
+    %    'FontSize',13);
+    ylabel(cb2, ['Difference' units_str], ...
+       'FontSize',13);
+    cb2.FontSize = 11;
+    set(cb2,'Box','on','LineWidth',1.2);
 end
 
-% ---------- helpers ----------
+% ---- helpers ----
 function out = get_nested_field(s, field)
     parts = strsplit(field,'.'); out = s;
     for i = 1:numel(parts)
         tok = parts{i};
         t = regexp(tok,'(.+)\((\d+)\)$','tokens');
         if ~isempty(t), out = out.(t{1}{1})(str2double(t{1}{2}));
-        else,           out = out.(tok);
+        else, out = out.(tok);
         end
     end
 end
 
-function y = iff(c,a,b); if c, y=a; else, y=b; end; end
+function y = iff(c,a,b), if c, y=a; else, y=b; end, end
 
 function cmap = redblue(n)
-% Diverging blue–white–red, white at zero
     if nargin<1, n=256; end
     m = n/2;
-    r = [linspace(0,1,m) , ones(1,m)];
-    g = [linspace(0,1,m) , linspace(1,0,m)];
-    b = [ones(1,m)       , linspace(1,0,m)];
-    cmap = [r(:) g(:) b(:)];
+    r=[linspace(0,1,m) ones(1,m)];
+    g=[linspace(0,1,m) linspace(1,0,m)];
+    b=[ones(1,m) linspace(1,0,m)];
+    cmap=[r(:) g(:) b(:)];
 end
-
-% function data = get_nested_field(s, field)
-% %GET_NESTED_FIELD Safely extracts nested field from a struct/model
-% %   field is a string like 'geometry.thickness' or 'results.TransientSolution(10).MaskOceanLevelset'
-
-%     parts = strsplit(field,'.');
-%     data = s;
-%     for i = 1:numel(parts)
-%         % Handle parentheses like 'TransientSolution(10)'
-%         token = parts{i};
-%         idx = regexp(token,'(.+)\((\d+)\)$','tokens');
-%         if ~isempty(idx)
-%             base = idx{1}{1};
-%             k = str2double(idx{1}{2});
-%             data = data.(base)(k);
-%         else
-%             data = data.(token);
-%         end
-%     end
-% end
 
