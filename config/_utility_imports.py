@@ -145,7 +145,7 @@ if not flag_jupyter:
 
     # --- Ensemble Parameters ---
     params.update({
-        'nt': int(float(modeling_params['num_years'])) * int(float(modeling_params['timesteps_per_year'])), # number of time steps
+        'nt': int(float(modeling_params['num_years']) * float(modeling_params['timesteps_per_year'])), # number of time steps
         'dt': 1.0 / float(modeling_params['timesteps_per_year']),
         'num_state_vars': int(float(enkf_params.get('num_state_vars', 1))),
         'num_param_vars': int(float(enkf_params.get('num_param_vars', 0))),
@@ -162,14 +162,13 @@ if not flag_jupyter:
         'use_random_fields': bool(enkf_params.get('use_random_fields', False)),
         'execution_mode'   : int(enkf_params.get('execution_mode', 1)),  # 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
         'serial_file_creation': bool(enkf_params.get('serial_file_creation', True)),
-        'batch_size': int(enkf_params.get('batch_size', 50)),
         'chunk_size': int(enkf_params.get('chunk_size', 5000)),
         'joint_estimated_params': enkf_params.get('joint_estimated_params', []),
         'coupled_model_datasets_dir': enkf_params.get('coupled_model_datasets', 'data'),
         'vec_inputs': enkf_params['vec_inputs'],
         'collective_threshold': int(enkf_params.get('collective_threshold', 16)), # threshold for switching to collective I/O
     })
-
+    
     # --- incase CL args not provided ---
     if Nens == 1:
         params['Nens'] = int(float(enkf_params.get('Nens', 1)))

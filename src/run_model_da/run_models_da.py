@@ -55,6 +55,9 @@ def icesee_model_data_assimilation(**model_kwargs):
     params = model_kwargs.get("params", {}) or {}
     mode = _resolve_mode(params)
 
+    nt = model_kwargs.get('nt', params['nt'])
+    params.update({'batch_size': nt if nt <= 100 else max(1, (nt + 9) // 10)})
+
     if mode not in _MODE_TO_TARGET:
         raise ValueError(
             f"Invalid mode '{mode}'. Must be one of: 'serial', 'partial', or 'full'."

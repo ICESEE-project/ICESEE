@@ -137,7 +137,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
 
     # --- intialize EnKF I/O handler class ---
     time_file_io_initialization = MPI.Wtime()
-    batch_size = model_kwargs.get("batch_size",100)
+    batch_size = model_kwargs.get("batch_size", nt if nt <= 100 else max(1, (nt + 9) // 10))
     serial_file_creation = model_kwargs.get("serial_file_creation",True)
     h5_file_compression = model_kwargs.get("h5_file_compression",None)
     h5_file_compression_level = model_kwargs.get("h5_file_compression_level",4)

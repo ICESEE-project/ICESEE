@@ -47,9 +47,9 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
 
     # -- get ensemble pertubations
     use_ensemble_pertubations = model_kwargs.get("use_ensemble_pertubations", True)
-
+    ensemble_mean = np.mean(ensemble_vec, axis=1).reshape(-1,1)
     if use_ensemble_pertubations:
-        ensemble_perturbations = ensemble_vec - np.mean(ensemble_vec, axis=1).reshape(-1,1) # ensure mean is zero
+        ensemble_perturbations = ensemble_vec - ensemble_mean # ensure mean is zero
         Eta = np.dot(H, ensemble_perturbations) # mxNens, ensemble pertubations
     else: #or use ensembles of perturbations
         # generate ensemble of perturbations # mxNens o---->
@@ -99,27 +99,42 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
     # ----parallelize this step
     # Eta = np.zeros((d.shape[0], Nens)) # mxNens, ensemble pertubations
     
-    D   = np.zeros((d.shape[0], Nens)) # mxNens #virtual observations
-    HA  = np.zeros_like(D)
-    for ens in range(Nens):
+    # D   = np.zeros((d.shape[0], Nens)) # mxNens #virtual observations
+    # # HA  = np.zeros_like(D)
+    # for ens in range(Nens):
         
-        D[:,ens] = d + Eta[:,ens]
-        HA[:,ens] = np.dot(H, ensemble_vec[:,ens])
-    # ---------------------------------------
+    #     D[:,ens] = d + Eta[:,ens]
+    #     # HA[:,ens] = np.dot(H, ensemble_vec[:,ens])
+    # # ---------------------------------------
 
-    # print(f"\n[Rank {comm_world.Get_rank()}] norms H: {np.linalg.norm(H)}, ens_mean: {np.linalg.norm(np.mean(ensemble_vec, axis=1))}, d: {np.linalg.norm(d)} D: {np.linalg.norm(D)}, HA: {np.linalg.norm(HA)}, Eta: {np.linalg.norm(Eta)} ensemble_vec: {np.linalg.norm(ensemble_vec)}\n")
+    # # print(f"\n[Rank {comm_world.Get_rank()}] norms H: {np.linalg.norm(H)}, ens_mean: {np.linalg.norm(np.mean(ensemble_vec, axis=1))}, d: {np.linalg.norm(d)} D: {np.linalg.norm(D)}, HA: {np.linalg.norm(HA)}, Eta: {np.linalg.norm(Eta)} ensemble_vec: {np.linalg.norm(ensemble_vec)}\n")
 
-    # --- compute the innovations D` = D-HA
-    Dprime = D - HA # mxNens
-
-    # --- compute HAbar
-    HAbar = np.mean(HA, axis=1) # mx1
-    # --- compute HAprime
-    # HAprime = HA - HAbar.reshape(-1,1) # mxNens (requires H to be linear)
+    # # --- compute the innovations D` = D-HA
+    # # Dprime = D - HA # mxNens
     
-    # Aprime = ensemble_vec@(np.eye(Nens) - one_N) # mxNens
-    one_N = np.ones((Nens,Nens))/Nens
-    HAprime= HA@(np.eye(Nens) - one_N) # mxNens
+    # # # --- compute HAbar
+    # # HAbar = np.mean(HA, axis=1) # mx1
+    # # # --- compute HAprime
+    # # # HAprime = HA - HAbar.reshape(-1,1) # mxNens (requires H to be linear)
+    
+    # # # Aprime = ensemble_vec@(np.eye(Nens) - one_N) # mxNens
+    # # one_N = np.ones((Nens,Nens))/Nens
+    # # HAprime= HA@(np.eye(Nens) - one_N) # mxNens
+
+    HAbar = np.dot(H, ensemble_mean)
+    Dprime = d.reshape(-1, 1) - HAbar  # mxNens
+    HAprime = copy.deepcopy(Eta)  # mxNens (requires H to be linear)
+
+    # *---->>>>---------------
+    # HA = H @ ensemble_vec        # (m, nens)
+    # H_mean = H @ ensemble_mean   # (m, 1)
+    # Eta = HA - H_mean
+    # HAprime = copy.deepcopy(Eta)
+    # D = d.reshape(-1, 1) + Eta
+    # HAbar = np.mean(HA, axis=1, keepdims=True)
+    # HAprime_eta = HA - HAbar
+    # Dprime = D - HA
+    # *-------->>>---------------
 
     # get the min(m,Nens)
     m_obs = d.shape[0]
