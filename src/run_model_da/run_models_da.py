@@ -56,7 +56,9 @@ def icesee_model_data_assimilation(**model_kwargs):
     mode = _resolve_mode(params)
 
     nt = model_kwargs.get('nt', params['nt'])
-    params.update({'batch_size': nt if nt <= 100 else max(1, (nt + 9) // 10)})
+    batch_size = model_kwargs.get('batch_size', params.get('batch_size', None))
+    params['batch_size'] = batch_size if batch_size!=1 else (nt if nt <= 20 else max(1, (nt + 9) // 5))
+    # params.update({'batch_size', nt if nt <= 100 else max(1, (nt + 9) // 10)})
 
     if mode not in _MODE_TO_TARGET:
         raise ValueError(

@@ -27,8 +27,8 @@ modeling-parameters:
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 50                      # Number of ensemble members (paper uses 50)
-  freq_obs: 2                 # Frequency of observations (annual, as per paper)
-  obs_max_time: 16            # Maximum time for observations (30 years)
+  freq_obs: 3                 # Frequency of observations (annual, as per paper)
+  obs_max_time: 18            # Maximum time for observations (30 years)
   obs_start_time: 2            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
@@ -43,8 +43,8 @@ enkf-parameters:
 
   # Statistical parameters
   sig_obs: [4, 5, 2]          # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
-  sig_Q: [2, 3.0, 4.0]          # Process noise std dev (adjusted for H, Vx, Vy)
-  length_scale: [530,520,640]               # Length scale for covariance (5 km for friction, per paper)
+  sig_Q: [2, 2.0, 2.0]          # Process noise std dev (adjusted for H, Vx, Vy)
+  length_scale: [150,200,210]               # Length scale for covariance (5 km for friction, per paper)
   
   seed: 1                       # Seed for random number generator
   inflation_factor: 1.10        # Inflation factor (optimal range 1.10–1.18 from paper)
@@ -84,6 +84,7 @@ enkf-parameters:
   h5_file_chunk_size: 1000       # Chunk size for HDF5
   serial_file_creation: True  # Create HDF5 files in serial (True) or parallel (False)
   collective_threshold: 4
+  batch_size: 40              # Batch size for writing HDF5 files
 
   # restart parameters (only available for fully parallel runs)
   restart_enabled: 1         # Enable restart functionality

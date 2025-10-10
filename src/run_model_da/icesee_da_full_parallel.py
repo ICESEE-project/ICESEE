@@ -592,6 +592,10 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         comm_world.Barrier()
         time_file_io_closing = MPI.Wtime()
         enkf_parallel_io.close()
+        # --- Build the Virtual Dataset view for the entire run ---
+        # if rank_world == 0:
+        #     print("[ICESEE] Building unified Virtual Dataset...")
+        # enkf_parallel_io.create_virtual_dataset()
         time_file_io_initialization += MPI.Wtime() - time_file_io_closing
 
         # comm_world.Barrier()  

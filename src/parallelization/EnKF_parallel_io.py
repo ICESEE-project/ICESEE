@@ -158,7 +158,16 @@ class EnKF_fully_parallel_IO:
             self.files = []
             self.datasets = []
             self.current_batch_start = t_start
-            nfiles = min(self.batch_size, self.nt - t_start)
+            # nfiles = min(self.batch_size, self.nt - t_start)
+            # --- PATCH: create at least one file and clamp to nt ---
+            remaining = max(0, self.nt - t_start)
+            if remaining == 0:
+                print(f"[Rank {self.rank}] WARNING: no files to create (t_start={t_start}, nt={self.nt})")
+                return
+            
+            nfiles = min(self.batch_size, remaining)
+            t_end = t_start + nfiles
+            print(f"[Rank {self.rank}] Creating batch from {t_start} to {t_end - 1} ({nfiles} files, nt={self.nt})")
 
             if MPI.COMM_WORLD.Get_rank() == 0:
                 for t in range(t_start, t_start + nfiles):
@@ -349,6 +358,158 @@ class EnKF_fully_parallel_IO:
         # self._rw_select(self.datasets[batch_idx],
         #         self.nd_start_world, self.nd_local_world, ens_idx, 1, buf=data, write=True)
 
+    #     # =============================================================================
+    # # VDS-Mimic Integration for EnKF_fully_parallel_IO
+    # # =============================================================================
+
+    # def _ensure_batch(self, t):
+    #     """
+    #     Mimics Virtual Dataset behavior:
+    #     - Keeps a persistent mapping of timestep index → open HDF5 handle.
+    #     - Only opens each file once and reuses it across read/write calls.
+    #     - Fully compatible with legacy read_* / write_* methods.
+    #     """
+    #     try:
+    #         # Initialize cache if not present
+    #         if not hasattr(self, "_vds_cache"):
+    #             self._vds_cache = {}
+    #             # Limit to reasonable number of open files to avoid hitting ulimit
+    #             self._vds_cache_limit = min(self.batch_size, 128)
+
+    #         # Compute batch start (for legacy consistency)
+    #         batch_start = (t // self.batch_size) * self.batch_size
+    #         if batch_start != self.current_batch_start:
+    #             self.current_batch_start = batch_start
+
+    #         # Build filename for this timestep
+    #         fname = f"{self.base_path}/{self.file_prefix}_ens_{t:04d}.h5"
+
+    #         # Fast-path: if already cached
+    #         if t in self._vds_cache:
+    #             entry = self._vds_cache[t]
+    #             self.files = [entry["file"]]
+    #             self.datasets = [entry["dataset"]]
+    #             return
+
+    #         # If cache full, close and evict the least-recently-used file
+    #         if len(self._vds_cache) >= self._vds_cache_limit:
+    #             oldest_t = next(iter(self._vds_cache))
+    #             try:
+    #                 self._vds_cache[oldest_t]["file"].close()
+    #             except Exception:
+    #                 pass
+    #             del self._vds_cache[oldest_t]
+
+    #         # Ensure the file exists
+    #         if not os.path.exists(fname):
+    #             if self.serial_file_creation:
+    #                 if self.rank == 0:
+    #                     with h5py.File(fname, "w") as f:
+    #                         f.create_dataset(
+    #                             "states", (self.nd, self.nens),
+    #                             chunks=(self.nd_local_world, 1),
+    #                             compression=None, dtype="f8"
+    #                         )
+    #                 self.mpi_comm.Barrier()
+    #             else:
+    #                 f = h5py.File(fname, "w", driver="mpio", comm=self.comm)
+    #                 f.create_dataset(
+    #                     "states", (self.nd, self.nens),
+    #                     chunks=(self.nd_local_world, 1),
+    #                     compression=None, dtype="f8"
+    #                 )
+    #                 f.close()
+
+    #         # Open or reuse handle collectively
+    #         f = h5py.File(fname, "a", driver="mpio", comm=self.comm)
+    #         dset = f["states"]
+
+    #         # Cache this handle
+    #         self._vds_cache[t] = {"file": f, "dataset": dset}
+    #         self.files = [f]
+    #         self.datasets = [dset]
+
+    #     except Exception as e:
+    #         print(f"Error occurred in _ensure_batch (VDS mimic): {e}")
+    #         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+    #         print(f"Traceback details:\n{tb_str}")
+    #         self.mpi_comm.Abort(1)
+
+
+    # def create_virtual_dataset(self):
+    #     """
+    #     Build a lightweight HDF5 Virtual Dataset file linking all timestep HDF5 files
+    #     into one logical dataset of shape (nd, nt, nens).
+    #     Safe to call post-run for visualization or analysis.
+    #     """
+    #     import h5py.h5s as h5s
+    #     import h5py.h5p as h5p
+    #     import h5py.h5f as h5f
+    #     import h5py.h5d as h5d
+    #     import os
+
+    #     vds_path = f"{self.base_path}/{self.file_prefix}_VDS.h5"
+    #     if self.rank == 0:
+    #         print(f"[ICESEE-VDS] Building virtual dataset: {vds_path}")
+    #         if os.path.exists(vds_path):
+    #             os.remove(vds_path)
+
+    #     self.mpi_comm.Barrier()
+
+    #     # Collective file creation
+    #     fapl = h5p.create(h5p.FILE_ACCESS)
+    #     fapl.set_fapl_mpio(self.mpi_comm, MPI.Info.Create())
+    #     fid = h5f.create(bytes(vds_path, "utf-8"), h5f.ACC_TRUNC, fapl)
+    #     layout = h5s.create_simple((self.nd, self.nt, self.nens))
+    #     dcpl = h5p.create(h5p.DATASET_CREATE)
+
+    #     # Map each timestep file into the VDS
+    #     for t in range(self.nt):
+    #         src_file = f"{self.base_path}/{self.file_prefix}_ens_{t:04d}.h5"
+    #         if not os.path.exists(src_file):
+    #             if self.rank == 0:
+    #                 print(f"[ICESEE-VDS] Skipping missing timestep file: {src_file}")
+    #             continue
+
+    #         src_space = h5s.create_simple((self.nd, self.nens))
+    #         dcpl.set_virtual(
+    #             layout,
+    #             bytes(src_file, "utf-8"),
+    #             bytes("/states", "utf-8"),
+    #             src_space
+    #         )
+
+    #     # Create virtual dataset
+    #     h5d.create(fid, b"forecast", h5py.h5t.NATIVE_DOUBLE, layout, dcpl)
+    #     h5f.close(fid)
+    #     self.mpi_comm.Barrier()
+    #     if self.rank == 0:
+    #         print("[ICESEE-VDS] Virtual dataset created successfully.")
+
+
+    # def close(self):
+    #     """Close all cached and open file handles."""
+    #     try:
+    #         # Close VDS cache if active
+    #         if hasattr(self, "_vds_cache"):
+    #             for t, entry in list(self._vds_cache.items()):
+    #                 try:
+    #                     entry["file"].close()
+    #                 except Exception:
+    #                     pass
+    #             self._vds_cache.clear()
+
+    #         # Close any remaining legacy batch handles
+    #         self._close_batch()
+
+    #         if self.rank == 0:
+    #             print("[ICESEE-IO] Closed all open file handles.")
+
+    #     except Exception as e:
+    #         print(f"Error in close(): {e}")
+    #         print("".join(traceback.format_exception(*sys.exc_info())))
+    #         self.mpi_comm.Abort(1)
+    
     def compute_forecast_mean_chunked_v2(self, k, flag=None):
         """
         Simple & hang-free:
@@ -832,7 +993,7 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def compute_X5_utils(self, **kwargs):
+    def compute_X5_util_(self, **kwargs):
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
         k = kwargs.get('k')
@@ -919,22 +1080,121 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Abort(1)
 
 
-    def compute_X5_modified(self, **kwargs):
+    def compute_X5_utils(self, km, **kwargs):
+        """
+        Parallel EnKF X5 minimal utilities:
+        d_global   = H @ y_obs
+        Hbar       = H @ ensemble_mean
+        Dprime     = d_global - Hbar
+        HAprime    = Eta (from H @ ensemble_perturbations)
+        """
+
+        import numpy as np, h5py, zarr, sys, traceback
+        from mpi4py import MPI
+
+        comm  = self.mpi_comm
+        rank  = comm.Get_rank()
+        size  = comm.Get_size()
+
+        try:
+            # ----------------------------------------------------------------------
+            # Parameters and file paths
+            # ----------------------------------------------------------------------
+            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
+            # synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
+            m                       = kwargs.get('m_obs') * 2 + 1
+            Nens                    = self.nens
+
+            i0, i1 = self.nd_start_world, self.nd_end_world
+            local_nd = i1 - i0
+
+            # Choose MPI datatype dynamically (float32 or float64)
+            mpi_type = MPI._typedict[np.dtype(np.float64).char]
+
+            # ----------------------------------------------------------------------
+            # Load local column block of H and local slices of ensemble_mean, obs
+            # ----------------------------------------------------------------------
+            H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')
+            H_local  = np.asarray(H_matrix[:, i0:i1], dtype=np.float64, order='C')  # (m, local_nd)
+
+            # Synthetic observation local slice (y)
+            # synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
+            # y_local = np.asarray(synthetic_obs[i0:i1, km], dtype=np.float64)  # (local_nd,)
+            obs_file = f"{self.base_path}/synthetic_obs.h5"
+            with h5py.File(obs_file, 'r', driver='mpio', comm=self.mpi_comm) as f:
+                y_local = np.asarray(f['hu_obs'][i0:i1, km], dtype=np.float64)  # (local_nd,)
+
+            # Ensemble mean local slice
+            mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
+            with h5py.File(mean_file_path, 'r', driver='mpio', comm=comm) as f:
+                ensemble_mean_local = np.asarray(f['mean'][i0:i1, km], dtype=np.float64)  # (local_nd,)
+
+            # ----------------------------------------------------------------------
+            # Compute d = H * y_obs   (GEMV + Allreduce)
+            # ----------------------------------------------------------------------
+            d_local = H_local @ y_local                    # (m,)
+            d_global = np.empty_like(d_local)
+            comm.Allreduce([d_local, mpi_type], [d_global, mpi_type], op=MPI.SUM)
+
+            # ----------------------------------------------------------------------
+            # Compute Hbar = H * ensemble_mean   (GEMV + Allreduce)
+            # ----------------------------------------------------------------------
+            Hbar_local = H_local @ ensemble_mean_local     # (m,)
+            Hbar_global = np.empty_like(Hbar_local)
+            comm.Allreduce([Hbar_local, mpi_type], [Hbar_global, mpi_type], op=MPI.SUM)
+
+            # ----------------------------------------------------------------------
+            # Compute Eta = H * (ensemble_vec - ensemble_mean)
+            # ----------------------------------------------------------------------
+            # Each rank reads its local portion of ensemble states
+            States_local = np.empty((local_nd, Nens), dtype=np.float64, order='C')
+            for j in range(Nens):
+                States_local[:, j] = np.asarray(self.read_analysis(km, j), dtype=np.float64)
+
+            # Compute local ensemble perturbations
+            perturb_local = States_local - ensemble_mean_local[:, None]  # (local_nd, Nens)
+
+            # Project ensemble perturbations into observation space
+            Eta_local = H_local @ perturb_local                          # (m, Nens)
+            Eta = Eta_local.copy(order='C')
+            comm.Allreduce(MPI.IN_PLACE, [Eta, mpi_type], op=MPI.SUM)    # (m, Nens)
+
+            # ----------------------------------------------------------------------
+            # Compute Dprime and HAprime (final outputs)
+            # ----------------------------------------------------------------------
+            Dprime  = (d_global - Hbar_global).reshape(m, 1)             # (m,1)
+            HAprime = Eta                                                # (m,Nens)
+
+            # Optional: diagnostics
+            if rank == 0:
+                print(f"[rank {rank}] Shapes -> Dprime: {Dprime.shape}, HAprime: {HAprime.shape}")
+
+            return Dprime, Eta, HAprime, kwargs
+
+        except Exception as e:
+            print(f"[rank {rank}] Error in compute_X5_utils: {e}")
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
+            comm.Abort(1)
+
+
+    def compute_X5_modified(self, km, **kwargs):
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
         try:
             m = kwargs.get('m_obs') * 2 + 1
             Nens = self.nens
 
-            Dprime, Eta, HA, kwargs = self.compute_X5_utils(**kwargs)
+            # Dprime, Eta, HA, kwargs = self.compute_X5_utils_(km, **kwargs)
+            Dprime, Eta, HAprime, kwargs  = self.compute_X5_utils(km, **kwargs)
             # print(f"\n [Rank {self.mpi_comm.Get_rank()}] Dprime norm: {np.linalg.norm(Dprime)}, Eta norm: {np.linalg.norm(Eta)}, HA norm: {np.linalg.norm(HA)} \n")
             # Dprime, Eta, HA = self.compute_X5_utils_batch(**kwargs)
 
             # compute the HAbar
             # HAbar = np.mean(HA, axis=1)
             # HAprime = HA - HAbar[:, np.newaxis]
-            one_N = np.ones((Nens,Nens))/Nens
-            HAprime= HA@(np.eye(Nens) - one_N) # mxNens
+            # one_N = np.ones((Nens,Nens))/Nens
+            # HAprime= HA@(np.eye(Nens) - one_N) # mxNens
 
             # compute HAprime + Eta
             HAprime_Eta = HAprime + Eta
@@ -984,7 +1244,8 @@ class EnKF_fully_parallel_IO:
             # print(f"[ICESEE] Rank: {rank_world} X3 shape: {X3.shape}")
             # compute X4 = (HAprime.T)*X3 # Nens x Nens
             X4 = np.dot(HAprime.T, X3)
-            del X2, X3, U, HAprime, HA, Eta, Dprime
+            # del X2, X3, U, HAprime, HA, Eta, Dprime
+            del X2, X3, U, HAprime, HAprime_Eta, Eta, Dprime
             gc.collect()
 
             # compute X5 = X4 + I
@@ -998,7 +1259,7 @@ class EnKF_fully_parallel_IO:
             return X5, kwargs
 
         except Exception as e:
-            print(f"Error in compute_X5_root_optimized: {e}")
+            print(f"Error in compute_X5_modified: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
