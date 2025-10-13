@@ -20,9 +20,10 @@ ICESEE simplifies the implementation of advanced data assimilation workflows—s
 To get started with ICESEE:
 
 - [Installation Guide](https://github.com/ICESEE-project/ICESEE/wiki/1.-Installation)  
-- [Using ICESEE](https:https://github.com/ICESEE-project/ICESEE/wiki/2.-Usage)  
-- [Build ICESEE as a package](https://github.com/ICESEE-project/ICESEE/wiki/3.-Build-ICESEE-as-a-package)  
-- [Developmental notes](https://github.com/ICESEE-project/ICESEE/wiki/4.-Development-Notes)
+- [Using ICESEE](https://github.com/ICESEE-project/ICESEE/wiki/2.-Usage)  
+- [Guide to Integrating Models](https://github.com/ICESEE-project/ICESEE/wiki/3.--Guide-to-Integrating-Models-into-the-ICESEE-Framework)  
+- [Build ICESEE as a Package](https://github.com/ICESEE-project/ICESEE/wiki/4.-Build-ICESEE-as-a-package)  
+- [Development Notes](https://github.com/ICESEE-project/ICESEE/wiki/5.-Development-Notes)
 
 ---
 
@@ -37,12 +38,14 @@ To get started with ICESEE:
 
 ## Documentation
 
-Explore the Wiki to find:
+Explore the [Wiki](https://github.com/ICESEE-project/ICESEE/wiki) to find:
 
-- Configuration and setup tips  
-- How to implement new models  
-- How to extend or modify filters  
-- Debugging common issues  
+- **[Installation Guide](https://github.com/ICESEE-project/ICESEE/wiki/1.-Installation)**: Setup instructions for ICESEE and dependencies  
+- **[Usage Guide](https://github.com/ICESEE-project/ICESEE/wiki/2.-Usage)**: Running applications and using EnKF variants  
+- **[Model Integration Guide](https://github.com/ICESEE-project/ICESEE/wiki/3.--Guide-to-Integrating-Models-into-the-ICESEE-Framework)**: How to implement new models  
+- **[Development Notes](https://github.com/ICESEE-project/ICESEE/wiki/5.-Development-Notes)**: Project structure and best practices  
+- **[Common Issues](https://github.com/ICESEE-project/ICESEE/wiki/6.-Common-Issues-and-solutions)**: Debugging common issues  
+- **[Configuration Flags](config/README.md)**: Complete reference for all command-line and YAML parameters  
 
 ---
 
