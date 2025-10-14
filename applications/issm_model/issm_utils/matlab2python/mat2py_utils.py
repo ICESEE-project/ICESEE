@@ -837,8 +837,8 @@ def setup_ensemble_data(Nens, base_data_dir='./Models/ens_id_0', base_kwargs_fil
             kwargs_file = f'model_kwargs_{ens}.mat'
             
             if ens != 0:  # Skip ens_id_0 (base directory)
-                # if os.path.exists(ens_dir):
-                #     shutil.rmtree(ens_dir)
+                if os.path.exists(ens_dir):
+                    shutil.rmtree(ens_dir)
                 os.makedirs(ens_dir, exist_ok=True)
                 
             #     for root, _, files in os.walk(base_data_dir):
@@ -903,7 +903,9 @@ def setup_reference_data(reference_data_dir, reference_data, use_reference_data=
         if not os.path.isfile(initial_data):
             raise FileNotFoundError(f"[Rank {rank}] Reference data {initial_data} not found")
 
-        # Create destination directory
+        # remove existing file dir if it exists
+        if os.path.exists(rank_data_dir):
+            shutil.rmtree(rank_data_dir)
         os.makedirs(rank_data_dir, exist_ok=True)
 
         # Check if source and destination are the same file

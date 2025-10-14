@@ -546,7 +546,8 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                         
                         tobserve = model_kwargs.get("tobserve")
                         m_obs = model_kwargs.get("m_obs", params["number_obs_instants"])
-                        if (km < m_obs) and (k+1 == tobserve[km]):
+                        # if (km < m_obs) and (k+1 == tobserve[km]):
+                        if (km < m_obs) and (k == tobserve[km]):
                             # -- time global analysis step ---
                             _time_analysis_step = MPI.Wtime()
                             model_kwargs.update({'km': km, 'k': k})
