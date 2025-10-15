@@ -648,6 +648,22 @@ def get_grid_dimensions(nx, ny, ndim):
     
     return mx, my
 
+def midpoint_rect(mx, my):
+    return mx/2.0, my/2.0
+
+def midprofiles_coords(mx, my, n=100):
+    x_mid = np.full(n, mx/2.0)
+    yv = np.linspace(0.0, my, n)         # vertical profile (x fixed)
+    y_mid = np.full(n, my/2.0)
+    xv = np.linspace(0.0, mx, n)         # horizontal profile (y fixed)
+    return (x_mid, yv), (xv, y_mid)
+
+def midindices(Nx, Ny):
+    # choose the "left/bottom" center for even sizes; adjust if you prefer the right/top
+    ix = (Nx-1)//2
+    iy = (Ny-1)//2
+    return ix, iy
+
 def _extract_time_from_name(fname: str) -> int:
     m = re.search(FNAME_PATTERN, os.path.basename(fname))
     if not m:

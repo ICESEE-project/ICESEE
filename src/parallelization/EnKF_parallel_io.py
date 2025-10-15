@@ -654,7 +654,7 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Abort(1)
 
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
-    def generate_observation_schedule(self, **kwargs):
+    def generate_observation_schedule_(self, **kwargs):
         # try:
         t = np.array(kwargs["t"])
         freq_obs = self.params["freq_obs"]
@@ -678,6 +678,66 @@ class EnKF_fully_parallel_IO:
             print(f"[WARNING] obs_idx length {len(obs_idx)} does not match num_observations {num_observations}")
         # print(f"[DEBUG] obs_t: {obs_t}, obs_idx: {obs_idx}, num_observations: {num_observations}")
         return obs_t, obs_idx, num_observations
+    
+    @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
+    def generate_observation_schedule(self, **kwargs):
+        """
+        Build an observation schedule by snapping desired observation times to the nearest
+        entries in the model time grid `t`. Works for any uniform or nonuniform `t`.
+        Returns:
+            obs_t_req      : requested observation times (continuous)
+            obs_idx        : integer indices into `t` (strictly increasing, unique)
+            num_observations
+            obs_t_aligned  : times actually used (t[obs_idx])
+        """
+        import numpy as np
+
+        # --- Inputs ---
+        t = np.asarray(kwargs["t"], dtype=float)  # model time grid (physical units)
+        if t.ndim != 1 or t.size == 0:
+            raise ValueError("`t` must be a 1D non-empty array of times.")
+
+        freq_obs      = float(self.params["freq_obs"])
+        obs_start     = float(self.params["obs_start_time"])
+        obs_max_cfg   = float(self.params["obs_max_time"])
+
+        # --- Bound the observation window to the provided time grid ---
+        t_min, t_max = float(t[0]), float(t[-1])
+        if obs_start < t_min:
+            obs_start = t_min
+        obs_max = min(obs_max_cfg, t_max)
+
+        if freq_obs <= 0.0 or obs_start > obs_max:
+            # No observations possible
+            return np.array([]), np.array([], dtype=int), 0, np.array([])
+
+        # --- Create the requested observation times robustly (avoid float drift) ---
+        n_obs = int(np.floor((obs_max - obs_start) / freq_obs)) + 1
+        obs_t_req = obs_start + np.arange(n_obs, dtype=float) * freq_obs
+        # clip for safety
+        obs_t_req = obs_t_req[(obs_t_req >= t_min) & (obs_t_req <= obs_max)]
+
+        # --- Snap each requested time to the nearest index in `t` using searchsorted ---
+        # searchsorted gives insertion points; choose the closer neighbor
+        insert_pos = np.searchsorted(t, obs_t_req, side="left")
+        left_idx   = np.clip(insert_pos - 1, 0, t.size - 1)
+        right_idx  = np.clip(insert_pos,     0, t.size - 1)
+
+        choose_right = (np.abs(t[right_idx] - obs_t_req) < np.abs(t[left_idx] - obs_t_req))
+        nearest_idx  = np.where(choose_right, right_idx, left_idx).astype(int)
+
+        # --- Deduplicate while preserving order (handles freq_obs finer than grid) ---
+        # This ensures strictly increasing indices for downstream code.
+        uniq_mask = np.r_[True, nearest_idx[1:] != nearest_idx[:-1]]
+        obs_idx = nearest_idx[uniq_mask]
+
+        #  aligned times on the model grid
+        obs_t_aligned = t[obs_idx]
+
+        num_observations = obs_idx.size
+
+        # ensure unique indices
+        return obs_t_req, obs_idx, num_observations
     
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
     def _create_synthetic_observations(self, **kwargs):
@@ -734,7 +794,8 @@ class EnKF_fully_parallel_IO:
 
                     km = 0
                     for step in range(nt):
-                        if (km < m_obs) and (step + 1 == ind_m[km]):
+                        # if (km < m_obs) and (step + 1 == ind_m[km]):
+                        if (km < m_obs) and (step == ind_m[km]):
                             for key in kwargs['vec_inputs']:
                                 # print(f"[ICESEE] Generating obs at time step {step+1} for key {key} at obs index {km}")
                                 hu_obs[indx_map[key], km] = statevec_true[indx_map[key], step + 1] + \

@@ -130,8 +130,10 @@ def generate_nurged_state(**kwargs):
     nugget_friction = kwargs.get('nugget_friction')
     friction_model = gs.Gaussian(dim=1, var=sill_friction, len_scale=range_friction, nugget=nugget_friction)
     friction_srf = gs.SRF(friction_model, mean=mean_friction, seed=kwargs.get('seed', 42))
+    # friction_srf = gs.SRF(friction_model, mean=0, seed=kwargs.get('seed', 42) + rank)
     fdim = nd//params.get('total_state_param_vars', 1)
-    x = np.linspace(0, range_friction*2, fdim)
+    # x = np.linspace(0, range_friction*2, fdim)
+    x = np.linspace(0, range_friction, fdim)
     friction_field = friction_srf.structured([x])
 
     # --bed
@@ -139,8 +141,10 @@ def generate_nurged_state(**kwargs):
     range_bed = kwargs.get('range_bed')
     nugget_bed = kwargs.get('nugget_bed')
     bed_model = gs.Exponential(dim=1, var=sill_bed-nugget_bed, len_scale=range_bed, nugget=nugget_bed)
-    bed_srf = gs.SRF(bed_model, mean=0, seed=kwargs.get('seed', 42))
-    x = np.linspace(0, range_bed*2, fdim)
+    # bed_srf = gs.SRF(bed_model, mean=0, seed=kwargs.get('seed', 42))
+    bed_srf = gs.SRF(bed_model, mean=0, seed=kwargs.get('seed', 42) + rank)
+    # x = np.linspace(0, range_bed*2, fdim)
+    x = np.linspace(0, range_bed, fdim)
     bed_field = bed_srf.structured([x])
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
@@ -210,32 +214,33 @@ def initialize_ensemble(ens, **kwargs):
     kwargs.update({'fname': fname})
 
      # -- friction
-    sill_friction = kwargs.get('sill_friction')
-    range_friction = kwargs.get('range_friction')
-    mean_friction  = kwargs.get('mean_friction')
-    nugget_friction = kwargs.get('nugget_friction')
-    friction_model = gs.Gaussian(dim=1, var=sill_friction, len_scale=range_friction, nugget=nugget_friction)
-    friction_srf = gs.SRF(friction_model, mean=mean_friction, seed=kwargs.get('seed', 42))
-    fdim = nd//params.get('total_state_param_vars', 1)
-    x = np.linspace(0, range_friction*2, fdim)
-    friction_field = friction_srf.structured([x])
+    # sill_friction = kwargs.get('sill_friction')
+    # range_friction = kwargs.get('range_friction')
+    # mean_friction  = kwargs.get('mean_friction')
+    # nugget_friction = kwargs.get('nugget_friction')
+    # friction_model = gs.Gaussian(dim=1, var=sill_friction, len_scale=range_friction, nugget=nugget_friction)
+    # # friction_srf = gs.SRF(friction_model, mean=mean_friction, seed=kwargs.get('seed', 42))
+    # friction_srf = gs.SRF(friction_model, mean=0, seed=kwargs.get('seed', 42) + ens)
+    # fdim = nd//params.get('total_state_param_vars', 1)
+    # x = np.linspace(0, range_friction*2, fdim)
+    # friction_field = friction_srf.structured([x])
 
-    # --bed
-    sill_bed = kwargs.get('sill_bed')
-    range_bed = kwargs.get('range_bed')
-    nugget_bed = kwargs.get('nugget_bed')
-    bed_model = gs.Exponential(dim=1, var=sill_bed-nugget_bed, len_scale=range_bed, nugget=nugget_bed)
-    bed_srf = gs.SRF(bed_model, mean=0, seed=kwargs.get('seed', 42))
-    x = np.linspace(0, range_bed*2, fdim)
-    bed_field = bed_srf.structured([x])
+    # # --bed
+    # sill_bed = kwargs.get('sill_bed')
+    # range_bed = kwargs.get('range_bed')
+    # nugget_bed = kwargs.get('nugget_bed')
+    # bed_model = gs.Exponential(dim=1, var=sill_bed-nugget_bed, len_scale=range_bed, nugget=nugget_bed)
+    # bed_srf = gs.SRF(bed_model, mean=0, seed=kwargs.get('seed', 42) + ens)
+    # x = np.linspace(0, range_bed*2, fdim)
+    # bed_field = bed_srf.structured([x])
 
-    # write the wrong states to a .h5 file to be read by the ISSM model before nurging
-    friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
-    with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
-        # -- write the friction field
-        f.create_dataset('coefficient', data=friction_field)
-        # -- write the bed field
-        f.create_dataset('bed', data=bed_field)
+    # # write the wrong states to a .h5 file to be read by the ISSM model before nurging
+    # friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
+    # with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
+    #     # -- write the friction field
+    #     f.create_dataset('coefficient', data=friction_field)
+    #     # -- write the bed field
+    #     f.create_dataset('bed', data=bed_field)
 
 
     try:
@@ -263,8 +268,12 @@ def initialize_ensemble(ens, **kwargs):
     output_filename = f'{icesee_path}/{data_path}/ensemble_out_{ens_id}.h5'
     updated_state = {}
     with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
-        for key in vec_inputs:
-            updated_state[key] = f[key][0]
+        # for key in vec_inputs:
+        #     updated_state[key] = f[key][0]
+        updated_state['Thickness'] = f['Thickness'][0]
+        if kwargs.get('joint_estimation', False):
+            updated_state['bed'] = f['bed'][0]
+            updated_state['coefficient'] = f['coefficient'][0]
 
     os.chdir(icesee_path)
 
