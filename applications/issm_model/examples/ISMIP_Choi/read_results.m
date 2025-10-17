@@ -4,12 +4,12 @@
 % @brief: 	Reads and plot results from both ISSM and ICESEE
 % ------------------------------------------------------------
 
-close all; clear all
+% close all; clear all
 
 % data_file_paths='data3/_modelrun_datasets';
 % data_file_paths='data/new_data/_modelrun_datasets';
 data_file_paths='_modelrun_datasets';
-% data_file_paths='data_0'
+% data_file_paths='data_1/_modelrun_datasets'
 
 % Load the essential data
 results_dir = 'results';
@@ -53,7 +53,7 @@ md_mean = md; md_ens = md;
 x = md.mesh.x;
 y = md.mesh.y;
 % k = nt-1;
-k=9;
+k=1;
 
 True_fcoeff = model_true_state(2*hdim+1:3*hdim, k);
 True_bed = model_true_state(hdim+1:2*hdim,  k);
@@ -74,6 +74,17 @@ md_nurged.friction.coefficient=nurged_fcoeff;
 md_ens.geometry.bed=ensemble_vec_mean(hdim+1:2*hdim, k);
 md_ens.geometry.thickness=ensemble_vec_mean(1:hdim,  k);
 md_ens.friction.coefficient=ensemble_vec_mean(2*hdim+1:3*hdim, k);
+% *--
+% Nens=22;
+% md_ens.geometry.bed=squeeze(ensemble_vec_full(k,Nens,hdim+1:2*hdim));
+% md_ens.geometry.thickness=squeeze(ensemble_vec_full(k,Nens,1:hdim));
+% md_ens.friction.coefficient=squeeze(ensemble_vec_full(k, Nens, 2*hdim+1:3*hdim));
+% mean_compute
+% ens_mean = squeeze( mean( ensemble_vec_full(:, :, :), 2, 'omitnan'));  % -> [nt x hdim]
+% md_ens.geometry.bed=ens_mean(k,hdim+1:2*hdim)';
+% md_ens.geometry.thickness=ens_mean(k,1:hdim)';
+% md_ens.friction.coefficient=ens_mean(k,2*hdim+1:3*hdim)';
+% *---
 % plotmodel(md_true, 'data', md_true.geometry.thickness-md_ens.geometry.thickness, 'title', 'Ice Thickness'); hold off;
 
 % fetch groundingline
@@ -188,7 +199,7 @@ function plot_triptych(md_true, md_nurged, md_ens, field, field_title, cmap, uni
         'subplot',[4,1,3],'caxis',[cmin cmax],'colorbar','off');
 
     % 4) Difference
-    plotmodel(md_true,'data',diff_data, ...
+    plotmodel(md_ens,'data',diff_data, ...
         'title',['Assimilated - True ' field_title], ...
         'subplot',[4,1,4],'caxis',[-maxAbs maxAbs],'colorbar','off');
 
