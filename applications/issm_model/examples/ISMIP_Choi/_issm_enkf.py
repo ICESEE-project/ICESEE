@@ -123,31 +123,31 @@ def generate_nurged_state(**kwargs):
     statevec_nurged = kwargs.get('statevec_nurged')
 
     # -- call the icesee_get_index function to get the index of the state vector
-    vecs, indx_map, dim_per_proc = icesee_get_index(statevec_nurged, **kwargs)
+    vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
 
-    # -- friction
+    Lx = kwargs.get('Lx',params.get('Lx', 640e3))
+    fdim = nd//params.get('total_state_param_vars', 1)
+    x = np.linspace(0, Lx, fdim)
+    seed_base = kwargs.get('seed_base', 42)
+
+     # -- friction
     sill_friction = kwargs.get('sill_friction')
     range_friction = kwargs.get('range_friction')
     mean_friction  = kwargs.get('mean_friction')
     nugget_friction = kwargs.get('nugget_friction')
-    friction_model = gs.Gaussian(dim=1, var=sill_friction, len_scale=range_friction, nugget=nugget_friction)
-    # friction_srf = gs.SRF(friction_model, mean=mean_friction, seed=kwargs.get('seed', 42))
-    friction_srf = gs.SRF(friction_model, mean=0, seed=kwargs.get('seed', 42) + rank)
-    fdim = nd//params.get('total_state_param_vars', 1)
-    # x = np.linspace(0, range_friction*2, fdim)
-    x = np.linspace(0, range_friction, fdim)
-    friction_field = friction_srf.structured([x])
+    var_fric = max(sill_friction - nugget_friction, 0.0)
+    friction_model = gs.Gaussian(dim=1, var=var_fric, len_scale=range_friction, nugget=nugget_friction)
+    friction_srf = gs.SRF(friction_model, mean=0, seed=seed_base + ens_id)
+    friction_field = np.asarray(friction_srf.structured([x])).reshape(-1)
 
     # --bed
     sill_bed = kwargs.get('sill_bed')
     range_bed = kwargs.get('range_bed')
     nugget_bed = kwargs.get('nugget_bed')
-    bed_model = gs.Exponential(dim=1, var=sill_bed-nugget_bed, len_scale=range_bed, nugget=nugget_bed)
-    # bed_srf = gs.SRF(bed_model, mean=0, seed=kwargs.get('seed', 42))
-    bed_srf = gs.SRF(bed_model, mean=0, seed=kwargs.get('seed', 42) + rank)
-    # x = np.linspace(0, range_bed*2, fdim)
-    x = np.linspace(0, range_bed, fdim)
-    bed_field = bed_srf.structured([x])
+    var_bed = max(sill_bed - nugget_bed, 0.0)
+    bed_model = gs.Exponential(dim=1, var=var_bed, len_scale=range_bed, nugget=nugget_bed)
+    bed_srf = gs.SRF(bed_model, mean=0.0, seed=seed_base + 10_000 + ens_id)  # different stream
+    bed_field = np.asarray(bed_srf.structured([x])).reshape(-1)  # 1D
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
@@ -219,26 +219,30 @@ def initialize_ensemble(ens, **kwargs):
     fname = 'initialize_ensemble.mat'
     kwargs.update({'fname': fname})
 
+    #*-----------------------
+    Lx = kwargs.get('Lx',params.get('Lx', 640e3))
+    fdim = nd//params.get('total_state_param_vars', 1)
+    x = np.linspace(0, Lx, fdim)
+    seed_base = kwargs.get('seed_base', 42)
+
      # -- friction
     sill_friction = kwargs.get('sill_friction')
     range_friction = kwargs.get('range_friction')
     mean_friction  = kwargs.get('mean_friction')
     nugget_friction = kwargs.get('nugget_friction')
-    friction_model = gs.Gaussian(dim=1, var=sill_friction, len_scale=range_friction, nugget=nugget_friction)
-    # friction_srf = gs.SRF(friction_model, mean=mean_friction, seed=kwargs.get('seed', 42))
-    friction_srf = gs.SRF(friction_model, mean=0, seed=kwargs.get('seed', 42) + ens)
-    fdim = nd//params.get('total_state_param_vars', 1)
-    x = np.linspace(0, range_friction*2, fdim)
-    friction_field = friction_srf.structured([x])
+    var_fric = max(sill_friction - nugget_friction, 0.0)
+    friction_model = gs.Gaussian(dim=1, var=var_fric, len_scale=range_friction, nugget=nugget_friction)
+    friction_srf = gs.SRF(friction_model, mean=0.0, seed=seed_base + ens)
+    friction_field = np.asarray(friction_srf.structured([x])).reshape(-1)
 
     # --bed
     sill_bed = kwargs.get('sill_bed')
     range_bed = kwargs.get('range_bed')
     nugget_bed = kwargs.get('nugget_bed')
-    bed_model = gs.Exponential(dim=1, var=sill_bed-nugget_bed, len_scale=range_bed, nugget=nugget_bed)
-    bed_srf = gs.SRF(bed_model, mean=0, seed=kwargs.get('seed', 42) + ens)
-    x = np.linspace(0, range_bed*2, fdim)
-    bed_field = bed_srf.structured([x])
+    var_bed = max(sill_bed - nugget_bed, 0.0)
+    bed_model = gs.Exponential(dim=1, var=var_bed, len_scale=range_bed, nugget=nugget_bed)
+    bed_srf = gs.SRF(bed_model, mean=100.0, seed=seed_base + 10_000 + ens)  # different stream
+    bed_field = np.asarray(bed_srf.structured([x])).reshape(-1)  # 1D
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
@@ -247,6 +251,7 @@ def initialize_ensemble(ens, **kwargs):
         f.create_dataset('coefficient', data=friction_field)
         # -- write the bed field
         f.create_dataset('bed', data=bed_field)
+    #*-----------------------
 
 
     try:

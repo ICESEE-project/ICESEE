@@ -52,8 +52,8 @@ md_mean = md; md_ens = md;
 
 x = md.mesh.x;
 y = md.mesh.y;
-% k = nt-1;
-k=1;
+k = nt-1;
+% k=2;
 
 True_fcoeff = model_true_state(2*hdim+1:3*hdim, k);
 True_bed = model_true_state(hdim+1:2*hdim,  k);
@@ -68,7 +68,8 @@ nurged_bed = model_nurged_state(hdim+1:2*hdim,  k);
 nurged_thickness= model_nurged_state(1:hdim,  k);
 md_nurged.geometry.bed=nurged_bed;
 md_nurged.geometry.thickness=nurged_thickness;
-md_nurged.friction.coefficient=nurged_fcoeff;   
+md_nurged.friction.coefficient=nurged_fcoeff;
+% md_nurged.friction.coefficient=nurged_fcoeff - 2500*ones(md_nurged.mesh.numberofvertices,1); 
  
 % update ens loads
 md_ens.geometry.bed=ensemble_vec_mean(hdim+1:2*hdim, k);

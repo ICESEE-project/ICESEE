@@ -7,9 +7,9 @@ physical-parameters:
 
 modeling-parameters:
   # Model parameters
-  num_years: 50          # Number of years to run the model (30-year assimilation period from paper)
+  num_years: 30          # Number of years to run the model (30-year assimilation period from paper)
   tinitial: 0.0           # Initial time
-  timesteps_per_year: 0.25 # Number of timesteps per year (monthly for stability in SSA)
+  timesteps_per_year: 0.1 # Number of timesteps per year (monthly for stability in SSA)
 
   example_name: "ISMIP_Choi"  # Must have added this to the ISSM directory
   ParamFile: "Mismip2.par" # Parameter file for ISSM-DART setup
@@ -27,9 +27,9 @@ modeling-parameters:
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 50                      # Number of ensemble members (paper uses 50)
-  freq_obs: 4                 # Frequency of observations (annual, as per paper)
-  obs_max_time: 45            # Maximum time for observations (30 years)
-  obs_start_time: 5            # Start time for observations (start of simulation)
+  freq_obs: 2                 # Frequency of observations (annual, as per paper)
+  obs_max_time: 28            # Maximum time for observations (30 years)
+  obs_start_time: 3            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state:    1  # Generate true state for synthetic observations
@@ -42,12 +42,12 @@ enkf-parameters:
   observed_params: ['bed','coefficient']   # Parameters to estimate (friction coefficient, bed topography)
 
   # Statistical parameters
-  sig_obs: [4, 5, 2]          # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
-  sig_Q: [2.0, 0.8, 2.0]          # Process noise std dev (adjusted for H, Vx, Vy)
-  length_scale: [40,150,25]               # Length scale for covariance (5 km for friction, per paper)
+  sig_obs: [4, 3, 3]          # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
+  sig_Q: [0.8, 0.4, 0.8]          # Process noise std dev (adjusted for H, Vx, Vy)
+  length_scale: [120,125,130]               # Length scale for covariance (5 km for friction, per paper)
   
   seed: 1                       # Seed for random number generator
-  inflation_factor: 1.15        # Inflation factor (optimal range 1.10–1.18 from paper)
+  inflation_factor: 1.01        # Inflation factor (optimal range 1.10–1.18 from paper)
   localization_flag: False       # Enable localization (paper uses 4–8 km radius)
   localization_radius: 6        # Localization radius in km (midpoint of 4–8 km)
 
@@ -84,7 +84,7 @@ enkf-parameters:
   h5_file_chunk_size: 1000       # Chunk size for HDF5
   serial_file_creation: True  # Create HDF5 files in serial (True) or parallel (False)
   collective_threshold: 4
-  batch_size: 200             # Batch size for writing HDF5 files
+  batch_size: 300             # Batch size for writing HDF5 files
 
   # restart parameters (only available for fully parallel runs)
   restart_enabled: 1         # Enable restart functionality
