@@ -438,7 +438,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.timestepping = timestepping();
             md.timestepping.time_step = 0.1;
             md.timestepping.start_time = 0;
-            md.timestepping.final_time = 0.2;
+            md.timestepping.final_time = 2.0;
             md.settings.output_frequency = output_frequency; %make sure this is set to 1 for 
             md.stressbalance.maxiter = 100;
             md.stressbalance.restol = 1;
@@ -567,7 +567,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.timestepping = timestepping();
             md.timestepping.time_step = 0.1;
             md.timestepping.start_time = 0;
-            md.timestepping.final_time = 0.1;
+            md.timestepping.final_time = 0.2;
             md.settings.output_frequency = output_frequency; %make sure this is set to 1 for
             
             % Enforce minimum thickness
@@ -762,31 +762,31 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.friction.coefficient = md.results.TransientSolution(end).FrictionCoefficient;
 
             % *--
-            % % Enforce minimum thickness
-            % pos = (md.geometry.thickness < 1);
-            % md.geometry.thickness(pos) = 1;
+            % Enforce minimum thickness
+            pos = (md.geometry.thickness < 1);
+            md.geometry.thickness(pos) = 1;
 
-            % % Ocean level set and flotation geometry
-            % di = md.materials.rho_ice / md.materials.rho_water;
-            % md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
+            % Ocean level set and flotation geometry
+            di = md.materials.rho_ice / md.materials.rho_water;
+            md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
 
-            % % Below sea levelset: set surface by flotation, then base = surface - thickness
-            % pos = (md.mask.ocean_levelset < 0);
-            % md.geometry.surface(pos) = md.geometry.thickness(pos) .* ...
-            %     (md.materials.rho_water - md.materials.rho_ice) / md.materials.rho_water;
+            % Below sea levelset: set surface by flotation, then base = surface - thickness
+            pos = (md.mask.ocean_levelset < 0);
+            md.geometry.surface(pos) = md.geometry.thickness(pos) .* ...
+                (md.materials.rho_water - md.materials.rho_ice) / md.materials.rho_water;
 
-            % md.geometry.base = md.geometry.surface - md.geometry.thickness;
+            md.geometry.base = md.geometry.surface - md.geometry.thickness;
 
-            % % If base < bed (no-op in your Python; keeping it as-is, see note below)
-            % pos = (md.geometry.base < md.geometry.bed);
-            % md.geometry.base(pos) = md.geometry.base(pos);  % no change; see note
+            % If base < bed (no-op in your Python; keeping it as-is, see note below)
+            pos = (md.geometry.base < md.geometry.bed);
+            md.geometry.base(pos) = md.geometry.base(pos);  % no change; see note
 
-            % % Above sea levelset: grounded—set base to bed
-            % pos = (md.mask.ocean_levelset > 0);
-            % md.geometry.base(pos) = md.geometry.bed(pos);
+            % Above sea levelset: grounded—set base to bed
+            pos = (md.mask.ocean_levelset > 0);
+            md.geometry.base(pos) = md.geometry.bed(pos);
 
-            % % Update surface for consistency
-            % md.geometry.surface = md.geometry.base + md.geometry.thickness;
+            % Update surface for consistency
+            md.geometry.surface = md.geometry.base + md.geometry.thickness;
 
 
             % Save ensemble outputs in HDF5

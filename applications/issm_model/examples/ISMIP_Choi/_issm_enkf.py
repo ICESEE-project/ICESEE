@@ -241,7 +241,7 @@ def initialize_ensemble(ens, **kwargs):
     nugget_bed = kwargs.get('nugget_bed')
     var_bed = max(sill_bed - nugget_bed, 0.0)
     bed_model = gs.Exponential(dim=1, var=var_bed, len_scale=range_bed, nugget=nugget_bed)
-    bed_srf = gs.SRF(bed_model, mean=100.0, seed=seed_base + 10_000 + ens)  # different stream
+    bed_srf = gs.SRF(bed_model, mean=0.0, seed=seed_base + 10_000 + ens)  # different stream
     bed_field = np.asarray(bed_srf.structured([x])).reshape(-1)  # 1D
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
