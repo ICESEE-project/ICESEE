@@ -4,12 +4,12 @@
 % @brief: 	Reads and plot results from both ISSM and ICESEE
 % ------------------------------------------------------------
 
-% close all; clear all
+close all; clear all
 
-% data_file_paths='data3/_modelrun_datasets';
-% data_file_paths='data/new_data/_modelrun_datasets';
+% data_file_paths='data_0/_modelrun_datasets';
+% data_file_paths='data_1';
 data_file_paths='_modelrun_datasets';
-% data_file_paths='data_1/_modelrun_datasets'
+% data_file_paths='_model_data'
 
 % Load the essential data
 results_dir = 'results';
@@ -43,38 +43,56 @@ ensemble_vec_mean = h5read(file_path, '/ensemble_mean')';
 % Process and plot
 [ndim, nt] = size(model_true_state);
 num_steps = nt - 1;
-hdim = floor(ndim / 3);
+var_inputs = ['thickness', 'Vx', 'Vy', 'friction_coefficient', 'bed_topography'];
+hdim = floor(ndim / 5);  % dimension of one variable
 
 file_path   = fullfile("data", "ISMIP_initial_data.mat");
 md = loadmodel(file_path);
 md_true = md; md_nurged = md;
 md_mean = md; md_ens = md;
+dt = t(2) - t(1);
 
-x = md.mesh.x;
-y = md.mesh.y;
-k = nt-1;
-% k=2;
+% k = nt-1;
+k=50;
 
-True_fcoeff = model_true_state(2*hdim+1:3*hdim, k);
-True_bed = model_true_state(hdim+1:2*hdim,  k);
+
 True_thickness= model_true_state(1:hdim,  k);
+Vx = model_true_state(hdim+1:2*hdim, k);
+Vy = model_true_state(2*hdim+1:3*hdim, k);
+Vel = sqrt(Vx.^2 + Vy.^2);
+True_bed = model_true_state(3*hdim+1:4*hdim, k);
+True_fcoeff = model_true_state(4*hdim+1:5*hdim, k);
 md_true.geometry.bed=True_bed;
+md_true.initialization.vx=Vx;
+md_true.initialization.vy=Vy;
+md_true.initialization.vel=Vel;
 md_true.geometry.thickness=True_thickness;
 md_true.friction.coefficient=True_fcoeff;
 
 % nurged state
-nurged_fcoeff = model_nurged_state(2*hdim+1:3*hdim, k);
-nurged_bed = model_nurged_state(hdim+1:2*hdim,  k);
 nurged_thickness= model_nurged_state(1:hdim,  k);
-md_nurged.geometry.bed=nurged_bed;
+Vx = model_nurged_state(hdim+1:2*hdim, k);
+Vy = model_nurged_state(2*hdim+1:3*hdim, k);
+Vel = sqrt(Vx.^2 + Vy.^2);
+
+nurged_bed = model_nurged_state(3*hdim+1:4*hdim, k);
+nurged_fcoeff = model_nurged_state(4*hdim+1:5*hdim, k);
+
 md_nurged.geometry.thickness=nurged_thickness;
+md_nurged.initialization.vx=Vx;
+md_nurged.initialization.vy=Vy;
+md_nurged.initialization.vel=Vel;
+md_nurged.geometry.bed=nurged_bed;
 md_nurged.friction.coefficient=nurged_fcoeff;
 % md_nurged.friction.coefficient=nurged_fcoeff - 2500*ones(md_nurged.mesh.numberofvertices,1); 
  
 % update ens loads
-md_ens.geometry.bed=ensemble_vec_mean(hdim+1:2*hdim, k);
 md_ens.geometry.thickness=ensemble_vec_mean(1:hdim,  k);
-md_ens.friction.coefficient=ensemble_vec_mean(2*hdim+1:3*hdim, k);
+md_ens.initialization.vx=ensemble_vec_mean(hdim+1:2*hdim, k);
+md_ens.initialization.vy=ensemble_vec_mean(2*hdim+1:3*hdim, k);
+md_ens.initialization.vel=sqrt(md_ens.initialization.vx.^2 + md_ens.initialization.vy.^2);
+md_ens.geometry.bed=ensemble_vec_mean(3*hdim+1:4*hdim, k);
+md_ens.friction.coefficient=ensemble_vec_mean(4*hdim+1:5*hdim, k);
 % *--
 % Nens=22;
 % md_ens.geometry.bed=squeeze(ensemble_vec_full(k,Nens,hdim+1:2*hdim));
@@ -99,14 +117,17 @@ md_ens.mask.ocean_levelset= md_ens.geometry.thickness + md_ens.geometry.bed/di;
 
 % thickness
 plot_triptych(md_true, md_nurged, md_ens, ...
-              'geometry.thickness', sprintf('Ice Thickness after %d years', round((k-1)*0.5)), parula, 'm');   
+              'geometry.thickness', sprintf('Ice Thickness after %d years', round((k-1)*dt)), parula, 'm');  
+% velocity              
+plot_triptych(md_true, md_nurged, md_ens, ...
+              'initialization.vel', sprintf('Ice Velocity after %d years', round((k-1)*dt)), parula, 'm/s');   
 % bed topography
 plot_triptych(md_true, md_nurged, md_ens, ...
-              'geometry.bed', sprintf('Bed Elevation after %d years', round((k-1)*0.5)), parula, 'm');
+              'geometry.bed', sprintf('Bed Elevation after %d years', round((k-1)*dt)), parula, 'm');
 %
 % % Frcition coefficient
 plot_triptych(md_true, md_nurged, md_ens, ...
-              'friction.coefficient', sprintf('Friction Coefficient after %d years', round((k-1)*0.5)), parula, '');
+              'friction.coefficient', sprintf('Friction Coefficient after %d years', round((k-1)*dt)), parula, '');
 %
 % % grounding line
 % plot_triptych(md_true, md_nurged, md_ens, ...
@@ -114,7 +135,7 @@ plot_triptych(md_true, md_nurged, md_ens, ...
 %               'Grounding Line', gray, '');
 plot_triptych(md_true, md_nurged, md_ens, ...
               'mask.ocean_levelset', ...
-              sprintf('Grounding Line after %d years', round((k-1)*0.5)), parula, '');
+              sprintf('Grounding Line after %d years', round((k-1)*dt)), parula, '');
 
 % create a movie for the groundingline for every 10 yrs
 % Setup video writer (optional)
@@ -156,7 +177,7 @@ if make_movie
             frame = getframe(gcf);
             writeVideo(v, frame);
         else
-            pause(0.1); % interactive view
+            pause(dt); % interactive view
         end
     end
 
@@ -201,7 +222,7 @@ function plot_triptych(md_true, md_nurged, md_ens, field, field_title, cmap, uni
 
     % 4) Difference
     plotmodel(md_ens,'data',diff_data, ...
-        'title',['Assimilated - True ' field_title], ...
+        'title',['(Assmilated - True) ' field_title], ...
         'subplot',[4,1,4],'caxis',[-maxAbs maxAbs],'colorbar','off');
 
     % --- Axes layout ---

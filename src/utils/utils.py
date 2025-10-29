@@ -99,32 +99,75 @@ class UtilsFunctions:
         return self.H_matrix(n_model)
 
     
+    # def generate_observation_schedule(self, **kwargs):
+    #     try:
+    #         t = np.array(kwargs["t"])
+    #         freq_obs = self.params["freq_obs"]
+    #         obs_start_time = self.params["obs_start_time"]
+    #         obs_max_time = self.params["obs_max_time"]
+
+    #         max_t = np.max(t)
+    #         obs_max_time = min(obs_max_time, max_t)
+
+    #         obs_t = np.arange(obs_start_time, obs_max_time + freq_obs, freq_obs)
+    #         obs_t = obs_t[obs_t <= obs_max_time]
+
+    #         obs_idx = []
+    #         for time in obs_t:
+    #             idx = np.argmin(np.abs(t - time))
+    #             obs_idx.append(idx)
+    #         obs_idx = np.array(obs_idx, dtype=int)
+
+    #         num_observations = len(obs_idx)
+    #         return obs_t, obs_idx, num_observations
+    #     except Exception as e:
+    #         print(f"Error occurred in generate_observation_schedule: {e}")
+    #         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+    #         print(f"Traceback details:\n{tb_str}")
+    #         # self.mpi_comm.Abort(1)
+
     def generate_observation_schedule(self, **kwargs):
         try:
-            t = np.array(kwargs["t"])
-            freq_obs = self.params["freq_obs"]
-            obs_start_time = self.params["obs_start_time"]
-            obs_max_time = self.params["obs_max_time"]
+            import numpy as np
 
-            max_t = np.max(t)
-            obs_max_time = min(obs_max_time, max_t)
+            t = np.asarray(kwargs["t"], dtype=float)
+            if t.ndim != 1 or t.size == 0:
+                raise ValueError("`t` must be a 1D non-empty array of times.")
+            t_min, t_max = float(t[0]), float(t[-1])
 
-            obs_t = np.arange(obs_start_time, obs_max_time + freq_obs, freq_obs)
-            obs_t = obs_t[obs_t <= obs_max_time]
+            freq_obs = float(self.params["freq_obs"])
+            obs_start = float(self.params["obs_start_time"])
+            obs_max_cfg = float(self.params["obs_max_time"])
 
+            obs_start = max(obs_start, t_min)
+            obs_max = min(obs_max_cfg, t_max)
+
+            if freq_obs <= 0.0 or obs_start > obs_max:
+                return np.array([]), np.array([], dtype=int), 0, np.array([])
+
+            # --- Build ideal observation times ---
+            n_obs = int(np.floor((obs_max - obs_start) / freq_obs)) + 1
+            obs_t_req = obs_start + np.arange(n_obs, dtype=float) * freq_obs
+
+            # --- Match model time points to observation times ---
+            dt_grid = np.min(np.diff(t)) if len(t) > 1 else 1.0
+            tol = 1e-6 * dt_grid
+
+            # For each t in the model time grid, check if it’s close to any obs time
             obs_idx = []
-            for time in obs_t:
-                idx = np.argmin(np.abs(t - time))
-                obs_idx.append(idx)
-            obs_idx = np.array(obs_idx, dtype=int)
+            for i, ti in enumerate(t):
+                if np.any(np.abs(ti - obs_t_req) < tol):
+                    obs_idx.append(i)
 
+            obs_idx = np.array(obs_idx, dtype=int)
+            obs_t_aligned = t[obs_idx]
             num_observations = len(obs_idx)
-            return obs_t, obs_idx, num_observations
+
+            return obs_t_req, obs_idx, num_observations
         except Exception as e:
             print(f"Error occurred in generate_observation_schedule: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
-            # self.mpi_comm.Abort(1)
     
     # --- Create synthetic observations ---
     def _create_synthetic_observations(self,**kwargs):
