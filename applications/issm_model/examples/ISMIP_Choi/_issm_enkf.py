@@ -130,8 +130,10 @@ def generate_nurged_state(**kwargs):
     vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
 
     Lx = kwargs.get('Lx',params.get('Lx', 640e3))
+    Ly = kwargs.get('Ly',params.get('Ly', 80e3))
     fdim = nd//params.get('total_state_param_vars', 1)
-    x = np.linspace(0, Lx, fdim)
+    # x = np.linspace(0, Lx, fdim)
+    x = np.linspace(0, Ly, fdim)
     seed_base = kwargs.get('seed_base', 42)
 
      # -- friction
@@ -150,7 +152,7 @@ def generate_nurged_state(**kwargs):
     nugget_bed = kwargs.get('nugget_bed')
     var_bed = max(sill_bed - nugget_bed, 0.0)
     bed_model = gs.Exponential(dim=1, var=var_bed, len_scale=range_bed, nugget=nugget_bed)
-    bed_srf = gs.SRF(bed_model, mean=0.0, seed=seed_base + 10_000 + ens_id)  # different stream
+    bed_srf = gs.SRF(bed_model, mean=mean_friction, seed=seed_base + 10_000 + ens_id)  # different stream
     bed_field = np.asarray(bed_srf.structured([x])).reshape(-1)  # 1D
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
@@ -229,8 +231,10 @@ def initialize_ensemble(ens, **kwargs):
 
     #*-----------------------
     Lx = kwargs.get('Lx',params.get('Lx', 640e3))
+    Ly = kwargs.get('Ly',params.get('Ly', 80e3))
     fdim = nd//params.get('total_state_param_vars', 1)
-    x = np.linspace(0, Lx, fdim)
+    # x = np.linspace(0, Lx, fdim)
+    x = np.linspace(0, Ly, fdim)
     seed_base = kwargs.get('seed_base', 42)
 
      # -- friction

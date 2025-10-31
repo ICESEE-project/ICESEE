@@ -53,21 +53,12 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.initialization.vx        = md.results.TransientSolution(end).Vx;
         md.initialization.vy        = md.results.TransientSolution(end).Vy;
         md.initialization.vel       = md.results.TransientSolution(end).Vel;
-        md.initialization.pressure  = md.results.TransientSolution(end).Pressure;
-        md.smb.mass_balance         = md.results.TransientSolution(end).SmbMassBalance;
+        % md.initialization.pressure  = md.results.TransientSolution(end).Pressure;
+        % md.smb.mass_balance         = md.results.TransientSolution(end).SmbMassBalance;
         md.mask.ocean_levelset      = md.results.TransientSolution(end).MaskOceanLevelset;
 
 
         md = setflowequation(md,'SSA','all');
-
-        % md.transient.isthermal=0;
-        % md.transient.isstressbalance=1;
-        % md.transient.ismasstransport=1;
-        % md.transient.isgroundingline=1;
-        % md.groundingline.migration = 'SubelementMigration';
-        % md.groundingline.friction_interpolation='SubelementFriction1';
-        % md.groundingline.melt_interpolation='NoMeltOnPartiallyFloating';
-        % md.masstransport.spcthickness = NaN*ones(md.mesh.numberofvertices,1);
 
 
         md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
@@ -118,31 +109,13 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.initialization.vx        = md.results.TransientSolution(end).Vx;
         md.initialization.vy        = md.results.TransientSolution(end).Vy;
         md.initialization.vel       = md.results.TransientSolution(end).Vel;
-        md.initialization.pressure  = md.results.TransientSolution(end).Pressure;
-        md.smb.mass_balance         = md.results.TransientSolution(end).SmbMassBalance;
+        % md.initialization.pressure  = md.results.TransientSolution(end).Pressure;
+        % md.smb.mass_balance         = md.results.TransientSolution(end).SmbMassBalance;
         md.mask.ocean_levelset      = md.results.TransientSolution(end).MaskOceanLevelset;
 
         % save updated model
         filename = fullfile(folder, data_fname);
         save(filename, 'md', '-v7.3');
-
-        % Initialize data cell array
-        % data = cell(length(md.results.TransientSolution)*3 + 2, 3); % 3 fields per time step
-
-        % % Populate data for Thickness for each k
-        % for k = 1:length(md.results.TransientSolution)
-        %     data{k, 1} = sprintf('Thickness_%d', k);
-        %     data{k, 2} = md.results.TransientSolution(k);
-        %     data{k, 3} = 'Thickness';
-        % end
-
-        % % Add geometry and friction data
-        % data{end-1, 1} = 'bed';
-        % data{end-1, 2} = md.geometry;
-        % data{end-1, 3} = 'bed';
-        % data{end, 1} = 'coefficient';
-        % data{end, 2} = md.friction;
-        % data{end, 3} = 'coefficient';
 
         N = length(md.results.TransientSolution);
         data = cell(N * 5, 5);   % 5 variables per step
@@ -190,8 +163,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             mkdir(folder);
         end
             
-        filename_ref = fullfile(folder, reference_data);
-        md_ref = loadmodel(filename_ref);
+        % filename_ref = fullfile(folder, reference_data);
+        % filename_ref = fullfile(folder, 'true_state.mat');
+        % md_ref = loadmodel(filename_ref);
         % filename = fullfile(folder, 'true_state.mat');
         filename = fullfile(icesee_path, 'data', wrong_reference_data);
         md = loadmodel(filename);
@@ -206,11 +180,11 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
        md.geometry.base      = md.results.TransientSolution(end).Base;
 
        % Update other fields
-       md.initialization.vx        = md_ref.results.TransientSolution(end).Vx;
-       md.initialization.vy        = md_ref.results.TransientSolution(end).Vy;
-       md.initialization.vel       = md_ref.results.TransientSolution(end).Vel;
+       md.initialization.vx        = md.results.TransientSolution(end).Vx;
+       md.initialization.vy        = md.results.TransientSolution(end).Vy;
+       md.initialization.vel       = md.results.TransientSolution(end).Vel;
        md.initialization.pressure  = md.results.TransientSolution(end).Pressure;
-       md.smb.mass_balance         = md.results.TransientSolution(end).SmbMassBalance;
+    %    md.smb.mass_balance         = md.results.TransientSolution(end).SmbMassBalance;
        md.mask.ocean_levelset      = md.results.TransientSolution(end).MaskOceanLevelset;
        md.geometry.bed              = md.results.TransientSolution(end).Bed;
        md.friction.coefficient      = md.results.TransientSolution(end).FrictionCoefficient;
@@ -234,7 +208,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % md.geometry.bed = bed_ref + bed_err;
         % md.geometry.base = base_ref + bed_err;
         md.geometry.bed = bed_ref + bed;
-        md.geometry.base = base_ref + bed_err;
+        md.geometry.base = base_ref + bed;
 
         md.geometry.thickness=md.geometry.surface-md.geometry.base;
         pos = find(md.geometry.thickness < 1);
@@ -252,27 +226,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.geometry.base(pos) = md.geometry.bed(pos);
         md.geometry.surface = md.geometry.base + md.geometry.thickness;
 
-    %    md = setflowequation(md,'SSA','all');
-
-    %    md.transient.isthermal=0;
-    %    md.transient.isstressbalance=1;
-    %    md.transient.ismasstransport=1;
-    %    md.transient.isgroundingline=1;
-    %    md.groundingline.migration = 'SubelementMigration';
-    %    md.groundingline.friction_interpolation='SubelementFriction1';
-    %    md.groundingline.melt_interpolation='NoMeltOnPartiallyFloating';
-    %    md.masstransport.spcthickness = NaN*ones(md.mesh.numberofvertices,1);
-
-
-    %    md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
-    %    md.transient.ismovingfront=0;
-    %    % 
-    %    md.basalforcings=linearbasalforcings();
-    %    md.basalforcings.deepwater_melting_rate=deepwater_melting_rate;
-    %    md.basalforcings.groundedice_melting_rate=zeros(md.mesh.numberofvertices,1);
-
-       % friction coefficient
-    %    md.friction.coefficient = 2500*ones(md.mesh.numberofvertices,1);
+        md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
 
        % --time stepping
        md.timestepping = timestepping();
@@ -312,8 +266,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.initialization.vx        = md.results.TransientSolution(end).Vx;
         md.initialization.vy        = md.results.TransientSolution(end).Vy;
         md.initialization.vel       = md.results.TransientSolution(end).Vel;
-        md.initialization.pressure  = md.results.TransientSolution(end).Pressure;
-        md.smb.mass_balance         = md.results.TransientSolution(end).SmbMassBalance;
+        % md.initialization.pressure  = md.results.TransientSolution(end).Pressure;
+        % md.smb.mass_balance         = md.results.TransientSolution(end).SmbMassBalance;
         md.mask.ocean_levelset      = md.results.TransientSolution(end).MaskOceanLevelset;
 
         % save updated model
@@ -372,33 +326,30 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                 mkdir(folder);
             end
 
-            filename_ref = fullfile(folder, reference_data);
-            md_ref = loadmodel(filename_ref);
+            % filename_ref = fullfile(folder, reference_data);
+            % filename_ref = fullfile(folder, 'true_state.mat');
+            % md_ref = loadmodel(filename_ref);
             %*-----------------------
             % filename = fullfile(folder, 'true_state.mat');
             % filename = fullfile(folder, reference_data);
             filename = fullfile(icesee_path, 'data', wrong_reference_data);
-            % fjfjjf
-            %*-----------------------
-
             md = loadmodel(filename);
-            % md = transientrestart(md);
+          
 
             md.geometry.thickness = md.results.TransientSolution(end).Thickness;
             md.geometry.surface   = md.results.TransientSolution(end).Surface;
             md.geometry.base      = md.results.TransientSolution(end).Base;
 
             % Update other fields
-            md.initialization.vx        = md_ref.results.TransientSolution(end).Vx;
-            md.initialization.vy        = md_ref.results.TransientSolution(end).Vy;
-            md.initialization.vel       = md_ref.results.TransientSolution(end).Vel;
-            md.initialization.pressure  = md.results.TransientSolution(end).Pressure;
-            md.smb.mass_balance         = md.results.TransientSolution(end).SmbMassBalance;
+            md.initialization.vx        = md.results.TransientSolution(end).Vx;
+            md.initialization.vy        = md.results.TransientSolution(end).Vy;
+            md.initialization.vel       = md.results.TransientSolution(end).Vel;
+            % md.initialization.pressure  = md.results.TransientSolution(end).Pressure;
+            % md.smb.mass_balance         = md.results.TransientSolution(end).SmbMassBalance;
             md.mask.ocean_levelset      = md.results.TransientSolution(end).MaskOceanLevelset;
             md.geometry.bed             = md.results.TransientSolution(end).Bed;
             md.friction.coefficient     = md.results.TransientSolution(end).FrictionCoefficient;
 
-            % *------------------
             friction_ref = mean_friction*ones(md.mesh.numberofvertices,1);
             thickness_ref = md.geometry.thickness;
             bed_ref = md.geometry.bed;
@@ -411,15 +362,14 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             %  update the friction and bed
             md.friction.coefficient = friction_ref + coefficient;
+            % md.friction.coefficient = coefficient;
             bed_err = bed - bed_ref;
             % md.geometry.bed = bed_ref + bed_err;
             % md.geometry.base = base_ref + bed_err;
             md.geometry.bed = bed_ref + bed;
-            md.geometry.base = base_ref + bed_err;
-            %*------------------
-
-            % md.friction.coefficient = md.results.TransientSolution(first_soln).FrictionCoefficient;
-            % md.geometry.bed = md.results.TransientSolution(first_soln).Bed;
+            md.geometry.base = base_ref + bed;
+    
+            md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
 
             md.geometry.thickness=md.geometry.surface-md.geometry.base;
             pos = find(md.geometry.thickness < 1);
@@ -521,9 +471,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             end
             % filename = fullfile(folder_true, 'true_state.mat');
             % filename = fullfile(folder, reference_data);
-            filename = fullfile(icesee_path, 'data', wrong_reference_data);
+            % filename = fullfile(icesee_path, 'data', wrong_reference_data);
 
-            % filename = fullfile(folder, 'initialize_ensemble.mat');
+            filename = fullfile(folder, 'initialize_ensemble.mat');
             md = loadmodel(filename);
             
             md.inversion.iscontrol            = 0;
@@ -542,8 +492,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             md.verbose.solution              = 1;
 
+            mask_all = zeros(md.mesh.numberofvertices,1);
+            md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
+
             % update from initial ensemble file
-            % md_init = loadmodel(filename_ens_init);
             filename = fullfile(icesee_path, data_path, sprintf('ens_init%d.h5', ens_id));
             bed = h5read(filename, '/bed');
             coefficient = h5read(filename, '/fcoeff');
@@ -640,8 +592,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % Subsequent time steps: 
             filename = fullfile(folder, data_fname);
             md = loadmodel(filename);
-            % md = transientrestart(md);
-            % md = setflowequation(md,'SSA','all');
+            
             % update geometry
             md.geometry.thickness = md.results.TransientSolution(end).Thickness;
             md.geometry.surface   = md.results.TransientSolution(end).Surface;
@@ -651,37 +602,23 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.initialization.vx        = md.results.TransientSolution(end).Vx;
             md.initialization.vy        = md.results.TransientSolution(end).Vy;
             md.initialization.vel       = md.results.TransientSolution(end).Vel;
-            md.initialization.pressure  = md.results.TransientSolution(end).Pressure;
-            md.smb.mass_balance         = md.results.TransientSolution(end).SmbMassBalance;
+            % md.initialization.pressure  = md.results.TransientSolution(end).Pressure;
+            % md.smb.mass_balance         = md.results.TransientSolution(end).SmbMassBalance;
             md.mask.ocean_levelset      = md.results.TransientSolution(end).MaskOceanLevelset;
 
             md.geometry.bed = md.results.TransientSolution(end).Bed;
             md.friction.coefficient = md.results.TransientSolution(end).FrictionCoefficient;
 
-            % if k == 1
-            %     % Load ensemble input from HDF5
-            %     filename_thickness = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
-            %     filename = fullfile(icesee_path, data_path, sprintf('friction_bed_%d.h5', ens_id));
-            %     md.geometry.thickness = h5read(filename_thickness, '/Thickness');
-            %     md.geometry.bed = h5read(filename, '/bed');
-            %     md.friction.coefficient = h5read(filename, '/coefficient');
-            % else 
-                 % Load ensemble input from HDF5
-                filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
-                md.geometry.thickness = h5read(filename, '/Thickness');
-                md.initialization.vx = h5read(filename, '/Vx');
-                md.initialization.vy = h5read(filename, '/Vy');
-                md.initialization.vel = sqrt(md.initialization.vx.^2 + md.initialization.vy.^2);
-            
-                % parameters for bed and friction
-                md.geometry.bed = h5read(filename, '/bed');
-                md.friction.coefficient = h5read(filename, '/coefficient');
-            % end
-            % md.geometry.thickness = h5read(filename, '/Thickness');
-            % % md.geometry.surface   = h5read(filename, '/Surface');
-            
-            % md.geometry.bed = h5read(filename, '/bed');
-            % md.friction.coefficient = h5read(filename, '/coefficient');
+            % Load ensemble input from HDF5
+            filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
+            md.geometry.thickness = h5read(filename, '/Thickness');
+            md.initialization.vx = h5read(filename, '/Vx');
+            md.initialization.vy = h5read(filename, '/Vy');
+            md.initialization.vel = sqrt(md.initialization.vx.^2 + md.initialization.vy.^2);
+        
+            % parameters for bed and friction
+            md.geometry.bed = h5read(filename, '/bed');
+            md.friction.coefficient = h5read(filename, '/coefficient');
 
             % Set minimum thickness to 1
             pos = find(md.geometry.thickness < 1);
@@ -689,6 +626,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Update surface
             md.geometry.surface = md.geometry.base + md.geometry.thickness;
+
+            md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
 
             % disp('      -- ice shelf base based on hydrostatic equilibrium');
 
@@ -757,8 +696,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.initialization.vx        = md.results.TransientSolution(end).Vx;
             md.initialization.vy        = md.results.TransientSolution(end).Vy;
             md.initialization.vel       = md.results.TransientSolution(end).Vel;
-            md.initialization.pressure  = md.results.TransientSolution(end).Pressure;
-            md.smb.mass_balance         = md.results.TransientSolution(end).SmbMassBalance;
+            % md.initialization.pressure  = md.results.TransientSolution(end).Pressure;
+            % md.smb.mass_balance         = md.results.TransientSolution(end).SmbMassBalance;
             md.mask.ocean_levelset      = md.results.TransientSolution(end).MaskOceanLevelset;
 
             md.geometry.bed = md.results.TransientSolution(end).Bed;
