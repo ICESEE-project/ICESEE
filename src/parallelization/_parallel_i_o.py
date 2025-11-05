@@ -512,7 +512,7 @@ def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, model_kwargs
                 # Create dataset with total dimensions
                 dset = f.create_dataset('ensemble', (nd, Nens, model_kwargs.get('nt', params['nt']) + 1), dtype=dtype)
                 # Write full ensemble
-                dset[:, :, 0] = full_ensemble
+                dset[:, :, 0] = full_ensemble[:,:Nens]
 
                 # Create and write ensemble mean
                 ens_mean = f.create_dataset('ensemble_mean', (nd, model_kwargs.get('nt', params['nt']) + 1), dtype=dtype)
@@ -525,7 +525,7 @@ def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, model_kwargs
             with h5py.File(output_file, 'a') as f:
                 dset = f['ensemble']
                 # Write full ensemble for current timestep
-                dset[:, :, timestep] = full_ensemble
+                dset[:, :, timestep] = full_ensemble[:,:Nens]
 
                 ens_mean = f['ensemble_mean']
                 ens_mean[:, timestep] = ensemble_mean

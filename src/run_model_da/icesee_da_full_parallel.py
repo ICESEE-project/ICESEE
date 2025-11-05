@@ -137,7 +137,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
 
     # --- intialize EnKF I/O handler class ---
     time_file_io_initialization = MPI.Wtime()
-    batch_size = model_kwargs.get("batch_size",100)
+    batch_size = model_kwargs.get("batch_size", nt if nt <= 100 else max(1, (nt + 9) // 10))
     serial_file_creation = model_kwargs.get("serial_file_creation",True)
     h5_file_compression = model_kwargs.get("h5_file_compression",None)
     h5_file_compression_level = model_kwargs.get("h5_file_compression_level",4)
@@ -546,7 +546,8 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                         
                         tobserve = model_kwargs.get("tobserve")
                         m_obs = model_kwargs.get("m_obs", params["number_obs_instants"])
-                        if (km < m_obs) and (k+1 == tobserve[km]):
+                        # if (km < m_obs) and (k+1 == tobserve[km]):
+                        if (km < m_obs) and (k == tobserve[km]):
                             # -- time global analysis step ---
                             _time_analysis_step = MPI.Wtime()
                             model_kwargs.update({'km': km, 'k': k})
@@ -592,6 +593,10 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         comm_world.Barrier()
         time_file_io_closing = MPI.Wtime()
         enkf_parallel_io.close()
+        # --- Build the Virtual Dataset view for the entire run ---
+        # if rank_world == 0:
+        #     print("[ICESEE] Building unified Virtual Dataset...")
+        # enkf_parallel_io.create_virtual_dataset()
         time_file_io_initialization += MPI.Wtime() - time_file_io_closing
 
         # comm_world.Barrier()  
@@ -623,8 +628,14 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                 # --- create the ensemble dataset ---
                 if model_kwargs.get("create_ensemble_dataset", True):
                     print("[ICESEE] Creating ensemble dataset...")
-                    out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
-                    print("VDS ready:", out_vds)
+                    # Option A: no-copy, instant
+                    # out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
+                    # print("VDS ready:", out_vds)
+
+                    # Option B: portable single file
+                    out_h5 = finalize_stack(_modelrun_datasets, mode="h5", dset_name="states",
+                                            allow_missing=False, compression="gzip", compression_opts=4)
+                    print("Materialized file:", out_h5)
                 # --- remove all .zarr files ---
                 cleanup_intermediates = model_kwargs.get("cleanup_intermediates", True)
                 if cleanup_intermediates:

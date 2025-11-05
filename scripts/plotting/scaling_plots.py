@@ -4,12 +4,28 @@ import pandas as pd
 from typing import List, Dict
 
 def parse_time(time_str: str) -> float:
-    """Parse DAY:HR:MIN:SEC.ms to seconds."""
+    """Parse time strings in DAY:HR:MIN:SEC.ms, MIN:SEC.ms, or SEC.ms to seconds."""
     if '.' not in time_str:
         return 0.0
     parts = time_str.split('.')
     ms = int(parts[1][:3]) / 1000  # Take up to 3 digits for ms
-    d, h, m, s = map(int, parts[0].split(':'))
+    time_parts = parts[0].split(':')
+    
+    # Initialize components
+    d, h, m, s = 0, 0, 0, 0
+    
+    # Assign values based on number of components
+    if len(time_parts) == 4:
+        d, h, m, s = map(int, time_parts)
+    elif len(time_parts) == 3:
+        h, m, s = map(int, time_parts)
+    elif len(time_parts) == 2:
+        m, s = map(int, time_parts)
+    elif len(time_parts) == 1:
+        s = int(time_parts[0])
+    else:
+        return 0.0
+    
     total_sec = d * 86400 + h * 3600 + m * 60 + s + ms
     return total_sec
 
@@ -145,6 +161,6 @@ def plot_metrics(df: pd.DataFrame, scaling_type: str):
     plt.show()
 
 # Example usage:
-# scaling_type = 'strong_scaling'  # or 'weak_scaling'
+# scaling_type = 'weak_scaling'  # or 'strong_scaling'
 # df = extract_metrics_from_log('icesee_timing.log')
 # plot_metrics(df, scaling_type)

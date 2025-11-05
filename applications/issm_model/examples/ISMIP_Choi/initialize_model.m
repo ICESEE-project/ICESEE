@@ -166,8 +166,6 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
         filename = fullfile(folder,reference_data);
         md = loadmodel(filename);
 
-        fields = {'thickness', 'bed', 'coefficient'};
-
         % result_0 = md.initialization(end);
         result_0 = md.results.TransientSolution(end);
         result_1 = md.geometry;
@@ -188,8 +186,9 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
 		end
 
         %  save the fields to the file
-        data = {'Thickness', result_0, 'Thickness';
-                % 'Surface', result_0, 'Surface';
+        data = {'Surface', result_0, 'Surface';
+                'Vx', result_0, 'Vx';
+                'Vy', result_0, 'Vy';
                 'bed', result_1, 'bed';
                 'coefficient', result_2, 'coefficient'};
         writeToHDF5(filename, data);

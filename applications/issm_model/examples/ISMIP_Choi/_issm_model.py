@@ -44,7 +44,7 @@ def initialize_model(**kwargs):
     reference_data_dir = f'{icesee_path}/{_reference_data_dir}'  # set the reference data directory from ICESEE side
 
     # --- prepare the reference data if use_reference_data is True ---
-    setup_reference_data(reference_data_dir, reference_data, use_reference_data)
+    setup_reference_data(reference_data_dir, reference_data, use_reference_data, kwargs)
     
     #  call the issm initalize_model.m matlab function to initialize the model
     issm_cmd = f"run(\'issm_env\'); initialize_model({icesee_rank}, {icesee_size}, {ens_id})"
@@ -57,7 +57,7 @@ def initialize_model(**kwargs):
 
     # -- we would have broadcasted data to the remaining  ranks but now if nprocs > Nens, we need to duplicate data by copying data from ens_id_0000 to ens_id_0001, ens_id_0002, ... ens_id_000Nens
     Nens = kwargs.get('Nens')
-    setup_ensemble_data(Nens)
+    setup_ensemble_data(Nens, kwargs=kwargs)
 
     # fetch model size from output file
     output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
@@ -178,7 +178,9 @@ def run_model(ensemble, **kwargs):
     with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
         # for key in vec_inputs:
         #     f.create_dataset(key, data=ensemble[indx_map[key]])
-        f.create_dataset('Thickness', data=ensemble[indx_map['Thickness']])
+        f.create_dataset('Surface', data=ensemble[indx_map['Surface']])
+        f.create_dataset('Vx', data=ensemble[indx_map['Vx']])
+        f.create_dataset('Vy', data=ensemble[indx_map['Vy']])
         f.create_dataset('bed', data=bed)
         f.create_dataset('coefficient', data=coefficient)
 
@@ -198,7 +200,9 @@ def run_model(ensemble, **kwargs):
     
     updated_state = {}
     with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
-        updated_state['Thickness'] = f['Thickness'][0]
+        updated_state['Surface'] = f['Surface'][0]
+        updated_state['Vx'] = f['Vx'][0]
+        updated_state['Vy'] = f['Vy'][0]
         
         # --Joint Estimations--
         if kwargs["joint_estimation"]:

@@ -72,6 +72,7 @@ def build_vds(input_dir: str,
 
     os.makedirs(os.path.dirname(out_file) or ".", exist_ok=True)
     with h5py.File(out_file, "w", libver="latest") as fout:
+        # dset_name='ensemble'
         fout.create_virtual_dataset(dset_name, layout, fillvalue=fillvalue)
         fout.attrs.update({
             "nd": nd, "nens": nens, "nt": nt,
@@ -79,6 +80,15 @@ def build_vds(input_dir: str,
             "source_dir": os.path.abspath(input_dir),
             "dataset_name": dset_name
         })
+        # Compute ensemble mean (iterate time slices lazily)
+        mean_dset = fout.create_dataset(
+            "ensemble_mean", shape=(nd, nt), dtype=np.float64,
+            chunks=(nd, 1), fillvalue=np.nan
+        )
+        for t in range(nt):
+            arr = fout[dset_name][:, :, t]
+            mean_dset[:, t] = np.nanmean(arr, axis=1)
+
     return out_file
 
 # ---------- Option B: materialized 3-D HDF5 ----------
@@ -107,9 +117,22 @@ def consolidate_h5(input_dir: str,
 
     os.makedirs(os.path.dirname(out_file) or ".", exist_ok=True)
     with h5py.File(out_file, "w") as fout:
+        # dset = fout.create_dataset(
+        #     dset_name, shape=(nd, nens, nt), dtype=dtype,
+        #     chunks=chunks, compression=compression,
+        #     compression_opts=compression_opts,
+        #     shuffle=True, fletcher32=True
+        # )
+        # dset_name='ensemble'
         dset = fout.create_dataset(
-            dset_name, shape=(nd, nens, nt), dtype=dtype,
+            'ensemble', shape=(nd, nens, nt), dtype=dtype,
             chunks=chunks, compression=compression,
+            compression_opts=compression_opts,
+            shuffle=True, fletcher32=True
+        )
+        mean_dset = fout.create_dataset(
+            "ensemble_mean", shape=(nd, nt), dtype=np.float64,
+            chunks=(nd, 1), compression=compression,
             compression_opts=compression_opts,
             shuffle=True, fletcher32=True
         )
@@ -135,10 +158,11 @@ def consolidate_h5(input_dir: str,
                 raise ValueError(f"Shape mismatch at {fpath}: {arr.shape} != {(nd, nens)}")
 
             dset[:, :, t] = arr
+            mean_dset[:, t] = np.nanmean(arr, axis=1)  # (nd,) → store column
 
     return out_file
 
-# ---------- Convenience entry point for ICESEE data copying pipeline ----------
+# ---------- Convenience entry point for your pipeline ----------
 def finalize_stack(output_dir: str,
                    mode: str = "vds",
                    dset_name: str | None = "states",
@@ -153,6 +177,7 @@ def finalize_stack(output_dir: str,
         return consolidate_h5(output_dir, dset_name=dset_name, **kwargs)
     else:
         raise ValueError("mode must be 'vds' or 'h5'")
+
 
 # Function to safely change directory
 def safe_chdir(main_directory,target_directory):
@@ -622,6 +647,22 @@ def get_grid_dimensions(nx, ny, ndim):
                 product = mx * my
     
     return mx, my
+
+def midpoint_rect(mx, my):
+    return mx/2.0, my/2.0
+
+def midprofiles_coords(mx, my, n=100):
+    x_mid = np.full(n, mx/2.0)
+    yv = np.linspace(0.0, my, n)         # vertical profile (x fixed)
+    y_mid = np.full(n, my/2.0)
+    xv = np.linspace(0.0, mx, n)         # horizontal profile (y fixed)
+    return (x_mid, yv), (xv, y_mid)
+
+def midindices(Nx, Ny):
+    # choose the "left/bottom" center for even sizes; adjust if you prefer the right/top
+    ix = (Nx-1)//2
+    iy = (Ny-1)//2
+    return ix, iy
 
 def _extract_time_from_name(fname: str) -> int:
     m = re.search(FNAME_PATTERN, os.path.basename(fname))

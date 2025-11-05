@@ -1,33 +1,17 @@
-% -----------------------------------------------------------
+%% -----------------------------------------------------------
 % @author: 	Brian Kyanjo
 % @date: 		2025-04-30
 % @brief: 	Reads and plot results from both ISSM and ICESEE
 % ------------------------------------------------------------
 
-%% Make the $ISSM_DIR environment variable available
-issm_dir = getenv('ISSM_DIR');  % Retrieve the ISSM_DIR environment variable
-% addpath(genpath(issm_dir));     % Add the ISSM directory and its subdirectories to the MATLAB path
+close all; clear all
 
-% path to the results
-results_dir = fullfile(issm_dir, 'examples', 'ISMIP_Choi', 'Models','ens_id_0');  % Path to the results directory
-forecast_dir = fullfile(issm_dir, 'examples', 'ISMIP_Choi', 'Models','ens_id_0')
+% data_file_paths='data_0/_modelrun_datasets';
+% data_file_paths='data_1';
+data_file_paths='_modelrun_datasets';
+% data_file_paths='test_data';
+% data_file_paths='test_data_1';
 
-%% plot surface velocities
-% Load the ISSM results
-md_true = loadmodel(fullfile(results_dir, 'true_state.mat'));  % Load the ISSM results from a .mat file
-md_nurged = loadmodel(fullfile(results_dir, 'enkf_state.mat'));  % Load the ISSM results from a .mat file 
-plotmodel(md_true, 'data', md_true.results.TransientSolution.Vel, 'layer', 5, 'figure', 5);
-plotmodel(md_nurged, 'data', md_nurged.results.TransientSolution.Vel, 'layer', 5, 'figure', 6);
-
-%% ICESEE results
-% Get the Python version
-% pyversion = py.sys.version;
-% 
-% % Add the configuration directory to the Python path
-% py.sys.path().append('../../config');
-% 
-% % Import the Python module _utility_imports
-% utility_imports = py.importlib.import_module('_utility_imports');
 
 % Load the essential data
 results_dir = 'results';
@@ -39,88 +23,581 @@ tm_m        = h5read(file_path,'/obs_max_time');
 run_mode    = h5read(file_path,'/run_mode');
 
 % load the true and nurged states
-file_path            = '_modelrun_datasets/true_nurged_states.h5';
+file_path            = fullfile(data_file_paths, 'true_nurged_states.h5');
 model_true_state     = h5read(file_path,'/true_state')';
 model_nurged_state   = h5read(file_path, '/nurged_state')';
 
 % load observation data
-file_path  = '_modelrun_datasets/synthetic_obs.h5';
+file_path  = fullfile(data_file_paths, 'synthetic_obs.h5');
 w          = h5read(file_path, '/hu_obs')'; 
 
 % load the ensemble data
-file_path         = '_modelrun_datasets/icesee_ensemble_data.h5';
+file_path         = fullfile(data_file_paths, 'icesee_ensemble_data.h5');
 ensemble_vec_full = h5read(file_path, '/ensemble'); 
 ensemble_vec_mean = h5read(file_path, '/ensemble_mean')';
+
+% Or read from .mat files (from the ISSM side)
+% file_path_true= fullfile("issm_data","true_state.mat");
+% file_path_nurged= fullfile("issm_data","nurged_state.mat");
+% md_true_= loadmodel(file_path_true);
+% md_nurged_= loadmodel(file_path_nurged);
 
 % Process and plot
 [ndim, nt] = size(model_true_state);
 num_steps = nt - 1;
-hdim = floor(ndim / 4);
+var_inputs = ['thickness', 'Vx', 'Vy', 'friction_coefficient', 'bed_topography'];
+hdim = floor(ndim / 5);  % dimension of one variable
 
-% velocity componets
-utrue  = model_true_state(1:hdim, :);
-unurge = model_nurged_state(1:hdim, :);
-vtrue  = model_true_state(hdim+1:2*hdim, :);
-vnurge = model_nurged_state(hdim+1:2*hdim, :);
-wtrue  = model_true_state(2*hdim+1:3*hdim, :);
-wnurge = model_nurged_state(2*hdim+1:3*hdim, :);
-% magnitude of the velocity
-vtrue_magnitude  = sqrt(utrue.^2 + vtrue.^2 + wtrue.^2);
-vnurge_magnitude = sqrt(unurge.^2 + vnurge.^2 + wnurge.^2);
+file_path   = fullfile("data", "ISMIP_initial_data.mat");
+md = loadmodel(file_path);
+md_true = md; md_nurged = md;
+md_mean = md; md_ens = md;
+% dt = t(2) - t(1);
+dt = 0.15;
 
-% pressure
-ptrue  = model_true_state(3*hdim+1:4*hdim, :);
-pnurge = model_nurged_state(3*hdim+1:4*hdim, :);
+% k = nt-1;
+k=1;
 
-% plot flag
-plot_flag = 'pressure';
-if strcmp(plot_flag, 'velocity')
-    htrue = vtrue_magnitude;
-    hnurge = vnurge_magnitude;
-elseif strcmp(plot_flag, 'pressure')
-    htrue = ptrue;
-    hnurge = pnurge;
+%%  Thickness plots --------------------
+dt  = 0.15;
+k1  = 1;     
+k2  = 10;   
+k3  = 14;  
+% k1=10;
+% k2=20;
+% k3=80;
+% thickness difference plots
+plot_var_diff(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'geometry.thickness', 'Thicknes', 'm');
+
+ % thickness plot evolution
+plot_var_evolution(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'geometry.thickness', 'Thickness', 'm');
+
+    % velocity evolution plots
+plot_var_evolution(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'initialization.vel', 'Velocity', 'm/s');
+
+    % bed topography evolution plots        
+plot_var_evolution(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'geometry.bed', 'Bed Elevation', 'm');
+
+    % friction coefficient evolution plots  
+plot_var_evolution(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'friction.coefficient', 'Friction Coefficient', '');
+
+
+plot_var_diff(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'initialization.vel', 'Velocity', 'm');
+plot_var_diff(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'geometry.bed', 'Bed', 'm');
+plot_var_diff(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'friction.coefficient', 'Friction', 'm');
+
+
+make_plots = false;
+if make_plots
+    % thickness
+    plot_triptych(md_true, md_nurged, md_ens, ...
+                'geometry.thickness', sprintf('Ice Thickness after %d years', round((k-1)*dt)), parula, 'm');  
+    % velocity              
+    plot_triptych(md_true, md_nurged, md_ens, ...
+                'initialization.vel', sprintf('Ice Velocity after %d years', round((k-1)*dt)), parula, 'm/s');   
+    % bed topography
+    plot_triptych(md_true, md_nurged, md_ens, ...
+                'geometry.bed', sprintf('Bed Elevation after %d years', round((k-1)*dt)), parula, 'm');
+    %
+    % % Frcition coefficient
+    plot_triptych(md_true, md_nurged, md_ens, ...
+                'friction.coefficient', sprintf('Friction Coefficient after %d years', round((k-1)*dt)), parula, '');
+    %
+    % % grounding line
+    % plot_triptych(md_true, md_nurged, md_ens, ...
+    %               'results.TransientSolution(499).MaskOceanLevelset', ...
+    %               'Grounding Line', gray, '');
+    plot_triptych(md_true, md_nurged, md_ens, ...
+                'mask.ocean_levelset', ...
+                sprintf('Grounding Line after %d years', round((k-1)*dt)), parula, '');
+end
+% create a movie for the groundingline for every 10 yrs
+% Setup video writer (optional)
+make_movie = false;
+if make_movie
+    if make_movie
+        v = VideoWriter('groundingline_triptych.mp4','MPEG-4');
+        v.FrameRate = 10;  % frames per second
+        open(v);
+    end
+
+    % Precompute density ratio
+    di = md.materials.rho_ice / md.materials.rho_water;
+
+    for k = 1:20:500
+        
+        % Update ensemble model from state vector
+        md_ens.geometry.bed        = ensemble_vec_mean(hdim+1:2*hdim, k);
+        md_ens.geometry.thickness  = ensemble_vec_mean(1:hdim, k);
+        md_ens.friction.coefficient= ensemble_vec_mean(2*hdim+1:3*hdim, k);
+
+        % Compute flotation mask for ensemble
+        md_ens.mask.ocean_levelset = md_ens.geometry.thickness + md_ens.geometry.bed/di;
+
+        % Fetch true & nudged grounding lines
+        md_true.mask.ocean_levelset   = md_true_.results.TransientSolution(k).MaskOceanLevelset;
+        md_nurged.mask.ocean_levelset = md_nurged_.results.TransientSolution(k).MaskOceanLevelset;
+
+        % Plot triptych
+        plot_triptych(md_true, md_nurged, md_ens, ...
+                    'mask.ocean_levelset', ...
+                    sprintf('Grounding Line after %d years', round((k-1)*0.5)), ...
+                    parula, '');
+
+        drawnow;
+
+        % Capture frame if making movie
+        if make_movie
+            frame = getframe(gcf);
+            writeVideo(v, frame);
+        else
+            pause(dt); % interactive view
+        end
+    end
+
+    if make_movie
+        close(v);
+    end
 end
 
-profile_flag = 'middle';
-if strcmp(profile_flag, 'beginning')
-    h_indx = 1;
-elseif strcmp(profile_flag, 'middle')
-    h_indx = floor(size(htrue, 2) / 2);
-elseif strcmp(profile_flag, 'end')
-    h_indx = size(htrue, 2);
-elseif strcmp(profile_flag, 'random')
-    h_indx = randi(size(htrue, 2));
-else
-    error('Invalid profile_flag. Use: beginning, middle, end, random');
+
+%% -- helper functions -- %%
+function plot_var_diff(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, field,field_title, units)
+    % =========================================================================
+    % plot_var_diff
+    %
+    % Purpose:
+    %   Compare the evolution of a field (e.g., geometry.thickness) between
+    %   the true simulation, the no-assimilation run, and assimilated runs.
+    %
+    % Panels:
+    %   (a) True field
+    %   (b) No assimilation − True (Δ without assimilation)
+    %   (c) Assimilated − True after k1
+    %   (d) Assimilated − True after k2
+    %   (e) Assimilated − True after k3
+    %
+    % Author:  Brian Kyanjo
+    % Date:    2025-11-04
+    % =========================================================================
+
+    if nargin < 12, units = ''; end
+    units_str = iff(~isempty(units), [' (' units ')'], '');
+
+    % --- Create figure ---
+    figure('Position',[100 100 1000 850]); clf;
+
+    % -------------------------------------------------------------------------
+    % (a) True field
+    % -------------------------------------------------------------------------
+    [md_true, md_nurged, md_ens] = setup_model_states(1, dt, ...
+        model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md);
+
+    data_true   = get_nested_field(md_true, field);
+    data_nurged = get_nested_field(md_nurged, field);
+    data_ens    = get_nested_field(md_ens, field);
+
+    % cmin = min([data_true(:); data_nurged(:); data_ens(:)]);
+    % cmax = max([data_true(:); data_nurged(:); data_ens(:)]);
+    cmin = min([data_true(:);  data_ens(:)]);
+    cmax = max([data_true(:);  data_ens(:)]);
+
+    plotmodel(md_true, 'data', data_true, ...
+        'title', sprintf('(a) %s',field_title), ...
+        'subplot', [5,1,1], 'caxis', [cmin cmax], 'colorbar', 'off');
+
+    % -------------------------------------------------------------------------
+    % (b) No assimilation − True
+    % -------------------------------------------------------------------------
+    % diff_noassim = data_nurged - data_true;
+    diff_noassim = data_ens - data_true;
+    maxAbs_noassim = max(abs(diff_noassim(:)));
+
+    plotmodel(md_nurged, 'data', diff_noassim, ...
+        'title', '(b) No assimilation − True', ...
+        'subplot', [5,1,2], 'caxis', [-maxAbs_noassim maxAbs_noassim], 'colorbar', 'off');
+
+    % -------------------------------------------------------------------------
+    % Helper nested function for assimilation differences
+    % -------------------------------------------------------------------------
+    function make_diff_panel(idx, k, label)
+        [md_true, md_nurged, md_ens] = setup_model_states(k, dt, ...
+            model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md);
+        diff_data = get_nested_field(md_ens, field) - get_nested_field(md_true, field);
+        maxAbs = max(abs(diff_data(:)));
+        plotmodel(md_ens, 'data', diff_data, ...
+            'title', sprintf('%s Assimilated − True (after %.1f years)', label, (k-1)*dt), ...
+            'subplot', [5,1,idx], 'caxis', [-maxAbs maxAbs], 'colorbar', 'off');
+    end
+
+    % -------------------------------------------------------------------------
+    % (c–e) Assimilation differences at chosen times
+    % -------------------------------------------------------------------------
+    make_diff_panel(3, k1, '(c)');
+    make_diff_panel(4, k2, '(d)');
+    make_diff_panel(5, k3, '(e)');
+
+    % -------------------------------------------------------------------------
+    % Layout and colorbars
+    % -------------------------------------------------------------------------
+    axs = flipud(findall(gcf,'Type','axes'));
+    gap = -0.26; top = 0.95; bottom = 0.08;
+    height = (top-bottom - 4.25*gap)/5;
+
+    for i = 1:5
+        pos = [0.10, bottom+(5-i)*(height+gap), 0.70, height];
+        set(axs(i), 'Position', pos, ...
+            'FontWeight', 'bold', 'LineWidth', 1.2, ...
+            'Box', 'on', 'TickDir', 'out', 'Layer', 'top','TickLength',[0.005 0.005],'FontSize', 11);
+        ylabel(axs(i),'y (km)','FontWeight','bold');
+        if i < 5
+            set(axs(i),'XTickLabel',[]);
+        else
+            xlabel(axs(i),'x (km)','FontWeight','bold');
+        end
+    end
+
+    % --- (a) colorbar: True field (panel 1) ---
+    cb1 = colorbar(axs(1), 'Position',[0.83 0.68 0.025 0.16]);
+    % ylabel(cb1,[field units_str],'FontSize',12,'FontWeight','bold');
+    ylabel(cb1,[field_title units_str],'FontSize',12,'FontWeight','bold');
+    colormap(axs(1), parula);
+
+    % --- (b–e) colorbar: Differences (no-assim & assimilations) ---
+    for i = 2:5, colormap(axs(i), redblue(256)); end
+    cb2 = colorbar(axs(5), 'Position',[0.83 0.25 0.025 0.40]);
+    ylabel(cb2,['Δ' field_title units_str],'FontSize',12,'FontWeight','bold');
+
+    set(gcf,'Color','w');
+
 end
 
-fprintf('At h_indx = %d profile\n', h_indx);
+function plot_var_evolution(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, field, field_title, units)
+    % =========================================================================
+    % plot_var_evolution
+    %
+    % Purpose:
+    %   Plot a variable (e.g., geometry.thickness, initialization.vel, etc.)
+    %   across assimilation cycles:
+    %       (a) True
+    %       (b) No assimilation
+    %       (c) Assimilated after k1
+    %       (d) Assimilated after k2
+    %       (e) Assimilated after k3
+    %
+    % Author:  Brian Kyanjo
+    % Date:    2025-11-05
+    % =========================================================================
 
-h_true = htrue(h_indx, :);
-h_nurged = hnurge(h_indx, :);
+    if nargin < 13, field_title = field; end
+    if nargin < 14, units = ''; end
+    units_str = iff(~isempty(units), [' (' units ')'], '');
 
-figure('Position', [100, 100, 800, 400]);
-plot(t, h_true, 'r', 'DisplayName', 'True'); hold on;
-plot(t, h_nurged, 'g', 'DisplayName', 'Wrong');
-obs = w(h_indx, :);
-fprintf('obs shape: [%d, %d]\n', size(obs));
-plot(t(ind_m), obs, 'kx', 'DisplayName', 'Observations');
-xlabel('Time (years)');
-% ylabel('Pressure (Pa)');
-legend('show');
-title(sprintf('%s profile %s at h_indx = %d', profile_flag, plot_flag, h_indx));
-hold off;
+    figure('Position',[100 100 1000 850]); clf;
 
-% Plot the ensemble mean
-fig = figure('Position', [100, 100, 1000, 600]);
+    % --- Panel (a): True simulation ------------------------------------------
+    [md_true, md_nurged, md_ens] = setup_model_states(1, dt, ...
+        model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md);
 
-% get the observation data
-obs = w(h_indx, :);
+    data_true   = get_nested_field(md_true, field);
+    data_nurged = get_nested_field(md_nurged, field);
+    data_ens    = get_nested_field(md_ens, field);
 
-hens = ensemble_vec_mean(1:hdim, :); % Equivalent to ensemble_vec_mean[:hdim,:]
-h_true = htrue(h_indx, :);
-h_nurged = hnurge(h_indx, :);
-h_ens_mean = hens(h_indx, :);
-h_ens_mem = ensemble_vec_full(h_indx, :, :); % 3D array
-h_ens_mem = permute(h_ens_mem, [3, 2, 1]);
+    % cmin = min([data_true(:); data_nurged(:); data_ens(:)]);
+    % cmax = max([data_true(:); data_nurged(:); data_ens(:)]);
+    cmin = min([data_true(:);  data_ens(:)]);
+    cmax = max([data_true(:);  data_ens(:)]);
+
+    plotmodel(md_true, 'data', data_true, ...
+        'title', sprintf('(a) True %s', field_title), ...
+        'subplot', [5,1,1], 'caxis', [cmin cmax], 'colorbar', 'off');
+    % hold on;
+    % contour(md_true.mesh.x, md_true.mesh.y, ...
+    %         reshape(md_true.mask.ocean_levelset, size(md_true.mesh.x)), ...
+    %         [0 0], 'g', 'LineWidth', 1.2);
+
+    % --- Panel (b): No assimilation ------------------------------------------
+    [md_true, md_nurged, md_ens] = setup_model_states(1, dt, ...
+        model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md);
+
+    data_nurged = get_nested_field(md_nurged, field);
+    plotmodel(md_nurged, 'data', data_nurged, ...
+        'title', sprintf('(b) No assimilation %s', field_title), ...
+        'subplot', [5,1,2], 'caxis', [cmin cmax], 'colorbar', 'off');
+    % hold on;
+    % contour(md_nurged.mesh.x, md_nurged.mesh.y, ...
+    %         reshape(md_nurged.mask.ocean_levelset, size(md_nurged.mesh.x)), ...
+    %         [0 0], 'g', 'LineWidth', 1.2);
+
+    % --- Helper: Assimilation cycles -----------------------------------------
+    function make_assim_panel(idx, k, label)
+        [md_true, md_nurged, md_ens] = setup_model_states(k, dt, ...
+            model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md);
+        data_ens = get_nested_field(md_ens, field);
+        plotmodel(md_ens, 'data', data_ens, ...
+            'title', sprintf('%s Assimilated %s (after %.1f years)', ...
+                label, field_title, (k-1)*dt), ...
+            'subplot', [5,1,idx], 'caxis', [cmin cmax], 'colorbar', 'off');
+        % hold on;
+        % contour(md_ens.mesh.x, md_ens.mesh.y, ...
+        %         reshape(md_ens.mask.ocean_levelset, size(md_ens.mesh.x)), ...
+                % [0 0], 'g', 'LineWidth', 1.2);
+    end
+
+    % --- Panels (c)–(e): Assimilation cycles ---------------------------------
+    make_assim_panel(3, k1, '(c)');
+    make_assim_panel(4, k2, '(d)');
+    make_assim_panel(5, k3, '(e)');
+
+    % --- Layout adjustments --------------------------------------------------
+    axs = flipud(findall(gcf,'Type','axes'));
+    gap = -0.26; top = 0.95; bottom = 0.08;
+    height = (top-bottom - 4.25*gap)/5;
+
+    for i = 1:5
+        pos = [0.10, bottom+(5-i)*(height+gap), 0.70, height];
+        set(axs(i), 'Position', pos, ...
+            'FontWeight', 'bold', 'LineWidth', 1.2, ...
+            'Box', 'on', 'TickDir', 'out', 'Layer', 'top', ...
+            'TickLength',[0.005 0.005], 'FontSize', 11);
+        ylabel(axs(i),'y (km)','FontWeight','bold');
+        if i < 5
+            set(axs(i),'XTickLabel',[]);
+        else
+            xlabel(axs(i),'x (km)','FontWeight','bold');
+        end
+    end
+
+    % --- (a) colorbar: for field magnitude -----------------------------------
+    cb1 = colorbar(axs(1), 'Position',[0.83 0.71 0.025 0.16]);
+    ylabel(cb1,[field_title units_str],'FontSize',12,'FontWeight','bold');
+    colormap(axs(1), parula);
+
+    % --- (b–e): same colormap scale -----------------------------------------
+    for i = 2:5, colormap(axs(i), parula); end
+    cb2 = colorbar(axs(5), 'Position',[0.83 0.24 0.025 0.45]);
+    ylabel(cb2,[field_title units_str],'FontSize',12,'FontWeight','bold');
+
+    set(gcf,'Color','w');
+
+end
+
+
+function plot_triptych(md_true, md_nurged, md_ens, field, field_title, cmap, units)
+% Compare true, nudged, assimilated, and difference with two separate colorbars
+
+    if nargin < 6 || isempty(cmap), cmap = parula; end
+    if nargin < 7, units = ''; end
+    units_str = iff(~isempty(units), [' (' units ')'], '');
+
+    % --- Data ---
+    data_true   = get_nested_field(md_true, field);
+    data_nurged = get_nested_field(md_nurged, field);
+    data_ens    = get_nested_field(md_ens, field);
+    diff_data   = data_ens - data_true;
+
+    % --- Limits ---
+    cmin   = min([data_true(:); data_nurged(:); data_ens(:)]);
+    cmax   = max([data_true(:); data_nurged(:); data_ens(:)]);
+    maxAbs = max(abs(diff_data(:)));
+
+    figure('Position',[100 100 1000 800]); clf;
+
+    % 1) True
+    plotmodel(md_true,'data',data_true,'title',['True ' field_title], ...
+        'subplot',[4,1,1],'caxis',[cmin cmax],'colorbar','off');
+
+    % 2) Wrong
+    plotmodel(md_nurged,'data',data_nurged,'title',['Wrong ' field_title], ...
+        'subplot',[4,1,2],'caxis',[cmin cmax],'colorbar','off');
+
+    % 3) Assimilated
+    plotmodel(md_ens,'data',data_ens,'title',['Assimilated ' field_title], ...
+        'subplot',[4,1,3],'caxis',[cmin cmax],'colorbar','off');
+
+    % 4) Difference
+    plotmodel(md_ens,'data',diff_data, ...
+        'title',['(Assmilated - True) ' field_title], ...
+        'subplot',[4,1,4],'caxis',[-maxAbs maxAbs],'colorbar','off');
+
+    % --- Axes layout ---
+    axs = flipud(findall(gcf,'Type','axes'));   % 1..4 top->bottom
+    gap = -0.255; top = 0.94; bottom = 0.08;    % tightened spacing
+    height = (top-bottom - 3*gap)/4;
+
+    for i = 1:4
+        pos = [0.10, bottom+(4-i)*(height+gap), 0.70, height];
+        set(axs(i),'Position',pos, ...
+            'FontWeight','bold','LineWidth',1.5,'Box','on', ...
+            'TickDir','out','TickLength',[0.005 0.005], ...
+            'Layer','top');
+        ylabel(axs(i),'Y (km)','FontSize',12,'FontWeight','bold');
+        if i < 4
+            set(axs(i),'XTickLabel',[]);  % only bottom plot shows X
+        else
+            xlabel(axs(i),'X (km)','FontSize',12,'FontWeight','bold');
+        end
+    end
+
+
+    % --- First colorbar (shortened for top 3) ---
+    for i = 1:3, colormap(axs(i), cmap); caxis(axs(i), [cmin cmax]); end
+    cb1 = colorbar(axs(2),'Position',[0.83 0.415 0.025 0.35]); % shorter
+    static_field = regexprep(field_title,'\s+after.*','');
+    ylabel(cb1,[static_field units_str],'FontSize',13,'FontWeight','bold');
+    cb1.FontSize = 11;
+    set(cb1,'Box','on','LineWidth',1.2);
+
+    % --- Second colorbar (shortened for difference) ---
+    ax_diff = axs(4);
+    colormap(ax_diff, redblue(256));
+    caxis(ax_diff,[-maxAbs maxAbs]);
+    pos_diff = get(ax_diff,'Position');
+    cb2 = colorbar(ax_diff,'Position',[0.83 pos_diff(2)+0.14 0.025 pos_diff(4)-0.28]);
+    % ylabel(cb2, ['$\mathbf{\Delta}$' static_field units_str], ...
+    %    'Interpreter','latex', ...
+    %    'FontSize',13);
+    ylabel(cb2, ['Difference' units_str], ...
+       'FontSize',13);
+    cb2.FontSize = 11;
+    set(cb2,'Box','on','LineWidth',1.2);
+end
+
+% ---- helpers ----
+function out = get_nested_field(s, field)
+    parts = strsplit(field,'.'); out = s;
+    for i = 1:numel(parts)
+        tok = parts{i};
+        t = regexp(tok,'(.+)\((\d+)\)$','tokens');
+        if ~isempty(t), out = out.(t{1}{1})(str2double(t{1}{2}));
+        else, out = out.(tok);
+        end
+    end
+end
+
+function y = iff(c,a,b), if c, y=a; else, y=b; end, end
+
+function cmap = redblue(n)
+    if nargin<1, n=256; end
+    m = n/2;
+    r=[linspace(0,1,m) ones(1,m)];
+    g=[linspace(0,1,m) linspace(1,0,m)];
+    b=[ones(1,m) linspace(1,0,m)];
+    cmap=[r(:) g(:) b(:)];
+end
+
+function [md_true, md_nurged, md_ens] = setup_model_states(k, dt, model_true_state, model_nurged_state, ensemble_vec_mean, md_true, md_nurged, md_ens, md)
+% =========================================================================
+% setup_model_states
+%
+% Purpose:
+%   Initialize the true, nurged, and ensemble models at time index k.
+%
+% Inputs:
+%   k                  - Time index (integer)
+%   dt                 - Time step (scalar, e.g., 0.15)
+%   model_true_state   - Matrix of true model states [n_state_vars x nt]
+%   model_nurged_state - Matrix of nurged model states [n_state_vars x nt]
+%   ensemble_vec_mean  - Matrix of ensemble mean states [n_state_vars x nt]
+%   md_true, md_nurged, md_ens - Model structures (initialized ISSM models)
+%   md                 - Reference model (for materials, constants)
+%
+% Outputs:
+%   md_true, md_nurged, md_ens - Updated model structures at step k
+%
+% Author:  Brian Kyanjo
+% Date:    2025-11-03
+% =========================================================================
+
+    % --- Basic setup ---
+    hdim = length(model_true_state(:,1)) / 5;  % Assuming 5 state components
+    di = md.materials.rho_ice / md.materials.rho_water;
+
+    %% === TRUE STATE ===
+    True_surface = model_true_state(1:hdim, k);
+    Vx = model_true_state(hdim+1:2*hdim, k);
+    Vy = model_true_state(2*hdim+1:3*hdim, k);
+    Vel = sqrt(Vx.^2 + Vy.^2);
+    True_bed = model_true_state(3*hdim+1:4*hdim, k);
+    True_fcoeff = model_true_state(4*hdim+1:5*hdim, k);
+    True_thickness = True_surface - True_bed;
+
+    md_true.geometry.thickness = True_thickness;
+    md_true.geometry.surface = True_surface;
+    md_true.initialization.vx  = Vx;
+    md_true.initialization.vy  = Vy;
+    md_true.initialization.vel = Vel;
+    md_true.geometry.bed       = True_bed;
+    md_true.friction.coefficient = True_fcoeff;
+    md_true.mask.ocean_levelset = True_surface + True_bed / di;
+
+
+    %% === NURGED STATE ===
+    nurged_surface = model_nurged_state(1:hdim, k);
+    Vx = model_nurged_state(hdim+1:2*hdim, k);
+    Vy = model_nurged_state(2*hdim+1:3*hdim, k);
+    Vel = sqrt(Vx.^2 + Vy.^2);
+    nurged_bed = model_nurged_state(3*hdim+1:4*hdim, k);
+    nurged_fcoeff = model_nurged_state(4*hdim+1:5*hdim, k);
+    nurged_thickness = nurged_surface - nurged_bed;
+
+    md_nurged.geometry.thickness = nurged_thickness;
+    md_nurged.initialization.vx  = Vx;
+    md_nurged.initialization.vy  = Vy;
+    md_nurged.initialization.vel = Vel;
+    md_nurged.geometry.bed       = nurged_bed;
+    md_nurged.friction.coefficient = nurged_fcoeff;
+    md_nurged.mask.ocean_levelset = nurged_thickness + nurged_bed / di;
+
+    %% === ENSEMBLE MEAN STATE ===
+    ens_surface = ensemble_vec_mean(1:hdim, k);
+    Vx = ensemble_vec_mean(hdim+1:2*hdim, k);
+    Vy = ensemble_vec_mean(2*hdim+1:3*hdim, k);
+    Vel = sqrt(Vx.^2 + Vy.^2);
+    ens_bed = ensemble_vec_mean(3*hdim+1:4*hdim, k);
+    ens_fcoeff = ensemble_vec_mean(4*hdim+1:5*hdim, k);
+    ens_thickness = ens_surface - ens_bed;
+
+    md_ens.geometry.thickness = ens_thickness;
+    md_ens.initialization.vx  = Vx;
+    md_ens.initialization.vy  = Vy;
+    md_ens.initialization.vel = Vel;
+    md_ens.geometry.bed       = ens_bed;
+    md_ens.friction.coefficient = ens_fcoeff;
+    md_ens.mask.ocean_levelset = ens_thickness + ens_bed / di;
+
+end
+

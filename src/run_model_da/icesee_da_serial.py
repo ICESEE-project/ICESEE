@@ -27,7 +27,7 @@ from ICESEE.src.utils.utils import UtilsFunctions
 from ICESEE.src.EnKF.python_enkf.EnKF import EnsembleKalmanFilter as EnKF     # Ensemble Kalman Filter
 from ICESEE.applications.supported_models import SupportedModels              # supported models for data assimilation routine
 from ICESEE.src.utils.tools import icesee_get_index, display_timing_default,display_timing_verbose, save_all_data
-from ICESEE.src.run_model_da._localization_functions import gaspari_cohn, localization  
+from  ICESEE.src.EnKF._localization_inflation import  LocalizationInflationUtils
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
                               generate_pseudo_random_field_1d, \
@@ -48,6 +48,10 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
     Lx, Ly            = model_kwargs.get("Lx",1.0), model_kwargs.get("Ly",1.0)
     nx, ny            = model_kwargs.get("nx",0.2), model_kwargs.get("ny",0.2)
     b_in, b_out       = model_kwargs.get("b_in",0.0), model_kwargs.get("b_out",0.0) 
+
+    #  call the gaspari function and localization function
+    localization = LocalizationInflationUtils().localization
+    gaspari_cohn = LocalizationInflationUtils().gaspari_cohn
 
     # --- call the ICESEE mpi parallel manager ---
     if re.match(r"\AMPI_model\Z", parallel_flag, re.IGNORECASE):

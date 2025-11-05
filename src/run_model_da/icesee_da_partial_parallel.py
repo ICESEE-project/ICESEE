@@ -27,7 +27,6 @@ from ICESEE.src.utils.utils import UtilsFunctions
 from ICESEE.src.EnKF.python_enkf.EnKF import EnsembleKalmanFilter as EnKF     # Ensemble Kalman Filter
 from ICESEE.applications.supported_models import SupportedModels              # supported models for data assimilation routine
 from ICESEE.src.utils.tools import icesee_get_index, display_timing_default,display_timing_verbose, save_all_data
-from ICESEE.src.run_model_da._localization_functions import gaspari_cohn, localization  
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
                               generate_pseudo_random_field_1d, \

@@ -231,6 +231,9 @@ def parallel_forecast_step_default_run(**model_kwargs):
         if rank_world == 0:
             ensemble_vec = [arr for sublist in gathered_ensemble_global for arr in sublist if arr is not None]
             ensemble_vec = np.column_stack(ensemble_vec) 
+
+            # cap ensemble_vec to (nd,nens) dimensions
+            ensemble_vec = ensemble_vec[:, :Nens]
             
             # get the shape of the ensemble
             shape_ens = np.array(ensemble_vec.shape, dtype=np.int32)
@@ -530,6 +533,7 @@ def parallel_forecast_step_default_full_parallel_run(**model_kwargs):
                 #  time forecast file writing
                 _time_forecast_file_writing = MPI.Wtime()
                 # enkf_parallel_io.write_forecast(k + 1 if k < nt - 1 else k, ensemble_vec, ens)
+                # ensemble_vec_block = 
                 enkf_parallel_io.write_forecast(k + 1 if k < nt - 1 else k, ensemble_vec, ens)
                 time_forecast_file_writing += MPI.Wtime() - _time_forecast_file_writing + time_forecast_file_writing_0
 
@@ -663,7 +667,7 @@ def parallel_forecast_step_default_full_parallel_run(**model_kwargs):
     tobserve = model_kwargs.get("tobserve")
     m_obs = model_kwargs.get("m_obs", params["number_obs_instants"])
     if (km < m_obs) and (k+1 == tobserve[km]):
-        enkf_parallel_io.compute_forecast_mean_chunked_v2(k + 1 if k < nt - 1 else k)
+        enkf_parallel_io.compute_forecast_mean_chunked_v2(k + 1 if k < nt - 1 else k, flag='initial')
     time_forecast_ensemble_mean_generation += MPI.Wtime() - _time_forecast_ensemble_mean_generation
 
     # update model_kwargs with timing variables and other parameters
