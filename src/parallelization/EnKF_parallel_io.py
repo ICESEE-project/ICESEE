@@ -357,158 +357,6 @@ class EnKF_fully_parallel_IO:
         self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx] = data
         # self._rw_select(self.datasets[batch_idx],
         #         self.nd_start_world, self.nd_local_world, ens_idx, 1, buf=data, write=True)
-
-    #     # =============================================================================
-    # # VDS-Mimic Integration for EnKF_fully_parallel_IO
-    # # =============================================================================
-
-    # def _ensure_batch(self, t):
-    #     """
-    #     Mimics Virtual Dataset behavior:
-    #     - Keeps a persistent mapping of timestep index → open HDF5 handle.
-    #     - Only opens each file once and reuses it across read/write calls.
-    #     - Fully compatible with legacy read_* / write_* methods.
-    #     """
-    #     try:
-    #         # Initialize cache if not present
-    #         if not hasattr(self, "_vds_cache"):
-    #             self._vds_cache = {}
-    #             # Limit to reasonable number of open files to avoid hitting ulimit
-    #             self._vds_cache_limit = min(self.batch_size, 128)
-
-    #         # Compute batch start (for legacy consistency)
-    #         batch_start = (t // self.batch_size) * self.batch_size
-    #         if batch_start != self.current_batch_start:
-    #             self.current_batch_start = batch_start
-
-    #         # Build filename for this timestep
-    #         fname = f"{self.base_path}/{self.file_prefix}_ens_{t:04d}.h5"
-
-    #         # Fast-path: if already cached
-    #         if t in self._vds_cache:
-    #             entry = self._vds_cache[t]
-    #             self.files = [entry["file"]]
-    #             self.datasets = [entry["dataset"]]
-    #             return
-
-    #         # If cache full, close and evict the least-recently-used file
-    #         if len(self._vds_cache) >= self._vds_cache_limit:
-    #             oldest_t = next(iter(self._vds_cache))
-    #             try:
-    #                 self._vds_cache[oldest_t]["file"].close()
-    #             except Exception:
-    #                 pass
-    #             del self._vds_cache[oldest_t]
-
-    #         # Ensure the file exists
-    #         if not os.path.exists(fname):
-    #             if self.serial_file_creation:
-    #                 if self.rank == 0:
-    #                     with h5py.File(fname, "w") as f:
-    #                         f.create_dataset(
-    #                             "states", (self.nd, self.nens),
-    #                             chunks=(self.nd_local_world, 1),
-    #                             compression=None, dtype="f8"
-    #                         )
-    #                 self.mpi_comm.Barrier()
-    #             else:
-    #                 f = h5py.File(fname, "w", driver="mpio", comm=self.comm)
-    #                 f.create_dataset(
-    #                     "states", (self.nd, self.nens),
-    #                     chunks=(self.nd_local_world, 1),
-    #                     compression=None, dtype="f8"
-    #                 )
-    #                 f.close()
-
-    #         # Open or reuse handle collectively
-    #         f = h5py.File(fname, "a", driver="mpio", comm=self.comm)
-    #         dset = f["states"]
-
-    #         # Cache this handle
-    #         self._vds_cache[t] = {"file": f, "dataset": dset}
-    #         self.files = [f]
-    #         self.datasets = [dset]
-
-    #     except Exception as e:
-    #         print(f"Error occurred in _ensure_batch (VDS mimic): {e}")
-    #         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-    #         print(f"Traceback details:\n{tb_str}")
-    #         self.mpi_comm.Abort(1)
-
-
-    # def create_virtual_dataset(self):
-    #     """
-    #     Build a lightweight HDF5 Virtual Dataset file linking all timestep HDF5 files
-    #     into one logical dataset of shape (nd, nt, nens).
-    #     Safe to call post-run for visualization or analysis.
-    #     """
-    #     import h5py.h5s as h5s
-    #     import h5py.h5p as h5p
-    #     import h5py.h5f as h5f
-    #     import h5py.h5d as h5d
-    #     import os
-
-    #     vds_path = f"{self.base_path}/{self.file_prefix}_VDS.h5"
-    #     if self.rank == 0:
-    #         print(f"[ICESEE-VDS] Building virtual dataset: {vds_path}")
-    #         if os.path.exists(vds_path):
-    #             os.remove(vds_path)
-
-    #     self.mpi_comm.Barrier()
-
-    #     # Collective file creation
-    #     fapl = h5p.create(h5p.FILE_ACCESS)
-    #     fapl.set_fapl_mpio(self.mpi_comm, MPI.Info.Create())
-    #     fid = h5f.create(bytes(vds_path, "utf-8"), h5f.ACC_TRUNC, fapl)
-    #     layout = h5s.create_simple((self.nd, self.nt, self.nens))
-    #     dcpl = h5p.create(h5p.DATASET_CREATE)
-
-    #     # Map each timestep file into the VDS
-    #     for t in range(self.nt):
-    #         src_file = f"{self.base_path}/{self.file_prefix}_ens_{t:04d}.h5"
-    #         if not os.path.exists(src_file):
-    #             if self.rank == 0:
-    #                 print(f"[ICESEE-VDS] Skipping missing timestep file: {src_file}")
-    #             continue
-
-    #         src_space = h5s.create_simple((self.nd, self.nens))
-    #         dcpl.set_virtual(
-    #             layout,
-    #             bytes(src_file, "utf-8"),
-    #             bytes("/states", "utf-8"),
-    #             src_space
-    #         )
-
-    #     # Create virtual dataset
-    #     h5d.create(fid, b"forecast", h5py.h5t.NATIVE_DOUBLE, layout, dcpl)
-    #     h5f.close(fid)
-    #     self.mpi_comm.Barrier()
-    #     if self.rank == 0:
-    #         print("[ICESEE-VDS] Virtual dataset created successfully.")
-
-
-    # def close(self):
-    #     """Close all cached and open file handles."""
-    #     try:
-    #         # Close VDS cache if active
-    #         if hasattr(self, "_vds_cache"):
-    #             for t, entry in list(self._vds_cache.items()):
-    #                 try:
-    #                     entry["file"].close()
-    #                 except Exception:
-    #                     pass
-    #             self._vds_cache.clear()
-
-    #         # Close any remaining legacy batch handles
-    #         self._close_batch()
-
-    #         if self.rank == 0:
-    #             print("[ICESEE-IO] Closed all open file handles.")
-
-    #     except Exception as e:
-    #         print(f"Error in close(): {e}")
-    #         print("".join(traceback.format_exception(*sys.exc_info())))
-    #         self.mpi_comm.Abort(1)
     
     def compute_forecast_mean_chunked_v2(self, k, flag=None):
         """
@@ -833,144 +681,29 @@ class EnKF_fully_parallel_IO:
                         error_R[start_idx:end_idx, :] = np.ones((hdim, 1)) * sig
 
                     km = 0
+                    km_temp = 0
                     for step in range(nt):
                         # if (km < m_obs) and (step + 1 == ind_m[km]):
                         if (km < m_obs) and (step == ind_m[km]):
-                            for key in kwargs['vec_inputs']:
-                                # print(f"[ICESEE] Generating obs at time step {step+1} for key {key} at obs index {km}")
-                                hu_obs[indx_map[key], km] = statevec_true[indx_map[key], step + 1] + \
-                                                            np.random.normal(0, error_R[indx_map[key], km], len(indx_map[key]))
+                            # for key in kwargs['vec_inputs']:
+                            for ii, key in enumerate(kwargs['vec_inputs']):
+                                if ii < kwargs['num_state_vars']:
+                                    # print(f"[ICESEE] Generating obs at time step {step+1} for key {key} at obs index {km}")
+                                    hu_obs[indx_map[key], km] = statevec_true[indx_map[key], step + 1] + \
+                                                                np.random.normal(0, error_R[indx_map[key], km], len(indx_map[key]))
+                                else:
+                                    hu_obs[indx_map[key], km] = np.zeros(len(indx_map[key]))
+
+                                if key == 'bed' or key == 'bedrock' or key == 'bed_topography' or key == 'bedtopo' or key == 'bedtopography':
+                                    if step+1 == kwargs.get('bed_obs_snapshot', 0)[km_temp]:
+                                        hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
+                                        km_temp += 1
                             km += 1
             except Exception as e:
                 print(f"[ICESEE] Error in HDF5 operations: {e}")
                 raise
         self.mpi_comm.Barrier()
         return ind_m, m_obs
-        
-
-    @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
-    def _create_synthetic_observations_(self, **kwargs):
-        try:
-            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path')
-            error_R_zarr_path = kwargs.get('error_R_zarr_path')
-            nd = self.nd
-            nt = self.nt
-
-            obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
-            m = m_obs
-            m_R = m_obs*2 +1
-
-            # print(f"\n m={m}, m_R={m_R} \n")
-
-            rank = self.mpi_comm.Get_rank()
-            size = self.mpi_comm.Get_size()
-
-            if rank == 0:
-                if os.path.exists(synthetic_obs_zarr_path):
-                    shutil.rmtree(synthetic_obs_zarr_path)
-                if os.path.exists(error_R_zarr_path):
-                    shutil.rmtree(error_R_zarr_path)
-            self.mpi_comm.Barrier()
-            
-            if rank == 0:
-                hu_obs = zarr.create_array(store=synthetic_obs_zarr_path, shape=(nd, m), chunks=(min(1000, nd), min(50, m)), dtype='f8', overwrite=True)
-                error_R = zarr.create_array(store=error_R_zarr_path, shape=(nd, m_R), chunks=(min(1000, nd), min(50, m_R)), dtype='f8', overwrite=True)
-            
-            self.mpi_comm.Barrier()
-            hu_obs = zarr.open_array(store=synthetic_obs_zarr_path, mode='r+')
-            error_R = zarr.open_array(store=error_R_zarr_path, mode='r+')
-            self.mpi_comm.Barrier()
-
-            if kwargs.get('joint_estimation', False) or self.params.get('localization_flag', False):
-                hdim = nd // self.params["total_state_param_vars"]
-            else:
-                hdim = nd // self.params["total_state_param_vars"]
-
-            if rank == 0:
-                for i, sig in enumerate(self.params["sig_obs"]):
-                    start_idx = i*hdim
-                    end_idx = start_idx + hdim
-                    error_R[start_idx:end_idx,:] = np.ones((hdim,1)) * sig
-            self.mpi_comm.Barrier()
-
-            statevec_true = zarr.open_array(store=f"{self.base_path}/statevec_true.zarr", mode='r+')
-            _, indx_map, _ = icesee_get_index(**kwargs)
-            if self.nd < 10000:
-                if rank==0:
-                    print("[ICESEE] Generating synthetic observations ...")
-                    km = 0
-                    for step in range(nt):
-                        if (km<m_obs) and (step+1 == ind_m[km]):
-                            for key in kwargs['vec_inputs']:
-                                # hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1]
-                                hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
-
-                            km += 1
-                    # print(f"\n nd = {nd}, Nens = {self.nens}, nt = {nt}\n")        
-                self.mpi_comm.Barrier()
-            else:
-                if rank == 0:
-                    print("[ICESEE] Generating synthetic observations in parallel ...")
-                    # print(f"\n nd = {nd}, Nens = {self.nens}, nt = {nt}\n")
-                if size >= m_obs:
-                    obs_per_process = m_obs // size
-                    remainder = m_obs % size
-                    start_obs = rank * obs_per_process + min(rank, remainder)
-                    num_obs = obs_per_process + 1 if rank < remainder else obs_per_process
-
-                    rows_per_process = hdim // size
-                    row_remainder = hdim % size
-                    row_start = rank * rows_per_process + min(rank, row_remainder)
-                    row_end = row_start + (rows_per_process + 1 if rank < row_remainder else rows_per_process)
-
-                    for km in range(start_obs, start_obs + num_obs):
-                        if km < m_obs:
-                            step = ind_m[km] - 1
-                            if 0 <= step < nt:
-                                for key in kwargs['vec_inputs']:
-                                    indices = indx_map[key]
-                                    local_indices = indices[(indices >= row_start) & (indices < row_end)]
-                                    if len(local_indices) > 0:
-                                        state_data = statevec_true[local_indices, step]
-                                        error_data = error_R[local_indices, km]
-                                        result = state_data + np.random.normal(0, error_data, len(local_indices))
-                                        if result.shape != (len(local_indices),):
-                                            raise ValueError(f"Rank {rank}: Shape mismatch at km={km}: expected {len(local_indices)}, got {result.shape}")
-                                        hu_obs[local_indices, km] = result
-                    self.mpi_comm.Barrier()
-                else:
-                    obs_per_process = m_obs // size
-                    remainder = m_obs % size
-                    start_obs = rank * obs_per_process + min(rank, remainder)
-                    num_obs = obs_per_process + 1 if rank < remainder else obs_per_process
-
-                    rows_per_process = nd // size
-                    row_remainder = nd % size
-                    row_start = rank * rows_per_process + min(rank, row_remainder)
-                    row_end = min(row_start + (rows_per_process + 1 if rank < row_remainder else rows_per_process), nd)
-
-                    for km in range(start_obs, start_obs + num_obs):
-                        if km < m_obs:
-                            step = ind_m[km] - 1
-                            if 0 <= step < nt:
-                                for key in kwargs['vec_inputs']:
-                                    indices = indx_map[key]
-                                    local_indices = indices[(indices >= row_start) & (indices < row_end)]
-                                    if len(local_indices) > 0:
-                                        state_data = statevec_true[local_indices, step]
-                                        error_data = error_R[local_indices, km]
-                                        result = state_data + np.random.normal(0, error_data, len(local_indices))
-                                        if result.shape != (len(local_indices),):
-                                            raise ValueError(f"Rank {rank}: Shape mismatch at km={km}: expected {len(local_indices)}, got {result.shape}")
-                                        hu_obs[local_indices, km] = result
-                    self.mpi_comm.Barrier()
-
-            return ind_m, m_obs
-        except Exception as e:
-            print(f"Error in _create_synthetic_observations: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
 
     def H_matrix(self, **kwargs):
         try:

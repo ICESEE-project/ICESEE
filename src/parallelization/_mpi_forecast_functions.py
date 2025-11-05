@@ -231,6 +231,9 @@ def parallel_forecast_step_default_run(**model_kwargs):
         if rank_world == 0:
             ensemble_vec = [arr for sublist in gathered_ensemble_global for arr in sublist if arr is not None]
             ensemble_vec = np.column_stack(ensemble_vec) 
+
+            # cap ensemble_vec to (nd,nens) dimensions
+            ensemble_vec = ensemble_vec[:, :Nens]
             
             # get the shape of the ensemble
             shape_ens = np.array(ensemble_vec.shape, dtype=np.int32)

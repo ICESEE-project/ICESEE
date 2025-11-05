@@ -580,7 +580,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
         comm_world.Barrier()
         _time_init_ensemble_mean_computation = MPI.Wtime()
         # enkf_parallel_io.compute_forecast_mean_chunked(0)
-        enkf_parallel_io.compute_forecast_mean_chunked_v2(0)
+        enkf_parallel_io.compute_forecast_mean_chunked_v2(k=0,flag="initial")
         # ens_mean = enkf_parallel_io.compute_forecast_mean(0)
         # ens_mean = .datasets[0][:, :].mean(axis=1)
         time_init_ensemble_mean_computation += MPI.Wtime() - _time_init_ensemble_mean_computation

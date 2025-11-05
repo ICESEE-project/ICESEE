@@ -256,6 +256,7 @@ if not flag_jupyter:
         'h5_file_compression': enkf_params.get('h5_file_compression', None), # e.g., 'gzip' or 'lzf' or 'szip' or None
         'h5_file_compression_level': int(enkf_params.get('h5_file_compression_level', 4)), # 0-9 for gzip, 1-9 for szip, ignored for lzf and None
         'h5_file_chunk_size': int(enkf_params.get('h5_file_chunk_size', 1000)),
+        'bed_obs_snapshot':enkf_params.get('bed_obs_snapshot', []),
     }
 
 

@@ -199,13 +199,21 @@ class UtilsFunctions:
 
         # print(f"[ICESEE] vec_inputs: {kwargs['vec_inputs']}")
         km = 0
+        km_temp = 0
         for step in range(nt):
             if (km<m_obs) and (step+1 == ind_m[km]):
-                # hu_obs[:,km] = statevec_true[:,step+1] + norm(loc=0,scale=self.params["sig_obs"][step+1]).rvs(size=nd)
-                # hu_obs[:,km] = statevec_true[:,step+1] + np.random.normal(0,self.params["sig_obs"][step+1],nd)
-                # TODO: start from here tomorrow.
-                for key in kwargs['vec_inputs']:
-                    hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
+                # for key in kwargs['vec_inputs']:
+                for ii, key in enumerate(kwargs['vec_inputs']):
+                    if ii < kwargs['num_state_vars']:
+                        hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
+                    else:
+                        # fill with zeros for parameters
+                        hu_obs[indx_map[key],km] = np.zeros(len(indx_map[key]))
+
+                    if key == 'bed' or key == 'bedrock' or key == 'bed_topography' or key == 'bedtopo' or key == 'bedtopography':
+                        if step+1 == kwargs.get('bed_obs_snapshot', 0)[km_temp]:
+                            hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
+                            km_temp += 1
 
                 km += 1
 

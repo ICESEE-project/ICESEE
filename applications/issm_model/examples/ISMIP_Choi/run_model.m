@@ -122,10 +122,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
         idx = 1;
         for k = 1:N
-            % Thickness
-            data{idx, 1} = sprintf('Thickness_%d', k);
+            % Surface
+            data{idx, 1} = sprintf('Surface_%d', k);
             data{idx, 2} = md.results.TransientSolution(k);
-            data{idx, 3} = 'Thickness';
+            data{idx, 3} = 'Surface';
             idx = idx + 1;
 
             % Vx 
@@ -191,6 +191,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
         % setup nugged state
         friction_ref = mean_friction*ones(md.mesh.numberofvertices,1);
+        % friction_ref = md_ref.friction.coefficient;
         thickness_ref = md.geometry.thickness;
         bed_ref = md.geometry.bed;
         base_ref = md.geometry.base;
@@ -279,10 +280,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
         idx = 1;
         for k = 1:N
-            % Thickness
-            data{idx, 1} = sprintf('Thickness_%d', k);
+            % Surface
+            data{idx, 1} = sprintf('Surface_%d', k);
             data{idx, 2} = md.results.TransientSolution(k);
-            data{idx, 3} = 'Thickness';
+            data{idx, 3} = 'Surface';
             idx = idx + 1;
 
             % Vx
@@ -327,8 +328,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             end
 
             % filename_ref = fullfile(folder, reference_data);
-            % filename_ref = fullfile(folder, 'true_state.mat');
-            % md_ref = loadmodel(filename_ref);
+            filename_ref = fullfile(folder, 'true_state.mat');
+            md_ref = loadmodel(filename_ref);
             %*-----------------------
             % filename = fullfile(folder, 'true_state.mat');
             % filename = fullfile(folder, reference_data);
@@ -351,6 +352,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.friction.coefficient     = md.results.TransientSolution(end).FrictionCoefficient;
 
             friction_ref = mean_friction*ones(md.mesh.numberofvertices,1);
+            % friction_ref = md_ref.friction.coefficient;
             thickness_ref = md.geometry.thickness;
             bed_ref = md.geometry.bed;
             base_ref = md.geometry.base;
@@ -391,7 +393,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.timestepping = timestepping();
             md.timestepping.time_step = 0.1;
             md.timestepping.start_time = 0;
-            md.timestepping.final_time = 2.0;
+            md.timestepping.final_time = 1.0;
             md.settings.output_frequency = output_frequency; %make sure this is set to 1 for 
             md.stressbalance.maxiter = 100;
             md.stressbalance.restol = 1;
@@ -422,12 +424,11 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             save(filename, 'md', '-v7.3');
 
             % Save ensemble outputs in HDF5
-            fields = {'Thickness','bed', 'coefficient'};
             result_0 = md.results.TransientSolution(end);
 
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_out_%d.h5', ens_id));
 
-            data = {'Thickness', result_0, 'Thickness';
+            data = {'Surface', result_0, 'Surface';
                     'Vx', result_0, 'Vx';
                     'Vy', result_0, 'Vy';
                     'bed', result_0, 'Bed';
@@ -471,9 +472,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             end
             % filename = fullfile(folder_true, 'true_state.mat');
             % filename = fullfile(folder, reference_data);
-            % filename = fullfile(icesee_path, 'data', wrong_reference_data);
+            filename = fullfile(icesee_path, 'data', wrong_reference_data);
 
-            filename = fullfile(folder, 'initialize_ensemble.mat');
+            % filename = fullfile(folder, 'initialize_ensemble.mat');
             md = loadmodel(filename);
             
             md.inversion.iscontrol            = 0;
@@ -576,7 +577,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % result_2 = md.friction;
             result_2 = md.results.TransientSolution(end);
 
-            data = {'Thickness', result_0, 'Thickness';
+            data = {'Surface', result_0, 'Surface';
                     'Vx', result_0, 'Vx';
                     'Vy', result_0, 'Vy';
                     'bed', result_1, 'Bed';
@@ -611,7 +612,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Load ensemble input from HDF5
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
-            md.geometry.thickness = h5read(filename, '/Thickness');
+            md.geometry.thickness = h5read(filename, '/Surface');
             md.initialization.vx = h5read(filename, '/Vx');
             md.initialization.vy = h5read(filename, '/Vy');
             md.initialization.vel = sqrt(md.initialization.vx.^2 + md.initialization.vy.^2);
@@ -741,7 +742,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             result_2 = md.friction;
             % result_2 = md.results.TransientSolution(end);
 
-            data = {'Thickness', result_1, 'thickness';
+            data = {'Surface', result_1, 'surface';
                     'Vx', result_0, 'vx';
                     'Vy', result_0, 'vy';
                     'bed', result_1, 'bed';

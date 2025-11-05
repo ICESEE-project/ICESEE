@@ -8,6 +8,7 @@
 import os
 import numpy as np
 import h5py
+import netCDF4
 import gstools as gs
 
 # --- import utility functions ---
@@ -77,12 +78,12 @@ def generate_true_state(**kwargs):
     with h5py.File(input_filename, 'r') as f:
         # -- fetch state variables
         for k in range(1, kwargs.get('nt') + 1):
-            key_thickness = f'Thickness_{k}'
+            key_surface = f'Surface_{k}'
             key_u  = f'Vx_{k}'
             key_v  = f'Vy_{k}'
             key_bed = f'bed_{k}'
             key_coefficient = f'coefficient_{k}'
-            statevec_true[indx_map['Thickness'], k-1] = f[key_thickness][0]
+            statevec_true[indx_map['Surface'], k-1] = f[key_surface][0]
             statevec_true[indx_map['Vx'], k-1] = f[key_u][0]
             statevec_true[indx_map['Vy'], k-1] = f[key_v][0]
             statevec_true[indx_map['bed'], k-1] = f[key_bed][0]
@@ -136,25 +137,39 @@ def generate_nurged_state(**kwargs):
     # x = np.linspace(0, Ly, fdim)
     seed_base = kwargs.get('seed_base', 42)
 
-     # -- friction
+    #  # -- friction
     sill_friction = kwargs.get('sill_friction')
     range_friction = kwargs.get('range_friction')
     mean_friction  = kwargs.get('mean_friction')
     nugget_friction = kwargs.get('nugget_friction')
+    x = np.linspace(0, range_friction, fdim)
     var_fric = max(sill_friction - nugget_friction, 0.0)
     friction_model = gs.Gaussian(dim=1, var=var_fric, len_scale=range_friction, nugget=nugget_friction)
     friction_srf = gs.SRF(friction_model, mean=0.0, seed=seed_base + ens_id)
     friction_field = np.asarray(friction_srf.structured([x])).reshape(-1)
 
     # --bed
-    # x = np.linspace(0, Lx, fdim)
     sill_bed = kwargs.get('sill_bed')
     range_bed = kwargs.get('range_bed')
     nugget_bed = kwargs.get('nugget_bed')
     var_bed = max(sill_bed - nugget_bed, 0.0)
+    # x = np.linspace(0, range_bed, fdim)
+    x = np.linspace(0, Lx, fdim)
     bed_model = gs.Exponential(dim=1, var=var_bed, len_scale=range_bed, nugget=nugget_bed)
     bed_srf = gs.SRF(bed_model, mean=0.0, seed=seed_base + 10_000 + ens_id)  # different stream
     bed_field = np.asarray(bed_srf.structured([x])).reshape(-1)  # 1D
+
+    # fcoeff = f'{icesee_path}/data/Data/uncondition_fcoeff_err_ens1000.nc'
+    # bed_data = f'{icesee_path}/data/Data/condition_bed_err_30km.nc'
+    # with netCDF4.Dataset(fcoeff, 'r') as nc:
+    #         fcoeff = nc.variables['fcoeff'][ens_id, :fdim]
+    #         fcoeff = fcoeff.astype(float)
+    #         friction_field=np.array(fcoeff)
+
+    # with netCDF4.Dataset(bed_data, 'r') as nc:
+    #     bed = nc.variables['bed_err'][ens_id, :fdim]
+    #     bed = bed.astype(float)
+    #     bed_field = np.array(bed)
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
@@ -177,12 +192,12 @@ def generate_nurged_state(**kwargs):
     with h5py.File(nurged_filename, 'r', driver='mpio', comm=comm) as f:
         # -- fetch state variables
         for k in range(1, kwargs.get('nt') + 1):
-            key_thickness = f'Thickness_{k}'
+            key_surface = f'Surface_{k}'
             key_u = f'Vx_{k}'
             key_v = f'Vy_{k}'
             key_bed = f'bed_{k}'
             key_coefficient = f'coefficient_{k}'
-            statevec_nurged[indx_map['Thickness'], k-1] = f[key_thickness][0]
+            statevec_nurged[indx_map['Surface'], k-1] = f[key_surface][0]
             statevec_nurged[indx_map['Vx'], k-1] = f[key_u][0]
             statevec_nurged[indx_map['Vy'], k-1] = f[key_v][0]
             statevec_nurged[indx_map['bed'], k-1] = f[key_bed][0]
@@ -238,25 +253,39 @@ def initialize_ensemble(ens, **kwargs):
     # x = np.linspace(0, Ly, fdim)
     seed_base = kwargs.get('seed_base', 42)
 
-     # -- friction
+    #  # -- friction
     sill_friction = kwargs.get('sill_friction')
     range_friction = kwargs.get('range_friction')
     mean_friction  = kwargs.get('mean_friction')
     nugget_friction = kwargs.get('nugget_friction')
     var_fric = max(sill_friction - nugget_friction, 0.0)
+    x = np.linspace(0, range_friction, fdim)
     friction_model = gs.Gaussian(dim=1, var=var_fric, len_scale=range_friction, nugget=nugget_friction)
     friction_srf = gs.SRF(friction_model, mean=0.0, seed=seed_base + ens)
     friction_field = np.asarray(friction_srf.structured([x])).reshape(-1)
 
-    # --bed
-    # x = np.linspace(0, Lx, fdim)
+    # # --bed
     sill_bed = kwargs.get('sill_bed')
     range_bed = kwargs.get('range_bed')
     nugget_bed = kwargs.get('nugget_bed')
     var_bed = max(sill_bed - nugget_bed, 0.0)
+    # x = np.linspace(0, range_bed, fdim)
+    x = np.linspace(0, Lx, fdim)
     bed_model = gs.Exponential(dim=1, var=var_bed, len_scale=range_bed, nugget=nugget_bed)
     bed_srf = gs.SRF(bed_model, mean=0.0, seed=seed_base + 10_000 + ens)  # different stream
     bed_field = np.asarray(bed_srf.structured([x])).reshape(-1)  # 1D
+
+    # fcoeff = f'{icesee_path}/data/Data/uncondition_fcoeff_err_ens1000.nc'
+    # bed_data = f'{icesee_path}/data/Data/condition_bed_err_30km.nc'
+    # with netCDF4.Dataset(fcoeff, 'r') as nc:
+    #         fcoeff = nc.variables['fcoeff'][ens, :fdim]
+    #         fcoeff = fcoeff.astype(float)
+    #         friction_field=np.array(fcoeff)
+
+    # with netCDF4.Dataset(bed_data, 'r') as nc:
+    #     bed = nc.variables['bed_err'][ens, :fdim]
+    #     bed = bed.astype(float)
+    #     bed_field = np.array(bed)
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
@@ -288,7 +317,7 @@ def initialize_ensemble(ens, **kwargs):
     with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
         # for key in vec_inputs:
         #     updated_state[key] = f[key][0]
-        updated_state['Thickness'] = f['Thickness'][0]
+        updated_state['Surface'] = f['Surface'][0]
         updated_state['Vx'] = f['Vx'][0]
         updated_state['Vy'] = f['Vy'][0]
         if kwargs.get('joint_estimation', False):

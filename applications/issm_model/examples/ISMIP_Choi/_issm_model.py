@@ -178,7 +178,7 @@ def run_model(ensemble, **kwargs):
     with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
         # for key in vec_inputs:
         #     f.create_dataset(key, data=ensemble[indx_map[key]])
-        f.create_dataset('Thickness', data=ensemble[indx_map['Thickness']])
+        f.create_dataset('Surface', data=ensemble[indx_map['Surface']])
         f.create_dataset('Vx', data=ensemble[indx_map['Vx']])
         f.create_dataset('Vy', data=ensemble[indx_map['Vy']])
         f.create_dataset('bed', data=bed)
@@ -200,7 +200,7 @@ def run_model(ensemble, **kwargs):
     
     updated_state = {}
     with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
-        updated_state['Thickness'] = f['Thickness'][0]
+        updated_state['Surface'] = f['Surface'][0]
         updated_state['Vx'] = f['Vx'][0]
         updated_state['Vy'] = f['Vy'][0]
         
