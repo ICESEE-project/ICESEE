@@ -65,7 +65,7 @@ def generate_true_state(**kwargs):
 
     # Run the model forward in time
     for k in range(nt-1):
-        state = run_model(statevec_true[:, k+1], **kwargs)
+        state = run_model(statevec_true[:, k], **kwargs)
         statevec_true[indx_map['x'], k + 1] = state['x']
         statevec_true[indx_map['y'], k + 1] = state['y']
         statevec_true[indx_map['z'], k + 1] = state['z']
@@ -88,17 +88,17 @@ def generate_nurged_state(**kwargs):
     nd,nt = statevec_nurged.shape
     dt = params['dt']
     num_state_vars = params['num_state_vars']
-    u0True = kwargs.get('u0True', None)
+    u0b = kwargs.get('u0b', None)
 
     # call the icesee_get_index function to get the indices of the state variables
     vecs, indx_map, dim_per_proc = icesee_get_index(statevec_nurged, **kwargs)
 
     # Set the initial condition
-    statevec_nurged[:, 0] = u0True
+    statevec_nurged[:, 0] = u0b
 
     # Run the model forward in time
     for k in range(nt-1):
-        state = run_model(statevec_nurged[:, k+1], **kwargs)
+        state = run_model(statevec_nurged[:, k], **kwargs)
         statevec_nurged[indx_map['x'], k + 1] = state['x']
         statevec_nurged[indx_map['y'], k + 1] = state['y']
         statevec_nurged[indx_map['z'], k + 1] = state['z']
@@ -123,3 +123,12 @@ def initialize_ensemble(ens, **kwargs):
                         'y' : u0b[1],
                         'z' : u0b[2]}
     return intialized_state
+
+# the user should able to override the default observation operator and its jacobian
+def Obs_fun(virtual_obs=None):
+    w = virtual_obs.copy()
+    return w
+
+def JObs_fun(nd=None):
+    H_jac = np.eye(nd)
+    return H_jac

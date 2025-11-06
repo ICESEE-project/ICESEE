@@ -322,51 +322,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
     DEnKF_flag  = re.match(r"\ADEnKF\Z", filter_type, re.IGNORECASE)
     EnRSKF_flag = re.match(r"\AEnRSKF\Z", filter_type, re.IGNORECASE)
     EnTKF_flag  = re.match(r"\AEnTKF\Z", filter_type, re.IGNORECASE)
-
-    # get the grid points
-    if params.get("localization_flag", False):
-        #  for both localization and joint estimation
-        # - apply Gaspari-Cohn localization to only state variables [h,u,v] in [h,u,v,smb]
-        # - for parameters eg. smb and others, don't apply localization
-        # if model_kwargs["joint_estimation"]:
-        # get state variables indices
-        num_state_vars = params["num_state_vars"]
-        num_params = params["num_param_vars"]
-        # get the the inital smb
-        # smb_init = ensemble_vec[num_state_vars*hdim:,:]
-        inflation_factor = params["inflation_factor"] #TODO: store this, for localization debuging
-        
-        if True:
-            # --- call the localization function (with adaptive localization) ---
-            state_size = params["total_state_param_vars"]*hdim
-            adaptive_localization = False   
-            if not adaptive_localization:
-                x_points = np.linspace(0, model_kwargs["Lx"], model_kwargs["nx"]+1)
-                y_points = np.linspace(0, model_kwargs["Ly"], model_kwargs["ny"]+1)
-                grid_x, grid_y = np.meshgrid(x_points, y_points)
-
-                grid_points = np.vstack((grid_x.ravel(), grid_y.ravel())).T
-
-                # Adjust grid if n_points != nx * ny (interpolating for 425 points)
-                n_points = hdim
-                missing_rows = n_points - grid_points.shape[0]
-                if missing_rows > 0:
-                    last_row = grid_points[-1]  # Get the last available row
-                    extrapolated_rows = np.tile(last_row, (missing_rows, 1))  # Repeat last row
-                    grid_points = np.vstack([grid_points, extrapolated_rows])  # Append extrapolated rows
-
-                dist_matrix = distance_matrix(grid_points, grid_points) 
-
-                # Normalize distance matrix
-                L = 2654
-                r_matrix = dist_matrix / L
-            else:
-                loc_matrix = localization(Lx,Ly,nx, ny, hdim, params["total_state_param_vars"], Nens, state_size)
     
-
-    # --- Initialize the EnKF class ---
-    EnKFclass = EnKF(parameters=params, parallel_manager=parallel_manager, parallel_flag = parallel_flag)
-
     # tqdm progress bar
     # Initialize progress bar on the root process
     if rank_world == 0:
@@ -463,90 +419,6 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                                 "ensemble_local": ensemble_local if params.get("even_distribution", False) else None,
                                 })                             
             
-            # === Four approaches of forecast step mpi parallelization ===
-            # --- case 1: Each forecast runs squentially using all available processors
-            if params.get("sequential_run", False):
-                # call the parallel_forecast_step function
-                model_kwargs, ensemble_vec, ensemble_vec_mean, shape_ens = parallel_forecast_step_squential_run(**model_kwargs)
-
-                # Analysis step
-                obs_index = model_kwargs["obs_index"]
-                if (km < params["number_obs_instants"]) and (k+1 == obs_index[km]):
-                #     local_ensemble_centered = ensemble_local -  np.mean(ensemble_local, axis=1).reshape(-1,1)  # Center data
-                    if EnKF_flag or DEnKF_flag:
-                        diff = ens_T[:nd,:] - ensemble_vec_mean[:,k+1].reshape(-1,1)
-                        Cov_model = diff @ diff.T / (Nens - 1)
-                    elif EnRSKF_flag or EnTKF_flag:
-                        diff = ens_T[:nd,:] - ensemble_vec_mean[:,k+1].reshape(-1,1)
-                        Cov_model = diff / (Nens - 1)
-                
-                    # localization
-                    if params.get("localization_flag", False):
-                        # try with the localization matrix
-                        cutoff_distance = 6000
-
-                        # rho = np.zeros_like(Cov_model)
-                        rho = np.ones_like(Cov_model)
-                        # for j in range(Cov_model.shape[0]):
-                        #     for i in range(Cov_model.shape[1]):
-                        #         rad_x = np.abs(X[j] - X[i])
-                        #         rad_y = np.abs(Y[j] - Y[i])
-                        #         rad = np.sqrt(rad_x**2 + rad_y**2)
-                        #         rad = rad/cutoff_distance
-                        #         rho[j,i] = gaspari_cohn(rad)
-
-                        Cov_model = rho * Cov_model
-
-                        # if EnKF_flag or DEnKF_flag:
-                    analysis  = EnKF(Observation_vec=  UtilsFunctions(params, ensemble_vec).Obs_fun(hu_obs[:nd,km]), 
-                                            Cov_obs=params["sig_obs"][k+1]**2 * np.eye(2*params["number_obs_instants"]+1), \
-                                            Cov_model= Cov_model, \
-                                            Observation_function=UtilsFunctions(params, ensemble_vec).Obs_fun, \
-                                            Obs_Jacobian=UtilsFunctions(params, ensemble_vec).JObs_fun, \
-                                            parameters=  params,\
-                                            parallel_flag=   parallel_flag)
-                    # compute the analysis ensemble
-                    if EnKF_flag:
-                        ens_T[:nd,:], Cov_model = analysis.EnKF_Analysis(ens_T[:nd,:])
-                    elif DEnKF_flag:
-                        ens_T[:nd,:], Cov_model = analysis.DEnKF_Analysis(ens_T[:nd,:])
-                    elif EnRSKF_flag:
-                        ens_T[:nd,:], Cov_model = analysis.EnRSKF_Analysis(ens_T[:nd,:])
-                    elif EnTKF_flag:
-                        ens_T[:nd,:], Cov_model = analysis.EnTKF_Analysis(ens_T[:nd,:])
-                    else:
-                        raise ValueError("Filter type not supported")
-                    
-                    # update the ensemble mean
-                    ensemble_vec_mean[:,k+1] = np.mean(ens_T[:nd,:], axis=1)
-
-                    # update observation index
-                    km += 1
-
-                    # inflate the ensemble
-                    ens_T = UtilsFunctions(params, ens_T[:nd,:]).inflate_ensemble(in_place=True)
-                            
-                    # ensemble_vec = copy.deepcopy(ens_T[:nd,:])
-                    ensemble_vec = ens_T[:,:]
-
-                # save the ensemble
-                ensemble_vec_full[:,:,k+1] = ensemble_vec[:nd,:]
-                
-                # before exiting the time loop, we have to gather data from all processors
-                if k == model_kwargs.get("nt",params["nt"]) - 1:
-                    # we are interested in ensemble_vec_full, ensemble_vec_mean, ensemble_bg
-                    gathered_ens_vec_mean = comm_world.allgather(ensemble_vec_mean)
-                    gathered_ens_vec_full = comm_world.allgather(ensemble_vec_full)
-                    if rank_world == 0:
-                        # print(f"[ICESEE] Ensemble mean shape: {[arr.shape for arr in gathered_ens_vec_mean]}")
-                        ensemble_vec_mean = np.vstack(gathered_ens_vec_mean)
-                        ensemble_vec_full = np.vstack(gathered_ens_vec_full)
-                        print(f"[ICESEE] Ensemble mean shape: {ensemble_vec_mean.shape}")
-                    else:
-                        ensemble_vec_mean = np.empty((shape_ens[0],model_kwargs.get("nt",params["nt"])+1), dtype=np.float64)
-                        ensemble_vec_full = np.empty((shape_ens[0],Nens,model_kwargs.get("nt",params["nt"])+1), dtype=np.float64)
-            # ------------------------------------------------- end of case 1 -------------------------------------------------
-
             if params["default_run"]:
                 # call the parallel_forecast_step_default_run function
                 model_kwargs, ensemble_vec, shape_ens,ens_mean = parallel_forecast_step_default_run(**model_kwargs)
@@ -824,103 +696,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                 # free up memory
                 del ensemble_vec; gc.collect()
             
-            # -------------------------------------------------- end of case 4 -------------------------------------------------    
-        #  ====== Serial run ======
-        else:
-            input_file = f"{_modelrun_datasets}/icesee_ensemble_data.h5"
-            with h5py.File(input_file, "r") as f:
-                ensemble_vec = f["ensemble"][:,:,k]
-
-            ensemble_vec = EnKFclass.forecast_step(ensemble_vec, \
-                                               model_module.forecast_step_single, \
-                                                Q_err, **model_kwargs)
-
-
-            #  compute the ensemble mean
-            ensemble_vec_mean[:,k+1] = np.mean(ensemble_vec, axis=1)
-
-            # Analysis step
-            obs_index = model_kwargs["obs_index"]
-            if (km < params["number_obs_instants"]) and (k+1 == obs_index[km]):
-
-                # Compute the model covariance
-                diff = ensemble_vec - np.tile(ensemble_vec_mean[:,k+1].reshape(-1,1),Nens)
-                if EnKF_flag or DEnKF_flag:
-                    Cov_model = 1/(Nens-1) * diff @ diff.T
-                elif EnRSKF_flag or EnTKF_flag:
-                    Cov_model = 1/(Nens-1) * diff 
-
-                # --- localization ---
-                if params["localization_flag"]:
-                    if not adaptive_localization:
-                        # call the gahpari-cohn localization function
-                        loc_matrix_spatial = gaspari_cohn(r_matrix)
-
-                        # expand to full state space
-                        loc_matrix = np.empty_like(Cov_model)
-                        for var_i in range(params["total_state_param_vars"]):
-                            for var_j in range(params["total_state_param_vars"]):
-                                start_i, start_j = var_i * hdim, var_j * hdim
-                                loc_matrix[start_i:start_i+hdim, start_j:start_j+hdim] = loc_matrix_spatial
-                        
-                        # apply the localization matrix
-                        # Cov_model = loc_matrix * Cov_model
-                        
-                    Cov_model = loc_matrix * Cov_model
-
-                    # inflate the top-left (smb h) and bottom-right (h smb) blocks of the covariance matrix 
-                    state_block_size = num_state_vars*hdim
-                    h_smb_block = Cov_model[:hdim,state_block_size:]
-                    smb_h_block = Cov_model[state_block_size:,:hdim]
-
-                    # apply the inflation factor
-                    params["inflation_factor"] = 1.2
-                    smb_h_block = UtilsFunctions(params, smb_h_block).inflate_ensemble(in_place=True)
-                    h_smb_block = UtilsFunctions(params, h_smb_block).inflate_ensemble(in_place=True)
-
-                    # update the covariance matrix
-                    Cov_model[:hdim,state_block_size:] = h_smb_block
-                    Cov_model[state_block_size:,:hdim] = smb_h_block
-
-                # check if params["sig_obs"] is a scalar
-                if isinstance(params["sig_obs"], (int, float)):
-                    params["sig_obs"] = np.ones(model_kwargs.get("nt",params["nt"])+1) * params["sig_obs"]
-
-
-                # Call the EnKF class for the analysis step
-                analysis  = EnKF(Observation_vec=  UtilsFunctions(params, ensemble_vec).Obs_fun(hu_obs[:,km]), 
-                                Cov_obs=params["sig_obs"][k+1]**2 * np.eye(2*params["number_obs_instants"]+1), \
-                                Cov_model= Cov_model, \
-                                Observation_function=UtilsFunctions(params, ensemble_vec).Obs_fun, \
-                                Obs_Jacobian=UtilsFunctions(params, ensemble_vec).JObs_fun, \
-                                parameters=  params,\
-                                parallel_flag=   parallel_flag)
-                
-                # Compute the analysis ensemble
-                if EnKF_flag:
-                    ensemble_vec, Cov_model = analysis.EnKF_Analysis(ensemble_vec)
-                elif DEnKF_flag:
-                    ensemble_vec, Cov_model = analysis.DEnKF_Analysis(ensemble_vec)
-                elif EnRSKF_flag:
-                    ensemble_vec, Cov_model = analysis.EnRSKF_Analysis(ensemble_vec)
-                elif EnTKF_flag:
-                    ensemble_vec, Cov_model = analysis.EnTKF_Analysis(ensemble_vec)
-                else:
-                    raise ValueError("Filter type not supported")
-
-                ensemble_vec_mean[:,k+1] = np.mean(ensemble_vec, axis=1)
-                
-                # update the ensemble with observations instants
-                km += 1
-
-                # inflate the ensemble
-                ensemble_vec = UtilsFunctions(params, ensemble_vec).inflate_ensemble(in_place=True)
-                # ensemble_vec = UtilsFunctions(params, ensemble_vec)._inflate_ensemble()
-            
-                # ensemble_vec_mean[:,k+1] = np.mean(ensemble_vec, axis=1)
-
-            # Save the ensemble
-            ensemble_vec_full[:,:,k+1] = ensemble_vec
+            # -------------------------------------------------- end of case 4 -------------------------------------------------   
 
         # update the progress bar
         if rank_world == 0:
@@ -933,29 +709,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
 
     # ====== load data to be written to file ======
     # print("[ICESEE] Saving data ...")
-    if params["even_distribution"]:
-        save_all_data(
-            enkf_params=model_kwargs['enkf_params'],
-            nofilter=True,
-            t=model_kwargs["t"], b_io=np.array([b_in,b_out]),
-            Lxy=np.array([Lx,Ly]),nxy=np.array([nx,ny]),
-            ensemble_true_state=ensemble_true_state,
-            ensemble_nurged_state=ensemble_nurged_state, 
-            obs_max_time=np.array([params["obs_max_time"]]),
-            obs_index=model_kwargs["obs_index"],
-            w=hu_obs,
-            run_mode= np.array([params["execution_flag"]])
-        )
-
-        # --- Save final data ---
-        save_all_data(
-            enkf_params=model_kwargs['enkf_params'],
-            ensemble_vec_full=ensemble_vec_full,
-            ensemble_vec_mean=ensemble_vec_mean,
-            ensemble_bg=ensemble_bg
-        )
-    else:
-        save_all_data(
+    save_all_data(
             enkf_params=model_kwargs['enkf_params'],
             nofilter=True,
             t=model_kwargs["t"], b_io=np.array([b_in,b_out]),

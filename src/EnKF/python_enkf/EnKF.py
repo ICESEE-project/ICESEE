@@ -53,7 +53,7 @@ class EnsembleKalmanFilter:
         self.parallel_manager       = parallel_manager
     
     # Forecast step
-    def forecast_step(self, ensemble=None, forecast_step_single=None, Q_err=None, **model_kwargs):
+    def forecast_step(self, ensemble=None, forecast_step_single=None, **model_kwargs):
         """
         Forecast step for the Ensemble Kalman Filter (EnKF).
         
@@ -66,16 +66,23 @@ class EnsembleKalmanFilter:
         Returns:
             ensemble: ndarray - Updated ensemble matrix.
         """
+        Q_err = model_kwargs.get("Q_err")
         
         if re.match(r"\Aserial\Z", self.parallel_flag, re.IGNORECASE):
             # Serial forecast step
             nd, Nens = ensemble.shape # Get the number of ensemble members
-            state_block_size = nd // self.parameters["total_state_param_vars"] 
-
+            state_block_size = nd if nd == self.parameters["total_state_param_vars"]  or nd < self.parameters["total_state_param_vars"] else nd // self.parameters["total_state_param_vars"]
+            # print(f"nd: {nd}, Nens: {Nens}, state_block_size: {state_block_size}")
+            print("[ICESEE] Running serial forecast step ...")
+            print(ensemble[:,0])
             # Loop over the ensemble members
             for ens in range(Nens):
-                ensemble[:,ens] = forecast_step_single(ens=ens, ensemble=ensemble, nd=nd, \
+                updated_sate = forecast_step_single(ens=ens, ensemble=ensemble[:,ens], nd=nd, \
                                               **model_kwargs)
+                for ii,var in enumerate(model_kwargs["vec_inputs"]):
+                    start_idx = ii * state_block_size
+                    end_idx   = start_idx + state_block_size
+                    ensemble[start_idx:end_idx,ens] = updated_sate[var]
                 q0 = multivariate_normal.rvs(np.zeros(nd), Q_err)
 
                 ensemble[:state_block_size,ens] = ensemble[:state_block_size,ens] + q0[:state_block_size]
