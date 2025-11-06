@@ -1,0 +1,114 @@
+disp('creating thickness');
+
+Lx = 640000;
+Ly = 80000;
+xbar = 300000;
+fc = 4000;
+wc = 24000;
+dc = 500;
+
+% bx profile
+bx = zeros(md.mesh.numberofvertices,1);
+pos = find(md.mesh.x <= 350000);
+bx(pos) = 150 - 3 * md.mesh.x(pos)/1000;
+
+pos = find(md.mesh.x > 350000 & md.mesh.x <= 450000);
+bx(pos) = -900 + 5 * (md.mesh.x(pos)/1000 - 350);
+
+pos = find(md.mesh.x > 450000);
+bx(pos) = -400 - 3 * (md.mesh.x(pos)/1000 - 450);
+
+% by profile
+by  = dc./(1 + exp(-2/fc * (md.mesh.y - Ly/2 - wc))) + ...
+      dc./(1 + exp( 2/fc * (md.mesh.y - Ly/2 + wc)));
+
+by0 = dc./(1 + exp(-2/fc * (0 - Ly/2 - wc))) + ...
+      dc./(1 + exp( 2/fc * (0 - Ly/2 + wc)));
+
+md.geometry.bed      = max(bx + by, -720);
+md.geometry.surface  = max(bx + by0 + 100, 10);
+md.geometry.base     = max(md.geometry.bed, -90);
+md.geometry.thickness = md.geometry.surface - md.geometry.base;
+
+%% --------------------------------------------------------------------
+disp('creating drag');
+
+Cx = 0.02 + 0.01 * sin(5 * 2*pi*(md.mesh.x - 640000)/640000) .* ...
+               sin(30 * 2*pi*md.mesh.x/640000);
+Cy = sin(pi*(md.mesh.y - 80000)/80000) + 2;
+
+md.friction.coefficient = sqrt((Cx .* Cy) * 1e6 .* (md.constants.yts).^(1/3));
+md.friction.p = 3 * ones(md.mesh.numberofelements,1);
+md.friction.q = zeros(md.mesh.numberofelements,1);
+
+%% --------------------------------------------------------------------
+disp('creating flow law parameter');
+
+md.materials.rheology_B = (1 / ((6.338e-25)^(1/3))) * ...
+                           ones(md.mesh.numberofvertices,1);
+md.materials.rheology_n = 3 * ones(md.mesh.numberofelements,1);
+md.materials.rheology_law = 'None';
+
+%% --------------------------------------------------------------------
+disp('boundary conditions for diagnostic model');
+
+% initialize masks
+md.mask.ice_levelset   = NaN(md.mesh.numberofvertices,1);
+md.mask.ocean_levelset = NaN(md.mesh.numberofvertices,1);
+
+% Apply ice shelf front boundary
+md = SetIceShelfBC(md, './Front.exp');
+md.mask.ice_levelset(:)   = -1;
+md.mask.ocean_levelset(:) = -1;
+
+% Floating front (x ≈ 640 km)
+pos = find(md.mesh.x < 640000.1 & md.mesh.x > 639999.9);
+md.mask.ice_levelset(pos) = 0;
+
+% Stress balance BCs
+md.stressbalance.spcvx = NaN(md.mesh.numberofvertices,1);
+md.stressbalance.spcvy = NaN(md.mesh.numberofvertices,1);
+
+% y = 0 and y = Ly boundaries
+pos = find((md.mesh.y < 0.1 & md.mesh.y > -0.1) | ...
+           (md.mesh.y < 80000.1 & md.mesh.y > 79999.9));
+md.stressbalance.spcvy(pos) = 0;
+
+% x = 0 inflow boundary
+pos2 = find(md.mesh.x < 0.1 & md.mesh.x > -0.1);
+md.stressbalance.spcvx(pos2) = 50;
+md.stressbalance.spcvy(pos2) = 0;
+
+%% --------------------------------------------------------------------
+disp('forcing conditions');
+
+% Surface mass balance
+md.smb.mass_balance = 0.3 * ones(md.mesh.numberofvertices,1);
+
+% Geothermal flux
+md.basalforcings.geothermalflux = 0.5 * ones(md.mesh.numberofvertices,1);
+
+% Thermal & grounding line settings
+md.thermal.spctemperature = NaN(md.mesh.numberofvertices,1);
+md.groundingline.migration = 'SubelementMigration';
+
+% Material constants
+md.materials.rho_ice   = 918;
+md.materials.rho_water = 1028;
+md.constants.g = 9.81;
+
+% Transient options
+md.transient.isthermal        = 0;
+md.transient.isgroundingline  = 1;
+md.stressbalance.isnewton     = 0;
+
+%% --------------------------------------------------------------------
+disp('initialization');
+
+md.initialization.vx = ones(md.mesh.numberofvertices,1);
+md.initialization.vy = ones(md.mesh.numberofvertices,1);
+md.initialization.vz = ones(md.mesh.numberofvertices,1);
+md.initialization.vel = sqrt(2) * ones(md.mesh.numberofvertices,1);
+md.initialization.pressure = md.constants.g * md.materials.rho_ice .* ...
+                             md.geometry.thickness;
+md.initialization.temperature = 273 * ones(md.mesh.numberofvertices,1);
