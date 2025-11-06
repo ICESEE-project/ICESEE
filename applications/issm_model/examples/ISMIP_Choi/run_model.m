@@ -387,7 +387,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.timestepping = timestepping();
             md.timestepping.time_step = 0.1;
             md.timestepping.start_time = 0;
-            md.timestepping.final_time = 2.0;
+            md.timestepping.final_time = 1.0;
             md.settings.output_frequency = output_frequency; %make sure this is set to 1 for 
             md.stressbalance.maxiter = 100;
             md.stressbalance.restol = 1;
@@ -612,7 +612,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Load ensemble input from HDF5
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
-            md.geometry.thickness = h5read(filename, '/Surface');
+            md.geometry.surface = h5read(filename, '/Surface');
             md.initialization.vx = h5read(filename, '/Vx');
             md.initialization.vy = h5read(filename, '/Vy');
             md.initialization.vel = sqrt(md.initialization.vx.^2 + md.initialization.vy.^2);
