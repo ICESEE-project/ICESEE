@@ -204,19 +204,32 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % md.geometry.base = base_ref + bed_err;
         md.geometry.bed = bed_ref + bed;
         md.geometry.base = base_ref + bed;
+        
+        % Compute ice thickness
+        md.geometry.thickness = generate_correlated_field(md, thickness_ref, 10e3, 300);
 
-        md.geometry.thickness=md.geometry.surface-md.geometry.base;
+        % Ensure minimum ice thickness of 1 m
         pos = find(md.geometry.thickness < 1);
         md.geometry.thickness(pos) = 1;
         md.geometry.surface = md.geometry.base + md.geometry.thickness;
+
+        disp('      -- ice shelf base based on hydrostatic equilibrium');
         di = md.materials.rho_ice / md.materials.rho_water;
+
+        % Compute ocean level set based on hydrostatic equilibrium
         md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
+
+        % Floating ice (ocean_levelset < 0)
         pos = find(md.mask.ocean_levelset < 0);
-        md.geometry.surface(pos) = md.geometry.thickness(pos) * ...
-            (md.materials.rho_water - md.materials.rho_ice) / md.materials.rho_water;
+        md.geometry.surface(pos) = md.geometry.thickness(pos) .* ...
+        (md.materials.rho_water - md.materials.rho_ice) / md.materials.rho_water;
         md.geometry.base = md.geometry.surface - md.geometry.thickness;
+
+        % Ensure base not below bedrock
         pos = find(md.geometry.base < md.geometry.bed);
         md.geometry.base(pos) = md.geometry.bed(pos);
+
+        % Grounded ice (ocean_levelset > 0)
         pos = find(md.mask.ocean_levelset > 0);
         md.geometry.base(pos) = md.geometry.bed(pos);
         md.geometry.surface = md.geometry.base + md.geometry.thickness;
@@ -367,21 +380,36 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
     
             md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
 
-            md.geometry.thickness=md.geometry.surface-md.geometry.base;
+            % Compute ice thickness
+            % md.geometry.thickness = md.geometry.surface - md.geometry.base;
+            md.geometry.thickness = generate_correlated_field(md, thickness_ref, 10e3, 300);
+
+            % Ensure minimum ice thickness of 1 m
             pos = find(md.geometry.thickness < 1);
             md.geometry.thickness(pos) = 1;
             md.geometry.surface = md.geometry.base + md.geometry.thickness;
+
+            disp('      -- ice shelf base based on hydrostatic equilibrium');
             di = md.materials.rho_ice / md.materials.rho_water;
+
+            % Compute ocean level set based on hydrostatic equilibrium
             md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
+
+            % Floating ice (ocean_levelset < 0)
             pos = find(md.mask.ocean_levelset < 0);
-            md.geometry.surface(pos) = md.geometry.thickness(pos) * ...
+            md.geometry.surface(pos) = md.geometry.thickness(pos) .* ...
                 (md.materials.rho_water - md.materials.rho_ice) / md.materials.rho_water;
             md.geometry.base = md.geometry.surface - md.geometry.thickness;
+
+            % Ensure base not below bedrock
             pos = find(md.geometry.base < md.geometry.bed);
             md.geometry.base(pos) = md.geometry.bed(pos);
+
+            % Grounded ice (ocean_levelset > 0)
             pos = find(md.mask.ocean_levelset > 0);
             md.geometry.base(pos) = md.geometry.bed(pos);
             md.geometry.surface = md.geometry.base + md.geometry.thickness;
+
 
             % --time stepping
             md.timestepping = timestepping();
@@ -471,10 +499,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                 mkdir(folder_true);
             end
             % filename = fullfile(folder_true, 'true_state.mat');
-            filename = fullfile(folder_init, reference_data);
+            % filename = fullfile(folder_init, reference_data);
             % filename = fullfile(icesee_path, 'data', wrong_reference_data);
 
-            % filename = fullfile(folder, 'initialize_ensemble.mat');
+            filename = fullfile(folder, 'initialize_ensemble.mat');
             md = loadmodel(filename);
             
             md.inversion.iscontrol            = 0;
@@ -522,30 +550,33 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.timestepping.final_time = 0.2;
             md.settings.output_frequency = output_frequency; %make sure this is set to 1 for
             
-            % Enforce minimum thickness
-            pos = (md.geometry.thickness < 1);
+            % Ensure minimum ice thickness
+            pos = find(md.geometry.thickness < 1);
             md.geometry.thickness(pos) = 1;
 
-            % Ocean level set and flotation geometry
+            % Compute density ratio
             di = md.materials.rho_ice / md.materials.rho_water;
+
+            % Compute ocean level set
             md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
 
-            % Below sea levelset: set surface by flotation, then base = surface - thickness
-            pos = (md.mask.ocean_levelset < 0);
+            % Floating ice (ocean_levelset < 0)
+            pos = find(md.mask.ocean_levelset < 0);
             md.geometry.surface(pos) = md.geometry.thickness(pos) .* ...
                 (md.materials.rho_water - md.materials.rho_ice) / md.materials.rho_water;
 
+            % Update base geometry
             md.geometry.base = md.geometry.surface - md.geometry.thickness;
 
-            % If base < bed (no-op in your Python; keeping it as-is, see note below)
-            pos = (md.geometry.base < md.geometry.bed);
-            md.geometry.base(pos) = md.geometry.base(pos);  % no change; see note
-
-            % Above sea levelset: grounded—set base to bed
-            pos = (md.mask.ocean_levelset > 0);
+            % Ensure base is not below bedrock
+            pos = find(md.geometry.base < md.geometry.bed);
             md.geometry.base(pos) = md.geometry.bed(pos);
 
-            % Update surface for consistency
+            % Grounded ice (ocean_levelset > 0)
+            pos = find(md.mask.ocean_levelset > 0);
+            md.geometry.base(pos) = md.geometry.bed(pos);
+
+            % Update surface geometry
             md.geometry.surface = md.geometry.base + md.geometry.thickness;
 
             % % Outputs and verbosity
@@ -595,20 +626,20 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md = loadmodel(filename);
             
             % update geometry
-            md.geometry.thickness = md.results.TransientSolution(end).Thickness;
-            md.geometry.surface   = md.results.TransientSolution(end).Surface;
+            % md.geometry.thickness = md.results.TransientSolution(end).Thickness;
+            % md.geometry.surface   = md.results.TransientSolution(end).Surface;
             md.geometry.base      = md.results.TransientSolution(end).Base;
 
             % Update other fields
-            md.initialization.vx        = md.results.TransientSolution(end).Vx;
-            md.initialization.vy        = md.results.TransientSolution(end).Vy;
-            md.initialization.vel       = md.results.TransientSolution(end).Vel;
+            % md.initialization.vx        = md.results.TransientSolution(end).Vx;
+            % md.initialization.vy        = md.results.TransientSolution(end).Vy;
+            % md.initialization.vel       = md.results.TransientSolution(end).Vel;
             % md.initialization.pressure  = md.results.TransientSolution(end).Pressure;
             % md.smb.mass_balance         = md.results.TransientSolution(end).SmbMassBalance;
             md.mask.ocean_levelset      = md.results.TransientSolution(end).MaskOceanLevelset;
 
-            md.geometry.bed = md.results.TransientSolution(end).Bed;
-            md.friction.coefficient = md.results.TransientSolution(end).FrictionCoefficient;
+            % md.geometry.bed = md.results.TransientSolution(end).Bed;
+            % md.friction.coefficient = md.results.TransientSolution(end).FrictionCoefficient;
 
             % Load ensemble input from HDF5
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
@@ -621,44 +652,39 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.geometry.bed = h5read(filename, '/bed');
             md.friction.coefficient = h5read(filename, '/coefficient');
 
-            % Set minimum thickness to 1
+            % Ensure base not below bedrock*---
+            pos = find(md.geometry.base < md.geometry.bed);
+            md.geometry.base(pos) = md.geometry.bed(pos);
+            % %*---<----
+            % % Compute ice thickness
+            md.geometry.thickness = md.geometry.surface - md.geometry.base;
+            % % md.geometry.thickness = md.results.TransientSolution(end).Thickness;
+
+            % % Ensure minimum ice thickness of 1 m
             pos = find(md.geometry.thickness < 1);
             md.geometry.thickness(pos) = 1;
-
-            % Update surface
             md.geometry.surface = md.geometry.base + md.geometry.thickness;
 
-            md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
-
             % disp('      -- ice shelf base based on hydrostatic equilibrium');
-
-            % Calculate density ratio
             di = md.materials.rho_ice / md.materials.rho_water;
 
-            % Calculate ocean levelset
+            % % Compute ocean level set based on hydrostatic equilibrium
             md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
 
-            % Find positions where ocean_levelset < 0
+            % Floating ice (ocean_levelset < 0)
             pos = find(md.mask.ocean_levelset < 0);
-
-            % Update surface for floating ice
-            md.geometry.surface(pos) = md.geometry.thickness(pos) * ...
+            md.geometry.surface(pos) = md.geometry.thickness(pos) .* ...
                 (md.materials.rho_water - md.materials.rho_ice) / md.materials.rho_water;
-
-            % Update base
             md.geometry.base = md.geometry.surface - md.geometry.thickness;
 
-            % Ensure base is not below bed
+            % Ensure base not below bedrock
             pos = find(md.geometry.base < md.geometry.bed);
             md.geometry.base(pos) = md.geometry.bed(pos);
 
-            % For grounded ice (ocean_levelset > 0)
+            % Grounded ice (ocean_levelset > 0)
             pos = find(md.mask.ocean_levelset > 0);
             md.geometry.base(pos) = md.geometry.bed(pos);
-
-            % Final surface update
             md.geometry.surface = md.geometry.base + md.geometry.thickness;
-
 
             % Time stepping
             md.timestepping = timestepping();
@@ -705,32 +731,34 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.friction.coefficient = md.results.TransientSolution(end).FrictionCoefficient;
 
             % *--
-            % Enforce minimum thickness
-            pos = (md.geometry.thickness < 1);
+            % Ensure minimum ice thickness of 1 m
+            pos = find(md.geometry.thickness < 1);
             md.geometry.thickness(pos) = 1;
 
-            % Ocean level set and flotation geometry
+            % Density ratio
             di = md.materials.rho_ice / md.materials.rho_water;
+
+            % Compute ocean level set based on hydrostatic equilibrium
             md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
 
-            % Below sea levelset: set surface by flotation, then base = surface - thickness
-            pos = (md.mask.ocean_levelset < 0);
+            % Floating ice (ocean_levelset < 0)
+            pos = find(md.mask.ocean_levelset < 0);
             md.geometry.surface(pos) = md.geometry.thickness(pos) .* ...
                 (md.materials.rho_water - md.materials.rho_ice) / md.materials.rho_water;
 
+            % Update base geometry
             md.geometry.base = md.geometry.surface - md.geometry.thickness;
 
-            % If base < bed (no-op in your Python; keeping it as-is, see note below)
-            pos = (md.geometry.base < md.geometry.bed);
-            md.geometry.base(pos) = md.geometry.base(pos);  % no change; see note
-
-            % Above sea levelset: grounded—set base to bed
-            pos = (md.mask.ocean_levelset > 0);
+            % Ensure base not below bedrock
+            pos = find(md.geometry.base < md.geometry.bed);
             md.geometry.base(pos) = md.geometry.bed(pos);
 
-            % Update surface for consistency
-            md.geometry.surface = md.geometry.base + md.geometry.thickness;
+            % Grounded ice (ocean_levelset > 0)
+            pos = find(md.mask.ocean_levelset > 0);
+            md.geometry.base(pos) = md.geometry.bed(pos);
 
+            % Update surface geometry
+            md.geometry.surface = md.geometry.base + md.geometry.thickness;
 
             % Save ensemble outputs in HDF5
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
@@ -773,4 +801,53 @@ function writeToHDF5(filename, data)
         h5create(filename, ['/' var_name], size(var_value));
         h5write(filename, ['/' var_name], var_value);
     end
+end
+
+function field = generate_correlated_field(md, ref_field, corr_length, std_dev)
+%==========================================================================
+% generate_correlated_field  (toolbox-free version)
+%
+% Purpose:
+%   Generate a spatially correlated Gaussian random field suitable for EnKF
+%   ensemble initialization in ISSM/ICESEE, without requiring pdist().
+%
+% Author:  Brian Kyanjo (2025)
+%==========================================================================
+
+    x = md.mesh.x(:);
+    y = md.mesh.y(:);
+    n = md.mesh.numberofvertices;
+
+    rng('shuffle');
+
+    % --- Compute pairwise distance matrix manually (memory-optimized) ---
+    D2 = zeros(n, n);
+    for i = 1:n
+        dx = x - x(i);
+        dy = y - y(i);
+        D2(:, i) = dx.^2 + dy.^2;
+    end
+
+    % Gaussian covariance model
+    C = exp(-D2 / (2 * corr_length^2));
+
+    % Add small diagonal regularization
+    C = C + 1e-6 * eye(n);
+
+    % Cholesky decomposition (may require cholcov for large n)
+    L = chol(C, 'lower');
+
+    % Generate correlated perturbation
+    z = randn(n,1);
+    perturbation = std_dev * (L * z);
+
+    % Apply perturbation
+    field = ref_field + perturbation;
+
+    % Enforce minimum physical constraint
+    pos = find(field < 1);
+    field(pos) = 1;
+
+    disp(['[generate_correlated_field] Applied correlated noise with L = ' ...
+        num2str(corr_length/1e3, '%.1f') ' km, std = ' num2str(std_dev) ' m']);
 end
