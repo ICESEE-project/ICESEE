@@ -27,6 +27,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
     % set initail ens_id
     ens_id_init = 0;
+    h_perturb = 500;
 
     output_frequency = 1; % make sure this is set to 1 for coupling with ICESEE
 
@@ -206,7 +207,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.geometry.base = base_ref + bed;
         
         % Compute ice thickness
-        md.geometry.thickness = generate_correlated_field(md, thickness_ref, 10e3, 300);
+        % md.geometry.thickness = generate_correlated_field(md, thickness_ref, 10e3, 300);
+        rand_field = h_perturb * (randn(md.mesh.numberofvertices,1) - min(randn(md.mesh.numberofvertices,1))) ./ (max(randn(md.mesh.numberofvertices,1)) - min(randn(md.mesh.numberofvertices,1)));
+        md.geometry.thickness = thickness_ref + rand_field;
 
         % Ensure minimum ice thickness of 1 m
         pos = find(md.geometry.thickness < 1);
@@ -382,7 +385,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Compute ice thickness
             % md.geometry.thickness = md.geometry.surface - md.geometry.base;
-            md.geometry.thickness = generate_correlated_field(md, thickness_ref, 10e3, 300);
+            % md.geometry.thickness = generate_correlated_field(md, thickness_ref, 10e3, 300);
+            rand_field = h_perturb * (randn(md.mesh.numberofvertices,1) - min(randn(md.mesh.numberofvertices,1))) ./ (max(randn(md.mesh.numberofvertices,1)) - min(randn(md.mesh.numberofvertices,1)));
+        md.geometry.thickness = thickness_ref + rand_field;
 
             % Ensure minimum ice thickness of 1 m
             pos = find(md.geometry.thickness < 1);
