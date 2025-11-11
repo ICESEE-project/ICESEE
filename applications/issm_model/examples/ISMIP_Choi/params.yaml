@@ -29,9 +29,9 @@ enkf-parameters:
   obs_max_time: 40            # Maximum time for observations (30 years)
   obs_start_time: 2            # Start time for observations (start of simulation)
 
-  generate_synthetic_obs: 0  # Generate synthetic observations for testing
-  generate_true_state:    0  # Generate true state for synthetic observations
-  generate_nurged_state:  0  # Generate nudged state for synthetic observations
+  generate_synthetic_obs: 1  # Generate synthetic observations for testing
+  generate_true_state:    1  # Generate true state for synthetic observations
+  generate_nurged_state:  1  # Generate nudged state for synthetic observations
   sequential_ensemble_initialization: 1
   use_ensemble_pertubations: 1
 
@@ -45,10 +45,10 @@ enkf-parameters:
   bed_obs_spacing: 30000          # Spacing of bedrock elevation observations (30 km)
 
   # Statistical parameters
-  sig_obs: [0.01, 5, 10, 10, 3, 0.01]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
-  sig_Q: [0.8, 0.9, 0.4, 0.08, 0.08, 0.6]          # Process noise std dev (adjusted for H, Vx, Vy)
+  sig_obs: [0.01, 5, 8, 7, 3, 0.01]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
+  sig_Q: [0.8, 0.4, 0.4, 0.08, 0.08, 0.8]          # Process noise std dev (adjusted for H, Vx, Vy)
   # length_scale: [300,220,180,150,320]               # Length scale for covariance (5 km for friction, per paper)
-  length_scale: [1400, 1500,1200,1200,1800,1900] 
+  length_scale: [1800, 1800,1300,1300,1800,1900] 
 
   seed: 42                       # Seed for random number generator
   inflation_factor: 1.15        # Inflation factor (optimal range 1.10–1.18 from paper)

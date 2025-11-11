@@ -27,8 +27,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
     % set initail ens_id
     ens_id_init = 0;
-    h_perturb = 300;
-    nurged_entries_percentage = 0.20;
+    h_perturb = 400;
+    nurged_entries_percentage = 0.25;
 
     output_frequency = 1; % make sure this is set to 1 for coupling with ICESEE
 

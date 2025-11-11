@@ -8,10 +8,18 @@ close all; clear all
 
 % data_file_paths='data_0/_modelrun_datasets';
 % data_file_paths='data_1';
-% data_file_paths='_modelrun_datasets';
+data_file_paths='_modelrun_datasets';
 % data_file_paths='test_data_al';
-data_file_paths='test_data';
+% data_file_paths='test_data_al1';
 
+% time steps
+k_array = [25, 50, 80, 150, 230, 300];  % multiple time steps
+% k_array=[25, 50, 80];
+dt = 0.2;
+
+make_plots = false;
+% k = nt-1;
+% k=1;
 
 % Load the essential data
 results_dir = 'results';
@@ -55,73 +63,60 @@ md_mean = md; md_ens = md;
 % dt = t(2) - t(1);
 % dt = 0.25;
 
-% k = nt-1;
-% k=1;
 
-%%  Thickness plots --------------------
-dt  = 0.2;
-k1  = 10;     
-k2  = 40;   
-k3  = 80;  
-% k1=10;
-% k2=20;
-% k3=80;
 % thickness difference plots
-plot_var_diff(k1, k2, k3, dt, ...
+plot_var_diff(k_array, dt, ...
     model_true_state, model_nurged_state, ensemble_vec_mean, ...
     md_true, md_nurged, md_ens, md, ...
     'geometry.thickness', 'Thicknes', 'm');
 
  % thickness plot evolution
-plot_var_evolution(k1, k2, k3, dt, ...
+plot_var_evolution(k_array, dt, ...
     model_true_state, model_nurged_state, ensemble_vec_mean, ...
     md_true, md_nurged, md_ens, md, ...
     'geometry.thickness', 'Thickness', 'm');
 
-plot_var_diff(k1, k2, k3, dt, ...
+plot_var_diff(k_array, dt, ...
     model_true_state, model_nurged_state, ensemble_vec_mean, ...
     md_true, md_nurged, md_ens, md, ...
     'geometry.surface', 'Surface', 'm');
 
  % thickness plot evolution
-plot_var_evolution(k1, k2, k3, dt, ...
+plot_var_evolution(k_array, dt, ...
     model_true_state, model_nurged_state, ensemble_vec_mean, ...
     md_true, md_nurged, md_ens, md, ...
     'geometry.surface', 'Surface', 'm');
 
     % velocity evolution plots
-plot_var_evolution(k1, k2, k3, dt, ...
+plot_var_evolution(k_array, dt, ...
     model_true_state, model_nurged_state, ensemble_vec_mean, ...
     md_true, md_nurged, md_ens, md, ...
     'initialization.vel', 'Velocity', 'm/s');
 
-plot_var_diff(k1, k2, k3, dt, ...
+plot_var_diff(k_array, dt, ...
     model_true_state, model_nurged_state, ensemble_vec_mean, ...
     md_true, md_nurged, md_ens, md, ...
     'initialization.vel', 'Velocity', 'm');
     % bed topography evolution plots        
-plot_var_evolution(k1, k2, k3, dt, ...
+plot_var_evolution(k_array, dt, ...
     model_true_state, model_nurged_state, ensemble_vec_mean, ...
     md_true, md_nurged, md_ens, md, ...
     'geometry.bed', 'Bed Elevation', 'm');
-plot_var_diff(k1, k2, k3, dt, ...
+plot_var_diff(k_array, dt, ...
     model_true_state, model_nurged_state, ensemble_vec_mean, ...
     md_true, md_nurged, md_ens, md, ...
     'geometry.bed', 'Bed', 'm');
 
     % friction coefficient evolution plots  
-plot_var_evolution(k1, k2, k3, dt, ...
+plot_var_evolution(k_array, dt, ...
     model_true_state, model_nurged_state, ensemble_vec_mean, ...
     md_true, md_nurged, md_ens, md, ...
     'friction.coefficient', 'Friction Coefficient', '');
-plot_var_diff(k1, k2, k3, dt, ...
+plot_var_diff(k_array, dt, ...
     model_true_state, model_nurged_state, ensemble_vec_mean, ...
     md_true, md_nurged, md_ens, md, ...
     'friction.coefficient', 'Friction', 'm');
 
-
-
-make_plots = false;
 if make_plots
     % thickness
     plot_triptych(md_true, md_nurged, md_ens, ...
@@ -196,233 +191,229 @@ end
 
 
 %% -- helper functions -- %%
-function plot_var_diff(k1, k2, k3, dt, ...
+function plot_var_diff(k_array, dt, ...
     model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    md_true, md_nurged, md_ens, md, field,field_title, units)
+    md_true, md_nurged, md_ens, md, field, field_title, units)
     % =========================================================================
     % plot_var_diff
-    %
-    % Purpose:
-    %   Compare the evolution of a field (e.g., geometry.thickness) between
-    %   the true simulation, the no-assimilation run, and assimilated runs.
-    %
-    % Panels:
-    %   (a) True field
-    %   (b) No assimilation − True (Δ without assimilation)
-    %   (c) Assimilated − True after k1
-    %   (d) Assimilated − True after k2
-    %   (e) Assimilated − True after k3
-    %
-    % Author:  Brian Kyanjo
-    % Date:    2025-11-04
+    % Automatically adapts the number of subplots to the length of k_array.
     % =========================================================================
 
     if nargin < 12, units = ''; end
     units_str = iff(~isempty(units), [' (' units ')'], '');
+    nk = length(k_array);
+    nrows = 2 + nk;  % (a) True + (b) No assimilation + (c...e) Assim steps
 
-    % --- Create figure ---
-    figure('Position',[100 100 1000 850]); clf;
+    figure('Position',[100 100 1000 150 + 150*nrows]); clf;
 
-    % -------------------------------------------------------------------------
+    % ---- Compute global colour limits across all requested steps ----
+    all_data = [];
+
+    for k = [1, k_array]          % include the true (initial) state
+        [md_true_tmp, md_nurged_tmp, md_ens_tmp] = setup_model_states(k, dt, ...
+            model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md);
+        data_tmp = get_nested_field(md_ens_tmp, field);
+        all_data = [all_data; data_tmp(:)];
+        % Also include true state for diff limits
+        data_true_tmp = get_nested_field(md_true_tmp, field);
+        all_data = [all_data; data_true_tmp(:)];
+        % nureged state for diff limits
+        data_nurged_tmp = get_nested_field(md_nurged_tmp, field);
+        all_data = [all_data; data_nurged_tmp(:)];
+    end
+
+    cmin = min(all_data);
+    cmax = max(all_data);
+    clear all_data
+
     % (a) True field
-    % -------------------------------------------------------------------------
     [md_true, md_nurged, md_ens] = setup_model_states(1, dt, ...
         model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md);
-
-    data_true   = get_nested_field(md_true, field);
+    data_true = get_nested_field(md_true, field);
+    data_ens  = get_nested_field(md_ens, field);
     data_nurged = get_nested_field(md_nurged, field);
-    data_ens    = get_nested_field(md_ens, field);
-
-    cmin = min([data_true(:); data_nurged(:); data_ens(:)]);
-    cmax = max([data_true(:); data_nurged(:); data_ens(:)]);
-    % cmin = min([data_true(:);  data_ens(:)]);
-    % cmax = max([data_true(:);  data_ens(:)]);
+    % cmin = min([data_true(:); data_ens(:)]);
+    % cmax = max([data_true(:); data_ens(:)]);
 
     plotmodel(md_true, 'data', data_true, ...
-        'title', sprintf('(a) True %s',field_title), ...
-        'subplot', [5,1,1], 'caxis', [cmin cmax], 'colorbar', 'off');
+        'title', sprintf('(a) True %s', field_title), ...
+        'subplot', [nrows, 1, 1], 'caxis', [cmin cmax], 'colorbar', 'off');
 
-    % -------------------------------------------------------------------------
     % (b) No assimilation − True
-    % -------------------------------------------------------------------------
-    diff_noassim = data_nurged - data_true;
     % diff_noassim = data_ens - data_true;
+    diff_noassim = data_nurged - data_true;
     maxAbs_noassim = max(abs(diff_noassim(:)));
-
     plotmodel(md_nurged, 'data', diff_noassim, ...
         'title', '(b) No assimilation − True', ...
-        'subplot', [5,1,2], 'caxis', [-maxAbs_noassim maxAbs_noassim], 'colorbar', 'off');
+        'subplot', [nrows, 1, 2], 'caxis', [-maxAbs_noassim maxAbs_noassim], 'colorbar', 'off');
 
-    % -------------------------------------------------------------------------
-    % Helper nested function for assimilation differences
-    % -------------------------------------------------------------------------
-    function make_diff_panel(idx, k, label)
+    % (c...): Assimilation differences at each k
+    for idx = 1:nk
+        label = sprintf('(%c)', 'b' + idx);
+        k = k_array(idx);
         [md_true, md_nurged, md_ens] = setup_model_states(k, dt, ...
             model_true_state, model_nurged_state, ensemble_vec_mean, ...
             md_true, md_nurged, md_ens, md);
         diff_data = get_nested_field(md_ens, field) - get_nested_field(md_true, field);
         maxAbs = max(abs(diff_data(:)));
-        minAbs = min(abs(diff_data(:)));
         plotmodel(md_ens, 'data', diff_data, ...
             'title', sprintf('%s Assimilated − True (after %.1f years)', label, (k-1)*dt), ...
-            'subplot', [5,1,idx], 'caxis', [-maxAbs maxAbs], 'colorbar', 'off');
+            'subplot', [nrows, 1, idx + 2], 'caxis', [-maxAbs maxAbs], 'colorbar', 'off');
     end
 
-    % -------------------------------------------------------------------------
-    % (c–e) Assimilation differences at chosen times
-    % -------------------------------------------------------------------------
-    make_diff_panel(3, k1, '(c)');
-    make_diff_panel(4, k2, '(d)');
-    make_diff_panel(5, k3, '(e)');
-
-    % -------------------------------------------------------------------------
-    % Layout and colorbars
-    % -------------------------------------------------------------------------
+    % Adjust layout
     axs = flipud(findall(gcf,'Type','axes'));
-    gap = -0.26; top = 0.95; bottom = 0.08;
-    height = (top-bottom - 4.25*gap)/5;
+    % --- Adaptive layout scaling ---
+    gap = 0.02;              % small positive gap
+    top = 0.95; bottom = 0.08;
+    available_height = top - bottom - (nrows-1)*gap;
+    height = available_height / nrows;
 
-    for i = 1:5
-        pos = [0.10, bottom+(5-i)*(height+gap), 0.70, height];
-        set(axs(i), 'Position', pos, ...
-            'FontWeight', 'bold', 'LineWidth', 1.2, ...
-            'Box', 'on', 'TickDir', 'out', 'Layer', 'top','TickLength',[0.005 0.005],'FontSize', 11);
+    % if too small (many rows), expand figure height automatically
+    if height < 0.05
+        fig = gcf;
+        scale_factor = max(1, ceil(0.05 / height));  % ensure visible spacing
+        fig.Position(4) = fig.Position(4) * scale_factor;  % increase figure height
+        height = 0.05;  % set to minimum safe height
+    end
+
+
+    for i = 1:nrows
+        pos = [0.10, bottom+(nrows-i)*(height+gap), 0.70, height];
+        set(axs(i), 'Position', pos, 'FontWeight', 'bold', ...
+            'LineWidth', 1.2, 'Box', 'on', 'TickDir', 'out', ...
+            'Layer', 'top', 'FontSize', 11, 'TickLength',[0.005 0.005]);
         ylabel(axs(i),'y (km)','FontWeight','bold');
-        if i < 5
+        if i < nrows
             set(axs(i),'XTickLabel',[]);
         else
             xlabel(axs(i),'x (km)','FontWeight','bold');
         end
     end
 
-    % --- (a) colorbar: True field (panel 1) ---
+    % Colorbars
     cb1 = colorbar(axs(1), 'Position',[0.83 0.68 0.025 0.16]);
-    % ylabel(cb1,[field units_str],'FontSize',12,'FontWeight','bold');
     ylabel(cb1,[field_title units_str],'FontSize',12,'FontWeight','bold');
     colormap(axs(1), parula);
-
-    % --- (b–e) colorbar: Differences (no-assim & assimilations) ---
-    for i = 2:5, colormap(axs(i), redblue(256)); end
-    cb2 = colorbar(axs(5), 'Position',[0.83 0.25 0.025 0.40]);
+    for i = 2:nrows, colormap(axs(i), redblue(256)); end
+    cb2 = colorbar(axs(end), 'Position',[0.83 0.25 0.025 0.40]);
     ylabel(cb2,['Δ' field_title units_str],'FontSize',12,'FontWeight','bold');
-
     set(gcf,'Color','w');
-
 end
 
-function plot_var_evolution(k1, k2, k3, dt, ...
+
+function plot_var_evolution(k_array, dt, ...
     model_true_state, model_nurged_state, ensemble_vec_mean, ...
     md_true, md_nurged, md_ens, md, field, field_title, units)
     % =========================================================================
     % plot_var_evolution
-    %
-    % Purpose:
-    %   Plot a variable (e.g., geometry.thickness, initialization.vel, etc.)
-    %   across assimilation cycles:
-    %       (a) True
-    %       (b) No assimilation
-    %       (c) Assimilated after k1
-    %       (d) Assimilated after k2
-    %       (e) Assimilated after k3
-    %
-    % Author:  Brian Kyanjo
-    % Date:    2025-11-05
+    % Automatically adapts subplot layout to number of k_array elements.
     % =========================================================================
 
     if nargin < 13, field_title = field; end
     if nargin < 14, units = ''; end
     units_str = iff(~isempty(units), [' (' units ')'], '');
+    nk = length(k_array);
+    nrows = 2 + nk;
 
-    figure('Position',[100 100 1000 850]); clf;
+    figure('Position',[100 100 1000 150 + 150*nrows]); clf;
 
-    % --- Panel (a): True simulation ------------------------------------------
+    % ---- Compute global colour limits across all requested steps ----
+    all_data = [];
+
+    for k = [1, k_array]          % include the true (initial) state
+        [md_true_tmp, md_nurged_tmp, md_ens_tmp] = setup_model_states(k, dt, ...
+            model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md);
+        data_tmp = get_nested_field(md_ens_tmp, field);
+        all_data = [all_data; data_tmp(:)];
+        % Also include true state for diff limits
+        data_true_tmp = get_nested_field(md_true_tmp, field);
+        all_data = [all_data; data_true_tmp(:)];
+        % nureged state for diff limits
+        data_nurged_tmp = get_nested_field(md_nurged_tmp, field);
+        all_data = [all_data; data_nurged_tmp(:)];
+    end
+
+    cmin = min(all_data);
+    cmax = max(all_data);
+    clear all_data
+
+    % (a) True
     [md_true, md_nurged, md_ens] = setup_model_states(1, dt, ...
         model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md);
-
-    data_true   = get_nested_field(md_true, field);
+    data_true = get_nested_field(md_true, field);
+    data_ens  = get_nested_field(md_ens, field);
     data_nurged = get_nested_field(md_nurged, field);
-    data_ens    = get_nested_field(md_ens, field);
-
-    % cmin = min([data_true(:); data_nurged(:); data_ens(:)]);
-    % cmax = max([data_true(:); data_nurged(:); data_ens(:)]);
-    cmin = min([data_true(:);  data_ens(:)]);
-    cmax = max([data_true(:);  data_ens(:)]);
-
+    % cmin = min([data_true(:); data_ens(:)]);
+    % cmax = max([data_true(:); data_ens(:)]);
     plotmodel(md_true, 'data', data_true, ...
         'title', sprintf('(a) True %s', field_title), ...
-        'subplot', [5,1,1], 'caxis', [cmin cmax], 'colorbar', 'off');
-    % hold on;
-    % contour(md_true.mesh.x, md_true.mesh.y, ...
-    %         reshape(md_true.mask.ocean_levelset, size(md_true.mesh.x)), ...
-    %         [0 0], 'g', 'LineWidth', 1.2);
+        'subplot', [nrows, 1, 1], 'caxis', [cmin cmax], 'colorbar', 'off');
 
-    % --- Panel (b): No assimilation ------------------------------------------
-    [md_true, md_nurged, md_ens] = setup_model_states(1, dt, ...
-        model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md);
-
-    data_nurged = get_nested_field(md_nurged, field);
+    % (b) No assimilation
     plotmodel(md_nurged, 'data', data_nurged, ...
         'title', sprintf('(b) No assimilation %s', field_title), ...
-        'subplot', [5,1,2], 'caxis', [cmin cmax], 'colorbar', 'off');
-    % hold on;
-    % contour(md_nurged.mesh.x, md_nurged.mesh.y, ...
-    %         reshape(md_nurged.mask.ocean_levelset, size(md_nurged.mesh.x)), ...
-    %         [0 0], 'g', 'LineWidth', 1.2);
+        'subplot', [nrows, 1, 2], 'caxis', [cmin cmax], 'colorbar', 'off');
 
-    % --- Helper: Assimilation cycles -----------------------------------------
-    function make_assim_panel(idx, k, label)
+    % (c...): Assimilated snapshots
+    for idx = 1:nk
+        k = k_array(idx);
+        label = sprintf('(%c)', 'b' + idx);
         [md_true, md_nurged, md_ens] = setup_model_states(k, dt, ...
             model_true_state, model_nurged_state, ensemble_vec_mean, ...
             md_true, md_nurged, md_ens, md);
         data_ens = get_nested_field(md_ens, field);
         plotmodel(md_ens, 'data', data_ens, ...
-            'title', sprintf('%s Assimilated %s (after %.1f years)', ...
-                label, field_title, (k-1)*dt), ...
-            'subplot', [5,1,idx], 'caxis', [cmin cmax], 'colorbar', 'off');
-        % hold on;
-        % contour(md_ens.mesh.x, md_ens.mesh.y, ...
-        %         reshape(md_ens.mask.ocean_levelset, size(md_ens.mesh.x)), ...
-                % [0 0], 'g', 'LineWidth', 1.2);
+            'title', sprintf('%s Assimilated %s (after %.1f years)', label, field_title, (k-1)*dt), ...
+            'subplot', [nrows, 1, idx + 2], 'caxis', [cmin cmax], 'colorbar', 'off');
     end
 
-    % --- Panels (c)–(e): Assimilation cycles ---------------------------------
-    make_assim_panel(3, k1, '(c)');
-    make_assim_panel(4, k2, '(d)');
-    make_assim_panel(5, k3, '(e)');
-
-    % --- Layout adjustments --------------------------------------------------
+    % Layout
     axs = flipud(findall(gcf,'Type','axes'));
-    gap = -0.26; top = 0.95; bottom = 0.08;
-    height = (top-bottom - 4.25*gap)/5;
+    % --- Adaptive layout scaling ---
+    gap = 0.02;              % small positive gap
+    top = 0.95; bottom = 0.08;
+    available_height = top - bottom - (nrows-1)*gap;
+    height = available_height / nrows;
 
-    for i = 1:5
-        pos = [0.10, bottom+(5-i)*(height+gap), 0.70, height];
-        set(axs(i), 'Position', pos, ...
-            'FontWeight', 'bold', 'LineWidth', 1.2, ...
-            'Box', 'on', 'TickDir', 'out', 'Layer', 'top', ...
-            'TickLength',[0.005 0.005], 'FontSize', 11);
+    % if too small (many rows), expand figure height automatically
+    if height < 0.05
+        fig = gcf;
+        scale_factor = max(1, ceil(0.05 / height));  % ensure visible spacing
+        fig.Position(4) = fig.Position(4) * scale_factor;  % increase figure height
+        height = 0.05;  % set to minimum safe height
+    end
+
+
+    for i = 1:nrows
+        pos = [0.10, bottom+(nrows-i)*(height+gap), 0.70, height];
+        set(axs(i),'Position',pos, ...
+            'FontWeight','bold','LineWidth',1.2,'Box','on', ...
+            'TickDir','out','Layer','top','FontSize',11, ...
+            'TickLength',[0.005 0.005]);
         ylabel(axs(i),'y (km)','FontWeight','bold');
-        if i < 5
+        if i < nrows
             set(axs(i),'XTickLabel',[]);
         else
             xlabel(axs(i),'x (km)','FontWeight','bold');
         end
     end
 
-    % --- (a) colorbar: for field magnitude -----------------------------------
-    cb1 = colorbar(axs(1), 'Position',[0.83 0.71 0.025 0.16]);
-    ylabel(cb1,[field_title units_str],'FontSize',12,'FontWeight','bold');
-    colormap(axs(1), parula);
+    % Colorbars
+    % cb1 = colorbar(axs(1), 'Position',[0.83 0.71 0.025 0.16]);
+    % ylabel(cb1,[field_title units_str],'FontSize',12,'FontWeight','bold');
+    % for i = 2:nrows, colormap(axs(i), parula); end
+    % cb2 = colorbar(axs(end), 'Position',[0.83 0.24 0.025 0.45]);
+    % ylabel(cb2,[field_title units_str],'FontSize',12,'FontWeight','bold');
+    % set(gcf,'Color','w');
 
-    % --- (b–e): same colormap scale -----------------------------------------
-    for i = 2:5, colormap(axs(i), parula); end
-    cb2 = colorbar(axs(5), 'Position',[0.83 0.24 0.025 0.45]);
-    ylabel(cb2,[field_title units_str],'FontSize',12,'FontWeight','bold');
-
-    set(gcf,'Color','w');
+    for i = 1:nrows, colormap(axs(i), parula); end
+    cb = colorbar(axs(end), 'Position',[0.83 0.25 0.025 0.45]);
+    ylabel(cb,[field_title units_str],'FontSize',12,'FontWeight','bold');
 
 end
 
@@ -440,9 +431,27 @@ function plot_triptych(md_true, md_nurged, md_ens, field, field_title, cmap, uni
     data_ens    = get_nested_field(md_ens, field);
     diff_data   = data_ens - data_true;
 
+        % ---- Compute global colour limits across all requested steps ----
+    all_data = [];
+
+    for k = [1, k_array]          % include the true (initial) state
+        [md_true_tmp, ~, md_ens_tmp] = setup_model_states(k, dt, ...
+            model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md);
+        data_tmp = get_nested_field(md_ens_tmp, field);
+        all_data = [all_data; data_tmp(:)];
+        % Also include true state for diff limits
+        data_true_tmp = get_nested_field(md_true_tmp, field);
+        all_data = [all_data; data_true_tmp(:)];
+    end
+
+    cmin = min(all_data);
+    cmax = max(all_data);
+    clear all_data
+
     % --- Limits ---
-    cmin   = min([data_true(:); data_nurged(:); data_ens(:)]);
-    cmax   = max([data_true(:); data_nurged(:); data_ens(:)]);
+    % cmin   = min([data_true(:); data_nurged(:); data_ens(:)]);
+    % cmax   = max([data_true(:); data_nurged(:); data_ens(:)]);
     maxAbs = max(abs(diff_data(:)));
 
     figure('Position',[100 100 1000 800]); clf;
