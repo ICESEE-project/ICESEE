@@ -9,8 +9,8 @@ close all; clear all
 % data_file_paths='data_0/_modelrun_datasets';
 % data_file_paths='data_1';
 % data_file_paths='_modelrun_datasets';
+% data_file_paths='test_data_al';
 data_file_paths='test_data';
-% data_file_paths='test_data_1';
 
 
 % Load the essential data
@@ -46,7 +46,7 @@ ensemble_vec_mean = h5read(file_path, '/ensemble_mean')';
 [ndim, nt] = size(model_true_state);
 num_steps = nt - 1;
 var_inputs = ['thickness', 'Vx', 'Vy', 'friction_coefficient', 'bed_topography'];
-hdim = floor(ndim / 5);  % dimension of one variable
+hdim = floor(ndim / 6);  % dimension of one variable
 
 file_path   = fullfile("data", "ISMIP_initial_data.mat");
 md = loadmodel(file_path);
@@ -56,69 +56,73 @@ md_mean = md; md_ens = md;
 % dt = 0.25;
 
 % k = nt-1;
-k=15;
-make_diff_plots = true;
-make_plots = false;
+% k=1;
 
 %%  Thickness plots --------------------
-dt  = 0.25;
-k1  = 5;     
-k2  = 15;   
-k3  = 25;  
+dt  = 0.2;
+k1  = 10;     
+k2  = 40;   
+k3  = 80;  
 % k1=10;
 % k2=20;
 % k3=80;
+% thickness difference plots
+plot_var_diff(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'geometry.thickness', 'Thicknes', 'm');
 
-if make_diff_plots
-    % thickness difference plots
-    plot_var_diff(k1, k2, k3, dt, ...
-        model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, ...
-        'geometry.thickness', 'Thicknes', 'm');
-    
-     % thickness plot evolution
-    plot_var_evolution(k1, k2, k3, dt, ...
-        model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, ...
-        'geometry.thickness', 'Thickness', 'm');
-    
-        % velocity evolution plots
-    plot_var_evolution(k1, k2, k3, dt, ...
-        model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, ...
-        'initialization.vel', 'Velocity', 'm/s');
-    
-        % bed topography evolution plots        
-    plot_var_evolution(k1, k2, k3, dt, ...
-        model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, ...
-        'geometry.bed', 'Bed Elevation', 'm');
-    
-        % friction coefficient evolution plots  
-    plot_var_evolution(k1, k2, k3, dt, ...
-        model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, ...
-        'friction.coefficient', 'Friction Coefficient', '');
-    
-    
-    plot_var_diff(k1, k2, k3, dt, ...
-        model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, ...
-        'initialization.vel', 'Velocity', 'm');
-    plot_var_diff(k1, k2, k3, dt, ...
-        model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, ...
-        'geometry.bed', 'Bed', 'm');
-    plot_var_diff(k1, k2, k3, dt, ...
-        model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, ...
-        'friction.coefficient', 'Friction', 'm');
-end
+ % thickness plot evolution
+plot_var_evolution(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'geometry.thickness', 'Thickness', 'm');
 
+plot_var_diff(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'geometry.surface', 'Surface', 'm');
+
+ % thickness plot evolution
+plot_var_evolution(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'geometry.surface', 'Surface', 'm');
+
+    % velocity evolution plots
+plot_var_evolution(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'initialization.vel', 'Velocity', 'm/s');
+
+plot_var_diff(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'initialization.vel', 'Velocity', 'm');
+    % bed topography evolution plots        
+plot_var_evolution(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'geometry.bed', 'Bed Elevation', 'm');
+plot_var_diff(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'geometry.bed', 'Bed', 'm');
+
+    % friction coefficient evolution plots  
+plot_var_evolution(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'friction.coefficient', 'Friction Coefficient', '');
+plot_var_diff(k1, k2, k3, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md, ...
+    'friction.coefficient', 'Friction', 'm');
+
+
+
+make_plots = false;
 if make_plots
-    [md_true, md_nurged, md_ens] = setup_model_states(k, dt, ...
-        model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md);
     % thickness
     plot_triptych(md_true, md_nurged, md_ens, ...
                 'geometry.thickness', sprintf('Ice Thickness after %d years', round((k-1)*dt)), parula, 'm');  
@@ -137,9 +141,9 @@ if make_plots
     % plot_triptych(md_true, md_nurged, md_ens, ...
     %               'results.TransientSolution(499).MaskOceanLevelset', ...
     %               'Grounding Line', gray, '');
-    % plot_triptych(md_true, md_nurged, md_ens, ...
-    %             'mask.ocean_levelset', ...
-    %             sprintf('Grounding Line after %d years', round((k-1)*dt)), parula, '');
+    plot_triptych(md_true, md_nurged, md_ens, ...
+                'mask.ocean_levelset', ...
+                sprintf('Grounding Line after %d years', round((k-1)*dt)), parula, '');
 end
 % create a movie for the groundingline for every 10 yrs
 % Setup video writer (optional)
@@ -341,10 +345,10 @@ function plot_var_evolution(k1, k2, k3, dt, ...
     data_nurged = get_nested_field(md_nurged, field);
     data_ens    = get_nested_field(md_ens, field);
 
-    cmin = min([data_true(:); data_nurged(:); data_ens(:)]);
-    cmax = max([data_true(:); data_nurged(:); data_ens(:)]);
-    % cmin = min([data_true(:);  data_ens(:)]);
-    % cmax = max([data_true(:);  data_ens(:)]);
+    % cmin = min([data_true(:); data_nurged(:); data_ens(:)]);
+    % cmax = max([data_true(:); data_nurged(:); data_ens(:)]);
+    cmin = min([data_true(:);  data_ens(:)]);
+    cmax = max([data_true(:);  data_ens(:)]);
 
     plotmodel(md_true, 'data', data_true, ...
         'title', sprintf('(a) True %s', field_title), ...
@@ -550,17 +554,17 @@ function [md_true, md_nurged, md_ens] = setup_model_states(k, dt, model_true_sta
 % =========================================================================
 
     % --- Basic setup ---
-    hdim = length(model_true_state(:,1)) / 5;  % Assuming 5 state components
+    hdim = length(model_true_state(:,1)) / 6;  % Assuming 5 state components
     di = md.materials.rho_ice / md.materials.rho_water;
 
     %% === TRUE STATE ===
-    True_surface = model_true_state(1:hdim, k);
-    Vx = model_true_state(hdim+1:2*hdim, k);
-    Vy = model_true_state(2*hdim+1:3*hdim, k);
+    True_thickness = model_true_state(1:hdim, k);
+    True_surface = model_true_state(hdim+1:2*hdim, k);
+    Vx = model_true_state(2*hdim+1:3*hdim, k);
+    Vy = model_true_state(3*hdim+1:4*hdim, k);
     Vel = sqrt(Vx.^2 + Vy.^2);
-    True_bed = model_true_state(3*hdim+1:4*hdim, k);
-    True_fcoeff = model_true_state(4*hdim+1:5*hdim, k);
-    True_thickness = True_surface - True_bed;
+    True_bed = model_true_state(4*hdim+1:5*hdim, k);
+    True_fcoeff = model_true_state(5*hdim+1:6*hdim, k);
 
     md_true.geometry.thickness = True_thickness;
     md_true.geometry.surface = True_surface;
@@ -573,15 +577,17 @@ function [md_true, md_nurged, md_ens] = setup_model_states(k, dt, model_true_sta
 
 
     %% === NURGED STATE ===
-    nurged_surface = model_nurged_state(1:hdim, k);
-    Vx = model_nurged_state(hdim+1:2*hdim, k);
-    Vy = model_nurged_state(2*hdim+1:3*hdim, k);
+    nurged_thickness = model_nurged_state(1:hdim, k);
+    nurged_surface = model_nurged_state(hdim+1:2*hdim, k);
+    Vx = model_nurged_state(2*hdim+1:3*hdim, k);
+    Vy = model_nurged_state(3*hdim+1:4*hdim, k);
     Vel = sqrt(Vx.^2 + Vy.^2);
-    nurged_bed = model_nurged_state(3*hdim+1:4*hdim, k);
-    nurged_fcoeff = model_nurged_state(4*hdim+1:5*hdim, k);
-    nurged_thickness = nurged_surface - nurged_bed;
+    nurged_bed = model_nurged_state(4*hdim+1:5*hdim, k);
+    nurged_fcoeff = model_nurged_state(5*hdim+1:6*hdim, k);
+    % nurged_thickness = nurged_surface - nurged_bed;
 
     md_nurged.geometry.thickness = nurged_thickness;
+    md_nurged.geometry.surface = nurged_surface;
     md_nurged.initialization.vx  = Vx;
     md_nurged.initialization.vy  = Vy;
     md_nurged.initialization.vel = Vel;
@@ -590,15 +596,17 @@ function [md_true, md_nurged, md_ens] = setup_model_states(k, dt, model_true_sta
     md_nurged.mask.ocean_levelset = nurged_thickness + nurged_bed / di;
 
     %% === ENSEMBLE MEAN STATE ===
-    ens_surface = ensemble_vec_mean(1:hdim, k);
-    Vx = ensemble_vec_mean(hdim+1:2*hdim, k);
-    Vy = ensemble_vec_mean(2*hdim+1:3*hdim, k);
+    ens_thickness = ensemble_vec_mean(1:hdim, k);
+    ens_surface = ensemble_vec_mean(hdim+1:2*hdim, k);
+    Vx = ensemble_vec_mean(2*hdim+1:3*hdim, k);
+    Vy = ensemble_vec_mean(3*hdim+1:4*hdim, k);
     Vel = sqrt(Vx.^2 + Vy.^2);
-    ens_bed = ensemble_vec_mean(3*hdim+1:4*hdim, k);
-    ens_fcoeff = ensemble_vec_mean(4*hdim+1:5*hdim, k);
-    ens_thickness = ens_surface - ens_bed;
+    ens_bed = ensemble_vec_mean(4*hdim+1:5*hdim, k);
+    ens_fcoeff = ensemble_vec_mean(5*hdim+1:6*hdim, k);
+    % ens_thickness = ens_surface - ens_bed;
 
     md_ens.geometry.thickness = ens_thickness;
+    md_ens.geometry.surface = ens_surface;
     md_ens.initialization.vx  = Vx;
     md_ens.initialization.vy  = Vy;
     md_ens.initialization.vel = Vel;
