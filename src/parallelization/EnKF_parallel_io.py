@@ -627,83 +627,246 @@ class EnKF_fully_parallel_IO:
         return obs_t_req, obs_idx, num_observations
 
     
+    # @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
+    # def _create_synthetic_observations(self, **kwargs):
+    #     synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path')
+    #     error_R_zarr_path = kwargs.get('error_R_zarr_path')
+    #     nd = self.nd
+    #     nt = self.nt
+
+    #     obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
+    #     m = m_obs
+    #     m_R = m_obs * 2 + 1
+
+    #     rank = self.mpi_comm.Get_rank()
+    #     size = self.mpi_comm.Get_size()
+
+    #     if kwargs.get('joint_estimation', False) or self.params.get('localization_flag', False):
+    #         hdim = nd // self.params["total_state_param_vars"]
+    #     else:
+    #         hdim = nd // self.params["total_state_param_vars"]
+
+    #     if rank == 0:
+    #         print("[ICESEE] Generating synthetic observations ...")
+    #         obs_file = f"{self.base_path}/synthetic_obs.h5"
+    #         # Remove existing file to avoid corruption
+    #         # if os.path.exists(obs_file):
+    #         #     print(f"[ICESEE] Removing existing {obs_file}...")
+    #         #     os.remove(obs_file)
+            
+    #         # statevec_true = zarr.open_array(store=f"{self.base_path}/statevec_true.zarr", mode='r+')
+    #         # read from HDF5 directly to avoid Zarr overhead for small nd
+    #         with h5py.File(f"{self.base_path}/true_nurged_states.h5", 'r') as f:
+    #             statevec_true = f['true_state'][:]
+    #         _, indx_map, _ = icesee_get_index(**kwargs)
+            
+    #         try:
+    #             with h5py.File(obs_file, 'a') as f:
+    #                 if 'hu_obs' in f or 'error_R' in f:
+    #                     print(f"[ICESEE] Warning: {obs_file} already contains 'hu_obs' or 'error_R'. Overwriting datasets.")
+    #                     del f['hu_obs']
+    #                     del f['error_R']
+
+    #                 if 'hu_obs' not in f:
+    #                     f.create_dataset('hu_obs', (nd, m_obs), chunks=(min(1000, nd), min(50, m_obs)), dtype='f8')
+    #                 if 'error_R' not in f:
+    #                     f.create_dataset('error_R', (nd, m_obs * 2 + 1), chunks=(min(1000, nd), min(50, m_obs * 2 + 1)), dtype='f8')
+    #                 hu_obs = f['hu_obs']
+    #                 error_R = f['error_R']
+    #                 # print(f"[ICESEE] error_R shape: {error_R.shape},  m_R: {m_R}, m: {m}, nd: {nd}, hdim: {hdim}")
+
+    #                 for i, sig in enumerate(self.params["sig_obs"]):
+    #                     start_idx = i * hdim
+    #                     end_idx = start_idx + hdim
+    #                     error_R[start_idx:end_idx, :] = np.ones((hdim, 1)) * sig
+
+    #                 km = 0
+    #                 km_temp = 0
+    #                 for step in range(nt):
+    #                     # if (km < m_obs) and (step + 1 == ind_m[km]):
+    #                     if (km < m_obs) and (step == ind_m[km]):
+    #                         # for key in kwargs['vec_inputs']:
+    #                         for ii, key in enumerate(kwargs['vec_inputs']):
+    #                             if ii < kwargs['num_state_vars']:
+    #                                 # print(f"[ICESEE] Generating obs at time step {step+1} for key {key} at obs index {km}")
+    #                                 hu_obs[indx_map[key], km] = statevec_true[indx_map[key], step + 1] + \
+    #                                                             np.random.normal(0, error_R[indx_map[key], km], len(indx_map[key]))
+    #                             else:
+    #                                 hu_obs[indx_map[key], km] = np.zeros(len(indx_map[key]))
+
+    #                             if key == 'bed' or key == 'bedrock' or key == 'bed_topography' or key == 'bedtopo' or key == 'bedtopography':
+    #                                 if step+1 == kwargs.get('bed_obs_snapshot', 0)[km_temp]:
+    #                                     hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
+    #                                     km_temp += 1
+    #                         km += 1
+    #         except Exception as e:
+    #             print(f"[ICESEE] Error in HDF5 operations: {e}")
+    #             raise
+    #     self.mpi_comm.Barrier()
+    #     return ind_m, m_obs
+
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
     def _create_synthetic_observations(self, **kwargs):
+        import os
+        import h5py
+        import numpy as np
+
         synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path')
         error_R_zarr_path = kwargs.get('error_R_zarr_path')
         nd = self.nd
         nt = self.nt
 
         obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
+        ind_m = np.asarray(ind_m, dtype=int)
         m = m_obs
         m_R = m_obs * 2 + 1
 
         rank = self.mpi_comm.Get_rank()
         size = self.mpi_comm.Get_size()
 
-        if kwargs.get('joint_estimation', False) or self.params.get('localization_flag', False):
-            hdim = nd // self.params["total_state_param_vars"]
-        else:
-            hdim = nd // self.params["total_state_param_vars"]
+        # Grid/meta
+        total_state_param_vars = self.params["total_state_param_vars"]
+        hdim = nd // total_state_param_vars
 
         if rank == 0:
             print("[ICESEE] Generating synthetic observations ...")
             obs_file = f"{self.base_path}/synthetic_obs.h5"
-            # Remove existing file to avoid corruption
-            # if os.path.exists(obs_file):
-            #     print(f"[ICESEE] Removing existing {obs_file}...")
-            #     os.remove(obs_file)
+
             
-            # statevec_true = zarr.open_array(store=f"{self.base_path}/statevec_true.zarr", mode='r+')
-            # read from HDF5 directly to avoid Zarr overhead for small nd
             with h5py.File(f"{self.base_path}/true_nurged_states.h5", 'r') as f:
-                statevec_true = f['true_state'][:]
+                statevec_true = f['true_state'][:]  # shape (nd, nt?) often nt+1 columns
+
+            # Build indices map once
             _, indx_map, _ = icesee_get_index(**kwargs)
-            
+            vec_inputs = list(kwargs['vec_inputs'])
+
+            # Optional: params + helpers
+            num_state_vars = kwargs.get('num_state_vars', self.params.get('num_state_vars'))
+            observed_params = set(kwargs.get('observed_params', []))
+            bed_aliases = {'bed', 'bedrock', 'bed_topography', 'bedtopo', 'bedtopography'}
+            key_is_bed = {k: (k in bed_aliases) for k in vec_inputs}
+            key_idx_map = {k: np.asarray(indx_map[k], dtype=int) for k in vec_inputs}
+
+            # ---- Bed snapshot & sparsity controls ----
+            bed_snaps = kwargs.get('bed_obs_snapshot', [])
+            if isinstance(bed_snaps, (list, np.ndarray)):
+                bed_snaps = list(bed_snaps)
+            else:
+                bed_snaps = []  # safe default
+
+            # Options for sparsity
+            Lx = kwargs.get('Lx', self.params.get('Lx', None))
+            bed_stride_km = kwargs.get('bed_obs_stride_km', None)   # e.g., 30 (km)
+            bed_spacing_pts = kwargs.get('bed_obs_spacing', None)   # e.g., 5 (points)
+            bed_indices_user = kwargs.get('bed_obs_indices', None)  # explicit indices (0..len(bed)-1)
+            bed_mask_user = kwargs.get('bed_obs_mask', None)        # boolean mask over bed-subvector
+
+            # Precompute a mask per bed-like key (over its local subvector order)
+            bed_mask_map = {}
+            for k in vec_inputs:
+                if not key_is_bed[k]:
+                    continue
+                idx = key_idx_map[k]            # global indices for bed subvector
+                local_len = idx.size
+                mask = np.ones(local_len, dtype=bool)  # default: observe all (original behavior)
+
+                if isinstance(bed_mask_user, (list, np.ndarray)):
+                    msk = np.asarray(bed_mask_user, dtype=bool)
+                    if msk.size == local_len:
+                        mask = msk
+                    elif msk.size > 0:
+                        rep = int(np.ceil(local_len / msk.size))
+                        mask = np.tile(msk, rep)[:local_len]
+                elif isinstance(bed_indices_user, (list, np.ndarray)):
+                    mask = np.zeros(local_len, dtype=bool)
+                    idxs = np.asarray(bed_indices_user, dtype=int)
+                    idxs = idxs[(idxs >= 0) & (idxs < local_len)]
+                    mask[idxs] = True
+                elif isinstance(bed_spacing_pts, (int, np.integer)) and bed_spacing_pts > 1:
+                    n = int(bed_spacing_pts)
+                    mask = np.zeros(local_len, dtype=bool)
+                    mask[::n] = True
+                elif (bed_stride_km is not None) and (Lx is not None):
+                    # Convert stride in km → every-nth point assuming uniform x-grid of length Lx
+                    intervals = max(hdim - 1, 1)
+                    dx_m = float(Lx) / intervals
+                    n = max(int(round((bed_stride_km) / max(dx_m, 1e-12))), 1)
+                    mask = np.zeros(local_len, dtype=bool)
+                    mask[::n] = True
+
+                bed_mask_map[k] = mask
+
+            # ---- Create / overwrite output datasets ----
             try:
                 with h5py.File(obs_file, 'a') as f:
                     if 'hu_obs' in f or 'error_R' in f:
                         print(f"[ICESEE] Warning: {obs_file} already contains 'hu_obs' or 'error_R'. Overwriting datasets.")
-                        del f['hu_obs']
-                        del f['error_R']
+                        if 'hu_obs' in f: del f['hu_obs']
+                        if 'error_R' in f: del f['error_R']
 
-                    if 'hu_obs' not in f:
-                        f.create_dataset('hu_obs', (nd, m_obs), chunks=(min(1000, nd), min(50, m_obs)), dtype='f8')
-                    if 'error_R' not in f:
-                        f.create_dataset('error_R', (nd, m_obs * 2 + 1), chunks=(min(1000, nd), min(50, m_obs * 2 + 1)), dtype='f8')
-                    hu_obs = f['hu_obs']
-                    error_R = f['error_R']
-                    # print(f"[ICESEE] error_R shape: {error_R.shape},  m_R: {m_R}, m: {m}, nd: {nd}, hdim: {hdim}")
+                    hu_obs = f.create_dataset('hu_obs', (nd, m_obs),
+                                            chunks=(min(1000, nd), min(50, m_obs)),
+                                            dtype='f8')
+                    error_R = f.create_dataset('error_R', (nd, m_obs * 2 + 1),
+                                            chunks=(min(1000, nd), min(50, m_obs * 2 + 1)),
+                                            dtype='f8')
 
-                    for i, sig in enumerate(self.params["sig_obs"]):
-                        start_idx = i * hdim
-                        end_idx = start_idx + hdim
-                        error_R[start_idx:end_idx, :] = np.ones((hdim, 1)) * sig
+                    # Fill error_R by blocks (broadcast, no extra allocs)
+                    sig_obs = np.asarray(self.params["sig_obs"]).reshape(-1)
+                    # pad/truncate for safety
+                    if sig_obs.size < total_state_param_vars:
+                        sig_obs = np.pad(sig_obs, (0, total_state_param_vars - sig_obs.size), mode='edge')
+                    elif sig_obs.size > total_state_param_vars:
+                        sig_obs = sig_obs[:total_state_param_vars]
 
+                    for i, sig in enumerate(sig_obs):
+                        s = i * hdim
+                        e = s + hdim
+                        error_R[s:e, :] = sig  # broadcast
+
+                    # === Main loop ===
                     km = 0
                     km_temp = 0
                     for step in range(nt):
-                        # if (km < m_obs) and (step + 1 == ind_m[km]):
-                        if (km < m_obs) and (step == ind_m[km]):
-                            # for key in kwargs['vec_inputs']:
-                            for ii, key in enumerate(kwargs['vec_inputs']):
-                                if ii < kwargs['num_state_vars']:
-                                    # print(f"[ICESEE] Generating obs at time step {step+1} for key {key} at obs index {km}")
-                                    hu_obs[indx_map[key], km] = statevec_true[indx_map[key], step + 1] + \
-                                                                np.random.normal(0, error_R[indx_map[key], km], len(indx_map[key]))
-                                else:
-                                    hu_obs[indx_map[key], km] = np.zeros(len(indx_map[key]))
+                        if (km < m_obs) and (step == ind_m[km]):  
+                            # guard to avoid OOB if nt doesn't include t0 column
+                            tcol = step + 1 if (step + 1) < statevec_true.shape[1] else step
 
-                                if key == 'bed' or key == 'bedrock' or key == 'bed_topography' or key == 'bedtopo' or key == 'bedtopography':
-                                    if step+1 == kwargs.get('bed_obs_snapshot', 0)[km_temp]:
-                                        hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
+                            for ii, key in enumerate(vec_inputs):
+                                idx = key_idx_map[key]
+                                bed_flag = key_is_bed[key]
+
+                                if (ii < num_state_vars or key in observed_params) and (not bed_flag):
+                                    sigma = error_R[idx, km]
+                                    hu_obs[idx, km] = statevec_true[idx, tcol] + \
+                                                    np.random.normal(0.0, sigma, size=idx.size)
+                                else:
+                                    # keep zeros (parameters not observed at this instant)
+                                    hu_obs[idx, km] = 0.0
+
+                                # bed* special snapshot (sparse)
+                                if bed_flag:
+                                    if km_temp < len(bed_snaps) and ((step + 1) == bed_snaps[km_temp]):
+                                        # only on masked subset; rest stay zero
+                                        mask = bed_mask_map.get(key, None)
+                                        if mask is None:
+                                            mask = np.ones(idx.size, dtype=bool)
+                                        idx_obs = idx[mask]
+                                        if idx_obs.size > 0:
+                                            sigma_obs = error_R[idx_obs, km]
+                                            hu_obs[idx_obs, km] = statevec_true[idx_obs, tcol] + \
+                                                                np.random.normal(0.0, sigma_obs, size=idx_obs.size)
                                         km_temp += 1
+
                             km += 1
+
             except Exception as e:
                 print(f"[ICESEE] Error in HDF5 operations: {e}")
                 raise
+
         self.mpi_comm.Barrier()
         return ind_m, m_obs
+
 
     def H_matrix(self, **kwargs):
         try:

@@ -169,55 +169,202 @@ class UtilsFunctions:
             print(f"Traceback details:\n{tb_str}")
     
     # --- Create synthetic observations ---
-    def _create_synthetic_observations(self,**kwargs):
-        """create synthetic observations"""
+    # def _create_synthetic_observations(self,**kwargs):
+    #     """create synthetic observations"""
+    #     statevec_true = kwargs.get('statevec_true', None)
+    #     nd, nt = statevec_true.shape
+
+    #     obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
+
+    #     vecs, indx_map, _ = icesee_get_index(statevec_true, **kwargs)
+
+    #     # create synthetic observations
+    #     hu_obs = np.zeros((nd,self.params["number_obs_instants"]))
+
+    #     # check if params["sig_obs"] is a scalar
+    #     # if isinstance(self.params["sig_obs"], (int, float)):
+    #     #     self.params["sig_obs"] = np.ones(self.params["nt"]+1) * self.params["sig_obs"]
+    #     if kwargs.get('joint_estimation', False) or self.params.get('localization_flag', False):
+    #         hdim = statevec_true.shape[0] // self.params["total_state_param_vars"]
+    #     else:
+    #         hdim = statevec_true.shape[0] // self.params["total_state_param_vars"]
+    #         nd = hdim * self.params["num_state_vars"]
+
+
+    #     error_R = np.zeros((nd, m_obs * 2 + 1))
+    #     for i, sig in enumerate(self.params["sig_obs"]):
+    #         start_idx = i*hdim
+    #         end_idx = start_idx + hdim
+    #         error_R[start_idx:end_idx,:] = np.ones((hdim,1)) * sig
+
+    #     # print(f"[ICESEE] vec_inputs: {kwargs['vec_inputs']}")
+    #     bed_flag = (key == 'bed' or key == 'bedrock' or key == 'bed_topography' or key == 'bedtopo' or key == 'bedtopography')
+    #     km = 0
+    #     km_temp = 0
+    #     for step in range(nt):
+    #         if (km<m_obs) and (step+1 == ind_m[km]):
+    #             # for key in kwargs['vec_inputs']:
+    #             for ii, key in enumerate(kwargs['vec_inputs']):
+    #                 if (ii < kwargs['num_state_vars'] or key in kwargs.get('observed_params', [])) and not bed_flag:
+    #                     hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
+    #                 else:
+    #                     # fill with zeros for parameters
+    #                     hu_obs[indx_map[key],km] = np.zeros(len(indx_map[key]))
+
+    #                 if key == 'bed' or key == 'bedrock' or key == 'bed_topography' or key == 'bedtopo' or key == 'bedtopography':
+    #                     if step+1 == kwargs.get('bed_obs_snapshot', 0)[km_temp]:
+    #                         hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
+    #                         km_temp += 1
+
+    #             km += 1
+
+    #     return hu_obs, error_R.T
+
+    def _create_synthetic_observations(self, **kwargs):
+        """create synthetic observations (same logic; bed snapshots are sparse by spacing/mask)"""
+        import numpy as np
+
         statevec_true = kwargs.get('statevec_true', None)
+        assert statevec_true is not None, "statevec_true is required"
         nd, nt = statevec_true.shape
 
+        # Observation schedule
         obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
+        ind_m = np.asarray(ind_m, dtype=int)  # 1-based
 
+        # Index maps
         vecs, indx_map, _ = icesee_get_index(statevec_true, **kwargs)
+        vec_inputs = list(kwargs['vec_inputs'])
 
-        # create synthetic observations
-        hu_obs = np.zeros((nd,self.params["number_obs_instants"]))
+        # Preallocate observations
+        hu_obs = np.zeros((nd, self.params["number_obs_instants"]))
 
-        # check if params["sig_obs"] is a scalar
-        # if isinstance(self.params["sig_obs"], (int, float)):
-        #     self.params["sig_obs"] = np.ones(self.params["nt"]+1) * self.params["sig_obs"]
-        if kwargs.get('joint_estimation', False) or self.params.get('localization_flag', False):
-            hdim = statevec_true.shape[0] // self.params["total_state_param_vars"]
-        else:
-            hdim = statevec_true.shape[0] // self.params["total_state_param_vars"]
+        # hdim / nd handling (unchanged)
+        total_state_param_vars = self.params["total_state_param_vars"]
+        hdim = statevec_true.shape[0] // total_state_param_vars
+        if not (kwargs.get('joint_estimation', False) or self.params.get('localization_flag', False)):
             nd = hdim * self.params["num_state_vars"]
 
-
+        # Build error_R (nd, m_obs*2+1), unchanged
         error_R = np.zeros((nd, m_obs * 2 + 1))
-        for i, sig in enumerate(self.params["sig_obs"]):
-            start_idx = i*hdim
+        sig_obs = self.params["sig_obs"]
+        for i, sig in enumerate(sig_obs):
+            start_idx = i * hdim
             end_idx = start_idx + hdim
-            error_R[start_idx:end_idx,:] = np.ones((hdim,1)) * sig
+            error_R[start_idx:end_idx, :] = sig  # broadcast
 
-        # print(f"[ICESEE] vec_inputs: {kwargs['vec_inputs']}")
+        # Fast memberships & cached indices
+        observed_params = set(kwargs.get('observed_params', []))
+        bed_aliases = {'bed', 'bedrock', 'bed_topography', 'bedtopo', 'bedtopography'}
+        key_is_bed = {k: (k in bed_aliases) for k in vec_inputs}
+        key_idx_map = {k: np.asarray(indx_map[k], dtype=int) for k in vec_inputs}
+
+        # ---- Bed snapshot control (same timing logic) ----
+        bed_snaps = kwargs.get('bed_obs_snapshot', [])
+        bed_snaps = list(bed_snaps) if isinstance(bed_snaps, (list, np.ndarray)) else []
         km = 0
         km_temp = 0
-        for step in range(nt):
-            if (km<m_obs) and (step+1 == ind_m[km]):
-                # for key in kwargs['vec_inputs']:
-                for ii, key in enumerate(kwargs['vec_inputs']):
-                    if ii < kwargs['num_state_vars']:
-                        hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
+
+        # ---- Build a sparse-observation mask for each bed-like key ----
+        # Options (use whichever you pass in):
+        #   - bed_obs_indices: exact indices into bed subvector (0..len(bed)-1)
+        #   - bed_obs_mask: boolean mask over bed subvector
+        #   - bed_obs_stride_km: spacing (km) to convert to every-nth point along x
+        #   - bed_obs_spacing: spacing (points) = every n-th point
+        # Needs Lx for stride_km->points if you use it. Pull from kwargs or params.
+        Lx = kwargs.get('Lx', self.params.get('Lx', None))
+        bed_stride_km = kwargs.get('bed_obs_stride_km', None)
+        bed_spacing_pts = kwargs.get('bed_obs_spacing', None)
+        bed_indices_user = kwargs.get('bed_obs_indices', None)
+        bed_mask_user = kwargs.get('bed_obs_mask', None)
+
+        bed_mask_map = {}
+        for k in vec_inputs:
+            if not key_is_bed[k]:
+                continue
+            bed_idx = key_idx_map[k]               # global indices into statevec
+            local_len = bed_idx.size               # size of the bed subvector
+
+            # Default: observe all (original behavior)
+            mask = np.ones(local_len, dtype=bool)
+
+            # Priority 1: explicit mask
+            if isinstance(bed_mask_user, (list, np.ndarray)):
+                mask = np.asarray(bed_mask_user, dtype=bool)
+                if mask.size != local_len:
+                    # Try to safely broadcast smaller masks by stepping
+                    if mask.ndim == 1 and mask.size > 0:
+                        step = int(np.ceil(local_len / mask.size))
+                        rep = int(np.ceil(local_len / mask.size))
+                        mask = np.tile(mask, rep)[:local_len]
                     else:
-                        # fill with zeros for parameters
-                        hu_obs[indx_map[key],km] = np.zeros(len(indx_map[key]))
+                        mask = np.ones(local_len, dtype=bool)
 
-                    if key == 'bed' or key == 'bedrock' or key == 'bed_topography' or key == 'bedtopo' or key == 'bedtopography':
-                        if step+1 == kwargs.get('bed_obs_snapshot', 0)[km_temp]:
-                            hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
+            # Priority 2: explicit indices
+            elif isinstance(bed_indices_user, (list, np.ndarray)):
+                mask = np.zeros(local_len, dtype=bool)
+                idxs = np.asarray(bed_indices_user, dtype=int)
+                idxs = idxs[(idxs >= 0) & (idxs < local_len)]
+                mask[idxs] = True
+
+            # Priority 3: spacing in points
+            elif isinstance(bed_spacing_pts, (int, np.integer)) and bed_spacing_pts > 1:
+                n = int(bed_spacing_pts)
+                mask = np.zeros(local_len, dtype=bool)
+                mask[::n] = True
+
+            # Priority 4: spacing in km (needs Lx)
+            elif (bed_stride_km is not None) and (Lx is not None):
+                # Convert stride in km → every-nth point, assuming uniform x-grid
+                # Use (hdim-1) intervals to estimate dx; fall back safely.
+                intervals = max(hdim - 1, 1)
+                dx_m = float(Lx) / intervals
+                # n = max(int(round((bed_stride_km * 1000.0) / max(dx_m, 1e-12))), 1)
+                n = max(int(round((bed_stride_km) / max(dx_m, 1e-12))), 1)
+                mask = np.zeros(local_len, dtype=bool)
+                mask[::n] = True
+
+            # Save per-key mask (over the bed subvector)
+            bed_mask_map[k] = mask
+
+        # === Main loop ===
+        for step in range(nt):
+            if (km < m_obs) and (step + 1 == ind_m[km]):  # 1-based compare
+                for ii, key in enumerate(vec_inputs):
+                    idx = key_idx_map[key]
+                    bed_flag = key_is_bed[key]
+
+                    if (ii < kwargs['num_state_vars'] or key in observed_params) and (not bed_flag):
+                        sigma = error_R[idx, km]
+                        hu_obs[idx, km] = statevec_true[idx, step + 1] + np.random.normal(0.0, sigma, size=idx.size)
+                    else:
+                        hu_obs[idx, km] = 0.0
+
+                    # bed* special snapshot logic with sparse mask
+                    if bed_flag:
+                        if km_temp < len(bed_snaps) and (step + 1 == bed_snaps[km_temp]):
+                            # Only observe on masked subset; zeros elsewhere
+                            mask = bed_mask_map.get(key, None)
+                            if mask is None:
+                                # if no mask computed (shouldn't happen), observe all
+                                mask = np.ones(idx.size, dtype=bool)
+
+                            # Local (bed-subvector) to global indices mapping:
+                            # idx is the global index array; mask is over the bed-subvector order
+                            # We need global indices for the masked positions:
+                            idx_obs = idx[mask]
+
+                            if idx_obs.size > 0:
+                                sigma_obs = error_R[idx_obs, km]
+                                hu_obs[idx_obs, km] = statevec_true[idx_obs, step + 1] + np.random.normal(
+                                    0.0, sigma_obs, size=idx_obs.size
+                                )
+                            # leave unmasked positions as zeros
                             km_temp += 1
-
                 km += 1
 
         return hu_obs, error_R.T
+
     
     def bed(self, x):
         """
