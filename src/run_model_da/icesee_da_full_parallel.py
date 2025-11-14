@@ -61,7 +61,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
     Q_err             = model_kwargs.get("Q_err",None)               # process noise
     commandlinerun    = model_kwargs.get("commandlinerun",None)      # run through the terminal
     Lx, Ly            = model_kwargs.get("Lx",1.0), model_kwargs.get("Ly",1.0)
-    nx, ny            = model_kwargs.get("nx",0.2), model_kwargs.get("ny",0.2)
+    nx, ny            = model_kwargs.get("nx",1), model_kwargs.get("ny",1)
     b_in, b_out       = model_kwargs.get("b_in",0.0), model_kwargs.get("b_out",0.0) 
     data_path         = model_kwargs.get("data_path","_modelrun_datasets")      # data path
     restart_enabled   = model_kwargs.get("restart_enabled", True)   # turn on/off restart

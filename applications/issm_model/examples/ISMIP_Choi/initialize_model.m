@@ -186,7 +186,8 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
 		end
 
         %  save the fields to the file
-        data = {'Surface', result_0, 'Surface';
+        data = { 'Thickness', result_0, 'Thickness';
+                'Surface', result_0, 'Surface';
                 'Vx', result_0, 'Vx';
                 'Vy', result_0, 'Vy';
                 'bed', result_1, 'bed';
