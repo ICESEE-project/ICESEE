@@ -45,7 +45,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
     Q_err             = model_kwargs.get("Q_err",None)               # process noise
     commandlinerun    = model_kwargs.get("commandlinerun",None)      # run through the terminal
     Lx, Ly            = model_kwargs.get("Lx",1.0), model_kwargs.get("Ly",1.0)
-    nx, ny            = model_kwargs.get("nx",0.2), model_kwargs.get("ny",0.2)
+    nx, ny            = model_kwargs.get("nx",1), model_kwargs.get("ny",1)
     b_in, b_out       = model_kwargs.get("b_in",0.0), model_kwargs.get("b_out",0.0) 
 
     # --- call the ICESEE mpi parallel manager ---
@@ -185,15 +185,18 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         
         # -- time ensemble initialization ---
         time_ensemble_initialization = MPI.Wtime()
-        # call the ensemble_initialization function
-        model_kwargs, ensemble_vec, time_init_noise_generation, \
-        time_init_ensemble_mean_computation, time_init_file_writing, \
-        shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full = ensemble_initialization(**model_kwargs)
+        if model_kwargs.get("initialize_ensemble", True):
+            # call the ensemble_initialization function
+            model_kwargs, ensemble_vec, time_init_noise_generation, \
+            time_init_ensemble_mean_computation, time_init_file_writing, \
+            shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full = ensemble_initialization(**model_kwargs)
         # --- time ensemble initialization ---
         time_ensemble_initialization = MPI.Wtime() - time_ensemble_initialization
         
         # --- get the ensemble size
-        nd, Nens = ensemble_vec.shape
+        # nd, Nens = ensemble_vec.shape
+        nd = model_kwargs.get("nd", params["nd"])
+        Nens = model_kwargs.get("Nens", params["Nens"])
         module_nprocs = model_kwargs.get("model_nprocs", 1)
 
         if params["even_distribution"]:

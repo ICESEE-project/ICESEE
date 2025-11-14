@@ -226,18 +226,23 @@ class UtilsFunctions:
 
         statevec_true = kwargs.get('statevec_true', None)
         assert statevec_true is not None, "statevec_true is required"
-        nd, nt = statevec_true.shape
+        # nd, nt = statevec_true.shape
+        params = kwargs.get('params')
+        nd = kwargs.get('nd', params.get('nd', statevec_true.shape[0]))
+        nt = kwargs.get('nt', params.get('nt', statevec_true.shape[1]))
 
         # Observation schedule
         obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
         ind_m = np.asarray(ind_m, dtype=int)  # 1-based
+        # print(f"[ICESEE] observation times: {obs_t}, indices: {ind_m}, total: {m_obs}")
 
         # Index maps
         vecs, indx_map, _ = icesee_get_index(statevec_true, **kwargs)
         vec_inputs = list(kwargs['vec_inputs'])
 
         # Preallocate observations
-        hu_obs = np.zeros((nd, self.params["number_obs_instants"]))
+        # hu_obs = np.zeros((nd, self.params["number_obs_instants"]))
+        hu_obs = np.zeros((nd, m_obs))
 
         # hdim / nd handling (unchanged)
         total_state_param_vars = self.params["total_state_param_vars"]
@@ -336,6 +341,7 @@ class UtilsFunctions:
 
                     if (ii < kwargs['num_state_vars'] or key in observed_params) and (not bed_flag):
                         sigma = error_R[idx, km]
+                        # print(f"[ICESEE] Generating obs for key='{key}' at step={step+1}, km={km}, sigma={sigma} hu_obs shape: {hu_obs[:,:].shape}")
                         hu_obs[idx, km] = statevec_true[idx, step + 1] + np.random.normal(0.0, sigma, size=idx.size)
                     else:
                         hu_obs[idx, km] = 0.0

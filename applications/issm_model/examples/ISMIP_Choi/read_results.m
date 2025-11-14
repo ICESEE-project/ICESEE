@@ -8,13 +8,14 @@ close all; clear all
 
 % data_file_paths='data_0/_modelrun_datasets';
 % data_file_paths='data_1';
-data_file_paths='_modelrun_datasets';
+% data_file_paths='_modelrun_datasets';
 % data_file_paths='test_data_al';
 % data_file_paths='test_data_al1';
+data_file_paths='test_data_3';
 
 % time steps
-k_array = [25, 50, 80, 150, 230, 300];  % multiple time steps
-% k_array=[25, 50, 80];
+% k_array = [26, 51, 80, 110, 150, 200, 230, 300];  % multiple time steps
+k_array=[25, 50, 80];
 dt = 0.2;
 
 make_plots = false;
@@ -220,7 +221,7 @@ function plot_var_diff(k_array, dt, ...
         all_data = [all_data; data_true_tmp(:)];
         % nureged state for diff limits
         data_nurged_tmp = get_nested_field(md_nurged_tmp, field);
-        all_data = [all_data; data_nurged_tmp(:)];
+        % all_data = [all_data; data_nurged_tmp(:)];
     end
 
     cmin = min(all_data);
@@ -243,9 +244,11 @@ function plot_var_diff(k_array, dt, ...
 
     % (b) No assimilation − True
     % diff_noassim = data_ens - data_true;
-    diff_noassim = data_nurged - data_true;
+    % diff_noassim = (data_nurged - data_true)./data_true;
+    eps0 = 0.01 * max(abs(data_true(:)));
+    diff_noassim = (data_ens - data_true)./(abs(data_true) + eps0);
     maxAbs_noassim = max(abs(diff_noassim(:)));
-    plotmodel(md_nurged, 'data', diff_noassim, ...
+    plotmodel(md_ens, 'data', diff_noassim, ...
         'title', '(b) No assimilation − True', ...
         'subplot', [nrows, 1, 2], 'caxis', [-maxAbs_noassim maxAbs_noassim], 'colorbar', 'off');
 
@@ -256,7 +259,14 @@ function plot_var_diff(k_array, dt, ...
         [md_true, md_nurged, md_ens] = setup_model_states(k, dt, ...
             model_true_state, model_nurged_state, ensemble_vec_mean, ...
             md_true, md_nurged, md_ens, md);
-        diff_data = get_nested_field(md_ens, field) - get_nested_field(md_true, field);
+        true_field = get_nested_field(md_true, field);
+        ens_field  = get_nested_field(md_ens, field);
+        
+        eps0 = 0.01 * max(abs(true_field(:)));    % 1% of max for stabilization
+        diff_data = (ens_field - true_field) ./ (abs(true_field) + eps0);
+
+        % diff_data = (get_nested_field(md_ens, field) - get_nested_field(md_true, field))./get_nested_field(md_true, field);
+        % diff_data = (get_nested_field(md_ens, field) - get_nested_field(md_true, field));
         maxAbs = max(abs(diff_data(:)));
         plotmodel(md_ens, 'data', diff_data, ...
             'title', sprintf('%s Assimilated − True (after %.1f years)', label, (k-1)*dt), ...
@@ -334,7 +344,7 @@ function plot_var_evolution(k_array, dt, ...
         all_data = [all_data; data_true_tmp(:)];
         % nureged state for diff limits
         data_nurged_tmp = get_nested_field(md_nurged_tmp, field);
-        all_data = [all_data; data_nurged_tmp(:)];
+        % all_data = [all_data; data_nurged_tmp(:)];
     end
 
     cmin = min(all_data);
@@ -355,7 +365,7 @@ function plot_var_evolution(k_array, dt, ...
         'subplot', [nrows, 1, 1], 'caxis', [cmin cmax], 'colorbar', 'off');
 
     % (b) No assimilation
-    plotmodel(md_nurged, 'data', data_nurged, ...
+    plotmodel(md_ens, 'data', data_ens, ...
         'title', sprintf('(b) No assimilation %s', field_title), ...
         'subplot', [nrows, 1, 2], 'caxis', [cmin cmax], 'colorbar', 'off');
 

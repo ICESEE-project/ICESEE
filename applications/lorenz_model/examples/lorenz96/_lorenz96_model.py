@@ -29,7 +29,7 @@ def Lorenz96(state, **kwargs):
 
     x,y,z = state # Unpack the state vector
     f = np.zeros(3) # Create an empty vector to store the derivatives
-    print(f"[Debug] State inside Lorenz96: x={x}, y={y}, z={z}")  # Debug print statement
+    # print(f"[Debug] State inside Lorenz96: x={x}, y={y}, z={z}")  # Debug print statement
     f[0] = sigma*(y-x)  
     f[1] = x*(rho-z)-y
     f[2] = x*y - beta*z

@@ -7,7 +7,7 @@ physical-parameters:
 
 modeling-parameters:
   # Model parameters
-  num_years: 60          # Number of years to run the model (30-year assimilation period from paper)
+  num_years: 150          # Number of years to run the model (30-year assimilation period from paper)
   tinitial: 0.0           # Initial time
   timesteps_per_year: 0.2 # Number of timesteps per year (monthly for stability in SSA)
 
@@ -15,7 +15,7 @@ modeling-parameters:
   ParamFile: "Mismip2.par" # Parameter file for ISSM-DART setup
   use_reference_data: True  # Use reference data for transient steady state
   reference_data_dir: "data" # Directory for reference data
-  reference_data: "ISMIP.reference_simulation2.mat" # Reference data for transient steady state: only used if use_reference_data is True
+  reference_data: "ISMIP.initial_reference.mat" # Reference data for transient steady state: only used if use_reference_data is True
   steps: 6                 # Increased steps for finer time integration
   verbose: True              # Enable verbosity for debugging
   deepwater_melting_rate: 150          # Basal melt rate (150 m/yr)
@@ -25,13 +25,15 @@ modeling-parameters:
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 50                      # Number of ensemble members (paper uses 50)
-  freq_obs: 2                 # Frequency of observations (annual, as per paper)
-  obs_max_time: 40            # Maximum time for observations (30 years)
+  freq_obs: 3                 # Frequency of observations (annual, as per paper)
+  obs_max_time: 100            # Maximum time for observations (30 years)
   obs_start_time: 2            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state:    1  # Generate true state for synthetic observations
-  generate_nurged_state:  1  # Generate nudged state for synthetic observations
+  generate_true_state:    0   # Generate true state for synthetic observations
+  generate_nurged_state:  0  # Generate nudged state for synthetic observations
+  initialize_ensemble: 1
+  initial_spread_factor: 1.25
   sequential_ensemble_initialization: 1
   use_ensemble_pertubations: 1
 
@@ -41,14 +43,14 @@ enkf-parameters:
   observed_params: ['bed']   # Parameters to estimate (friction coefficient, bed topography)
 
   # bed topography observations settings
-  bed_obs_snapshot: [8]        # Bedrock elevation observations at 30 years
+  bed_obs_snapshot: [30]        # Bedrock elevation observations at 30 years
   bed_obs_spacing: 30000          # Spacing of bedrock elevation observations (30 km)
 
   # Statistical parameters
-  sig_obs: [0.01, 5, 8, 7, 3, 0.01]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
-  sig_Q: [0.8, 0.4, 0.4, 0.08, 0.08, 0.8]          # Process noise std dev (adjusted for H, Vx, Vy)
+  sig_obs: [0.01, 3, 8, 7, 3, 0.01]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
+  sig_Q: [0.8, 0.2, 0.2, 0.08, 0.08, 0.8]          # Process noise std dev (adjusted for H, Vx, Vy)
   # length_scale: [300,220,180,150,320]               # Length scale for covariance (5 km for friction, per paper)
-  length_scale: [1800, 1800,1300,1300,1800,1900] 
+  length_scale: [18,18,23,23,28,39] 
 
   seed: 42                       # Seed for random number generator
   inflation_factor: 1.15        # Inflation factor (optimal range 1.10–1.18 from paper)

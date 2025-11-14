@@ -57,7 +57,7 @@ def generate_true_state(**kwargs):
     nd, nt = statevec_true.shape
 
     # call the icesee_get_index function to get the indices of the state variables
-    vecs, indx_map, dim_per_proc = icesee_get_index(statevec_true, **kwargs)
+    vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
     
 
     # Set the initial condition
@@ -132,3 +132,7 @@ def Obs_fun(virtual_obs=None):
 def JObs_fun(nd=None):
     H_jac = np.eye(nd)
     return H_jac
+
+def Cov_Obs_fun(sig_obs=None,nd=None):
+    R_cov = np.eye(nd) * (sig_obs ** 2)
+    return R_cov
