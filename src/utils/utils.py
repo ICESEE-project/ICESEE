@@ -348,7 +348,8 @@ class UtilsFunctions:
 
                     # bed* special snapshot logic with sparse mask
                     if bed_flag:
-                        if km_temp < len(bed_snaps) and (step + 1 == bed_snaps[km_temp]):
+                        if km_temp < len(bed_snaps) and (step + 1 == bed_snaps[km_temp]): #TODO: start from here (bed_snaps must be like ind_m)
+                        # if km_temp < len(bed_snaps) and (bed_snaps[km_temp] == ind_m[km]):
                             # Only observe on masked subset; zeros elsewhere
                             mask = bed_mask_map.get(key, None)
                             if mask is None:
