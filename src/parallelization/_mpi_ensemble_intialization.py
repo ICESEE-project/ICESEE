@@ -199,7 +199,19 @@ def ensemble_initialization(**model_kwargs):
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
 
                     # lets inflate the noise to increase the spread
-                    ensemble_vec[:,ens] += alpha*noise
+                    model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
+                    # exclude bed variables from observed variables
+                    all_observed = model_kwargs['observed_vars_params']
+                    nd_new = len(all_observed) * hdim
+                    for ii, key in enumerate(all_observed):
+                        # if ii < params["num_state_vars"]:
+                        ensemble_vec[indx_map[key], ens] += alpha * noise[indx_map[key]]
+                        # if ii < params["num_state_vars"]:
+                        #     start_idx = ii * hdim
+                        #     end_idx = start_idx + hdim
+                        #     ensemble_vec[start_idx:end_idx, ens] += alpha * noise[start_idx:end_idx]
+                            
+                    # ensemble_vec[:,ens] += alpha*noise
                     # for ii, sig in enumerate(params["sig_Q"]):
                     #     if ii <=params["num_state_vars"]:
                     #         start_idx = ii * hdim

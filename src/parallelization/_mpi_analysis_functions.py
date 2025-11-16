@@ -321,7 +321,8 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,time_analysis_me
         # do the ensemble analysis update: A_j = Fj*X5 
         analysis_vec = np.dot(scatter_ensemble, X5)
 
-        ndim = analysis_vec.shape[0] // params["total_state_param_vars"]
+        # ndim = analysis_vec.shape[0] // params["total_state_param_vars"]
+        ndim = model_kwargs.get("nd", params["nd"])//len(model_kwargs.get("all_observed",[]))
         state_block_size = ndim*params["num_state_vars"]
         # analysis_vec[state_block_size:,:] /= 10
         # analysis_vec[state_block_size:,:] *= (smb_scale)  # Scale SMB after analysis
@@ -343,7 +344,8 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,time_analysis_me
 
 
         # check for negative thicknes and set to 1e-3 if vec_input contains h
-        for i, var in enumerate(model_kwargs.get("vec_inputs",[])):
+        # for i, var in enumerate(model_kwargs.get("vec_inputs",[])):
+        for i, var in enumerate(model_kwargs.get("all_observed",[])):
             if var == "h":
                 start = i * ndim
                 end = start + ndim

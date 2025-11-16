@@ -25,7 +25,7 @@ modeling-parameters:
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 50                      # Number of ensemble members (paper uses 50)
-  freq_obs: 4                 # Frequency of observations (annual, as per paper)
+  freq_obs: 2 #4                 # Frequency of observations (annual, as per paper)
   obs_max_time: 50            # Maximum time for observations (30 years)
   obs_start_time: 2            # Start time for observations (start of simulation)
 
@@ -40,6 +40,7 @@ enkf-parameters:
   num_state_vars: 4             # State variables: ice thickness (H), velocities (u, v)
   num_param_vars: 2             # Parameter variables: friction coefficient (C), bed topography (B)
   vec_inputs: ['Thickness', 'Surface','Vx','Vy','bed','coefficient'] # State vector inputs (ice surface and velocities)
+  observed_vars: ['Surface', 'Vx', 'Vy']  # Observed variables (ice thickness, velocities, bed topography)
   observed_params: ['bed']   # Parameters to estimate (friction coefficient, bed topography)
 
   # bed topography observations settings
@@ -50,7 +51,8 @@ enkf-parameters:
   sig_obs: [0.01, 3, 8, 7, 3, 0.01]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
   sig_Q: [0.8, 0.08, 0.2, 0.08, 0.08, 0.6]          # Process noise std dev (adjusted for H, Vx, Vy)
   # length_scale: [300,220,180,150,320]               # Length scale for covariance (5 km for friction, per paper)
-  length_scale: [18,18,23,23,28,29] 
+  # length_scale: [18,18,23,23,28,29] 
+  length_scale: [28,28,23,23,18,39] 
 
   seed: 42                       # Seed for random number generator
   inflation_factor: 1.15        # Inflation factor (optimal range 1.10–1.18 from paper)

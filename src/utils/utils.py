@@ -59,8 +59,8 @@ class UtilsFunctions:
             state_variables_size = ndim*self.params["num_state_vars"]
             # parameters are not required to observe the state variables
             num_params_size = n - state_variables_size
-            H_param = np.zeros(num_params_size)
-            H[:,state_variables_size:] = H_param
+            # H_param = np.zeros(num_params_size)
+            # H[:,state_variables_size:] = H_param
             
         return H
 

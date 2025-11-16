@@ -12,6 +12,7 @@ import numpy as np
 import bigmpi4py as BM
 from scipy.stats import multivariate_normal, beta
 from mpi4py import MPI
+from ICESEE.src.utils.tools import icesee_get_index
 
 
 # def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_chunk, comm, model_kwargs, output_file="icesee_ensemble_data.h5"):
@@ -287,10 +288,29 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
             with h5py.File(output_file, 'a') as f:
                 dset = f['ensemble']
                 ens_mean = f['ensemble_mean']
-                
+
+                hdim =  model_kwargs.get("nd", params['nd'])//len(model_kwargs.get("all_observed", []))
+
+                # open full ensemble dataset before analysis
+                with h5py.File(f'{model_kwargs.get("data_path")}/ensemble_before_analysis_step_{timestep:04d}.h5', 'r') as f_before:
+                    data_before = f_before['ensemble_before_analysis'][:]
+                    vecs, indx_map, dim_per_proc = icesee_get_index(data_before, **model_kwargs)
+                    # for ii, key in enumerate (model_kwargs.get("all_observed", [])):
+                    #     # print('key:\n', key)
+                    #     start = ii*hdim
+                    #     end = start + hdim      
+                    #     data_before[indx_map[key], :] = recvbuf[start:end, :]
+
+                    # Build global indices in correct full-state order
+                    obs_indices = np.concatenate([indx_map[key] for key in model_kwargs.get("all_observed", [])])
+
+                    # (nd_new, Nens) must match recvbuf
+                    data_before[obs_indices, :] = recvbuf.copy()
+
+
                 # Write gathered data
-                dset[:, :, timestep] = recvbuf
-                ens_mean[:, timestep] = ensemble_mean
+                dset[:, :, timestep] = data_before
+                ens_mean[:, timestep] = np.mean(data_before, axis=1)
 
                 if model_kwargs.get("DEnKF_flag", False):
                     ensemble_mean = np.mean(dset[:, :, timestep], axis=1)
@@ -516,7 +536,8 @@ def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, model_kwargs
 
                 # Create and write ensemble mean
                 ens_mean = f.create_dataset('ensemble_mean', (nd, model_kwargs.get('nt', params['nt']) + 1), dtype=dtype)
-                ens_mean[:, 0] = ensemble_mean
+                # ens_mean[:, 0] = ensemble_mean
+                ens_mean[:, 0] = full_ensemble[:, 0]
 
                 if model_kwargs.get("DEnKF_flag", False):
                     ensemble_mean = np.mean(dset[:, :, 0], axis=1)
@@ -580,7 +601,8 @@ def parallel_write_full_ensemble_from_root_full_parallel_run(timestep, ensemble_
 
                     # Create and write ensemble mean
                     ens_mean = f.create_dataset('ensemble_mean', (nd, model_kwargs.get('nt', params['nt']) + 1), dtype=dtype)
-                    ens_mean[:, 0] = ensemble_mean
+                    # ens_mean[:, 0] = ensemble_mean
+                    ens_mean[:, 0] = full_ensemble[:, 0]
 
                     if model_kwargs.get("DEnKF_flag", False):
                         ensemble_mean = np.mean(dset[:, :, 0], axis=1)
