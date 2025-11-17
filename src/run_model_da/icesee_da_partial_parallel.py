@@ -442,60 +442,61 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                         _time_analysis_step = MPI.Wtime()
 
                         # get new diemensions after forecast step
-                        model_kwargs.update({'nd_old': nd})
-                        if rank_world == 0:
+                        # model_kwargs.update({'nd_old': nd})
+                        # if rank_world == 0:
 
-                             # write full ensemble to file before analysis
-                            with h5py.File(f'{_modelrun_datasets}/ensemble_before_analysis_step_{k+1:04d}.h5', 'w') as f:
-                                f.create_dataset("ensemble_before_analysis", data=ensemble_vec)
+                        #      # write full ensemble to file before analysis
+                        #     with h5py.File(f'{_modelrun_datasets}/ensemble_before_analysis_step_{k+1:04d}.h5', 'w') as f:
+                        #         f.create_dataset("ensemble_before_analysis", data=ensemble_vec)
 
-                            nd, Nens= ensemble_vec.shape
-                            hdim = nd // params["total_state_param_vars"]
-                            # print(ensemble_vec.shape)
-                            model_kwargs.update({"nd_old": nd}); params.update({"nd_old": nd})
-                            bed_aliases = {'bed', 'bedrock', 'bed_topography', 'bedtopo', 'bedtopography'}
-                            key_is_bed = {k: (k in bed_aliases) for k in model_kwargs['vec_inputs']}
-                            vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
-                            # check if bed_obs_snapshot array is empty
-                            if len(model_kwargs.get("bed_obs_snapshot", [])) == 0:
-                                # combine parameters and variables observed
-                                model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
-                                # exclude bed variables from observed variables
-                                all_observed = [var for var in model_kwargs['observed_vars_params'] if not key_is_bed.get(var, False)]
-                                nd_new = len(all_observed) * hdim
-                                ensemble_vec_reduced = np.zeros((nd_new, Nens))
-                                for ii, key in enumerate(all_observed):
-                                    start = ii * hdim
-                                    end = start + hdim
-                                    ensemble_vec_reduced[start:end, :] = ensemble_vec[indx_map[key], :]
-                                ensemble_vec = copy.deepcopy(ensemble_vec_reduced)
-                                # print('stop1\n'); exit(0)
-                                # model_kwargs.update({"nd": nd_new}); params["nd"] = nd_new
-                                # print("indx_map keys:", indx_map.keys())
-                                # print("all_observed:", all_observed)
+                        #     nd, Nens= ensemble_vec.shape
+                        #     hdim = nd // params["total_state_param_vars"]
+                        #     # print(ensemble_vec.shape)
+                        #     model_kwargs.update({"nd_old": nd}); params.update({"nd_old": nd})
+                        #     bed_aliases = {'bed', 'bedrock', 'bed_topography', 'bedtopo', 'bedtopography'}
+                        #     key_is_bed = {k: (k in bed_aliases) for k in model_kwargs['vec_inputs']}
+                        #     vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                        #     # check if bed_obs_snapshot array is empty
+                        #     if len(model_kwargs.get("bed_obs_snapshot", [])) == 0:
+                        #         # combine parameters and variables observed
+                        #         model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
+                        #         # exclude bed variables from observed variables
+                        #         all_observed = [var for var in model_kwargs['observed_vars_params'] if not key_is_bed.get(var, False)]
+                        #         nd_new = len(all_observed) * hdim
+                        #         ensemble_vec_reduced = np.zeros((nd_new, Nens))
+                        #         for ii, key in enumerate(all_observed):
+                        #             start = ii * hdim
+                        #             end = start + hdim
+                        #             ensemble_vec_reduced[start:end, :] = ensemble_vec[indx_map[key], :]
+                        #         ensemble_vec = copy.deepcopy(ensemble_vec_reduced)
+                        #         # print('stop1\n'); exit(0)
+                        #         # model_kwargs.update({"nd": nd_new}); params["nd"] = nd_new
+                        #         # print("indx_map keys:", indx_map.keys())
+                        #         # print("all_observed:", all_observed)
 
-                            else:
-                                # include bed variables in the observed variables
-                                # all_observed = np.concatenate(model_kwargs['observed_vars'], model_kwargs['observed_params'])
-                                model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
-                                all_observed = model_kwargs['observed_vars_params']
-                                nd_new = len(all_observed)* hdim
-                                ensemble_vec_reduced = np.zeros((nd_new, Nens))
-                                for ii, key in enumerate(all_observed):
-                                    start = ii * hdim
-                                    end = start + hdim
-                                    ensemble_vec_reduced[start:end, :] = ensemble_vec[indx_map[key], :]
-                                ensemble_vec = copy.deepcopy(ensemble_vec_reduced)
-                                # print('stop2'); exit(0)
-                                # model_kwargs.update({"nd": nd_new}); params["nd"] = nd_new
-                        else:
-                            nd_new = 0
-                            all_observed = None
+                        #     else:
+                        #         # include bed variables in the observed variables
+                        # all_observed = np.concatenate(model_kwargs['observed_vars'], model_kwargs['observed_params'])
+                        model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
+                        all_observed = model_kwargs['observed_vars_params']
+                        nd_new = len(all_observed)* hdim
 
-                        nd_new = comm_world.bcast(nd_new, root=0)
-                        all_observed = comm_world.bcast(all_observed, root=0)
+                        #         ensemble_vec_reduced = np.zeros((nd_new, Nens))
+                        #         for ii, key in enumerate(all_observed):
+                        #             start = ii * hdim
+                        #             end = start + hdim
+                        #             ensemble_vec_reduced[start:end, :] = ensemble_vec[indx_map[key], :]
+                        #         ensemble_vec = copy.deepcopy(ensemble_vec_reduced)
+                        #         # print('stop2'); exit(0)
+                        #         # model_kwargs.update({"nd": nd_new}); params["nd"] = nd_new
+                        # else:
+                        #     nd_new = 0
+                        #     all_observed = None
 
-                        model_kwargs.update({'nd': nd_new, 'all_observed': all_observed}); params.update({'nd': nd_new})
+                        # nd_new = comm_world.bcast(nd_new, root=0)
+                        # all_observed = comm_world.bcast(all_observed, root=0)
+
+                        model_kwargs.update({'all_observed': all_observed}); params.update({'all_observed': all_observed})
 
                         # *- parallelize the getting Eta, D and HA steps
                         # if Nens >= size_world:
@@ -508,7 +509,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                         #             local_Nens += 1
                         #         stop = start + local_Nens
                         #         ensemble_vec = f["ensemble"][:,start:stop,k+1]
-                        #         d = UtilsFunctions(params, ensemble_vec).Obs_fun(hu_obs[:,km])
+                        #         d = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).Obs_fun(hu_obs[:,km])
                         #         Cov_obs = params["sig_obs"][k+1]**2 * np.eye(2*params["number_obs_instants"]+1)
                         #         Eta = np.zeros((d.shape[0], local_Nens))
                         #         D = np.zeros_like(Eta)
@@ -535,11 +536,11 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                         #         with h5py.File(input_file, "r", driver="mpio", comm=comm_world) as f:
                         #             hu_obs = f["hu_obs"][:]
                         #             ensemble_vec = f["ensemble"][:,rank_world,k+1]
-                        #             d = UtilsFunctions(params, ensemble_vec).Obs_fun(hu_obs[:,km])
+                        #             d = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).Obs_fun(hu_obs[:,km])
                         #             Cov_obs = params["sig_obs"][k+1]**2 * np.eye(2*params["number_obs_instants"]+1)
                         #             Eta = np.random.multivariate_normal(mean=np.zeros(d.shape[0]), cov=Cov_obs)
                         #             D = d + Eta
-                        #             HA = UtilsFunctions(params, ensemble_vec).Obs_fun(ensemble_vec)
+                        #             HA = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).Obs_fun(ensemble_vec)
 
                         #             # gather the results
                         #             gathered_Eta = comm_world.gather(Eta, root=0)
@@ -567,8 +568,8 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                             state_block_size = ndim*params["num_state_vars"]
                         
                             # -------------
-                            # H = UtilsFunctions(params, ensemble_vec).JObs_fun(ensemble_vec.shape[0]) 
-                            # h = UtilsFunctions(params, ensemble_vec).Obs_fun # observation operator
+                            # H = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).JObs_fun(ensemble_vec.shape[0]) 
+                            # h = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).Obs_fun # observation operator
 
                             # compute the observation covariance matrix
                             # Cov_obs = params["sig_obs"][k+1]**2 * np.eye(2*params["number_obs_instants"]+1)
@@ -589,19 +590,19 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                             #     end = start + ndim
                             #     hu_obs[start:end, :] = _hu_obs[indx_map[key], :]
                             with h5py.File(_synthetic_obs, 'r') as f:
-                                _hu_obs = f['hu_obs'][:]
+                                hu_obs = f['hu_obs'][:]
                                 error_R = f['R'][:]
                                 # Cov_obs = np.cov(error_R)
                                 Cov_obs = np.zeros(error_R.shape)
 
-                            # Construct global observation indices for the reduced vector
-                            vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
-                            obs_indices = np.concatenate([indx_map[key] for key in model_kwargs['all_observed']])
+                            # # Construct global observation indices for the reduced vector
+                            # vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                            # obs_indices = np.concatenate([indx_map[key] for key in model_kwargs['all_observed']])
 
-                            # Now reduce the observations consistently
-                            hu_obs = _hu_obs[obs_indices, :]
+                            # # Now reduce the observations consistently
+                            # hu_obs = _hu_obs[obs_indices, :]
 
-                            d = UtilsFunctions(params, ensemble_vec).Obs_fun(hu_obs[:,km])
+                            d = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).Obs_fun(hu_obs[:,km])
                             model_kwargs.update({"error_R": error_R}) # store the error covariance matrix
                             #  -------------
 
@@ -626,7 +627,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                                 X5,X5prime = DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions)
                                 # y_i = np.sum(X5, axis=1)
                                 # ens_mean = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
-                                # H = UtilsFunctions(params, ensemble_vec).JObs_fun(ensemble_vec.shape[0])
+                                # H = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).JObs_fun(ensemble_vec.shape[0])
                                 # Cov_model = np.cov(ensemble_vec)
                                 # ens_mean = np.mean(ensemble_vec, axis=1)
                                 # diff = (ensemble_vec -np.tile(ens_mean.reshape(-1,1),Nens) )
@@ -661,13 +662,13 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                         # with h5py.File(_synthetic_obs, 'r', driver='mpio', comm=comm_world) as f:
                         vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
                         with h5py.File(_synthetic_obs, 'r') as f:
-                            _hu_obs = f['hu_obs'][:]
+                            hu_obs = f['hu_obs'][:]
 
-                        # Construct global observation indices for the reduced vector
-                        obs_indices = np.concatenate([indx_map[key] for key in model_kwargs['all_observed']])
+                        # # Construct global observation indices for the reduced vector
+                        # obs_indices = np.concatenate([indx_map[key] for key in model_kwargs['all_observed']])
 
-                        # Now reduce the observations consistently
-                        hu_obs = _hu_obs[obs_indices, :]
+                        # # Now reduce the observations consistently
+                        # hu_obs = _hu_obs[obs_indices, :]
 
 
                         # fetch the upper and lower bounds for every paramerter from observed data
@@ -709,8 +710,8 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                         time_analysis_step += MPI.Wtime() - _time_analysis_step
 
                         # update nd
-                        nd = model_kwargs.get('nd_old')
-                        model_kwargs.update({'nd': nd}); params.update({'nd': nd})
+                        # nd = model_kwargs.get('nd_old')
+                        # model_kwargs.update({'nd': nd}); params.update({'nd': nd})
 
                     else: 
                         # if Nens < size_world:
@@ -748,14 +749,14 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
             
                     if rank_world == 0:
 
-                        H = UtilsFunctions(params, ensemble_vec).JObs_fun(ensemble_vec.shape[0])
-                        h = UtilsFunctions(params, ensemble_vec).Obs_fun # observation operator
+                        H = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).JObs_fun(ensemble_vec.shape[0])
+                        h = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).Obs_fun # observation operator
 
                         # compute the observation covariance matrix
                         Cov_obs = params["sig_obs"][k+1]**2 * np.eye(2*params["number_obs_instants"]+1)
 
                         # --- vector of measurements
-                        d = UtilsFunctions(params, ensemble_vec).Obs_fun(hu_obs[:,km])
+                        d = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).Obs_fun(hu_obs[:,km])
 
                         if EnKF_flag:
                             # compute the X5 matrix
@@ -778,8 +779,8 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
 
                     # inflate the ensemble
                     # params["inflation_factor"] = inflation_factor
-                    ensemble_vec = UtilsFunctions(params, ensemble_vec).inflate_ensemble(in_place=True)
-                    # ensemble_vec = UtilsFunctions(params, ensemble_vec)._inflate_ensemble()
+                    ensemble_vec = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).inflate_ensemble(in_place=True)
+                    # ensemble_vec = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec)._inflate_ensemble()
                 
                     # update the local ensemble
                     ensemble_local = copy.deepcopy(ensemble_vec[:,start:stop])

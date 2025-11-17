@@ -43,7 +43,7 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
 
     # np.random.seed(rank_seed)
 
-    H = UtilsFunctions(params, ensemble_vec).JObs_fun(ensemble_vec.shape[0]) # mxNens, observation operator
+    H = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).JObs_fun(ensemble_vec.shape[0]) # mxNens, observation operator
 
     # -- get ensemble pertubations
     use_ensemble_pertubations = model_kwargs.get("use_ensemble_pertubations", True)
@@ -198,8 +198,8 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
         nx, ny = model_kwargs.get("nx"), model_kwargs.get("ny")
         from scipy.spatial import distance
         # for each grid point
-        h = UtilsFunctions(params, ensemble_vec).Obs_fun 
-        # d = UtilsFunctions(params, ensemble_vec).Obs_fun(hu_obs[:,km])
+        h = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).Obs_fun 
+        # d = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).Obs_fun(hu_obs[:,km])
         analysis_vec_ij = np.empty_like(ensemble_vec)
         dim = ensemble_vec.shape[0]//params["total_state_param_vars"]
         mx, my = get_grid_dimensions(nx, ny, dim)
@@ -344,8 +344,8 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,time_analysis_me
 
 
         # check for negative thicknes and set to 1e-3 if vec_input contains h
-        # for i, var in enumerate(model_kwargs.get("vec_inputs",[])):
-        for i, var in enumerate(model_kwargs.get("all_observed",[])):
+        for i, var in enumerate(model_kwargs.get("vec_inputs",[])):
+        # for i, var in enumerate(model_kwargs.get("all_observed",[])):
             if var == "h":
                 start = i * ndim
                 end = start + ndim
@@ -415,7 +415,7 @@ def DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
     """
     params = model_kwargs.get("params")
     comm_world = model_kwargs.get("comm_world")
-    H = UtilsFunctions(params, ensemble_vec).JObs_fun(ensemble_vec.shape[0]) # mxNens, observation operator
+    H = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).JObs_fun(ensemble_vec.shape[0]) # mxNens, observation operator
 
     # -- get ensemble pertubations
     ensemble_perturbations = ensemble_vec - np.mean(ensemble_vec, axis=1).reshape(-1,1)

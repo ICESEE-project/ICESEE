@@ -25,7 +25,7 @@ def isiterable(obj):
     return isinstance(obj, Iterable)
 
 class UtilsFunctions:
-    def __init__(self, params,ensemble=None):
+    def __init__(self, params=None,model_kwargs=None, ensemble=None):
         """
         Initialize the utility functions with model parameters.
         
@@ -34,8 +34,74 @@ class UtilsFunctions:
         """
         self.params   = params
         self.ensemble = ensemble
-    
+        self.model_kwargs = model_kwargs
+
     def H_matrix(self, n_model):
+        """
+        Build dense observation operator H.
+        H has shape (m_obs, n_model).
+        H(i,j) = 1 if observation i corresponds to state index j, else 0.
+        """
+
+        params = self.params
+        observed = params["all_observed"]         # ['h','u','v','smb']
+        vec_inputs = params["vec_inputs"]         # ['h','s','u','v','bed','fric','smb']
+
+        # Recompute index map for the *current full state vector*
+        vecs, indx_map, _ = icesee_get_index(**self.model_kwargs)
+
+        # COLLECT OBSERVATION INDICES
+        obs_indices = np.concatenate([indx_map[key] for key in observed]).astype(int)
+
+        # SAFETY CHECK
+        if obs_indices.max() >= n_model:
+            raise ValueError(
+                f"H_matrix error: obs index {obs_indices.max()} >= state size {n_model}. "
+                "likely vec_inputs or nd inconsistent."
+            )
+
+        m_obs = obs_indices.size
+
+        # H: zero everywhere except H[i, obs_indices[i]] = 1
+        H = np.zeros((m_obs, n_model))
+        H[np.arange(m_obs), obs_indices] = 1.0
+
+        return H
+
+    def H_matrix__(self, n_model):
+        """
+        Build observation operator H for multi-variable ice-sheet DA
+        WITHOUT changing the outer pipeline.
+        H returns a dense matrix of shape (m_obs, n_model).
+        """
+
+        # unpack parameters
+        params = self.params
+        observed = params['all_observed']       # e.g., ['h','u','v','smb']
+        vec_inputs = params['vec_inputs']       # full list like ['h','s','u','v','bed','fric','smb']
+
+        # Full state indexing
+        vecs, indx_map, dim_per_proc = icesee_get_index(**self.model_kwargs)
+
+        # Build consistent obs index list
+        obs_indices = []
+        for key in observed:
+            obs_indices.append(indx_map[key])
+        obs_indices = np.concatenate(obs_indices)
+
+        # Number of observations
+        m_obs = obs_indices.size
+
+        # Allocate H
+        H = np.zeros((m_obs, n_model))
+
+        # Fill H with identity rows at observation positions
+        H[np.arange(m_obs), obs_indices] = 1.0
+        print(f"observed indices: {obs_indices}")
+
+        return H
+
+    def H_matrix_(self, n_model):
         """ observation operator matrix
         """
         n = n_model
@@ -61,7 +127,18 @@ class UtilsFunctions:
             num_params_size = n - state_variables_size
             # H_param = np.zeros(num_params_size)
             # H[:,state_variables_size:] = H_param
-            
+
+        # lets have zeros for unobserved variables and parameters
+        all_observed = self.params['all_observed']
+        vec_inputs = self.params['vec_inputs']
+        ndim = n // self.params["total_state_param_vars"]
+        vecs, indx_map, dim_per_proc = icesee_get_index(**self.model_kwargs)
+        for ii, key in enumerate(vec_inputs):
+            if key in all_observed:
+                H[:, indx_map[key]] = H[:, indx_map[key]]
+            else:
+                H[:, indx_map[key]] = 0
+
         return H
 
     def Obs_fun(self, virtual_obs):
@@ -234,7 +311,7 @@ class UtilsFunctions:
         # Observation schedule
         obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
         ind_m = np.asarray(ind_m, dtype=int)  # 1-based
-        # print(f"[ICESEE] observation times: {obs_t}, indices: {ind_m}, total: {m_obs}")
+        print(f"[ICESEE] observation times: {obs_t}, indices: {ind_m}, total: {m_obs}")
 
         # Index maps
         vecs, indx_map, _ = icesee_get_index(statevec_true, **kwargs)
@@ -332,42 +409,39 @@ class UtilsFunctions:
             # Save per-key mask (over the bed subvector)
             bed_mask_map[k] = mask
 
-        # === Main loop ===
+        obs_set = set(kwargs["observed_vars"] + kwargs["observed_params"])
+        # Map each bed snapshot time to the obs column
+        bed_time_to_col = {t: col for col, t in enumerate(ind_m)}
+
         for step in range(nt):
-            if (km < m_obs) and (step + 1 == ind_m[km]):  # 1-based compare
-                for ii, key in enumerate(vec_inputs):
+            if (km < m_obs) and (step + 1 == ind_m[km]):
+                for key in vec_inputs:
                     idx = key_idx_map[key]
                     bed_flag = key_is_bed[key]
 
-                    if (ii < kwargs['num_state_vars'] or key in observed_params) and (not bed_flag):
+                    # ---------- STANDARD VARIABLES ----------
+                    if key in obs_set and not bed_flag:
                         sigma = error_R[idx, km]
-                        # print(f"[ICESEE] Generating obs for key='{key}' at step={step+1}, km={km}, sigma={sigma} hu_obs shape: {hu_obs[:,:].shape}")
-                        hu_obs[idx, km] = statevec_true[idx, step + 1] + np.random.normal(0.0, sigma, size=idx.size)
+                        hu_obs[idx, km] = (
+                            statevec_true[idx, step+1] +
+                            np.random.normal(0.0, sigma, size=idx.size)
+                        )
                     else:
                         hu_obs[idx, km] = 0.0
 
-                    # bed* special snapshot logic with sparse mask
-                    if bed_flag:
-                        if km_temp < len(bed_snaps) and (step + 1 == bed_snaps[km_temp]): #TODO: start from here (bed_snaps must be like ind_m)
-                        # if km_temp < len(bed_snaps) and (bed_snaps[km_temp] == ind_m[km]):
-                            # Only observe on masked subset; zeros elsewhere
-                            mask = bed_mask_map.get(key, None)
-                            if mask is None:
-                                # if no mask computed (shouldn't happen), observe all
-                                mask = np.ones(idx.size, dtype=bool)
+                    # ---------- BED SPECIAL CASE --------------
+                    if bed_flag and (step+1 in bed_time_to_col):
+                        col = bed_time_to_col[step+1]
+                        mask = bed_mask_map[key]
+                        idx_obs = idx[mask]
+                        if idx_obs.size > 0:
+                            sigma_obs = error_R[idx_obs, col]
+                            hu_obs[idx_obs, col] = (
+                                statevec_true[idx_obs, step+1] +
+                                np.random.normal(0.0, sigma_obs, size=idx_obs.size)
+                            )
+                        # print("Nonzero bed obs:", np.nonzero(hu_obs[bed_ind,:]))
 
-                            # Local (bed-subvector) to global indices mapping:
-                            # idx is the global index array; mask is over the bed-subvector order
-                            # We need global indices for the masked positions:
-                            idx_obs = idx[mask]
-
-                            if idx_obs.size > 0:
-                                sigma_obs = error_R[idx_obs, km]
-                                hu_obs[idx_obs, km] = statevec_true[idx_obs, step + 1] + np.random.normal(
-                                    0.0, sigma_obs, size=idx_obs.size
-                                )
-                            # leave unmasked positions as zeros
-                            km_temp += 1
                 km += 1
 
         return hu_obs, error_R.T

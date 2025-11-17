@@ -684,6 +684,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.geometry.bed = h5read(filename, '/bed');
             md.friction.coefficient = h5read(filename, '/coefficient');
 
+            % lets get thickness from surface and base
+            % md.geometry.thickness = md.geometry.surface - md.geometry.base;
+
             % Ensure minimum ice thickness
             pos = find(md.geometry.thickness < 1);
             md.geometry.thickness(pos) = 1;
