@@ -190,6 +190,10 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
             model_kwargs, ensemble_vec, time_init_noise_generation, \
             time_init_ensemble_mean_computation, time_init_file_writing, \
             shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full = ensemble_initialization(**model_kwargs)
+        else:
+            time_init_noise_generation = 0.0
+            time_init_ensemble_mean_computation = 0.0
+            time_init_file_writing = 0.0
         # --- time ensemble initialization ---
         time_ensemble_initialization = MPI.Wtime() - time_ensemble_initialization
         
@@ -592,8 +596,11 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                             with h5py.File(_synthetic_obs, 'r') as f:
                                 hu_obs = f['hu_obs'][:]
                                 error_R = f['R'][:]
+                                bed_mask_map = f['bed_mask_map'][:]
                                 # Cov_obs = np.cov(error_R)
                                 Cov_obs = np.zeros(error_R.shape)
+
+                            model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
 
                             # # Construct global observation indices for the reduced vector
                             # vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
@@ -663,6 +670,11 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                         vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
                         with h5py.File(_synthetic_obs, 'r') as f:
                             hu_obs = f['hu_obs'][:]
+                            bed_mask_map = f['bed_mask_map'][:]
+
+                        # print(f[:]); exit(0)
+
+                        model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
 
                         # # Construct global observation indices for the reduced vector
                         # obs_indices = np.concatenate([indx_map[key] for key in model_kwargs['all_observed']])

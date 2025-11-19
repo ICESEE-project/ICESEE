@@ -257,9 +257,9 @@ if not flag_jupyter:
         'h5_file_compression_level': int(enkf_params.get('h5_file_compression_level', 4)), # 0-9 for gzip, 1-9 for szip, ignored for lzf and None
         'h5_file_chunk_size': int(enkf_params.get('h5_file_chunk_size', 1000)),
         'bed_obs_snapshot':enkf_params.get('bed_obs_snapshot', []),# list of time snapshots to observe bed variables
-        'bed_obs_stride_km':enkf_params.get('bed_obs_stride_km',None ), # spatial stride in km for bed observations
+        'bed_obs_stride':enkf_params.get('bed_obs_stride',None ), # spatial stride in km for bed observations
         'bed_obs_spacing':enkf_params.get('bed_obs_spacing', None), # observation spacing every n grid points {int}
-        'bed_obs_indices':enkf_params.get('bed_obs_indices', []), # specific indices to observe {list} (bed subvector indices)
+        'bed_obs_indices':enkf_params.get('bed_obs_indices', None), # specific indices to observe {list} (bed subvector indices)
         'bed_obs_mask':enkf_params.get('bed_obs_mask', None), # boolean mask array for bed observations {np.array}
         'initialize_ensemble':enkf_params.get('initialize_ensemble', True),
         'initial_spread_factor': enkf_params.get('initial_spread_factor', 1.0),

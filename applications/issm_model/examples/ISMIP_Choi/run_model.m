@@ -243,7 +243,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
         % Ensure base not below bedrock
         pos = find(md.geometry.base < md.geometry.bed);
-        md.geometry.base(pos) = md.geometry.bed(pos);
+        md.geometry.base(pos) = md.geometry.base(pos);
 
         % Grounded ice (ocean_levelset > 0)
         pos = find(md.mask.ocean_levelset > 0);
@@ -432,7 +432,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Ensure base not below bedrock
             pos = find(md.geometry.base < md.geometry.bed);
-            md.geometry.base(pos) = md.geometry.bed(pos);
+            md.geometry.base(pos) = md.geometry.base(pos);
 
             % Grounded ice (ocean_levelset > 0)
             pos = find(md.mask.ocean_levelset > 0);
@@ -600,7 +600,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Ensure base is not below bedrock
             pos = find(md.geometry.base < md.geometry.bed);
-            md.geometry.base(pos) = md.geometry.bed(pos);
+            md.geometry.base(pos) = md.geometry.base(pos);
 
             % Grounded ice (ocean_levelset > 0)
             pos = find(md.mask.ocean_levelset > 0);
@@ -707,7 +707,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Ensure base is not below bedrock
             pos = find(md.geometry.base < md.geometry.bed);
-            md.geometry.base(pos) = md.geometry.bed(pos);
+            md.geometry.base(pos) = md.geometry.base(pos);
 
             % Grounded ice (ocean_levelset > 0)
             pos = find(md.mask.ocean_levelset > 0);
@@ -781,7 +781,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Ensure base not below bedrock
             pos = find(md.geometry.base < md.geometry.bed);
-            md.geometry.base(pos) = md.geometry.bed(pos);
+            md.geometry.base(pos) = md.geometry.base(pos);
 
             % Grounded ice (ocean_levelset > 0)
             pos = find(md.mask.ocean_levelset > 0);
