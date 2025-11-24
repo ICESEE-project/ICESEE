@@ -25,15 +25,15 @@ modeling-parameters:
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 50                      # Number of ensemble members (paper uses 50)
-  freq_obs: 4 #4                 # Frequency of observations (annual, as per paper)
-  obs_max_time: 80            # Maximum time for observations (30 years)
-  obs_start_time: 2            # Start time for observations (start of simulation)
+  freq_obs: 6 #4                 # Frequency of observations (annual, as per paper)
+  obs_max_time: 80          # Maximum time for observations (30 years)
+  obs_start_time: 4            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state:    0   # Generate true state for synthetic observations
-  generate_nurged_state:  0  # Generate nudged state for synthetic observations
-  initialize_ensemble: 0
-  initial_spread_factor: 1.5
+  generate_true_state:    1   # Generate true state for synthetic observations
+  generate_nurged_state:  1  # Generate nudged state for synthetic observations
+  initialize_ensemble: 1
+  initial_spread_factor: 1.20
   sequential_ensemble_initialization: 1
   use_ensemble_pertubations: 1
 
@@ -44,18 +44,18 @@ enkf-parameters:
   observed_params: ['bed']   # Parameters to estimate (friction coefficient, bed topography)
 
   # bed topography observations settings
-  bed_obs_snapshot: [50, 330]        # Bedrock elevation observations at 30 years
-  bed_obs_spacing: 30000          # Spacing of bedrock elevation observations (30 km)
+  bed_obs_snapshot: [40, 70]        # Bedrock elevation observations at 30 years
+  bed_obs_stride: 10000          # Spacing of bedrock elevation observations (30 km)
 
   # Statistical parameters
-  sig_obs: [0, 4, 8, 7, 2, 0]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
-  sig_Q: [0.8, 0.08, 0.2, 0.08, 0.04, 0.6]          # Process noise std dev (adjusted for H, Vx, Vy)
+  sig_obs: [0, 5, 9, 8, 4, 0]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
+  sig_Q: [0.4, 0.2, 0.2, 0.1, 0.08, 0.6]          # Process noise std dev (adjusted for H, Vx, Vy)
   # length_scale: [300,220,180,150,320]               # Length scale for covariance (5 km for friction, per paper)
-  length_scale: [48,38,33,23,48,49] 
-  # length_scale: [28,28,23,23,18,39] 
+  # length_scale: [48,38,33,23,48,49] 
+  length_scale: [26,35,28,23,36,35] 
 
   seed: 42                       # Seed for random number generator
-  inflation_factor: 1.15        # Inflation factor (optimal range 1.10–1.18 from paper)
+  inflation_factor: 1.12        # Inflation factor (optimal range 1.10–1.18 from paper)
 
   # Estimation flags
   joint_estimation: True       # Enable joint state and parameter estimation

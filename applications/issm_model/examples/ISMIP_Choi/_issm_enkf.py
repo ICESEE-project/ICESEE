@@ -79,12 +79,14 @@ def generate_true_state(**kwargs):
         # -- fetch state variables
         for k in range(1, kwargs.get('nt') + 1):
             key_Thickness=f'Thickness_{k}'
+            # key_base = f'Base_{k}'
             key_surface = f'Surface_{k}'
             key_u  = f'Vx_{k}'
             key_v  = f'Vy_{k}'
             key_bed = f'bed_{k}'
             key_coefficient = f'coefficient_{k}'
             statevec_true[indx_map['Thickness'], k-1] = f[key_Thickness][0]
+            # statevec_true[indx_map['Base'], k-1] = f[key_base][0]
             statevec_true[indx_map['Surface'], k-1] = f[key_surface][0]
             statevec_true[indx_map['Vx'], k-1] = f[key_u][0]
             statevec_true[indx_map['Vy'], k-1] = f[key_v][0]
@@ -201,12 +203,14 @@ def generate_nurged_state(**kwargs):
         for k in range(1, kwargs.get('nt') + 1):
             # key_thickness=f'Thickness_{k}'
             key_Thickness=f'Thickness_{k}'
+            # key_base = f'Base_{k}'
             key_surface = f'Surface_{k}'
             key_u = f'Vx_{k}'
             key_v = f'Vy_{k}'
             key_bed = f'bed_{k}'
             key_coefficient = f'coefficient_{k}'
             statevec_nurged[indx_map['Thickness'], k-1] = f[key_Thickness][0]
+            # statevec_nurged[indx_map['Base'], k-1] = f[key_base][0]
             statevec_nurged[indx_map['Surface'], k-1] = f[key_surface][0]
             statevec_nurged[indx_map['Vx'], k-1] = f[key_u][0]
             statevec_nurged[indx_map['Vy'], k-1] = f[key_v][0]
@@ -334,6 +338,7 @@ def initialize_ensemble(ens, **kwargs):
         # for key in vec_inputs:
         #     updated_state[key] = f[key][0]
         updated_state['Thickness'] = f['Thickness'][0]
+        # updated_state['Base'] = f['Base'][0]
         updated_state['Surface'] = f['Surface'][0]
         updated_state['Vx'] = f['Vx'][0]
         updated_state['Vy'] = f['Vy'][0]
