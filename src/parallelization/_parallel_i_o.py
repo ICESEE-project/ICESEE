@@ -312,8 +312,55 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                 # dset[:, :, timestep] = data_before
                 # ens_mean[:, timestep] = np.mean(data_before, axis=1)
 
+                # ISSM *------
+                di = 0.8930
+                rho_ice = 917.0
+                rho_sw = 1028.0
+                nd = model_kwargs.get("nd", params['nd'])
+                ndim = nd // params["total_state_param_vars"]
+                state_block_size = ndim*params["num_state_vars"]
+                thickness = recvbuf[:ndim,:]
+                surface = recvbuf[ndim:2*ndim,:]
+                bed = recvbuf[state_block_size:5*ndim,:]
+
+                pos = np.where(thickness < 1)
+                thickness[pos] = 1.0
+                ocean_levelset = thickness + (bed/di)
+                # Floating ice (ocean_levelset < 0) find the indices
+                pos = np.where(ocean_levelset < 0)
+                surface[pos] = thickness[pos]* ((rho_sw - rho_ice)/rho_sw)
+                recvbuf[ndim:2*ndim,:] = surface
+                base = surface - thickness
+
+                pos_base = np.where(base < bed)
+                base[pos_base] = base[pos_base]
+
+                # grounded ice
+                pos_grounded = np.where(ocean_levelset >= 0)
+                base[pos_grounded] = bed[pos_grounded]
+
+                # update surface, bed and thickness in recvbuf
+                recvbuf[ndim:2*ndim,:] = base + thickness
+                # recvbuf[state_block_size:5*ndim,:] = bed
+                recvbuf[:ndim,:] = thickness
+                # # -------*ISSM
+                # del thickness, surface, bed, ocean_levelset, pos, base, pos_base, pos_grounded
+                # gc.collect()
+
+                # read base data from h5file and compute the mean base from all ensembles_base_*.h5 files
+                # base_data = np.zeros((nd, Nens))
+                # for ens in range(Nens):
+                #     filename = os.path.join(model_kwargs.get('data_path'), f'ensemble_base_{ens}.h5')
+                #     with h5py.File(filename, 'r') as f_base:
+                #         base_data[:, ens] = f_base['base'][:]
+                # base_mean = np.mean(base_data, axis=1)
+                # del base_data
+                # gc.collect()
+                # base_mean = 
+
                 dset[:, :, timestep] = recvbuf
-                ens_mean[:, timestep] = ensemble_mean
+                # ens_mean[:, timestep] = ensemble_mean
+                ens_mean[:, timestep] = np.mean(recvbuf, axis=1)
 
                 if model_kwargs.get("DEnKF_flag", False):
                     ensemble_mean = np.mean(dset[:, :, timestep], axis=1)
@@ -604,8 +651,8 @@ def parallel_write_full_ensemble_from_root_full_parallel_run(timestep, ensemble_
 
                     # Create and write ensemble mean
                     ens_mean = f.create_dataset('ensemble_mean', (nd, model_kwargs.get('nt', params['nt']) + 1), dtype=dtype)
-                    # ens_mean[:, 0] = ensemble_mean
-                    ens_mean[:, 0] = full_ensemble[:, 0]
+                    ens_mean[:, 0] = ensemble_mean
+                    # ens_mean[:, 0] = full_ensemble[:, 0]
 
                     if model_kwargs.get("DEnKF_flag", False):
                         ensemble_mean = np.mean(dset[:, :, 0], axis=1)

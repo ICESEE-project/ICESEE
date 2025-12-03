@@ -342,6 +342,15 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,time_analysis_me
         # update the analysis vector
         analysis_vec[state_block_size:,:] = mean_params.reshape(-1,1) + inflated_pertubations
 
+        # mean_vars = np.mean(analysis_vec[:ndim,:], axis=1)
+        # #  compute parturbations
+        # pertubations_vars = analysis_vec[:ndim,:] - mean_vars.reshape(-1,1)
+        # # apply the inflation factor
+        # inflated_pertubations_vars = pertubations_vars * params['inflation_factor']
+
+        # # update the analysis vector
+        # analysis_vec[:ndim,:] = mean_vars.reshape(-1,1) + inflated_pertubations_vars
+
 
         # check for negative thicknes and set to 1e-3 if vec_input contains h
         for i, var in enumerate(model_kwargs.get("vec_inputs",[])):
@@ -583,19 +592,24 @@ def analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, UtilsFunctions
 
         ndim = analysis_vec.shape[0] // params["total_state_param_vars"]
         state_block_size = ndim*params["num_state_vars"]
+
         # analysis_vec[state_block_size:,:] /= 10
         # analysis_vec[state_block_size:,:] *= (smb_scale)  # Scale SMB after analysis
         # params['inflation_factor'] = 1.1
         # analysis_vec = UtilsFunctions(params,  analysis_vec).inflate_ensemble(in_place=True)
         # ---> multiplicative inflation
         mean_params = np.mean(analysis_vec[state_block_size:,:], axis=1)
+        mean_vars = np.mean(analysis_vec[:ndim,:], axis=1)
         #  compute parturbations
         pertubations = analysis_vec[state_block_size:,:] - mean_params.reshape(-1,1)
+        pertubations_vars = analysis_vec[:ndim,:] - mean_vars.reshape(-1,1)
         # apply the inflation factor
         inflated_pertubations = pertubations * params['inflation_factor']
+        # inflated_pertubations_vars = pertubations_vars * params['inflation_factor']
 
         # update the analysis vector
         analysis_vec[state_block_size:,:] = mean_params.reshape(-1,1) + inflated_pertubations
+        # analysis_vec[:ndim,:] = mean_vars.reshape(-1,1) + inflated_pertubations_vars
 
 
         # check for negative thicknes and set to 1e-3 if vec_input contains h
@@ -604,6 +618,25 @@ def analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, UtilsFunctions
                 start = i * ndim
                 end = start + ndim
                 analysis_vec[start:end, :] = np.maximum(analysis_vec[start:end, :], 1e-2)
+
+        # # ISSM *------
+        # di = 0.8930
+        # rho_ice = 917.0
+        # rho_sw = 1028.0
+        # ocean_levelset = analysis_vec[:ndim,:] + analysis_vec[state_block_size:ndim,:]/di
+        # # Floating ice (ocean_levelset < 0) find the indices
+        # pos = np.where(ocean_levelset < 0)
+        # thickness_floating = analysis_vec[:ndim,:]
+        # surface = analysis_vec[ndim:2*ndim,:]
+        # surface[pos] = thickness_floating[pos]* (rho_sw - rho_ice)/rho_sw
+        # analysis_vec[ndim:2*ndim,:] = surface
+
+        # # read base data from h5file and compute the mean base from all ensembles
+
+
+
+
+        # *---------
 
         # dynamical model for parameters: from https://doi.org/10.1002/qj.3257
         # obs_index = model_kwargs.get("obs_index")

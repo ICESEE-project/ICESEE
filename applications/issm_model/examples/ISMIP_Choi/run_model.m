@@ -27,9 +27,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
     % set initail ens_id
     ens_id_init = 0;
-    h_perturb = 400;
-    s_perturb = 300;
-    b_perturb = 150;
+    h_perturb = 350;
+    s_perturb = 200;
+    b_perturb = 100;
     nurged_entries_percentage = 0.25;
 
     output_frequency = 1; % make sure this is set to 1 for coupling with ICESEE
@@ -220,10 +220,13 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         bed_err = bed - bed_ref;
         % md.geometry.bed = bed_ref + bed_err;
         % md.geometry.base = base_ref + bed_err;
+        % md.geometry.bed = bed_ref + bed - b_perturb*ones(md.mesh.numberofvertices,1);
+        % md.geometry.base = base_ref + bed - b_perturb*ones(md.mesh.numberofvertices,1);
         md.geometry.bed = bed_ref + bed;
         md.geometry.base = base_ref + bed;
 
-        md.geometry.bed = md.geometry.bed - b_perturb*ones(md.mesh.numberofvertices,1);
+        % md.geometry.bed = md.geometry.bed - b_perturb*ones(md.mesh.numberofvertices,1);
+        % md.geometry.base = md.geometry.base - b_perturb*ones(md.mesh.numberofvertices,1);
         
         % Compute ice thickness
         % md.geometry.thickness = generate_correlated_field(md, thickness_ref, 10e3, 300);
@@ -237,12 +240,13 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.geometry.thickness = [h_with_bump; thickness_ref(h_indx+1:end)];
 
         % md.geometry.thickness = md.geometry.surface - md.geometry.base; 
+        
         % Ensure minimum ice thickness of 1 m
         pos = find(md.geometry.thickness < 1);
         md.geometry.thickness(pos) = 1;
         md.geometry.surface = md.geometry.base + md.geometry.thickness;
 
-        md.geometry.surface = md.geometry.surface - s_perturb*ones(md.mesh.numberofvertices,1);
+        % md.geometry.surface = md.geometry.surface + s_perturb*ones(md.mesh.numberofvertices,1);
 
         disp('      -- ice shelf base based on hydrostatic equilibrium');
         di = md.materials.rho_ice / md.materials.rho_water;
@@ -311,8 +315,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % md.mask.ocean_levelset      = md.results.TransientSolution(end).MaskOceanLevelset;
 
         % save updated model
-        filename = fullfile(folder, data_fname);
-        save(filename, 'md', '-v7.3');
+        % filename = fullfile(folder, data_fname);
+        % save(filename, 'md', '-v7.3');
 
         N = length(md.results.TransientSolution);
         data = cell(N * 6, 6);   % 5 variables per step
@@ -415,11 +419,13 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             coefficient = h5read(filename, '/coefficient');
 
             %  update the friction and bed
-            md.friction.coefficient = friction_ref - coefficient;
+            md.friction.coefficient = friction_ref + coefficient;
             % md.friction.coefficient = coefficient;
             bed_err = bed - bed_ref;
             % md.geometry.bed = bed_ref + bed_err;
             % md.geometry.base = base_ref + bed_err;
+            % md.geometry.bed = bed_ref + bed - b_perturb*ones(md.mesh.numberofvertices,1);
+            % md.geometry.base = base_ref + bed - b_perturb*ones(md.mesh.numberofvertices,1);
             md.geometry.bed = bed_ref + bed;
             md.geometry.base = base_ref + bed;
     
@@ -428,22 +434,26 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % Compute ice thickness
             % md.geometry.thickness = md.geometry.surface - md.geometry.base;
             % md.geometry.thickness = generate_correlated_field(md, thickness_ref, 10e3, 300);
-            rand_field = h_perturb * (randn(md.mesh.numberofvertices,1) - min(randn(md.mesh.numberofvertices,1))) ./ (max(randn(md.mesh.numberofvertices,1)) - min(randn(md.mesh.numberofvertices,1)));
+            % rand_field = h_perturb * (randn(md.mesh.numberofvertices,1) - min(randn(md.mesh.numberofvertices,1))) ./ (max(randn(md.mesh.numberofvertices,1)) - min(randn(md.mesh.numberofvertices,1)));
         % md.geometry.thickness = thickness_ref + rand_field;
             hdim = md.mesh.numberofvertices;
             h_indx = ceil(nurged_entries_percentage * hdim + 1);
             h_bump = linspace(-h_perturb, 0, h_indx)';
             h_with_bump = thickness_ref(1:h_indx) + h_bump;
+            
+            thickness_ref = md.geometry.thickness;
             md.geometry.thickness = [h_with_bump; thickness_ref(h_indx+1:end)];
 
             % md.geometry.thickness = md.geometry.surface - md.geometry.base; 
+            % md.geometry.bed = md.geometry.bed - b_perturb*ones(md.mesh.numberofvertices,1);
+            % md.geometry.base = md.geometry.base - b_perturb*ones(md.mesh.numberofvertices,1);
+
             % Ensure minimum ice thickness of 1 m
             pos = find(md.geometry.thickness < 1);
             md.geometry.thickness(pos) = 1;
             md.geometry.surface = md.geometry.base + md.geometry.thickness;
 
-            md.geometry.surface = md.geometry.surface - s_perturb*ones(md.mesh.numberofvertices,1);
-            md.geometry.bed = md.geometry.bed - b_perturb*ones(md.mesh.numberofvertices,1);
+            % md.geometry.surface = md.geometry.surface + s_perturb*ones(md.mesh.numberofvertices,1);
 
             disp('      -- ice shelf base based on hydrostatic equilibrium');
             di = md.materials.rho_ice / md.materials.rho_water;
@@ -469,9 +479,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % --time stepping
             md.timestepping = timestepping();
-            md.timestepping.time_step = 0.1;
+            md.timestepping.time_step = 0.2;
             md.timestepping.start_time = 0;
-            md.timestepping.final_time = 2.0;
+            md.timestepping.final_time = 0.6;
             md.settings.output_frequency = output_frequency; %make sure this is set to 1 for 
             md.stressbalance.maxiter = 100;
             md.stressbalance.restol = 1;
@@ -599,7 +609,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             oceanlevelset = h5read(filename, '/oceanlevelset');
             md.initialization.vx   = vx;
             md.initialization.vy   = vy;
-            md.initialization.vel  = vel;
+            md.initialization.vel  = sqrt(vx.^2 + vy.^2);
             md.geometry.thickness  = thickness;
             md.geometry.surface    = surface;
             md.geometry.bed        = bed;
@@ -635,7 +645,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % Ensure base is not below bedrock
             pos = find(md.geometry.base < md.geometry.bed);
             md.geometry.base(pos) = md.geometry.base(pos);
-            % md.geometry.base(pos) = md.geometry.bed(pos);
+            %md.geometry.base(pos) = md.geometry.bed(pos);
 
             % Grounded ice (ocean_levelset > 0)
             pos = find(md.mask.ocean_levelset > 0);
@@ -750,6 +760,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Update surface geometry
             md.geometry.surface = md.geometry.base + md.geometry.thickness;
+            % md.geometry.surface = md.geometry.bed + md.geometry.thickness;
 
             md.basalforcings=linearbasalforcings();
             md.basalforcings.deepwater_melting_rate=deepwater_melting_rate;
@@ -800,7 +811,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.friction.coefficient = md.results.TransientSolution(end).FrictionCoefficient;
 
             % *--
-            % % Ensure minimum ice thickness of 1 m
+            % Ensure minimum ice thickness of 1 m
             % pos = find(md.geometry.thickness < 1);
             % md.geometry.thickness(pos) = 1;
 
@@ -820,7 +831,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % % Ensure base not below bedrock
             % pos = find(md.geometry.base < md.geometry.bed);
-            % md.geometry.base(pos) = md.geometry.base(pos);
+            % % md.geometry.base(pos) = md.geometry.base(pos);
+            % md.geometry.base(pos) = md.geometry.bed(pos);
 
             % % Grounded ice (ocean_levelset > 0)
             % pos = find(md.mask.ocean_levelset > 0);
@@ -848,6 +860,12 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                     'coefficient', result_2, 'coefficient'};
 
             writeToHDF5(filename, data);
+
+            % base data
+            % data_base = {'Base', result_1, 'base'};
+            % % write base to h5 file
+            % filename = fullfile(icesee_path, data_path, sprintf('ensemble_base_%d.h5', ens_id));
+            % writeToHDF5(filename, data_base);
         end
     end
 end

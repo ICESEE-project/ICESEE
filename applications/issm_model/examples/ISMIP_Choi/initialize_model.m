@@ -171,6 +171,38 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
         result_1 = md.geometry;
         result_2 = md.friction;
 
+        % save mesh cordinates
+        % ens_id = 0;
+        h5file = fullfile(icesee_path, data_path, sprintf('mesh_idxy_%d.h5', ens_id));
+
+        fric_idx = find(md.friction.coefficient ~= 0);  % or your own index set
+        x_param  = md.mesh.x(fric_idx);
+        y_param  = md.mesh.y(fric_idx);
+
+        % Check if file already exists
+        if exist(h5file, 'file')
+            info = h5info(h5file);
+            ds_names = {info.Datasets.Name};
+        else
+            ds_names = {};
+        end
+
+        % Note: dataset names are 'fric_x', not '/fric_x'
+        if ~ismember('fric_x', ds_names)
+            h5create(h5file, '/fric_x', size(x_param), 'Datatype', 'double');
+        end
+        if ~ismember('fric_y', ds_names)
+            h5create(h5file, '/fric_y', size(y_param), 'Datatype', 'double');
+        end
+        if ~ismember('fric_idx', ds_names)
+            h5create(h5file, '/fric_idx', size(fric_idx), 'Datatype', 'double');
+        end
+
+        h5write(h5file, '/fric_x',   x_param);
+        h5write(h5file, '/fric_y',   y_param);
+        h5write(h5file, '/fric_idx', double(fric_idx));
+
+
         % 	% --- fetch and save data for ensemble use
 		filename = fullfile(icesee_path, data_path, sprintf('ensemble_init_%d.h5', ens_id));
         

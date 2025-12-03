@@ -167,6 +167,8 @@ def parallel_forecast_step_default_run(**model_kwargs):
                         noise_all.append(Z)
                 noise_ = np.concatenate(noise_all, axis=0)
                 ensemble_vec[:state_block_size] = ensemble_vec[:state_block_size] + noise_[:state_block_size]
+                # ensemble_vec[hdim:state_block_size] = ensemble_vec[hdim:state_block_size] + noise_[hdim:state_block_size]
+
                 # for ii, key in enumerate(model_kwargs['observed_vars']):
                 #         if ii < params["num_state_vars"]:
                 #             ensemble_vec[indx_map[key]] += noise_[indx_map[key]]
