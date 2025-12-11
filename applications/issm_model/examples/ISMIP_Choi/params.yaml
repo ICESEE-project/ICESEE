@@ -15,25 +15,25 @@ modeling-parameters:
   ParamFile: "Mismip2.par" # Parameter file for ISSM-DART setup
   use_reference_data: True  # Use reference data for transient steady state
   reference_data_dir: "data" # Directory for reference data
-  reference_data: "ISMIP.reference_simulation2.mat" # Reference data for transient steady state: only used if use_reference_data is True
-  steps: 6                 # Increased steps for finer time integration
+  reference_data: "ISMIP.reference_simulation_0.mat" # Reference data for transient steady state: only used if use_reference_data is True
+  steps: 55                 # Increased steps for finer time integration
   verbose: True              # Enable verbosity for debugging
   deepwater_melting_rate: 150          # Basal melt rate (150 m/yr)
-  smb: -1.5              # Surface mass balance (negative for melt, -0.3 m/yr)
+  smb: -0.3             # Surface mass balance (negative for melt, -0.3 m/yr)
 
 
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 50                      # Number of ensemble members (paper uses 50)
-  freq_obs: 4 #4                 # Frequency of observations (annual, as per paper)
+  freq_obs: 3 #4                 # Frequency of observations (annual, as per paper)
   obs_max_time: 80          # Maximum time for observations (30 years)
-  obs_start_time: 4            # Start time for observations (start of simulation)
+  obs_start_time: 0            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state:    0  # Generate true state for synthetic observations
   generate_nurged_state:    0   # Generate nudged state for synthetic observations
-  initialize_ensemble: 0
-  initial_spread_factor: 1.20
+  initialize_ensemble: 1
+  initial_spread_factor: 1.0
   sequential_ensemble_initialization: 0
   use_ensemble_pertubations: 1
 
@@ -43,19 +43,24 @@ enkf-parameters:
   observed_vars: ['Surface', 'Vx', 'Vy']  # Observed variables (ice thickness, velocities, bed topography)
   observed_params: ['bed']   # Parameters to estimate (friction coefficient, bed topography)
 
+  # inverse model parameters
+  vel_idx: 2                     # Index for velocity x in the state vector
+  friction_idx: 5               # Index for friction coefficient in the state vector
+  inversion_flag: 0         # Enable inversion for friction coefficient
+
   # bed topography observations settings
-  bed_obs_snapshot: [12, 20, 28, 36, 44, 52, 60]        # Bedrock elevation observations at 30 years
-  bed_obs_stride: 7000          # Spacing of bedrock elevation observations (30 km)
+  bed_obs_snapshot: [36]        # Bedrock elevation observations at 30 years
+  bed_obs_stride: 4000          # Spacing of bedrock elevation observations (30 km)
 
   # Statistical parameters
-  sig_obs: [0, 5, 9, 8, 4, 0]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
-  sig_Q: [0.6, 0.4, 0.4, 0.2, 0.08, 0.6]          # Process noise std dev (adjusted for H, Vx, Vy)
+  sig_obs: [0, 3, 3, 2, 4, 0]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
+  sig_Q: [0.08, 0.2, 0.1, 0., 0.2, 0.4]          # Process noise std dev (adjusted for H, Vx, Vy)
   # length_scale: [300,220,180,150,320]               # Length scale for covariance (5 km for friction, per paper)
-  # length_scale: [48,38,33,23,48,49] 
-  length_scale: [42,28,28,23,27,45] 
+  # length_scale: [32,38,33,23,48,49] 
+  length_scale: [95,98,95,90, 89,105] 
 
   seed: 42                       # Seed for random number generator
-  inflation_factor: 1.12        # Inflation factor (optimal range 1.10–1.18 from paper)
+  inflation_factor: 0.95        # Inflation factor (optimal range 1.10–1.18 from paper)
 
   # Estimation flags
   joint_estimation: True       # Enable joint state and parameter estimation
@@ -63,10 +68,10 @@ enkf-parameters:
   joint_estimated_params: ['bed','coefficient']  # parameters to be jointly estimated
 
   # Nudged parameters
-  sill_friction: 90000      # Sill friction coefficient (90000 Pa s/m from paper)
-  range_friction: 5000      # Range friction coefficient (5000 Pa s/m from paper)
-  mean_friction: 1500       # Mean friction coefficient (2500 Pa s/m from paper)
-  nugget_friction: 0        # Nugget effect for friction (0 Pa s/m from paper)
+  sill_friction: 10000      # Sill friction coefficient (90000 Pa s/m from paper)
+  range_friction: 500      # Range friction coefficient (5000 Pa s/m from paper)
+  mean_friction: 2500       # Mean friction coefficient (2500 Pa s/m from paper)
+  nugget_friction: 0.15        # Nugget effect for friction (0 Pa s/m from paper)
   sill_bed: 4000            # Sill bedrock elevation (4000 m from paper)
   range_bed: 50000          # Range bedrock elevation (50000 m from paper)
   nugget_bed: 200           # Nugget effect for bedrock elevation (200 m from paper)

@@ -8,19 +8,24 @@ close all; clear all
 
 % data_file_paths='data_0/_modelrun_datasets';
 % data_file_paths='data_1';
-% data_file_paths='_modelrun_datasets';
-% data_file_paths='test_data_al';
-% data_file_paths='test_data_al1';
-data_file_paths='test_data_3';
+data_file_paths='_modelrun_datasets';
+% data_file_paths = 'test_data_working_0'
+% data_file_paths='cluster_data/_modelrun_datasets';
+% data_file_paths='test_bed_observe_03';
+% data_file_paths='test_data_5';
 
 % time steps
-% k_array = [26, 51, 80, 110, 150, 200, 230, 300];  % multiple time steps
-k_array=[25, 50, 80];
+% k_array = [10, 30, 50, 80, 120, 180, 200];  % multiple time steps
+% k_array=[20, 70,  110,150,190];
+% k_array=[20, 50, 70, 80,100, 130, 150];
+% k_array=[30, 50, 80, 120, 159];
+k_array=[20, 60, 80, 120, 150 ];
 dt = 0.2;
 
-make_plots = false;
-% k = nt-1;
-% k=1;
+make_plots = 0;
+make_multi_plots = 1;
+k = 65;
+% k=28;
 
 % Load the essential data
 results_dir = 'results';
@@ -57,71 +62,91 @@ num_steps = nt - 1;
 var_inputs = ['thickness', 'Vx', 'Vy', 'friction_coefficient', 'bed_topography'];
 hdim = floor(ndim / 6);  % dimension of one variable
 
-file_path   = fullfile("data", "ISMIP_initial_data.mat");
+% file_path   = fullfile("data", "ISMIP_initial_data.mat");
+% file_path   = fullfile("data", "ISMIP.Parameterization1.mat");
+file_path   = fullfile("data", "ISMIP.Parameterization1.mat");
 md = loadmodel(file_path);
 md_true = md; md_nurged = md;
 md_mean = md; md_ens = md;
 % dt = t(2) - t(1);
 % dt = 0.25;
 
-
-% thickness difference plots
-plot_var_diff(k_array, dt, ...
-    model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    md_true, md_nurged, md_ens, md, ...
-    'geometry.thickness', 'Thicknes', 'm');
-
- % thickness plot evolution
-plot_var_evolution(k_array, dt, ...
-    model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    md_true, md_nurged, md_ens, md, ...
-    'geometry.thickness', 'Thickness', 'm');
-
-plot_var_diff(k_array, dt, ...
-    model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    md_true, md_nurged, md_ens, md, ...
-    'geometry.surface', 'Surface', 'm');
-
- % thickness plot evolution
-plot_var_evolution(k_array, dt, ...
-    model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    md_true, md_nurged, md_ens, md, ...
-    'geometry.surface', 'Surface', 'm');
-
-    % velocity evolution plots
-plot_var_evolution(k_array, dt, ...
-    model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    md_true, md_nurged, md_ens, md, ...
-    'initialization.vel', 'Velocity', 'm/s');
-
-plot_var_diff(k_array, dt, ...
-    model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    md_true, md_nurged, md_ens, md, ...
-    'initialization.vel', 'Velocity', 'm');
-    % bed topography evolution plots        
-plot_var_evolution(k_array, dt, ...
-    model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    md_true, md_nurged, md_ens, md, ...
-    'geometry.bed', 'Bed Elevation', 'm');
-plot_var_diff(k_array, dt, ...
-    model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    md_true, md_nurged, md_ens, md, ...
-    'geometry.bed', 'Bed', 'm');
-
-    % friction coefficient evolution plots  
-plot_var_evolution(k_array, dt, ...
-    model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    md_true, md_nurged, md_ens, md, ...
-    'friction.coefficient', 'Friction Coefficient', '');
-plot_var_diff(k_array, dt, ...
-    model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    md_true, md_nurged, md_ens, md, ...
-    'friction.coefficient', 'Friction', 'm');
+if make_multi_plots 
+    % %{ % Thickness difference plots
+    plot_var_diff(k_array, dt, ...
+        model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, ...
+        'geometry.thickness', 'Thicknes', 'm');
+    % 
+    %  % thickness plot evolution
+    plot_var_evolution(k_array, dt, ...
+        model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, ...
+        'geometry.thickness', 'Thickness', 'm');
+    % 
+    % % base  
+    % plot_var_diff(k_array, dt, ...
+    %     model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    %     md_true, md_nurged, md_ens, md, ...
+    %     'geometry.base', 'Base', 'm');
+    % 
+    %  % thickness plot evolution
+    % plot_var_evolution(k_array, dt, ...
+    %     model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    %     md_true, md_nurged, md_ens, md, ...
+    %     'geometry.base', 'Base', 'm');
+    % 
+    plot_var_diff(k_array, dt, ...
+        model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, ...
+        'geometry.surface', 'Surface', 'm');
+    % 
+    %  % thickness plot evolution
+    plot_var_evolution(k_array, dt, ...
+        model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, ...
+        'geometry.surface', 'Surface', 'm');
+    % 
+        % velocity evolution plots
+    plot_var_evolution(k_array, dt, ...
+        model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, ...
+        'initialization.vel', 'Velocity', 'm/s');
+    % 
+    plot_var_diff(k_array, dt, ...
+        model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, ...
+        'initialization.vel', 'Velocity', 'm'); %}
+        % bed topography evolution plots        
+    plot_var_evolution(k_array, dt, ...
+        model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, ...
+        'geometry.bed', 'Bed Elevation', 'm');
+    plot_var_diff(k_array, dt, ...
+        model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, ...
+        'geometry.bed', 'Bed', 'm');
+    
+        % friction coefficient evolution plots  
+    plot_var_evolution(k_array, dt, ...
+        model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, ...
+        'friction.coefficient', 'Friction Coefficient', '');
+    plot_var_diff(k_array, dt, ...
+        model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, ...
+        'friction.coefficient', 'Friction', 'm');
+end 
 
 if make_plots
     % thickness
+    [md_true, md_nurged, md_ens] = setup_model_states(k, dt, ...
+            model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md);
     plot_triptych(md_true, md_nurged, md_ens, ...
                 'geometry.thickness', sprintf('Ice Thickness after %d years', round((k-1)*dt)), parula, 'm');  
+    plot_triptych(md_true, md_nurged, md_ens, ...
+                'geometry.surface', sprintf('Ice Surface after %d years', round((k-1)*dt)), parula, 'm');  
     % velocity              
     plot_triptych(md_true, md_nurged, md_ens, ...
                 'initialization.vel', sprintf('Ice Velocity after %d years', round((k-1)*dt)), parula, 'm/s');   
@@ -129,7 +154,7 @@ if make_plots
     plot_triptych(md_true, md_nurged, md_ens, ...
                 'geometry.bed', sprintf('Bed Elevation after %d years', round((k-1)*dt)), parula, 'm');
     %
-    % % Frcition coefficient
+    % Frcition coefficient
     plot_triptych(md_true, md_nurged, md_ens, ...
                 'friction.coefficient', sprintf('Friction Coefficient after %d years', round((k-1)*dt)), parula, '');
     %
@@ -137,9 +162,9 @@ if make_plots
     % plot_triptych(md_true, md_nurged, md_ens, ...
     %               'results.TransientSolution(499).MaskOceanLevelset', ...
     %               'Grounding Line', gray, '');
-    plot_triptych(md_true, md_nurged, md_ens, ...
-                'mask.ocean_levelset', ...
-                sprintf('Grounding Line after %d years', round((k-1)*dt)), parula, '');
+    % plot_triptych(md_true, md_nurged, md_ens, ...
+    %             'mask.ocean_levelset', ...
+    %             sprintf('Grounding Line after %d years', round((k-1)*dt)), parula, '');
 end
 % create a movie for the groundingline for every 10 yrs
 % Setup video writer (optional)
@@ -220,7 +245,7 @@ function plot_var_diff(k_array, dt, ...
         data_true_tmp = get_nested_field(md_true_tmp, field);
         all_data = [all_data; data_true_tmp(:)];
         % nureged state for diff limits
-        data_nurged_tmp = get_nested_field(md_nurged_tmp, field);
+        % data_nurged_tmp = get_nested_field(md_nurged_tmp, field);
         % all_data = [all_data; data_nurged_tmp(:)];
     end
 
@@ -237,18 +262,26 @@ function plot_var_diff(k_array, dt, ...
     data_nurged = get_nested_field(md_nurged, field);
     % cmin = min([data_true(:); data_ens(:)]);
     % cmax = max([data_true(:); data_ens(:)]);
-
     plotmodel(md_true, 'data', data_true, ...
         'title', sprintf('(a) True %s', field_title), ...
         'subplot', [nrows, 1, 1], 'caxis', [cmin cmax], 'colorbar', 'off');
 
     % (b) No assimilation − True
     % diff_noassim = data_ens - data_true;
-    % diff_noassim = (data_nurged - data_true)./data_true;
-    eps0 = 0.01 * max(abs(data_true(:)));
-    diff_noassim = (data_ens - data_true)./(abs(data_true) + eps0);
+    
+    % eps0 = 0.01 * max(abs(data_true(:)));
+    % diff_noassim = (data_ens - data_true)./(abs(data_true) + eps0);
+    [md_true, md_nurged, md_ens] = setup_model_states(1, dt, ...
+    model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    md_true, md_nurged, md_ens, md);
+    data_true = get_nested_field(md_true, field);
+    data_ens  = get_nested_field(md_ens, field);
+    data_nurged = get_nested_field(md_nurged, field);
+    % diff_noassim = (data_ens - data_true);
+    diff_noassim = (data_ens - data_true)./(abs(data_true));
+    % maxAbs_noassim = max(abs(diff_noassim(:)));
     maxAbs_noassim = max(abs(diff_noassim(:)));
-    plotmodel(md_ens, 'data', diff_noassim, ...
+    plotmodel(md_true, 'data', diff_noassim, ...
         'title', '(b) No assimilation − True', ...
         'subplot', [nrows, 1, 2], 'caxis', [-maxAbs_noassim maxAbs_noassim], 'colorbar', 'off');
 
@@ -263,13 +296,14 @@ function plot_var_diff(k_array, dt, ...
         ens_field  = get_nested_field(md_ens, field);
         
         eps0 = 0.01 * max(abs(true_field(:)));    % 1% of max for stabilization
-        diff_data = (ens_field - true_field) ./ (abs(true_field) + eps0);
+        % diff_data = (ens_field - true_field) ./ (abs(true_field) + eps0);
 
-        % diff_data = (get_nested_field(md_ens, field) - get_nested_field(md_true, field))./get_nested_field(md_true, field);
+        diff_data = (get_nested_field(md_ens, field) - get_nested_field(md_true, field))./get_nested_field(md_true, field);
+        % diff_data = (get_nested_field(md_ens, field) - get_nested_field(md_true, field));
         % diff_data = (get_nested_field(md_ens, field) - get_nested_field(md_true, field));
         maxAbs = max(abs(diff_data(:)));
-        plotmodel(md_ens, 'data', diff_data, ...
-            'title', sprintf('%s Assimilated − True (after %.1f years)', label, (k-1)*dt), ...
+        plotmodel(md_true, 'data', diff_data, ...
+            'title', sprintf('%s Assimilated − True (after %.1f years)', label, round((k-1)*dt)), ...
             'subplot', [nrows, 1, idx + 2], 'caxis', [-maxAbs maxAbs], 'colorbar', 'off');
     end
 
@@ -333,7 +367,8 @@ function plot_var_evolution(k_array, dt, ...
     % ---- Compute global colour limits across all requested steps ----
     all_data = [];
 
-    for k = [1, k_array]          % include the true (initial) state
+    % for k = [1, k_array]          % include the true (initial) state
+    for k = [k_array(end), k_array]
         [md_true_tmp, md_nurged_tmp, md_ens_tmp] = setup_model_states(k, dt, ...
             model_true_state, model_nurged_state, ensemble_vec_mean, ...
             md_true, md_nurged, md_ens, md);
@@ -344,7 +379,7 @@ function plot_var_evolution(k_array, dt, ...
         all_data = [all_data; data_true_tmp(:)];
         % nureged state for diff limits
         data_nurged_tmp = get_nested_field(md_nurged_tmp, field);
-        % all_data = [all_data; data_nurged_tmp(:)];
+        all_data = [all_data; data_nurged_tmp(:)];
     end
 
     cmin = min(all_data);
@@ -352,7 +387,7 @@ function plot_var_evolution(k_array, dt, ...
     clear all_data
 
     % (a) True
-    [md_true, md_nurged, md_ens] = setup_model_states(1, dt, ...
+    [md_true, md_nurged, md_ens] = setup_model_states(k_array(end), dt, ...
         model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md);
     data_true = get_nested_field(md_true, field);
@@ -361,11 +396,17 @@ function plot_var_evolution(k_array, dt, ...
     % cmin = min([data_true(:); data_ens(:)]);
     % cmax = max([data_true(:); data_ens(:)]);
     plotmodel(md_true, 'data', data_true, ...
-        'title', sprintf('(a) True %s', field_title), ...
+        'title', sprintf('(a) True %s (after %.1f years)', field_title, round(k_array(end)-1)*dt), ...
         'subplot', [nrows, 1, 1], 'caxis', [cmin cmax], 'colorbar', 'off');
 
     % (b) No assimilation
-    plotmodel(md_ens, 'data', data_ens, ...
+    [md_true, md_nurged, md_ens] = setup_model_states(1, dt, ...
+        model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md);
+    data_true = get_nested_field(md_true, field);
+    data_ens  = get_nested_field(md_ens, field);
+    data_nurged = get_nested_field(md_nurged, field);
+    plotmodel(md_nurged, 'data', data_nurged, ...
         'title', sprintf('(b) No assimilation %s', field_title), ...
         'subplot', [nrows, 1, 2], 'caxis', [cmin cmax], 'colorbar', 'off');
 
@@ -378,7 +419,7 @@ function plot_var_evolution(k_array, dt, ...
             md_true, md_nurged, md_ens, md);
         data_ens = get_nested_field(md_ens, field);
         plotmodel(md_ens, 'data', data_ens, ...
-            'title', sprintf('%s Assimilated %s (after %.1f years)', label, field_title, (k-1)*dt), ...
+            'title', sprintf('%s Assimilated %s (after %.1f years)', label, field_title, round((k-1)*dt)), ...
             'subplot', [nrows, 1, idx + 2], 'caxis', [cmin cmax], 'colorbar', 'off');
     end
 
@@ -430,7 +471,8 @@ end
 
 function plot_triptych(md_true, md_nurged, md_ens, field, field_title, cmap, units)
 % Compare true, nudged, assimilated, and difference with two separate colorbars
-
+    global k_array;
+    global dt;
     if nargin < 6 || isempty(cmap), cmap = parula; end
     if nargin < 7, units = ''; end
     units_str = iff(~isempty(units), [' (' units ')'], '');
@@ -440,28 +482,28 @@ function plot_triptych(md_true, md_nurged, md_ens, field, field_title, cmap, uni
     data_nurged = get_nested_field(md_nurged, field);
     data_ens    = get_nested_field(md_ens, field);
     diff_data   = data_ens - data_true;
-
-        % ---- Compute global colour limits across all requested steps ----
-    all_data = [];
-
-    for k = [1, k_array]          % include the true (initial) state
-        [md_true_tmp, ~, md_ens_tmp] = setup_model_states(k, dt, ...
-            model_true_state, model_nurged_state, ensemble_vec_mean, ...
-            md_true, md_nurged, md_ens, md);
-        data_tmp = get_nested_field(md_ens_tmp, field);
-        all_data = [all_data; data_tmp(:)];
-        % Also include true state for diff limits
-        data_true_tmp = get_nested_field(md_true_tmp, field);
-        all_data = [all_data; data_true_tmp(:)];
-    end
-
-    cmin = min(all_data);
-    cmax = max(all_data);
-    clear all_data
+    % 
+    %     % ---- Compute global colour limits across all requested steps ----
+    % all_data = [];
+    % 
+    % for k = [1, k_array]          % include the true (initial) state
+    %     [md_true_tmp, ~, md_ens_tmp] = setup_model_states(k, dt, ...
+    %         model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    %         md_true, md_nurged, md_ens, md);
+    %     data_tmp = get_nested_field(md_ens_tmp, field);
+    %     all_data = [all_data; data_tmp(:)];
+    %     % Also include true state for diff limits
+    %     data_true_tmp = get_nested_field(md_true_tmp, field);
+    %     all_data = [all_data; data_true_tmp(:)];
+    % end
+    % 
+    % cmin = min(all_data);
+    % cmax = max(all_data);
+    % clear all_data
 
     % --- Limits ---
-    % cmin   = min([data_true(:); data_nurged(:); data_ens(:)]);
-    % cmax   = max([data_true(:); data_nurged(:); data_ens(:)]);
+    cmin   = min([data_true(:); data_nurged(:); data_ens(:)]);
+    cmax   = max([data_true(:); data_nurged(:); data_ens(:)]);
     maxAbs = max(abs(diff_data(:)));
 
     figure('Position',[100 100 1000 800]); clf;
@@ -578,7 +620,9 @@ function [md_true, md_nurged, md_ens] = setup_model_states(k, dt, model_true_sta
 
     %% === TRUE STATE ===
     True_thickness = model_true_state(1:hdim, k);
+    % True_base = model_true_state(hdim+1:2*hdim, k);
     True_surface = model_true_state(hdim+1:2*hdim, k);
+    True_base = True_surface - True_thickness;
     Vx = model_true_state(2*hdim+1:3*hdim, k);
     Vy = model_true_state(3*hdim+1:4*hdim, k);
     Vel = sqrt(Vx.^2 + Vy.^2);
@@ -586,6 +630,7 @@ function [md_true, md_nurged, md_ens] = setup_model_states(k, dt, model_true_sta
     True_fcoeff = model_true_state(5*hdim+1:6*hdim, k);
 
     md_true.geometry.thickness = True_thickness;
+    md_true.geometry.base = True_base;
     md_true.geometry.surface = True_surface;
     md_true.initialization.vx  = Vx;
     md_true.initialization.vy  = Vy;
@@ -597,7 +642,9 @@ function [md_true, md_nurged, md_ens] = setup_model_states(k, dt, model_true_sta
 
     %% === NURGED STATE ===
     nurged_thickness = model_nurged_state(1:hdim, k);
+    % nurged_base = model_nurged_state(hdim+1:2*hdim, k);
     nurged_surface = model_nurged_state(hdim+1:2*hdim, k);
+    nurged_base = nurged_surface - nurged_thickness;
     Vx = model_nurged_state(2*hdim+1:3*hdim, k);
     Vy = model_nurged_state(3*hdim+1:4*hdim, k);
     Vel = sqrt(Vx.^2 + Vy.^2);
@@ -616,7 +663,9 @@ function [md_true, md_nurged, md_ens] = setup_model_states(k, dt, model_true_sta
 
     %% === ENSEMBLE MEAN STATE ===
     ens_thickness = ensemble_vec_mean(1:hdim, k);
+    % ens_base = ensemble_vec_mean(hdim+1:2*hdim, k);
     ens_surface = ensemble_vec_mean(hdim+1:2*hdim, k);
+    ens_base = ens_surface - ens_thickness;
     Vx = ensemble_vec_mean(2*hdim+1:3*hdim, k);
     Vy = ensemble_vec_mean(3*hdim+1:4*hdim, k);
     Vel = sqrt(Vx.^2 + Vy.^2);
@@ -625,6 +674,7 @@ function [md_true, md_nurged, md_ens] = setup_model_states(k, dt, model_true_sta
     % ens_thickness = ens_surface - ens_bed;
 
     md_ens.geometry.thickness = ens_thickness;
+    md_ens.geometry.base = ens_base;
     md_ens.geometry.surface = ens_surface;
     md_ens.initialization.vx  = Vx;
     md_ens.initialization.vy  = Vy;

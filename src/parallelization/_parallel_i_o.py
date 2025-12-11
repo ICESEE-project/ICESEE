@@ -292,57 +292,68 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                 hdim =  model_kwargs.get("nd", params['nd'])//len(model_kwargs.get("all_observed", []))
 
                 # open full ensemble dataset before analysis
-                # with h5py.File(f'{model_kwargs.get("data_path")}/ensemble_before_analysis_step_{timestep:04d}.h5', 'r') as f_before:
-                #     data_before = f_before['ensemble_before_analysis'][:]
-                #     vecs, indx_map, dim_per_proc = icesee_get_index(data_before, **model_kwargs)
-                    # for ii, key in enumerate (model_kwargs.get("all_observed", [])):
-                    #     # print('key:\n', key)
-                    #     start = ii*hdim
-                    #     end = start + hdim      
-                    #     data_before[indx_map[key], :] = recvbuf[start:end, :]
+                inversion_flag = model_kwargs.get("inversion_flag", False)
+                if inversion_flag:
+                    with h5py.File(f'{model_kwargs.get("data_path")}/ensemble_before_analysis_step_{timestep:04d}.h5', 'r') as f_before:
+                        data_before = f_before['ensemble_before_analysis']
+                        model_module   = model_kwargs.get("model_module", None)
+                        print('[ICESEE inversion] - running inverse step to get full state before analysis...')
+                        
+                        vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                        
+                        for ii, key in enumerate (model_kwargs.get("vec_inputs_new", [])):
+                            # print('key:\n', key)
+                            start = ii*hdim
+                            end = start + hdim      
+                            data_before[indx_map[key], :] = recvbuf[start:end, :]
+                            # data_before[indx_map[key], :] = recvbuf[indx_map[key], :]
+                        
+                        data = model_module.inverse_step_single(ensemble=data_before, **model_kwargs)
+                        for key, value in data.items():
+                            data_before[indx_map[key], :] = value
 
-                    # Build global indices in correct full-state order
-                    # obs_indices = np.concatenate([indx_map[key] for key in model_kwargs.get("all_observed", [])])
+                        # Build global indices in correct full-state order
+                        # obs_indices = np.concatenate([indx_map[key] for key in model_kwargs.get("all_observed", [])])
 
-                    # # (nd_new, Nens) must match recvbuf
-                    # data_before[obs_indices, :] = recvbuf.copy()
+                        # # (nd_new, Nens) must match recvbuf
+                        # data_before[obs_indices, :] = recvbuf.copy()
 
 
-                # Write gathered data
-                # dset[:, :, timestep] = data_before
-                # ens_mean[:, timestep] = np.mean(data_before, axis=1)
+                    # Write gathered data
+                    dset[:, :, timestep] = data_before
+                    ens_mean[:, timestep] = np.mean(data_before, axis=1)
 
                 # ISSM *------
-                di = 0.8930
-                rho_ice = 917.0
-                rho_sw = 1028.0
-                nd = model_kwargs.get("nd", params['nd'])
-                ndim = nd // params["total_state_param_vars"]
-                state_block_size = ndim*params["num_state_vars"]
-                thickness = recvbuf[:ndim,:]
-                surface = recvbuf[ndim:2*ndim,:]
-                bed = recvbuf[state_block_size:5*ndim,:]
+                # di = 0.8930
+                # rho_ice = 917.0
+                # rho_sw = 1028.0
+                # nd = model_kwargs.get("nd", params['nd'])
+                # ndim = nd // params["total_state_param_vars"]
+                # state_block_size = ndim*params["num_state_vars"]
+                # thickness = recvbuf[:ndim,:]
+                # surface = recvbuf[ndim:2*ndim,:]
+                # bed = recvbuf[state_block_size:5*ndim,:]
 
-                pos = np.where(thickness < 1)
-                thickness[pos] = 1.0
-                ocean_levelset = thickness + (bed/di)
-                # Floating ice (ocean_levelset < 0) find the indices
-                pos = np.where(ocean_levelset < 0)
-                surface[pos] = thickness[pos]* ((rho_sw - rho_ice)/rho_sw)
-                recvbuf[ndim:2*ndim,:] = surface
-                base = surface - thickness
+                # pos = np.where(thickness < 1)
+                # thickness[pos] = 1.0
+                # ocean_levelset = thickness + (bed/di)
+                # # Floating ice (ocean_levelset < 0) find the indices
+                # pos = np.where(ocean_levelset < 0)
+                # surface[pos] = thickness[pos]* ((rho_sw - rho_ice)/rho_sw)
+                # recvbuf[ndim:2*ndim,:] = surface
+                # base = surface - thickness
 
-                pos_base = np.where(base < bed)
-                base[pos_base] = base[pos_base]
+                # pos_base = np.where(base < bed)
+                # base[pos_base] = base[pos_base]
 
-                # grounded ice
-                pos_grounded = np.where(ocean_levelset >= 0)
-                base[pos_grounded] = bed[pos_grounded]
+                # # grounded ice
+                # pos_grounded = np.where(ocean_levelset >= 0)
+                # base[pos_grounded] = bed[pos_grounded]
 
-                # update surface, bed and thickness in recvbuf
-                recvbuf[ndim:2*ndim,:] = base + thickness
-                # recvbuf[state_block_size:5*ndim,:] = bed
-                recvbuf[:ndim,:] = thickness
+                # # update surface, bed and thickness in recvbuf
+                # recvbuf[ndim:2*ndim,:] = base + thickness
+                # # recvbuf[state_block_size:5*ndim,:] = bed
+                # recvbuf[:ndim,:] = thickness
                 # # -------*ISSM
                 # del thickness, surface, bed, ocean_levelset, pos, base, pos_base, pos_grounded
                 # gc.collect()
@@ -358,9 +369,9 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                 # gc.collect()
                 # base_mean = 
 
-                dset[:, :, timestep] = recvbuf
-                # ens_mean[:, timestep] = ensemble_mean
-                ens_mean[:, timestep] = np.mean(recvbuf, axis=1)
+                # dset[:, :, timestep] = recvbuf
+                # # ens_mean[:, timestep] = ensemble_mean
+                # ens_mean[:, timestep] = np.mean(recvbuf, axis=1)
 
                 if model_kwargs.get("DEnKF_flag", False):
                     ensemble_mean = np.mean(dset[:, :, timestep], axis=1)

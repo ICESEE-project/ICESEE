@@ -72,6 +72,9 @@ model_kwargs = {
                 'nugget_bed': enkf_params.get('nugget_bed', 200),      
                 'deepwater_melting_rate': float(modeling_params.get('deepwater_melting_rate', 200)),
                 'smb': float(modeling_params.get('smb', 0.0)),
+                'vel_idx': int(float(enkf_params.get('vel_idx', 2))),
+                'inversion_flag': enkf_params.get('inversion_flag', False),
+                'friction_idx': int(float(enkf_params.get('friction_idx', 5))),
 }
 
 # observation schedule

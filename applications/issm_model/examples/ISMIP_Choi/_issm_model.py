@@ -219,3 +219,109 @@ def run_model(ensemble, **kwargs):
     os.chdir(icesee_path)
 
     return updated_state
+
+# ---- Run model for ISSM ----
+def run_model_inverse(ensemble, **kwargs):
+    """
+    Run the ISSM inverse model to generate friction and velocity from the stress balance equations with an ensemble matrix from ICESEE.
+
+    Args:
+        ensemble: Ensemble matrix for the model.
+        **kwargs: Additional parameters including:
+            - nprocs: Number of processors.
+            - server: Server information.
+            - issm_examples_dir: Directory for ISSM examples.
+            - icesee_path: Path to ICESEE directory.
+            - comm: MPI communicator object.
+            - vec_inputs: List of input vector keys.
+            - ens_id: Ensemble ID.
+            - data_path: Path to data directory.
+            - k: timestep index.
+
+    Returns:
+        dict: Dictionary containing the output from the ISSM model, or None if an error occurs.
+    """
+    import h5py
+    import numpy as np
+    import os
+
+    # Extract keyword arguments
+    nprocs = kwargs.get('nprocs')
+    server = kwargs.get('server')
+    issm_examples_dir = kwargs.get('issm_examples_dir')
+    icesee_path = kwargs.get('icesee_path')
+    comm = kwargs.get('comm')
+    vec_inputs = kwargs.get('vec_inputs')
+    ens_id = kwargs.get('ens_id')
+    data_path = kwargs.get('data_path')
+
+    # Change to ISSM examples directory
+    os.chdir(issm_examples_dir)
+
+    # Define filename for data saving
+    fname = 'inverse_state.mat'
+    kwargs.update({'fname': fname})
+
+    # Generate output filename based on ensemble ID
+    input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+
+    # Get ensemble indices
+    vecs, indx_map, _ = icesee_get_index(**kwargs)
+
+    #  --- Joint Estimations ---
+    if kwargs["joint_estimation"]:
+        bed = ensemble[indx_map['bed']]
+        coefficient = ensemble[indx_map['coefficient']]
+    else:
+        k = kwargs.get('k', 0) 
+        if k == 0:
+            bed_int = ensemble[indx_map['bed']]
+            coefficient_int = ensemble[indx_map['coefficient']]
+        bed = bed_int
+        coefficient = coefficient_int
+
+    # Write ensemble data to HDF5 file to be accessed by ISSM on the Matlab side
+    with h5py.File(input_filename, 'w') as f:
+        # for key in vec_inputs:
+        #     f.create_dataset(key, data=ensemble[indx_map[key]])
+        f.create_dataset('Thickness', data=ensemble[indx_map['Thickness']])
+        # f.create_dataset('Base', data=ensemble[indx_map['Base']])
+        f.create_dataset('Surface', data=ensemble[indx_map['Surface']])
+        f.create_dataset('Vx', data=ensemble[indx_map['Vx']])
+        f.create_dataset('Vy', data=ensemble[indx_map['Vy']])
+        f.create_dataset('bed', data=bed)
+        f.create_dataset('coefficient', data=coefficient)
+
+    # Run ISSM model to update state and parameters
+    try:
+        ISSM_model(**kwargs)
+    except Exception as e:
+        print(f"[ICESEE run_model Error] Error running the ISSM model: {e}")
+        server.kill_matlab_processes()
+        return None
+
+    # Read output from HDF5 file to be accessed by ICESEE on the Python side
+    output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+    if not os.path.exists(output_filename):
+        print("[ICESEE run_model Error] File does not exist: {output_filename}")
+        return None
+    
+    updated_state = {}
+    with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+        updated_state['Thickness'] = f['Thickness'][0]
+        # updated_state['Base'] = f['Base'][0]
+        updated_state['Surface'] = f['Surface'][0]
+        updated_state['Vx'] = f['Vx'][0]
+        updated_state['Vy'] = f['Vy'][0]
+        
+        # --Joint Estimations--
+        if kwargs["joint_estimation"]:
+            updated_state['bed'] = f['bed'][0]
+            updated_state['coefficient'] = f['coefficient'][0]
+        else:
+            bed_int = bed
+            coefficient_int = coefficient
+            
+    os.chdir(icesee_path)
+
+    return updated_state

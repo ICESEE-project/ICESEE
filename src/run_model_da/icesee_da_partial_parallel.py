@@ -444,6 +444,61 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                     if (km < params["number_obs_instants"]) and (k+1 == obs_index[km]):
                         # -- time global analysis step ---
                         _time_analysis_step = MPI.Wtime()
+                        model_kwargs.update({"km": km})
+                        inversion_flag = model_kwargs.get("inversion_flag", False)
+
+                        if inversion_flag:
+                            # shrink the ensembel to exclude vx, vy, and friction
+                            if rank_world == 0:
+                                # write full ensemble to file before analysis
+                                with h5py.File(f'{_modelrun_datasets}/ensemble_before_analysis_step_{k+1:04d}.h5', 'w') as f:
+                                    f.create_dataset("ensemble_before_analysis", data=ensemble_vec)
+                                nd = ensemble_vec.shape[0]
+                                Nens = ensemble_vec.shape[1]
+                                model_kwargs.update({"nd_old": nd}); params.update({"nd_old": nd})
+                                # get the velocity and friction indices
+                                friction_idx = model_kwargs.get("friction_idx")
+                                vel_idx = model_kwargs.get("vel_idx")
+                                vx = vel_idx; vy = vel_idx + 1
+                                excluded_indices = [vx, vy, friction_idx]
+                                vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                                hdim_new = nd // (params["total_state_param_vars"] - 3) # exclude vx, vy, friction
+                                nd_new = hdim_new * (params["total_state_param_vars"] - 3)
+                                ensemble_vec_reduced = np.zeros((nd_new, Nens))
+                                for ii, key in enumerate(model_kwargs['vec_inputs']):
+                                    if ii not in excluded_indices:
+                                        start = ii * hdim_new
+                                        end = start + hdim_new
+                                        ensemble_vec_reduced[start:end, :] = ensemble_vec[indx_map[key], :]
+                                ensemble_vec = copy.deepcopy(ensemble_vec_reduced)
+                                model_kwargs.update({"nd": nd_new}); params["nd"] = nd_new
+
+                                # do the same to observation operator
+                                # --- vector of measurements
+                                with h5py.File(_synthetic_obs, 'r') as f:
+                                    _hu_obs  = f['hu_obs'][:]
+                                    error_R = f['R'][:]
+                                    # Cov_obs = np.cov(error_R)
+                                    Cov_obs = np.zeros(error_R.shape)
+
+                                # scale all vectors to new dimesnions
+                                # hu_obs = hu_obs[:nd_new,:]
+                                hu_obs = np.zeros((nd_new, _hu_obs.shape[1]))
+                                for ii, key in enumerate(model_kwargs['vec_inputs']):
+                                    start = ii * ndim
+                                    end = start + ndim
+                                    hu_obs[start:end, :] = _hu_obs[indx_map[key], :]
+
+                                # form vec_inputs without vx, vy, friction
+                                model_kwargs['vec_inputs_new'] = [key for ii, key in enumerate(model_kwargs['vec_inputs']) if ii not in excluded_indices]
+                        else:
+                            with h5py.File(_synthetic_obs, 'r') as f:
+                                hu_obs = f['hu_obs'][:]
+                                error_R = f['R'][:]
+                                bed_mask_map = f['bed_mask_map'][:]
+                                # Cov_obs = np.cov(error_R)
+                                Cov_obs = np.zeros(error_R.shape)
+                            
 
                         # get new diemensions after forecast step
                         # model_kwargs.update({'nd_old': nd})
@@ -593,12 +648,12 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                             #     start = ii * ndim
                             #     end = start + ndim
                             #     hu_obs[start:end, :] = _hu_obs[indx_map[key], :]
-                            with h5py.File(_synthetic_obs, 'r') as f:
-                                hu_obs = f['hu_obs'][:]
-                                error_R = f['R'][:]
-                                bed_mask_map = f['bed_mask_map'][:]
-                                # Cov_obs = np.cov(error_R)
-                                Cov_obs = np.zeros(error_R.shape)
+                            # with h5py.File(_synthetic_obs, 'r') as f:
+                            #     hu_obs = f['hu_obs'][:]
+                            #     error_R = f['R'][:]
+                            #     bed_mask_map = f['bed_mask_map'][:]
+                            #     # Cov_obs = np.cov(error_R)
+                            #     Cov_obs = np.zeros(error_R.shape)
 
                             model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
 
@@ -722,7 +777,10 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                         time_analysis_step += MPI.Wtime() - _time_analysis_step
 
                         # update nd
-                        # nd = model_kwargs.get('nd_old')
+                        if inversion_flag:
+                            nd = model_kwargs.get('nd_old')
+                            model_kwargs.update({'nd': nd}); params.update({'nd': nd})
+                            # model_kwargs.update({'vec_inputs': model_kwargs.get('vec_inputs_old')})
                         # model_kwargs.update({'nd': nd}); params.update({'nd': nd})
 
                     else: 

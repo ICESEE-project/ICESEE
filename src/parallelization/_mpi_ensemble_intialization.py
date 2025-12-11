@@ -113,9 +113,15 @@ def ensemble_initialization(**model_kwargs):
                     #         end_idx = start_idx + hdim
                     #         # make sure the noise has zero mean
                     #         noise[start_idx:end_idx] *=sig
-                    #         noise[start_idx:end_idx] -= np.mean(noise[start_idx:end_idx])
-                    #         inflated_noise = noise[start_idx:end_idx] / np.max(np.abs(noise[start_idx:end_idx]))
-                    #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] + inflated_noise
+                    # #         noise[start_idx:end_idx] -= np.mean(noise[start_idx:end_idx])
+                    # #         inflated_noise = noise[start_idx:end_idx] / np.max(np.abs(noise[start_idx:end_idx]))
+                    #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx]
+
+                    # for ii, sig in enumerate(params["sig_Q"]):
+                    #     # if ii <=params["num_state_vars"]:
+                    #     start_idx = ii * hdim
+                    #     end_idx = start_idx + hdim
+                    #     ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
 
                     del noise  # Free memory immediately
 

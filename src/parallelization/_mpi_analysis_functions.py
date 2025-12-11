@@ -355,7 +355,7 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,time_analysis_me
         # check for negative thicknes and set to 1e-3 if vec_input contains h
         for i, var in enumerate(model_kwargs.get("vec_inputs",[])):
         # for i, var in enumerate(model_kwargs.get("all_observed",[])):
-            if var == "h":
+            if var == "h" or var == "thickness" or var == "ice_thickness" or var == "Thickness":
                 start = i * ndim
                 end = start + ndim
                 analysis_vec[start:end, :] = np.maximum(analysis_vec[start:end, :], 1e-2)

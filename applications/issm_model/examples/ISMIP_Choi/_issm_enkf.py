@@ -30,6 +30,20 @@ def forecast_step_single(ensemble=None, **kwargs):
     #  call the run_model fun to push the state forward in time
     return run_model(ensemble, **kwargs)
 
+# --- inverse model after or before analysis for friction or velocity ---
+def inverse_step_single(ensemble=None, **kwargs):
+    """ensemble: packs the state variables and parameters of a single ensemble member
+    Returns: ensemble: updated ensemble member
+    """
+    #  -- control time stepping   
+    time = kwargs.get('t')
+    k    = kwargs.get('k')
+    km   = kwargs.get('km', k)  # km is the time step for inverse model (can be before or after analysis)
+    
+    kwargs.update({'tinitial': time[km], 'tfinal': time[km+1]})
+
+    #  call the run_model fun to push the state forward in time
+    return run_model_inverse(ensemble, **kwargs)
 
 # --- generate true state ---
 def generate_true_state(**kwargs):
@@ -190,18 +204,25 @@ def generate_nurged_state(**kwargs):
     # # bed_field = np.asarray(bed_srf.structured([x, y])).reshape(-1)[:fdim]  # 1D
     # bed_field = np.asarray(bed_srf.structured([xx])).reshape(-1)
 
-    model_bed = gs.Exponential(
-        dim=2,
-        var=sill_bed,
-        len_scale=range_bed,
-        nugget=nugget_bed,
-    )
-    srf_bed = gs.SRF(model_bed, seed=seed_base)
-    # unstructured evaluation at real node positions
-    # bed_field = np.asarray(srf_bed((x_param / range_bed, y_param / range_bed)))  # (fdim,)
-    bed_field = np.asarray(srf_bed((x_param, y_param)))  # (fdim,)
+    # model_bed = gs.Exponential(
+    #     dim=2,
+    #     var=sill_bed,
+    #     len_scale=range_bed,
+    #     nugget=nugget_bed,
+    # )
+    # srf_bed = gs.SRF(model_bed, seed=seed_base)
+    # # unstructured evaluation at real node positions
+    # # bed_field = np.asarray(srf_bed((x_param / range_bed, y_param / range_bed)))  # (fdim,)
+    # bed_field = np.asarray(srf_bed((x_param, y_param)))  # (fdim,)
+
+    bed_kriging_file = f'{icesee_path}/bed_kriging_results.h5'
+    with h5py.File(bed_kriging_file, 'r') as f:
+        bed_field = f['bed_ens'][...]
+
+    bed_field = np.mean(bed_field, axis=0)
 
 
+    # import netCDF4
     # fcoeff = f'{icesee_path}/data/Data/uncondition_fcoeff_err_ens1000.nc'
     # bed_data = f'{icesee_path}/data/Data/condition_bed_err_30km.nc'
     # with netCDF4.Dataset(fcoeff, 'r') as nc:
@@ -328,7 +349,7 @@ def initialize_ensemble(ens, **kwargs):
     # bed_srf = gs.SRF(bed_model, seed=seed_base + ens)  # different stream
     # # bed_field = np.asarray(bed_srf.structured([x,y])).reshape(-1)[:fdim]  # 1D
     # bed_field =  np.asarray(bed_srf.structured([xx])).reshape(-1)
-
+    # import netCDF4
     # fcoeff = f'{icesee_path}/data/Data/uncondition_fcoeff_err_ens1000.nc'
     # bed_data = f'{icesee_path}/data/Data/condition_bed_err_30km.nc'
     # with netCDF4.Dataset(fcoeff, 'r') as nc:
@@ -364,19 +385,23 @@ def initialize_ensemble(ens, **kwargs):
 
 
     # --bed
-    sill_bed = kwargs.get('sill_bed')
-    range_bed = kwargs.get('range_bed')
-    nugget_bed = kwargs.get('nugget_bed')
+    # sill_bed = kwargs.get('sill_bed')
+    # range_bed = kwargs.get('range_bed')
+    # nugget_bed = kwargs.get('nugget_bed')
 
-    model_bed = gs.Exponential(
-        dim=2,
-        var=sill_bed,
-        len_scale=range_bed,
-        nugget=nugget_bed,
-    )
-    srf_bed = gs.SRF(model_bed, seed=seed_base+ens)
-    # unstructured evaluation at real node positions
-    bed_field = np.asarray(srf_bed((x_param, y_param)))  # 
+    # model_bed = gs.Exponential(
+    #     dim=2,
+    #     var=sill_bed,
+    #     len_scale=range_bed,
+    #     nugget=nugget_bed,
+    # )
+    # srf_bed = gs.SRF(model_bed, seed=seed_base+ens)
+    # # unstructured evaluation at real node positions
+    # bed_field = np.asarray(srf_bed((x_param, y_param)))  # 
+
+    bed_kriging_file = f'{icesee_path}/bed_kriging_results.h5'
+    with h5py.File(bed_kriging_file, 'r') as f:
+        bed_field = f['bed_ens'][ens, :]
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'

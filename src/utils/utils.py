@@ -381,6 +381,7 @@ class UtilsFunctions:
         nt = kwargs.get('nt', params.get('nt', statevec_true.shape[1]))
         Ly = kwargs.get('Ly', self.params.get('Ly', None))
         Lx = kwargs.get('Lx', self.params.get('Lx', None))
+        model_name = kwargs.get('model_name', None)
 
         # Observation schedule
         obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
@@ -506,38 +507,99 @@ class UtilsFunctions:
 
             # Priority 4: spacing in km (LiDAR-like stripes in 2D)
             elif (bed_stride_km is not None) and (Lx is not None) and (Ly is not None):
-                # We assume hdim is the x-dimension (Nx)
-                Nx = int(hdim)
-                Ny = int(local_len // Nx) if Nx > 0 else 1
-                if Nx * Ny != local_len:
-                    # Fallback: cannot infer 2D layout, revert to 1D thinning in x
-                    intervals = max(hdim - 1, 1)
-                    dx = float(Lx) / intervals  # in km (if Lx is in km)
-                    n = max(int(round(bed_stride_km / max(dx, 1e-12))), 1)
+                # if model_name == 'issm' or model_name == 'ISSM':
+                if re.match(r'(?i)^issm$', str(model_name)):
+                    icesee_path   = kwargs.get('icesee_path')
+                    data_path     = kwargs.get('data_path')
+
+                    # get the model dimensions from issm mesh
+                    file_path = f'{icesee_path}/{data_path}/mesh_idxy_{0}.h5'
+                    # check if file exists, if not raise error to inform the user to generate the mesh
+                    try:
+                        with h5py.File(file_path, 'r') as f:
+                            x_param = f['/fric_x'][:]   # shape (fdim,)
+                            y_param = f['/fric_y'][:]   # shape (fdim,)
+                            # print(f"[ICESEE] ISSM mesh dimensions: hdim={hdim}, fdim={fdim}")
+                    except FileNotFoundError:
+                        raise FileNotFoundError(
+                            f"ISSM mesh file '{file_path}' not found. "
+                            "Please generate the mesh indicies before running ICESEE."
+                        )
+
+                    y_param = np.asarray(y_param/1000.0, dtype=float).reshape(-1)
+                    x_param = np.asarray(x_param/1000.0, dtype=float).reshape(-1)
+                    y_min, y_max = np.min(y_param), np.max(y_param)
+                    x_min, x_max = np.min(x_param), np.max(x_param)
+
+                    local_len = x_param.size
+
+                    # number of nominal flight lines in y
+                    bed_stride_km = bed_stride_km/1000.0
+                    n_lines = max(int(np.floor((y_max - y_min) / bed_stride_km)) + 1, 1)
+                    y_lines = y_min + np.arange(n_lines) * bed_stride_km
+
+                    # tracks perpendicular to the ice flow direction
+                    x_lines = np.arange(x_min, x_max+1e-6, bed_stride_km)
+                    
+                    # band half-width: half the nominal y-spacing
+                    # if n_lines > 1:
+                    #     dy_nom = (y_max - y_min) / (n_lines - 1)
+                    # else:
+                    #     dy_nom = (y_max - y_min) if (y_max > y_min) else bed_stride_km
+                    # band = 0.5 * dy_nom
+
+                    # mask = np.zeros(local_len, dtype=bool)
+                    # for y_line in y_lines:
+                    #     mask |= np.abs(y_param - y_line) <= band
+
+                    if x_lines.size > 1:
+                        dx_nom = (x_max - x_min) / (x_lines.size - 1)
+                    else:
+                        dx_nom = bed_stride_km
+                    band = 0.5 * dx_nom
+
                     mask = np.zeros(local_len, dtype=bool)
-                    mask[::n] = True
+                    for x_line in x_lines:
+                        mask |= np.abs(x_param - x_line) <= band
+
+                    print(f"[ICESEE<-ISSM] bed LiDAR mask for '{k}': {mask.sum()} of {local_len} points observed")
+
                 else:
-                    # Build a 2D LiDAR-like mask: whole flight lines along x,
-                    # spaced every bed_stride_km in y.
-                    intervals_y = max(Ny - 1, 1)
-                    dy = float(Ly) / intervals_y  # km per grid cell in y
+                    #*--- based on assumptions of 2D grid layout ---*#
+                    # We assume hdim is the x-dimension (Nx)
+                    Nx = int(hdim)
+                    Ny = int(local_len // Nx) if Nx > 0 else 1
+                    if Nx * Ny != local_len:
+                        # Fallback: cannot infer 2D layout, revert to 1D thinning in x
+                        intervals = max(hdim - 1, 1)
+                        dx = float(Lx) / intervals  # in km (if Lx is in km)
+                        n = max(int(round(bed_stride_km / max(dx, 1e-12))), 1)
+                        mask = np.zeros(local_len, dtype=bool)
+                        mask[::n] = True
+                    else:
+                        # Build a 2D LiDAR-like mask: whole flight lines along x,
+                        # spaced every bed_stride_km in y.
+                        intervals_y = max(Ny - 1, 1)
+                        dy = float(Ly) / intervals_y  # km per grid cell in y
 
-                    # How many grid points in y between flight lines?
-                    stride_y_pts = max(int(round(bed_stride_km / max(dy, 1e-12))), 1)
+                        # How many grid points in y between flight lines?
+                        stride_y_pts = max(int(round(bed_stride_km / max(dy, 1e-12))), 1)
 
-                    # Optionally: along-track thinning in x (keep all points by default)
-                    along_track_stride_pts = 1  # or make this another parameter
+                        # Optionally: along-track thinning in x (keep all points by default)
+                        along_track_stride_pts = 1  # or make this another parameter
 
-                    mask2d = np.zeros((Ny, Nx), dtype=bool)
+                        mask2d = np.zeros((Ny, Nx), dtype=bool)
 
-                    # Select every stride_y_pts-th row as a LiDAR flight line,
-                    # and optionally thin along x.
-                    for j in range(0, Ny, stride_y_pts):
-                        mask2d[j, ::along_track_stride_pts] = True
+                        # Select every stride_y_pts-th row as a LiDAR flight line,
+                        # and optionally thin along x.
+                        for j in range(0, Ny, stride_y_pts):
+                            mask2d[j, ::along_track_stride_pts] = True
 
-                    # Flatten back to 1D in the same order as your state vector
-                    mask = mask2d.ravel(order="C")
-                    print(f"[ICESEE] bed 2D mask for key '{k}': Ny={Ny}, Nx={Nx}, stride_y_pts={stride_y_pts}")
+                        # Flatten back to 1D in the same order as your state vector
+                        mask = mask2d.ravel(order="C")
+
+
+                        print(f"[ICESEE] bed 2D mask for key '{k}': Ny={Ny}, Nx={Nx}, stride_y_pts={stride_y_pts}")
 
             # Save per-key mask (over the bed subvector)
             bed_mask_map[k] = mask
@@ -650,10 +712,7 @@ class UtilsFunctions:
 
 
             # print(bed_mask_map);exit(0)
-            # check if bed_mask_map  dictionary is empty:
             if len(bed_mask_map.keys()) == 0:
-                # create a dummy bed_mask_map with all false values
-                bed_mask_map = {key: np.zeros(m_obs, dtype=bool) for key in vec_inputs}
                 print("[ICESEE] Warning: bed_mask_map is empty. No bed observations will be created.")
 
         return hu_obs, error_R.T, bed_mask_map
