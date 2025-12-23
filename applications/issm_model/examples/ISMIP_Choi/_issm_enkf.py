@@ -38,9 +38,9 @@ def inverse_step_single(ensemble=None, **kwargs):
     #  -- control time stepping   
     time = kwargs.get('t')
     k    = kwargs.get('k')
-    km   = kwargs.get('km', k)  # km is the time step for inverse model (can be before or after analysis)
+    # km   = kwargs.get('km')  # km is the time step for inverse model (can be before or after analysis)
     
-    kwargs.update({'tinitial': time[km], 'tfinal': time[km+1]})
+    kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
 
     #  call the run_model fun to push the state forward in time
     return run_model_inverse(ensemble, **kwargs)

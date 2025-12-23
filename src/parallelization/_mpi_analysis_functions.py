@@ -341,6 +341,8 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,time_analysis_me
 
         # update the analysis vector
         analysis_vec[state_block_size:,:] = mean_params.reshape(-1,1) + inflated_pertubations
+        # only inflate bed topography if it is directly observed
+        observed_params = model_kwargs.get("observed_params", [])
 
         # mean_vars = np.mean(analysis_vec[:ndim,:], axis=1)
         # #  compute parturbations
@@ -353,12 +355,12 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,time_analysis_me
 
 
         # check for negative thicknes and set to 1e-3 if vec_input contains h
-        for i, var in enumerate(model_kwargs.get("vec_inputs",[])):
-        # for i, var in enumerate(model_kwargs.get("all_observed",[])):
-            if var == "h" or var == "thickness" or var == "ice_thickness" or var == "Thickness":
-                start = i * ndim
-                end = start + ndim
-                analysis_vec[start:end, :] = np.maximum(analysis_vec[start:end, :], 1e-2)
+        # for i, var in enumerate(model_kwargs.get("vec_inputs",[])):
+        # # for i, var in enumerate(model_kwargs.get("all_observed",[])):
+        #     if var == "h" or var == "thickness" or var == "ice_thickness" or var == "Thickness":
+        #         start = i * ndim
+        #         end = start + ndim
+        #         analysis_vec[start:end, :] = np.maximum(analysis_vec[start:end, :], 1e-2)
 
         # dynamical model for parameters: from https://doi.org/10.1002/qj.3257
         # obs_index = model_kwargs.get("obs_index")

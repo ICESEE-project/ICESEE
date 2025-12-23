@@ -252,7 +252,7 @@ def run_model_inverse(ensemble, **kwargs):
     icesee_path = kwargs.get('icesee_path')
     comm = kwargs.get('comm')
     vec_inputs = kwargs.get('vec_inputs')
-    ens_id = kwargs.get('ens_id')
+    # ens_id = kwargs.get('ens_id')
     data_path = kwargs.get('data_path')
 
     # Change to ISSM examples directory
@@ -261,6 +261,8 @@ def run_model_inverse(ensemble, **kwargs):
     # Define filename for data saving
     fname = 'inverse_state.mat'
     kwargs.update({'fname': fname})
+    ens_id = 0 # for inverse model, we always use ens_id = 0
+    kwargs.update({'ens_id': ens_id})
 
     # Generate output filename based on ensemble ID
     input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
@@ -293,6 +295,7 @@ def run_model_inverse(ensemble, **kwargs):
         f.create_dataset('coefficient', data=coefficient)
 
     # Run ISSM model to update state and parameters
+    kwargs.update({'k':kwargs.get('km')})
     try:
         ISSM_model(**kwargs)
     except Exception as e:
@@ -307,20 +310,21 @@ def run_model_inverse(ensemble, **kwargs):
         return None
     
     updated_state = {}
-    with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
-        updated_state['Thickness'] = f['Thickness'][0]
-        # updated_state['Base'] = f['Base'][0]
-        updated_state['Surface'] = f['Surface'][0]
-        updated_state['Vx'] = f['Vx'][0]
-        updated_state['Vy'] = f['Vy'][0]
-        
+    with h5py.File(output_filename, 'r') as f:
+        # Read full 1D fields (nvert,)
+        # updated_state['Thickness'] = np.asarray(f['Thickness'][:]).ravel()
+        # updated_state['Surface']   = np.asarray(f['Surface'][:]).ravel()
+        updated_state['Vx']        = np.asarray(f['Vx'][:]).ravel()
+        updated_state['Vy']        = np.asarray(f['Vy'][:]).ravel()
+
         # --Joint Estimations--
         if kwargs["joint_estimation"]:
-            updated_state['bed'] = f['bed'][0]
-            updated_state['coefficient'] = f['coefficient'][0]
+            # updated_state['bed']        = np.asarray(f['bed'][:]).ravel()
+            updated_state['coefficient'] = np.asarray(f['coefficient'][:]).ravel()
         else:
-            bed_int = bed
-            coefficient_int = coefficient
+            # keep the original bed, coefficient (already extracted above)
+            # updated_state['bed']        = bed.ravel()
+            updated_state['coefficient'] = coefficient.ravel()
             
     os.chdir(icesee_path)
 

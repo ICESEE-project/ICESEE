@@ -71,7 +71,8 @@ class UtilsFunctions:
             # if key_is_bed.get(key, False) and key in bed_mask_map:
                 # Apply the sparse mask
                 mask = np.asarray(bed_mask_map[key], dtype=bool)[0]
-                # print(mask.shape)
+                # mask = np.asarray(bed_mask_map[key], dtype=bool)
+                print(mask.shape)
                 # print(idx.shape)
                 if mask.size != idx.size:
                     raise ValueError(
@@ -291,7 +292,7 @@ class UtilsFunctions:
             obs_max = min(obs_max_cfg, t_max)
 
             if freq_obs <= 0.0 or obs_start > obs_max:
-                return np.array([]), np.array([], dtype=int), 0, np.array([])
+                return np.array([]), np.array([], dtype=int), 0
 
             # --- Build ideal observation times ---
             n_obs = int(np.floor((obs_max - obs_start) / freq_obs)) + 1
@@ -302,12 +303,20 @@ class UtilsFunctions:
             tol = 1e-6 * dt_grid
 
             # For each t in the model time grid, check if it’s close to any obs time
+            # obs_idx = []
+            # for i, ti in enumerate(t):
+            #     if np.any(np.abs(ti - obs_t_req) < tol):
+            #         obs_idx.append(i)
+            # obs_idx = np.array(obs_idx, dtype=int)
+
             obs_idx = []
-            for i, ti in enumerate(t):
-                if np.any(np.abs(ti - obs_t_req) < tol):
+            for tobs in obs_t_req:
+                i = np.argmin(np.abs(t - tobs))
+                if abs(t[i] - tobs) <= 0.5 * dt_grid:
                     obs_idx.append(i)
 
-            obs_idx = np.array(obs_idx, dtype=int)
+            obs_idx = np.array(sorted(set(obs_idx)), dtype=int)
+
             obs_t_aligned = t[obs_idx]
             num_observations = len(obs_idx)
 
@@ -691,7 +700,7 @@ class UtilsFunctions:
                 if key in obs_set and not key_is_bed[key]:
                     sigma = error_R[idx, km]
                     hu_obs[idx, km] = (
-                        statevec_true[idx, step_time - 1] +
+                        statevec_true[idx, step_time] +
                         np.random.normal(0.0, sigma, size=idx.size)
                     )
                 else:
@@ -706,7 +715,7 @@ class UtilsFunctions:
                     if idx_obs.size > 0:
                         sigma_obs = error_R[idx_obs, col]
                         hu_obs[idx_obs, col] = (
-                            statevec_true[idx_obs, step_time - 1] +
+                            statevec_true[idx_obs, step_time] +
                             np.random.normal(0.0, sigma_obs, size=idx_obs.size)
                         )
 

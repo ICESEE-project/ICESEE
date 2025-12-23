@@ -441,13 +441,15 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                 if model_kwargs.get('global_analysis', True) or model_kwargs.get('local_analysis', False):
                    
                     obs_index = model_kwargs["obs_index"]
-                    if (km < params["number_obs_instants"]) and (k+1 == obs_index[km]):
+                    if (km < params["number_obs_instants"]) and (k == obs_index[km]):
+                        # print(f"[ICESEE-debug] Rank {rank_world} performing analysis at time step {k+1} ..."); exit(0)
                         # -- time global analysis step ---
                         _time_analysis_step = MPI.Wtime()
                         model_kwargs.update({"km": km})
                         inversion_flag = model_kwargs.get("inversion_flag", False)
 
                         if inversion_flag:
+                            print(f"[ICESEE-debug1st] Rank {rank_world} performing analysis at time step {k+1} ..."); exit(0)
                             # shrink the ensembel to exclude vx, vy, and friction
                             if rank_world == 0:
                                 # write full ensemble to file before analysis
@@ -803,68 +805,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                     # --- compute the local X5 for each horizontal grid point ---
                     pass
 
-            # -------------------------------------------------- end of cases 2 & 3 --------------------------------------------
-
-            # --- case 4: Evenly distribute ensemble members among processors 
-            #         - each processor runs a subset of ensemble members
-            #         - best for size_world/Nens is a whole number and Nens >= size_world
-            #         - size_world = 2^n where n is an integer
-            if params["even_distribution"]:
-                #  call the parallel_forecast_step_even_distribution function
-                ensemble_vec, ensemble_vec_mean, shape_ens = parallel_forecast_step_even_distribution_run(**model_kwargs)
-
-                # Analysis step
-                obs_index = model_kwargs["obs_index"]
-                if (km < params["number_obs_instants"]) and (k+1 == obs_index[km]):
-            
-                    if rank_world == 0:
-
-                        H = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).JObs_fun(ensemble_vec.shape[0])
-                        h = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).Obs_fun # observation operator
-
-                        # compute the observation covariance matrix
-                        Cov_obs = params["sig_obs"][k+1]**2 * np.eye(2*params["number_obs_instants"]+1)
-
-                        # --- vector of measurements
-                        d = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).Obs_fun(hu_obs[:,km])
-
-                        if EnKF_flag:
-                            # compute the X5 matrix
-                            X5 = EnKF_X5(ensemble_vec, Cov_obs, Nens, h, d)
-                            y_i = np.sum(X5, axis=1)
-                            ensemble_vec_mean[:,k+1] = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
-                            
-                    else:
-                        X5 = np.empty((Nens, Nens))
-
-                    # clean the memory
-                    del ensemble_local, gathered_ensemble; gc.collect()
-
-                    # call the analysis update function
-                    shape_ens = ensemble_vec.shape # get the shape of the ensemble
-                    ensemble_vec = analysis_enkf_update(ensemble_vec, shape_ens, X5, comm_world)
-
-                    # update the ensemble with observations instants
-                    km += 1
-
-                    # inflate the ensemble
-                    # params["inflation_factor"] = inflation_factor
-                    ensemble_vec = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).inflate_ensemble(in_place=True)
-                    # ensemble_vec = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec)._inflate_ensemble()
-                
-                    # update the local ensemble
-                    ensemble_local = copy.deepcopy(ensemble_vec[:,start:stop])
-
-                # Save the ensemble
-                if rank_world == 0:
-                    ensemble_vec_full[:,:,k+1] = ensemble_vec
-                else:
-                    ensemble_vec_full = np.empty((nd, Nens, model_kwargs.get("nt",params["nt"])+1), dtype=np.float64)
-
-                # free up memory
-                del ensemble_vec; gc.collect()
-            
-            # -------------------------------------------------- end of case 4 -------------------------------------------------   
+              
 
         # update the progress bar
         if rank_world == 0:
