@@ -331,7 +331,7 @@ def icesee_get_index(vec=None, **kwargs):
         vec_inputs = kwargs.get("vec_inputs", None)
         params = kwargs.get("params", None)
         nd = kwargs.get("nd", params.get("nd", None))
-
+        # print(f"[ICESEE-debug] vec_inputs: {vec_inputs}, nd: {nd}, params: {params}\n")
         if params["default_run"]:
             comm = kwargs.get("subcomm", None)
         else:

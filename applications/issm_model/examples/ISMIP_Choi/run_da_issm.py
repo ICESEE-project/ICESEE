@@ -75,6 +75,7 @@ model_kwargs = {
                 'vel_idx': int(float(enkf_params.get('vel_idx', 2))),
                 'inversion_flag': enkf_params.get('inversion_flag', False),
                 'friction_idx': int(float(enkf_params.get('friction_idx', 5))),
+                'Nens': int(float(params.get('Nens'))),
 }
 
 # observation schedule
@@ -90,6 +91,7 @@ kwargs.update(model_kwargs)
 shutil.copy(os.path.join(icesee_cwd,'..','..','issm_utils','matlab2python', 'issm_env.m'), issm_examples_dir)
 shutil.copy(os.path.join(icesee_cwd,'..','..','issm_utils','matlab2python', 'matlab_server.m'), issm_examples_dir)
 shutil.copy(os.path.join(icesee_cwd, f'model_kwargs_{ens_id}.mat'), issm_examples_dir)
+shutil.copy(os.path.join(icesee_cwd, f'Domain.exp'), issm_examples_dir)
 shutil.copy(os.path.join(icesee_cwd, model_kwargs.get('ParamFile')), issm_examples_dir)
                          
 # --- change directory to the examples directory ---

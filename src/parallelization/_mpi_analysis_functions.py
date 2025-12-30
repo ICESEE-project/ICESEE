@@ -297,6 +297,7 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,time_analysis_me
         # broadcast X5 to all processors
         X5 = BM.bcast(X5, comm=comm_world)
         time_analysis_mean_generation = BM.bcast(time_analysis_mean_generation, comm=comm_world)
+        model_kwargs['X5'] = X5
         # X5_diff = BM.bcast(X5_diff, comm=comm_world)
 
         # initialize the an empty ensemble vector for the rest of the processors
@@ -616,7 +617,7 @@ def analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, UtilsFunctions
 
         # check for negative thicknes and set to 1e-3 if vec_input contains h
         for i, var in enumerate(model_kwargs.get("vec_inputs",[])):
-            if var == "h":
+            if var == "h" or var == "thickness" or var == "ice_thickness" or var == "Thickness":
                 start = i * ndim
                 end = start + ndim
                 analysis_vec[start:end, :] = np.maximum(analysis_vec[start:end, :], 1e-2)

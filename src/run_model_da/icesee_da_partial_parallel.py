@@ -448,8 +448,9 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                         model_kwargs.update({"km": km})
                         inversion_flag = model_kwargs.get("inversion_flag", False)
 
-                        if inversion_flag:
-                            print(f"[ICESEE-debug1st] Rank {rank_world} performing analysis at time step {k+1} ..."); exit(0)
+                        # if inversion_flag:
+                        if False:
+                            # print(f"[ICESEE-debug1st] Rank {rank_world} performing analysis at time step {k+1} ..."); 
                             # shrink the ensembel to exclude vx, vy, and friction
                             if rank_world == 0:
                                 # write full ensemble to file before analysis
@@ -779,9 +780,9 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                         time_analysis_step += MPI.Wtime() - _time_analysis_step
 
                         # update nd
-                        if inversion_flag:
-                            nd = model_kwargs.get('nd_old')
-                            model_kwargs.update({'nd': nd}); params.update({'nd': nd})
+                        # if inversion_flag:
+                        #     nd = model_kwargs.get('nd_old')
+                        #     model_kwargs.update({'nd': nd}); params.update({'nd': nd})
                             # model_kwargs.update({'vec_inputs': model_kwargs.get('vec_inputs_old')})
                         # model_kwargs.update({'nd': nd}); params.update({'nd': nd})
 

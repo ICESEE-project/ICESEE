@@ -666,7 +666,8 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
                 'Vx', result_0, 'vx';
                 'Vy', result_0, 'vy';
                 'bed', result_1, 'bed';
-                'coefficient', result_2, 'coefficient'};
+        };
+                % 'coefficient', result_2, 'coefficient'};
         writeToHDF5(filename, data);
 
     end

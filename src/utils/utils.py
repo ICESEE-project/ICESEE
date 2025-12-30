@@ -72,7 +72,7 @@ class UtilsFunctions:
                 # Apply the sparse mask
                 mask = np.asarray(bed_mask_map[key], dtype=bool)[0]
                 # mask = np.asarray(bed_mask_map[key], dtype=bool)
-                print(mask.shape)
+                # print(mask.shape)
                 # print(idx.shape)
                 if mask.size != idx.size:
                     raise ValueError(
