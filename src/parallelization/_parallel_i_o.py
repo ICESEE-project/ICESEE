@@ -334,33 +334,33 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                         bed_now = recvbuf[indx_map[vec], :]
                         
                         # only update bed if observation is available
-                        for bed_snaps in model_kwargs.get("bed_obs_snapshot", []):
-                            dt = model_kwargs.get("dt", params['dt'])
-                            if timestep*dt == bed_snaps:
-                            # if True:
-                                # relaxation_factor = 0.05
-                                # relaxation_factor = (eta + beta_t)*dt + sqrt(dt)*sigma*rho*bed_error
-                                eta = 1.0
-                                rho = model_kwargs.get("rho", 1.0) 
-                                sigma = 1e-3
-                                X5 = model_kwargs.get("X5", None)
-                                beta_0 = 0.001 # initial bais
-                                # beta_k = beta_0 \prod_{i=1}^{Nens} (X5_i)
-                                beta_t = beta_0
-                                for i in range(recvbuf.shape[1]):
-                                    for j in range(X5.shape[0]):
-                                        beta_t *= X5[j,i]
-                                for i, sig in enumerate(params["sig_Q"]):
-                                    if i == ii:
-                                        sigma = sig
-                                relaxation_factor = (eta+beta_t)*dt + np.sqrt(dt)*sigma*rho
-                                # put cap on relaxation factor to avoid instability 
-                                if relaxation_factor > 1.5:
-                                    relaxation_factor = np.sqrt(dt)*sigma*rho
-                                relaxation_factor = min(relaxation_factor, 0.025)
-                                recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)    
-                            else:
-                                recvbuf[indx_map[vec], :] = bed_prior
+                        # for bed_snaps in model_kwargs.get("bed_obs_snapshot", []):
+                        dt = model_kwargs.get("dt", params['dt'])
+                        # if timestep*dt == bed_snaps:
+                        if True:
+                            # relaxation_factor = 0.05
+                            # relaxation_factor = (eta + beta_t)*dt + sqrt(dt)*sigma*rho*bed_error
+                            eta = 1.0
+                            rho = model_kwargs.get("rho", 1.0) 
+                            sigma = 1e-3
+                            X5 = model_kwargs.get("X5", None)
+                            beta_0 = 0.001 # initial bais
+                            # beta_k = beta_0 \prod_{i=1}^{Nens} (X5_i)
+                            beta_t = beta_0
+                            for i in range(recvbuf.shape[1]):
+                                for j in range(X5.shape[0]):
+                                    beta_t *= X5[j,i]
+                            for i, sig in enumerate(params["sig_Q"]):
+                                if i == ii:
+                                    sigma = sig
+                            relaxation_factor = (eta+beta_t)*dt + np.sqrt(dt)*sigma*rho
+                            # put cap on relaxation factor to avoid instability 
+                            if relaxation_factor > 1.5:
+                                relaxation_factor = np.sqrt(dt)*sigma*rho
+                            relaxation_factor = min(relaxation_factor, 0.025)
+                            recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)    
+                        else:
+                            recvbuf[indx_map[vec], :] = bed_prior
 
                     if vec.lower() in ["thickness","ice_thickness","h","Thickness"]:
                         thickness_idx = indx_map[vec]

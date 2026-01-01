@@ -33,8 +33,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
     % set initail ens_id
     ens_id_init = 0;
     h_perturb = 150;
-    s_perturb = 200;
-    b_perturb = 100;
+    s_perturb = 75;
+    b_perturb = 150;
     nurged_entries_percentage = 0.25;
 
     output_frequency = 1; % make sure this is set to 1 for coupling with ICESEE
@@ -414,12 +414,16 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             %  update the friction and bed
             md.friction.coefficient = friction_ref;
+            md.friction.p=ones(md.mesh.numberofelements,1);
+            md.friction.q=ones(md.mesh.numberofelements,1);
 
             % md.friction.coefficient = md.friction.coefficient;
             % md.friction.coefficient = coefficient;
+            % r = 100 * rand(50,1);
             bed_err = bed - bed_ref;
-            md.geometry.bed = (bed_ref + bed_err) - b_perturb*ones(md.mesh.numberofvertices,1);
-            md.geometry.base = (base_ref + bed_err) - b_perturb*ones(md.mesh.numberofvertices,1);
+            md.geometry.bed = (bed_ref + bed_err) - b_perturb*rand(ones(md.mesh.numberofvertices,1),1);
+            md.geometry.base = (base_ref + bed_err) - b_perturb*rand(ones(md.mesh.numberofvertices,1),1);
+            md.geometry.surface = (md.geometry.surface + bed_err) - s_perturb*rand(ones(md.mesh.numberofvertices,1),1);
 
             % nv = md.mesh.numberofvertices;
             % bed_noise = b_perturb * rand(nv, 1);
@@ -461,8 +465,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.geometry.thickness(pos) = 1;
             % md.geometry.thickness(pos) = max(1, min(thickness_ref));
             md.geometry.surface = md.geometry.base + md.geometry.thickness;
-
             % md.geometry.surface = md.geometry.surface + s_perturb*ones(md.mesh.numberofvertices,1);
+
+            
 
             disp('      -- ice shelf base based on hydrostatic equilibrium');
             di = md.materials.rho_ice / md.materials.rho_water;
@@ -681,7 +686,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.timestepping = timestepping();
             md.timestepping.time_step = 0.2;
             md.timestepping.start_time = 0;
-            md.timestepping.final_time = 0.4;
+            md.timestepping.final_time = 0.2;
             md.settings.output_frequency = output_frequency; %make sure this is set to 1 for
             
             % Ensure minimum ice thickness
@@ -1035,24 +1040,28 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         di = md.materials.rho_ice / md.materials.rho_water;
 
         % Compute ocean level set
-        md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
-
-        % Floating ice (ocean_levelset < 0)
-        pos = find(md.mask.ocean_levelset < 0);
+        % md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
+        md.mask.ocean_levelset = h5read(filename, '/Thickness') + h5read(filename, '/bed') / di;
 
         % read from temporal friction file--------------------------------
         ens_id_=0;
         h5file = fullfile(icesee_path, data_path, sprintf('ensemble_friction_%d.h5', ens_id_));
         fcoeff = h5read(h5file, '/coefficient');
-        % md.friction.coefficient = fcoeff;
-        md.friction.coefficient=mean_friction*ones(md.mesh.numberofvertices,1);
+        md.friction.coefficient = fcoeff;
+        % md.friction.coefficient=mean_friction*ones(md.mesh.numberofvertices,1);
+
         % md.friction.p=ones(md.mesh.numberofelements,1);
         % md.friction.q=ones(md.mesh.numberofelements,1);
         % no friction applied on floating ice
         % pos=find(md.mask.groundedice_levelset<0);
-        md.friction.coefficient(pos)=0;
+
+        % no friction applied on grouding line
+        pos = find(md.mask.ocean_levelset < 0);
+        md.friction.coefficient(pos)=0; %TODO: check the impact of this
         md.groundingline.migration='SubelementMigration';
-        md=SetMarineIceSheetBC(md);
+
+        % md.groundingline.migration='SubelementMigration';
+        % md=SetMarineIceSheetBC(md);
         % md.basalforcings.floatingice_melting_rate = zeros(md.mesh.numberofvertices,1);
         % md.basalforcings.groundedice_melting_rate = zeros(md.mesh.numberofvertices,1);
         % md.thermal.spctemperature                 = md.initialization.temperature;
@@ -1098,10 +1107,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.inversion.cost_functions_coefficients=ones(md.mesh.numberofvertices,3);
         md.inversion.cost_functions_coefficients(:,1)=1;
         md.inversion.cost_functions_coefficients(:,2)=1;
-        md.inversion.cost_functions_coefficients(:,3)=8e-15;
+        md.inversion.cost_functions_coefficients(:,3)=1e-13;
         % md.inversion.cost_functions_coefficients(:,1)=1;
         % md.inversion.cost_functions_coefficients(:,2)=1;
-        % md.inversion.cost_functions_coefficients(:,3)=1e-15;
+        % md.inversion.cost_functions_coefficients(:,3)=8e-15;
 
         md.inversion.control_parameters={'FrictionCoefficient'};
         md.inversion.min_parameters=2000*ones(md.mesh.numberofvertices,1);

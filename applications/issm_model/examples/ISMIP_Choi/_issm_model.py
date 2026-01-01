@@ -300,6 +300,9 @@ def run_model_inverse(ensemble, **kwargs):
     # Get ensemble indices
     vecs, indx_map, _ = icesee_get_index(**kwargs)
     k = kwargs.get('k', 0) 
+    # kwargs.update({'_k':k})
+    time = kwargs.get('t')
+    kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
 
     #  --- Joint Estimations ---
     if kwargs["joint_estimation"]:
