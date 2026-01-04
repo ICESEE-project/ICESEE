@@ -29,12 +29,13 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
     % number of variables
     nvar = 5;
+    rng(1000 + ens_id, 'twister');   % ens_id = ensemble index
 
     % set initail ens_id
     ens_id_init = 0;
     h_perturb = 150;
-    s_perturb = 75;
-    b_perturb = 150;
+    s_perturb = 25;
+    b_perturb = 50;
     nurged_entries_percentage = 0.25;
 
     output_frequency = 1; % make sure this is set to 1 for coupling with ICESEE
@@ -421,9 +422,12 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % md.friction.coefficient = coefficient;
             % r = 100 * rand(50,1);
             bed_err = bed - bed_ref;
-            md.geometry.bed = (bed_ref + bed_err) - b_perturb*rand(ones(md.mesh.numberofvertices,1),1);
-            md.geometry.base = (base_ref + bed_err) - b_perturb*rand(ones(md.mesh.numberofvertices,1),1);
-            md.geometry.surface = (md.geometry.surface + bed_err) - s_perturb*rand(ones(md.mesh.numberofvertices,1),1);
+            % md.geometry.bed = (bed_ref + bed_err) - b_perturb*rand(md.mesh.numberofvertices, 1);
+            % md.geometry.base = (base_ref + bed_err) - b_perturb*rand(md.mesh.numberofvertices, 1);
+            % md.geometry.surface = (md.geometry.surface + bed_err) - s_perturb*rand(md.mesh.numberofvertices, 1);
+            md.geometry.bed = (bed_ref + bed_err) - b_perturb*randn(md.mesh.numberofvertices, 1);
+            md.geometry.base = (base_ref + bed_err) - b_perturb*randn(md.mesh.numberofvertices, 1);
+            md.geometry.surface = (md.geometry.surface + bed_err) - s_perturb*randn(md.mesh.numberofvertices, 1);
 
             % nv = md.mesh.numberofvertices;
             % bed_noise = b_perturb * rand(nv, 1);
@@ -1055,17 +1059,18 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % no friction applied on floating ice
         % pos=find(md.mask.groundedice_levelset<0);
 
-        % no friction applied on grouding line
+        % no friction applied on floating ice
         pos = find(md.mask.ocean_levelset < 0);
         md.friction.coefficient(pos)=0; %TODO: check the impact of this
+        % md.friction.coefficient(pos)=2000;
         md.groundingline.migration='SubelementMigration';
 
-        % md.groundingline.migration='SubelementMigration';
+        % set boundary conditions and other parameters
         % md=SetMarineIceSheetBC(md);
-        % md.basalforcings.floatingice_melting_rate = zeros(md.mesh.numberofvertices,1);
-        % md.basalforcings.groundedice_melting_rate = zeros(md.mesh.numberofvertices,1);
-        % md.thermal.spctemperature                 = md.initialization.temperature;
-        % md.masstransport.spcthickness             = NaN*ones(md.mesh.numberofvertices,1);
+        md.basalforcings.floatingice_melting_rate = zeros(md.mesh.numberofvertices,1);
+        md.basalforcings.groundedice_melting_rate = zeros(md.mesh.numberofvertices,1);
+        md.thermal.spctemperature                 = md.initialization.temperature;
+        md.masstransport.spcthickness             = NaN*ones(md.mesh.numberofvertices,1);
 
         % md.initialization.vx = h5read(h5file, '/Vx');
         % md.initialization.vy = h5read(h5file, '/Vy');
@@ -1083,7 +1088,6 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md = bamg(md, 'domain', 'Domain.exp', 'hvertices',hvertices,'gradation',gradation,'field',md.initialization.vel,'err',err);
         % size(md.initialization.vx)
 
-        % md = setflowequation(md,'SSA','all');
 
         %results of previous run are taken as observations
         md.inversion=m1qn3inversion();
@@ -1101,6 +1105,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.inversion.dxmin=0.1;
         md.inversion.gttol=1.0e-4;
         md.verbose=verbose('control',true);
+
+        % md = setflowequation(md,'SSA','all');
 
         md.inversion.maxsteps = maxsteps;
         md.inversion.cost_functions=[101 103 501];

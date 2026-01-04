@@ -328,16 +328,46 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
 
                 # apply a relaxation factor to bed
                 vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                thickness_idx = 0; surface_idx = 0; bed_idx = 0
+                for ii, vec in enumerate(model_kwargs.get("vec_inputs", [])):
+                    # dumy variables to hold indices
+                    # thickness_idx = 0; surface_idx = 0; bed_idx = 0
+                    if vec.lower() in ["thickness","ice_thickness","h","Thickness"]:
+                        thickness_idx = indx_map[vec]
+                    # else:
+                    #     thickness_idx = 0
+                    if vec.lower() in ["surface","ice_surface","s","Surface"]:
+                        surface_idx = indx_map[vec]
+                    # else:
+                    #     surface_idx = 0
+                    if vec.lower() in ["bed","bedrock","base","bedtopography"]:
+                        bed_idx = indx_map[vec]
+                    # else:
+                    #     bed_idx = 0
+
                 for ii, vec in enumerate(model_kwargs.get("vec_inputs", [])):
                     if vec.lower() in ["bed","bedrock","base","bedtopography"]:
                         bed_prior = dset[indx_map[vec], :, timestep-1]
                         bed_now = recvbuf[indx_map[vec], :]
-                        
+
+                        thickness = recvbuf[thickness_idx,:]
+                        di = 0.8930
+                        ocean_levelset = thickness + (recvbuf[bed_idx,:]/di)
+                        pos_bed = np.where(ocean_levelset > 0) # no floating ice
+
                         # only update bed if observation is available
                         # for bed_snaps in model_kwargs.get("bed_obs_snapshot", []):
                         dt = model_kwargs.get("dt", params['dt'])
-                        # if timestep*dt == bed_snaps:
-                        if True:
+                            # if timestep*dt == bed_snaps:
+                        t = timestep * dt
+                        for bed_snap in model_kwargs.get("bed_obs_snapshot", []):
+                            if np.isclose(t, bed_snap, rtol=0, atol=1e-12):
+                                do_bed_snap = True
+                                break
+                            else:
+                                do_bed_snap = False
+                        if do_bed_snap:
+                            # if True:
                             # relaxation_factor = 0.05
                             # relaxation_factor = (eta + beta_t)*dt + sqrt(dt)*sigma*rho*bed_error
                             eta = 1.0
@@ -347,7 +377,7 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                             beta_0 = 0.001 # initial bais
                             # beta_k = beta_0 \prod_{i=1}^{Nens} (X5_i)
                             beta_t = beta_0
-                            for i in range(recvbuf.shape[1]):
+                            for i in range(X5.shape[0]):
                                 for j in range(X5.shape[0]):
                                     beta_t *= X5[j,i]
                             for i, sig in enumerate(params["sig_Q"]):
@@ -357,17 +387,24 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                             # put cap on relaxation factor to avoid instability 
                             if relaxation_factor > 1.5:
                                 relaxation_factor = np.sqrt(dt)*sigma*rho
-                            relaxation_factor = min(relaxation_factor, 0.025)
-                            recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)    
+                            relaxation_factor = min(relaxation_factor, 0.5)
+                            recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
+                            # bed anomaly
+                            # bed_now_mean = np.mean(bed_prior, axis=1)
+                            # anomaly = bed_now - bed_now_mean[:, np.newaxis]
+                            # recvbuf[indx_map[vec], :] = bed_now_mean[:, np.newaxis] + relaxation_factor * anomaly    
                         else:
-                            recvbuf[indx_map[vec], :] = bed_prior
+                            # do_bed_snap = False
+                            relaxation_factor = 0.05 # damping factor
+                            recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
+                            # recvbuf[pos_bed, :] = bed_prior[pos_bed]
 
-                    if vec.lower() in ["thickness","ice_thickness","h","Thickness"]:
-                        thickness_idx = indx_map[vec]
-                    if vec.lower() in ["surface","ice_surface","s","Surface"]:
-                        surface_idx = indx_map[vec]
-                    if vec.lower() in ["bed","bedrock","base","bedtopography"]:
-                        bed_idx = indx_map[vec]
+                    # if vec.lower() in ["thickness","ice_thickness","h","Thickness"]:
+                    #     thickness_idx = indx_map[vec]
+                    # if vec.lower() in ["surface","ice_surface","s","Surface"]:
+                    #     surface_idx = indx_map[vec]
+                    # if vec.lower() in ["bed","bedrock","base","bedtopography"]:
+                    #     bed_idx = indx_map[vec]
                     
                 # check for negative thickness
                 # ISSM *------
@@ -397,7 +434,7 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                     base[pos_base] = base[pos_base]
 
                     # grounded ice
-                    pos_grounded = np.where(ocean_levelset >= 0)
+                    pos_grounded = np.where(ocean_levelset > 0)
                     base[pos_grounded] = bed[pos_grounded]
 
                     # update surface, bed and thickness in recvbuf

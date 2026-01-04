@@ -8,18 +8,17 @@ close all; clear all
 
 % data_file_paths='data_0/_modelrun_datasets';
 % data_file_paths='data_1';
-data_file_paths='_modelrun_datasets';
-% data_file_paths = 'working_results'
-% data_file_paths='cluster_data/_modelrun_datasets';
-% data_file_paths='test_bed_observe_03';
-% data_file_paths='test_data_5';
+% data_file_paths='_modelrun_datasets';
+global data_file_paths 
+data_file_paths = '_modelrun_datasets';
+
 
 % time steps
 % k_array = [10, 30, 50, 80,120];  % multiple time steps
-% k_array=[20, 70,  110,150,190];
-% k_array=[20, 50, 70, 80,100, 130, 150];
-% k_array=[2];
-k_array=[12, 24, 32,45, 65, 75,80, 100, 118];
+% k_array=[25, 45, 60, 80, 101, 137, 162];
+% k_array=[30, 40, 80,160, 180];
+k_array=[20, 80,120, 160, 240, 350, 450];
+% k_array=[1];
 dt = 0.2;
 global nvar;
 nvar = 6;
@@ -73,7 +72,7 @@ md_mean = md; md_ens = md;
 % dt = t(2) - t(1);
 % dt = 0.25;
 
-k_gl = 1;             % choose one of your k_array entries
+k_gl = 150;             % choose one of your k_array entries
 [md_true, md_nurged, md_ens] = setup_model_states(k_gl, dt, ...
     model_true_state, model_nurged_state, ensemble_vec_mean, ...
     md_true, md_nurged, md_ens, md);
@@ -343,7 +342,8 @@ function plot_var_diff(k_array, dt, ...
     diff_noassim = (data_ens - data_true); 
     % diff_noassim = abs(data_ens - data_true)./(abs(data_true));
     maxAbs_noassim = max(abs(diff_noassim(:)));
-    % maxAbs_noassim = 2.0;
+    maxAbs= maxAbs_noassim;
+    % maxAbs_noassim = 2;
     plotmodel(md_ens, 'data', diff_noassim, ...
         'title', '(b) No assimilation − True', ...
         'subplot', [nrows, 1, 2], 'caxis', [-maxAbs_noassim maxAbs_noassim], 'colorbar', 'off');
@@ -362,8 +362,8 @@ function plot_var_diff(k_array, dt, ...
         % diff_data = (ens_field - true_field) ./ (abs(true_field) + eps0);
 
         % diff_data = abs(get_nested_field(md_ens, field) - get_nested_field(md_true, field))./abs(get_nested_field(md_true, field));
-        % diff_data = (get_nested_field(md_ens, field) - get_nested_field(md_true, field));
         diff_data = (get_nested_field(md_ens, field) - get_nested_field(md_true, field));
+        % diff_data = (get_nested_field(md_ens, field) - get_nested_field(md_true, field));
         maxAbs = max(abs(diff_data(:)));
         % maxAbs=2;
         plotmodel(md_ens, 'data', diff_data, ...
@@ -744,8 +744,9 @@ function [md_true, md_nurged, md_ens] = setup_model_states(k, dt, model_true_sta
     % ens_fcoeff = ensemble_vec_mean(5*hdim+1:6*hdim, k);
     % read friction from temp file
     icesee_path='/Users/bkyanjo3/da_project/ICESEE/applications/issm_model/examples/ISMIP_Choi';
-    data_path= '_modelrun_datasets';
-    h5file = fullfile(icesee_path, data_path, sprintf('temp_coefficient_%d.h5', 0));
+    % data_path= '_modelrun_datasets';
+    global data_file_paths;
+    h5file = fullfile(icesee_path, data_file_paths, sprintf('temp_coefficient_%d.h5', 0));
     ens_fcoeff = h5read(h5file, '/coefficient'); ens_fcoeff = ens_fcoeff(k,:)';
     % Vx = h5read(h5file, '/Vx');
     % Vy = h5read(h5file, '/Vy');

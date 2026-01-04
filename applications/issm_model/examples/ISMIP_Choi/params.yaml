@@ -26,7 +26,7 @@ enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 50                      # Number of ensemble members (paper uses 50)
   freq_obs: 4 #4                 # Frequency of observations (annual, as per paper)
-  obs_max_time: 36          # Maximum time for observations (30 years)
+  obs_max_time: 48          # Maximum time for observations (30 years)
   obs_start_time: 0            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
@@ -35,7 +35,7 @@ enkf-parameters:
   initialize_ensemble: 1
   initial_spread_factor: 1.0
   sequential_ensemble_initialization: 0
-  use_ensemble_pertubations: 1
+  use_ensemble_pertubations: 0
 
   # num_state_vars: 4             # State variables: ice thickness (H), velocities (u, v)
   num_state_vars: 4             # State variables: ice thickness (H), surface elevation (S)
@@ -52,11 +52,11 @@ enkf-parameters:
   inversion_flag: 1         # Enable inversion for friction coefficient
 
   # bed topography observations settings
-  bed_obs_snapshot: [20]        # Bedrock elevation observations at 30 years
+  bed_obs_snapshot: [0]        # Bedrock elevation observations at 30 years
   bed_obs_stride: 4000          # Spacing of bedrock elevation observations (30 km)
 
   # Statistical parameters
-  sig_obs: [0, 2.8, 3.0, 1.5, 2.5]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
+  sig_obs: [0, 2.8, 3.0, 1.5, 1.5]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
   sig_Q: [0.08, 0.08, 0.08, 0.01, 0.01]          # Process noise std dev (adjusted for H, Vx, Vy)
   # length_scale: [300,220,180,150,320,250]               # Length scale for covariance (5 km for friction, per paper)
   # length_scale: [212,218,213,205, 212]               # Length scale for covariance (5 km for bed topography, per paper)
