@@ -107,7 +107,7 @@ def parallel_forecast_step_default_run(**model_kwargs):
                 updated_state = model_module.forecast_step_single(ensemble=ensemble_vec,**model_kwargs)
 
                 #fetch the updated state
-                vecs, indx_map, dim_per_proc = icesee_get_index(ensemble_vec, **model_kwargs)
+                vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
                 for key,value in updated_state.items():
                     ensemble_vec[indx_map[key]] = value
 
@@ -167,6 +167,11 @@ def parallel_forecast_step_default_run(**model_kwargs):
                         noise_all.append(Z)
                 noise_ = np.concatenate(noise_all, axis=0)
                 ensemble_vec[:state_block_size] = ensemble_vec[:state_block_size] + noise_[:state_block_size]
+                # ensemble_vec[hdim:state_block_size] = ensemble_vec[hdim:state_block_size] + noise_[hdim:state_block_size]
+
+                # for ii, key in enumerate(model_kwargs['observed_vars']):
+                #         if ii < params["num_state_vars"]:
+                #             ensemble_vec[indx_map[key]] += noise_[indx_map[key]]
                 noise = np.concatenate(q0, axis=0)
                 model_kwargs.update({"noise": noise})  # save the noise to the model_kwargs dictionary
 

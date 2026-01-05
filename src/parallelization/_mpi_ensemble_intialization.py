@@ -47,6 +47,7 @@ def ensemble_initialization(**model_kwargs):
     subcomm_size_min   = model_kwargs.get("subcomm_size_min", 1)
     rng           = model_kwargs.get("rng", np.random.default_rng())
     rank_seed = model_kwargs.get("rank_seed", 0)
+    alpha = model_kwargs.get("initial_spread_factor")
 
 
     sub_rank  = subcomm.Get_rank()
@@ -104,7 +105,7 @@ def ensemble_initialization(**model_kwargs):
                     # noise = generate_enkf_field(**model_kwargs)
                     noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
-                    ensemble_vec[:, ens] += noise
+                    ensemble_vec[:, ens] += alpha*noise
 
                     # for ii, sig in enumerate(params["sig_Q"]):
                     #     if ii <=params["num_state_vars"]:
@@ -112,9 +113,15 @@ def ensemble_initialization(**model_kwargs):
                     #         end_idx = start_idx + hdim
                     #         # make sure the noise has zero mean
                     #         noise[start_idx:end_idx] *=sig
-                    #         noise[start_idx:end_idx] -= np.mean(noise[start_idx:end_idx])
-                    #         inflated_noise = noise[start_idx:end_idx] / np.max(np.abs(noise[start_idx:end_idx]))
-                    #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] + inflated_noise
+                    # #         noise[start_idx:end_idx] -= np.mean(noise[start_idx:end_idx])
+                    # #         inflated_noise = noise[start_idx:end_idx] / np.max(np.abs(noise[start_idx:end_idx]))
+                    #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx]
+
+                    # for ii, sig in enumerate(params["sig_Q"]):
+                    #     # if ii <=params["num_state_vars"]:
+                    #     start_idx = ii * hdim
+                    #     end_idx = start_idx + hdim
+                    #     ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
 
                     del noise  # Free memory immediately
 
@@ -196,7 +203,23 @@ def ensemble_initialization(**model_kwargs):
                     # noise = generate_enkf_field(**model_kwargs)
                     noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
-                    ensemble_vec[:,ens] += noise
+
+                    # lets inflate the noise to increase the spread
+                    model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
+                    # exclude bed variables from observed variables
+                    all_observed = model_kwargs['observed_vars_params']
+                    model_kwargs['all_observed'] = all_observed; params['all_observed'] = all_observed
+                    nd_new = len(all_observed) * hdim
+                    model_kwargs['nd_observed'] = nd_new
+                    # for ii, key in enumerate(all_observed):
+                    #     # if ii < params["num_state_vars"]:
+                    #     ensemble_vec[indx_map[key], ens] += alpha * noise[indx_map[key]]
+                        # if ii < params["num_state_vars"]:
+                        #     start_idx = ii * hdim
+                        #     end_idx = start_idx + hdim
+                        #     ensemble_vec[start_idx:end_idx, ens] += alpha * noise[start_idx:end_idx]
+                            
+                    ensemble_vec[:,ens] += alpha*noise
                     # for ii, sig in enumerate(params["sig_Q"]):
                     #     if ii <=params["num_state_vars"]:
                     #         start_idx = ii * hdim
@@ -426,6 +449,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
     rank_seed = model_kwargs.get("rank_seed", 0)
     data_path = model_kwargs.get("data_path", "_modeldatasets")
     enkf_parallel_io = model_kwargs.get("enkf_parallel_io", None)
+    alpha       = model_kwargs.get("initial_spread_factor")
 
     sub_rank     = subcomm.Get_rank()
     rank_world   = comm_world.Get_rank()
@@ -485,7 +509,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
                     noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
                     # ensemble_vec[:,ens] += noise
-                    ensemble_vec += noise
+                    ensemble_vec += alpha*noise
                       
                     _time_init_file_writing = MPI.Wtime()    
                     enkf_parallel_io.write_forecast(0, ensemble_vec, ensemble_id)
@@ -539,7 +563,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
                     # noise = generate_enkf_field(**model_kwargs)
                     noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
-                    ensemble_vec[:,ens] += noise
+                    ensemble_vec[:,ens] += alpha*noise
                     # for ii, sig in enumerate(params["sig_Q"]):
                     #     if ii <=params["num_state_vars"]:
                     #         start_idx = ii * hdim
@@ -655,7 +679,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
                         time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
                         # initial_data[key][:state_block_size] += noise[:state_block_size]
                         # noise = noise / np.max(np.abs(noise))
-                        initial_data[key] += noise
+                        initial_data[key] += alpha*noise
                     else:
                         N_size = params["total_state_param_vars"] * hdim
                         _time_init_noise_generation = MPI.Wtime()

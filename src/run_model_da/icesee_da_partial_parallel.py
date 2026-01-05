@@ -45,7 +45,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
     Q_err             = model_kwargs.get("Q_err",None)               # process noise
     commandlinerun    = model_kwargs.get("commandlinerun",None)      # run through the terminal
     Lx, Ly            = model_kwargs.get("Lx",1.0), model_kwargs.get("Ly",1.0)
-    nx, ny            = model_kwargs.get("nx",0.2), model_kwargs.get("ny",0.2)
+    nx, ny            = model_kwargs.get("nx",1), model_kwargs.get("ny",1)
     b_in, b_out       = model_kwargs.get("b_in",0.0), model_kwargs.get("b_out",0.0) 
 
     # --- call the ICESEE mpi parallel manager ---
@@ -82,7 +82,8 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                              "rounds": rounds, "color": color,
                              "start": start, "stop": stop,
                              "subcomm_size_min": subcomm_size_min,
-                             "model_module": model_module})
+                             "model_module": model_module,
+                             'vec_inputs_old': model_kwargs.get('vec_inputs', params.get('vec_inputs', None)),})
 
         # pack the global communicator and the subcommunicator
         model_kwargs.update({"comm_world": comm_world, "subcomm": subcomm})
@@ -185,15 +186,22 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         
         # -- time ensemble initialization ---
         time_ensemble_initialization = MPI.Wtime()
-        # call the ensemble_initialization function
-        model_kwargs, ensemble_vec, time_init_noise_generation, \
-        time_init_ensemble_mean_computation, time_init_file_writing, \
-        shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full = ensemble_initialization(**model_kwargs)
+        if model_kwargs.get("initialize_ensemble", True):
+            # call the ensemble_initialization function
+            model_kwargs, ensemble_vec, time_init_noise_generation, \
+            time_init_ensemble_mean_computation, time_init_file_writing, \
+            shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full = ensemble_initialization(**model_kwargs)
+        else:
+            time_init_noise_generation = 0.0
+            time_init_ensemble_mean_computation = 0.0
+            time_init_file_writing = 0.0
         # --- time ensemble initialization ---
         time_ensemble_initialization = MPI.Wtime() - time_ensemble_initialization
         
         # --- get the ensemble size
-        nd, Nens = ensemble_vec.shape
+        # nd, Nens = ensemble_vec.shape
+        nd = model_kwargs.get("nd", params["nd"])
+        Nens = model_kwargs.get("Nens", params["Nens"])
         module_nprocs = model_kwargs.get("model_nprocs", 1)
 
         if params["even_distribution"]:
@@ -434,94 +442,119 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                 if model_kwargs.get('global_analysis', True) or model_kwargs.get('local_analysis', False):
                    
                     obs_index = model_kwargs["obs_index"]
-                    if (km < params["number_obs_instants"]) and (k+1 == obs_index[km]):
+                    if (km < params["number_obs_instants"]) and (k == obs_index[km]):
+                        # print(f"[ICESEE-debug] Rank {rank_world} performing analysis at time step {k+1} ..."); exit(0)
                         # -- time global analysis step ---
                         _time_analysis_step = MPI.Wtime()
-                        # *- parallelize the getting Eta, D and HA steps
-                        # if Nens >= size_world:
-                        #     with h5py.File(input_file, "r", driver="mpio", comm=comm_world) as f:
-                        #         hu_obs = f["hu_obs"][:]
-                        #         local_Nens = Nens // size_world
-                        #         remainder = Nens % size_world
-                        #         start = rank_world*local_Nens + min(rank_world, remainder)
-                        #         if rank_world < remainder:
-                        #             local_Nens += 1
-                        #         stop = start + local_Nens
-                        #         ensemble_vec = f["ensemble"][:,start:stop,k+1]
-                        #         d = UtilsFunctions(params, ensemble_vec).Obs_fun(hu_obs[:,km])
-                        #         Cov_obs = params["sig_obs"][k+1]**2 * np.eye(2*params["number_obs_instants"]+1)
-                        #         Eta = np.zeros((d.shape[0], local_Nens))
-                        #         D = np.zeros_like(Eta)
-                        #         HA = np.zeros_like(Eta)
-                        #         for i, ens in enumerate(range(start, stop)):
-                        #             Eta[:,i] = np.random.multivariate_normal(mean=np.zeros(d.shape[0]), cov=Cov_obs)
-                        #             D[:,i] = d + Eta[:,i]
-                        #             HA[:,i] = UtilsFunctions(params, ensemble_vec[:,i]).Obs_fun(ensemble_vec[:,i])
+                        model_kwargs.update({"km": km})
+                        inversion_flag = model_kwargs.get("inversion_flag", False)
+                        nd_old = model_kwargs.get("nd", nd)
+                        model_kwargs.update({"nd_old": nd_old})
 
-                        #         # gather the results
-                        #         gathered_Eta = comm_world.gather(Eta, root=0)
-                        #         gathered_D = comm_world.gather(D, root=0)
-                        #         gathered_HA = comm_world.gather(HA, root=0)
-                        #         if rank_world == 0:
-                        #             Eta = np.hstack(gathered_Eta)
-                        #             D = np.hstack(gathered_D)
-                        #             HA = np.hstack(gathered_HA)
-                        #         else:
-                        #             Eta = np.zeros((d.shape[0], Nens))
-                        #             D = np.zeros_like(Eta)
-                        #             HA = np.zeros_like(Eta)
-                        # else:
-                        #     if rank_world < Nens:
-                        #         with h5py.File(input_file, "r", driver="mpio", comm=comm_world) as f:
-                        #             hu_obs = f["hu_obs"][:]
-                        #             ensemble_vec = f["ensemble"][:,rank_world,k+1]
-                        #             d = UtilsFunctions(params, ensemble_vec).Obs_fun(hu_obs[:,km])
-                        #             Cov_obs = params["sig_obs"][k+1]**2 * np.eye(2*params["number_obs_instants"]+1)
-                        #             Eta = np.random.multivariate_normal(mean=np.zeros(d.shape[0]), cov=Cov_obs)
-                        #             D = d + Eta
-                        #             HA = UtilsFunctions(params, ensemble_vec).Obs_fun(ensemble_vec)
+                        if inversion_flag:
+                        # if False:
+                            # print(f"[ICESEE-debug1st] Rank {rank_world} performing analysis at time step {k+1} ..."); 
+                            # shrink the ensembel to exclude vx, vy, and friction
+                            if rank_world == 0:
+                                # write full ensemble to file before analysis
+                                with h5py.File(f'{_modelrun_datasets}/ensemble_before_analysis_step_{k+1:04d}.h5', 'w') as f:
+                                    f.create_dataset("ensemble_before_analysis", data=ensemble_vec)
+                                nd = ensemble_vec.shape[0]
+                                Nens = ensemble_vec.shape[1]
+                                model_kwargs.update({"nd_old": nd}); params.update({"nd_old": nd})
+                                # get the velocity and friction indices
+                                friction_idx = model_kwargs.get("friction_idx")
+                                # vel_idx = model_kwargs.get("vel_idx")
+                                # vx = vel_idx; vy = vel_idx + 1
+                                # excluded_indices = [vx, vy, friction_idx]
+                                excluded_indices = [friction_idx] # only exclude friction for now
+                                vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                                hdim = nd // (params["total_state_param_vars"] )
+                                nd_new = hdim * (params["total_state_param_vars"] - 1)  # exclude friction
+                                ensemble_vec_reduced = np.zeros((nd_new, Nens))
+                                for ii, key in enumerate(model_kwargs['vec_inputs']):
+                                    if ii not in excluded_indices:
+                                        start = ii * hdim
+                                        end = start + hdim
+                                        ensemble_vec_reduced[start:end, :] = ensemble_vec[indx_map[key], :]
+                                ensemble_vec = copy.deepcopy(ensemble_vec_reduced)
+                                model_kwargs.update({"nd": nd_new}); params["nd"] = nd_new
 
-                        #             # gather the results
-                        #             gathered_Eta = comm_world.gather(Eta, root=0)
-                        #             gathered_D = comm_world.gather(D, root=0)
-                        #             gathered_HA = comm_world.gather(HA, root=0)
-                        #             if rank_world == 0:
-                        #                 Eta = np.hstack(gatheEta)
-                        #                 D = np.hstack(gathered_D)
-                        #                 HA = np.hstack(gathered_HA)
-                        #             else:
-                        #                 Eta = np.zeros((d.shape[0], Nens))
-                        #                 D = np.zeros_like(Eta)
-                        #                 HA = np.zeros_like(Eta)
+                                # do the same to observation operator
+                                # --- vector of measurements
+                                with h5py.File(_synthetic_obs, 'r') as f:
+                                    _hu_obs  = f['hu_obs'][:]
+                                    error_R = f['R'][:]
+                                    # Cov_obs = np.cov(error_R)
+                                    bed_mask_map = f['bed_mask_map'][:]
+                                    Cov_obs = np.zeros(error_R.shape)
 
-                        #     else:
-                        #         global_shape = model_kwargs["global_shape"]
-                        #         Eta = np.zeros((global_shape, Nens))
-                        #         D = np.zeros_like(Eta)
-                        #         HA = np.zeros_like(Eta)
+                                # scale all vectors to new dimesnions
+                                # hu_obs = hu_obs[:nd_new,:]
+                                # print(f"\n[DEBUG] nd_new: {nd_new}, old hu_obs shape: {_hu_obs.shape} nd old: {model_kwargs.get('nd_old')} nd : {nd} ensemble_vec_reduced shape: {ensemble_vec_reduced.shape}\n")
+                                hu_obs = np.zeros((nd_new, _hu_obs.shape[1]))
+                                for ii, key in enumerate(model_kwargs['vec_inputs']):
+                                    if ii not in excluded_indices:
+                                        start = ii * hdim
+                                        end = start + hdim
+                                        hu_obs[start:end, :] = _hu_obs[indx_map[key], :]
+                                # hu_obs = _hu_obs[:nd_new,:]
+                                
+                                model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
+
+                                # form vec_inputs without vx, vy, friction
+                                model_kwargs['vec_inputs_new'] = [key for ii, key in enumerate(model_kwargs['vec_inputs']) if ii not in excluded_indices]
+                                model_kwargs.update({'vec_inputs': model_kwargs['vec_inputs_new']})
+                                vec_inputs = model_kwargs['vec_inputs_new']
+                                params.update({'vec_inputs': vec_inputs})
+                                nd = nd_new # update nd to new nd
+                                params.update({"nd": nd, "total_state_param_vars": len(vec_inputs)})
+                                model_kwargs.update({'excluded_indices': excluded_indices})
+                            else:
+                                nd_new = 0
+                                vec_inputs = None
+                                hu_obs = None
+                                model_kwargs=model_kwargs
+                                bed_mask_map = None
+                                excluded_indices = None
+
+                            excluded_indices = comm_world.bcast(excluded_indices, root=0)
+                            model_kwargs.update({'excluded_indices': excluded_indices})
+                            hu_obs = comm_world.bcast(hu_obs, root=0)
+                            # model_kwargs = comm_world.bcast(model_kwargs, root=0)
+                            bed_mask_map = comm_world.bcast(bed_mask_map, root=0)
+                            model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
+                            nd_new = comm_world.bcast(nd_new, root=0)
+                            model_kwargs.update({'nd': nd_new}); params.update({'nd': nd_new})
+                            vec_inputs = comm_world.bcast(vec_inputs, root=0)
+                            model_kwargs.update({'vec_inputs': vec_inputs})
+                            params.update({'vec_inputs': vec_inputs})
+                            params.update({"total_state_param_vars": len(vec_inputs)})
+                            model_kwargs.update({"params": params})
+                            
+                        else:
+                            with h5py.File(_synthetic_obs, 'r') as f:
+                                hu_obs = f['hu_obs'][:]
+                                error_R = f['R'][:]
+                                bed_mask_map = f['bed_mask_map'][:]
+                                # Cov_obs = np.cov(error_R)
+                                Cov_obs = np.zeros(error_R.shape)
+                            
+                        model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
+                        all_observed = model_kwargs['observed_vars_params']
+                        nd_new = len(all_observed)* hdim
+
+                        model_kwargs.update({'all_observed': all_observed}); params.update({'all_observed': all_observed})
 
                         # comm_world.Barrier()
                         if rank_world == 0:
 
                             ndim = ensemble_vec.shape[0]//params["total_state_param_vars"]  
                             state_block_size = ndim*params["num_state_vars"]
-                        
-                            # -------------
-                            # H = UtilsFunctions(params, ensemble_vec).JObs_fun(ensemble_vec.shape[0]) 
-                            # h = UtilsFunctions(params, ensemble_vec).Obs_fun # observation operator
 
-                            # compute the observation covariance matrix
-                            # Cov_obs = params["sig_obs"][k+1]**2 * np.eye(2*params["number_obs_instants"]+1)
-                            # Cov_obs = error_R[:,k+1]**2 * np.eye(2*params["number_obs_instants"]+1)
+                            model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
 
-                            # --- vector of measurements
-                            with h5py.File(_synthetic_obs, 'r') as f:
-                                hu_obs  = f['hu_obs'][:]
-                                error_R = f['R'][:]
-                                # Cov_obs = np.cov(error_R)
-                                Cov_obs = np.zeros(error_R.shape)
-
-                            d = UtilsFunctions(params, ensemble_vec).Obs_fun(hu_obs[:,km])
+                            d = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).Obs_fun(hu_obs[:,km])
                             model_kwargs.update({"error_R": error_R}) # store the error covariance matrix
                             #  -------------
 
@@ -546,7 +579,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                                 X5,X5prime = DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions)
                                 # y_i = np.sum(X5, axis=1)
                                 # ens_mean = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
-                                # H = UtilsFunctions(params, ensemble_vec).JObs_fun(ensemble_vec.shape[0])
+                                # H = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).JObs_fun(ensemble_vec.shape[0])
                                 # Cov_model = np.cov(ensemble_vec)
                                 # ens_mean = np.mean(ensemble_vec, axis=1)
                                 # diff = (ensemble_vec -np.tile(ens_mean.reshape(-1,1),Nens) )
@@ -563,8 +596,10 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                             time_analysis_mean_generation = 0.0
                             analysis_vec_ij = None
                             smb_scale = 0.0
+                            # nd_new = 0
                             if DEnKF_flag:
                                 ens_mean = np.empty((nd, 1))
+
 
                         if model_kwargs.get('local_analysis', False):
                             shape_ens = ensemble_vec.shape
@@ -574,8 +609,25 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                         # smb_scale = comm_world.bcast(smb_scale, root=0)
                         smb_scale = 1.0
 
-                        with h5py.File(_synthetic_obs, 'r', driver='mpio', comm=comm_world) as f:
-                            hu_obs  = f['hu_obs'][:]
+                        # broadcast new nd to all processors
+                        # nd_new = comm_world.bcast(nd_new, root=0)
+                        # model_kwargs.update({'nd': nd_new}); params.update({'nd': nd_new})
+                        # with h5py.File(_synthetic_obs, 'r', driver='mpio', comm=comm_world) as f:
+                        vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                        with h5py.File(_synthetic_obs, 'r') as f:
+                            hu_obs = f['hu_obs'][:]
+                            bed_mask_map = f['bed_mask_map'][:]
+
+                        # print(f[:]); exit(0)
+
+                        model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
+
+                        # # Construct global observation indices for the reduced vector
+                        # obs_indices = np.concatenate([indx_map[key] for key in model_kwargs['all_observed']])
+
+                        # # Now reduce the observations consistently
+                        # hu_obs = _hu_obs[obs_indices, :]
+
 
                         # fetch the upper and lower bounds for every paramerter from observed data
                         ndim = hu_obs.shape[0]//params["total_state_param_vars"]
@@ -615,6 +667,16 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                         # --- end time analysis step ---
                         time_analysis_step += MPI.Wtime() - _time_analysis_step
 
+                        # update nd
+                        if inversion_flag:
+                            nd = model_kwargs.get('nd_old')
+                            model_kwargs.update({'nd': nd}); params.update({'nd': nd})
+                            model_kwargs.update({'vec_inputs': model_kwargs.get('vec_inputs_old')})
+                            params.update({'vec_inputs': model_kwargs.get('vec_inputs_old')})
+                            params["total_state_param_vars"] = len(model_kwargs.get('vec_inputs_old'))
+                            model_kwargs.update({"params": params})
+                        # model_kwargs.update({'nd': nd}); params.update({'nd': nd})
+
                     else: 
                         # if Nens < size_world:
                         
@@ -635,68 +697,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                     # --- compute the local X5 for each horizontal grid point ---
                     pass
 
-            # -------------------------------------------------- end of cases 2 & 3 --------------------------------------------
-
-            # --- case 4: Evenly distribute ensemble members among processors 
-            #         - each processor runs a subset of ensemble members
-            #         - best for size_world/Nens is a whole number and Nens >= size_world
-            #         - size_world = 2^n where n is an integer
-            if params["even_distribution"]:
-                #  call the parallel_forecast_step_even_distribution function
-                ensemble_vec, ensemble_vec_mean, shape_ens = parallel_forecast_step_even_distribution_run(**model_kwargs)
-
-                # Analysis step
-                obs_index = model_kwargs["obs_index"]
-                if (km < params["number_obs_instants"]) and (k+1 == obs_index[km]):
-            
-                    if rank_world == 0:
-
-                        H = UtilsFunctions(params, ensemble_vec).JObs_fun(ensemble_vec.shape[0])
-                        h = UtilsFunctions(params, ensemble_vec).Obs_fun # observation operator
-
-                        # compute the observation covariance matrix
-                        Cov_obs = params["sig_obs"][k+1]**2 * np.eye(2*params["number_obs_instants"]+1)
-
-                        # --- vector of measurements
-                        d = UtilsFunctions(params, ensemble_vec).Obs_fun(hu_obs[:,km])
-
-                        if EnKF_flag:
-                            # compute the X5 matrix
-                            X5 = EnKF_X5(ensemble_vec, Cov_obs, Nens, h, d)
-                            y_i = np.sum(X5, axis=1)
-                            ensemble_vec_mean[:,k+1] = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
-                            
-                    else:
-                        X5 = np.empty((Nens, Nens))
-
-                    # clean the memory
-                    del ensemble_local, gathered_ensemble; gc.collect()
-
-                    # call the analysis update function
-                    shape_ens = ensemble_vec.shape # get the shape of the ensemble
-                    ensemble_vec = analysis_enkf_update(ensemble_vec, shape_ens, X5, comm_world)
-
-                    # update the ensemble with observations instants
-                    km += 1
-
-                    # inflate the ensemble
-                    # params["inflation_factor"] = inflation_factor
-                    ensemble_vec = UtilsFunctions(params, ensemble_vec).inflate_ensemble(in_place=True)
-                    # ensemble_vec = UtilsFunctions(params, ensemble_vec)._inflate_ensemble()
-                
-                    # update the local ensemble
-                    ensemble_local = copy.deepcopy(ensemble_vec[:,start:stop])
-
-                # Save the ensemble
-                if rank_world == 0:
-                    ensemble_vec_full[:,:,k+1] = ensemble_vec
-                else:
-                    ensemble_vec_full = np.empty((nd, Nens, model_kwargs.get("nt",params["nt"])+1), dtype=np.float64)
-
-                # free up memory
-                del ensemble_vec; gc.collect()
-            
-            # -------------------------------------------------- end of case 4 -------------------------------------------------   
+              
 
         # update the progress bar
         if rank_world == 0:

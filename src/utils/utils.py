@@ -6,6 +6,7 @@
 # =============================================================================
 
 # import libraries
+import h5py
 import numpy as np
 import re
 import sys
@@ -25,7 +26,7 @@ def isiterable(obj):
     return isinstance(obj, Iterable)
 
 class UtilsFunctions:
-    def __init__(self, params,ensemble=None):
+    def __init__(self, params=None,model_kwargs=None, ensemble=None):
         """
         Initialize the utility functions with model parameters.
         
@@ -34,8 +35,140 @@ class UtilsFunctions:
         """
         self.params   = params
         self.ensemble = ensemble
-    
+        self.model_kwargs = model_kwargs
+
     def H_matrix(self, n_model):
+        """
+        Build dense observation operator H, but EXCLUDE masked-out
+        bed observation points. Only real observations (including bed
+        subsampling) appear in H.
+        """
+
+        params = self.params
+        observed = params["all_observed"]     # e.g., ['h','u','v','smb','bed']
+        vec_inputs = self.model_kwargs["vec_inputs"]     # ['h','s','u','v','bed','fric','smb']
+
+        # --- Recompute index map ---
+        vecs, indx_map, _ = icesee_get_index(**self.model_kwargs)
+
+        # --- Retrieve bed masks (must already exist) ---
+        # Expected shape: bed_mask_map[key] → boolean mask over local bed subvector
+        bed_mask_map = self.model_kwargs.get("bed_mask_map", {})
+        # print(f"[ICESEE] H_matrix: bed_mask_map keys: {list(bed_mask_map.keys())}")
+        # print(f"[ICESEE] H_matrix: bed_mask_map contents: {bed_mask_map}")
+
+        bed_aliases = {'bed', 'bedrock', 'bed_topography', 'bedtopo', 'bedtopography'}
+        key_is_bed = {k: (k in bed_aliases) for k in vec_inputs}
+        # key_idx_map = {k: np.asarray(indx_map[k], dtype=int) for k in vec_inputs}
+
+        # --- Collect observation indices, but apply masks to bed ---
+        all_obs_indices = []
+
+        for key in observed:
+            idx = np.asarray(indx_map[key], dtype=int)
+
+            if key == "bed" and key in bed_mask_map:
+            # if key_is_bed.get(key, False) and key in bed_mask_map:
+                # Apply the sparse mask
+                mask = np.asarray(bed_mask_map[key], dtype=bool)[0]
+                # mask = np.asarray(bed_mask_map[key], dtype=bool)
+                # print(mask.shape)
+                # print(idx.shape)
+                if mask.size != idx.size:
+                    raise ValueError(
+                        f"bed_mask_map['{key}'] length {mask.size} does not "
+                        f"match bed vector length {idx.size}"
+                    )
+
+                # Only keep bed points that are actually observed
+                idx = idx[mask]
+
+            # Add (possibly filtered) indices
+            all_obs_indices.append(idx)
+
+        # Flatten
+        obs_indices = np.concatenate(all_obs_indices).astype(int)
+
+        # --- Safety ---
+        if obs_indices.max() >= n_model:
+            raise ValueError(
+                f"H_matrix error: obs index {obs_indices.max()} >= state size {n_model}"
+            )
+
+        # --- Allocate H ---
+        m_obs = obs_indices.size
+        H = np.zeros((m_obs, n_model))
+        H[np.arange(m_obs), obs_indices] = 1.0
+
+        return H
+
+
+    def _H_matrix(self, n_model):
+        """
+        Build dense observation operator H.
+        H has shape (m_obs, n_model).
+        H(i,j) = 1 if observation i corresponds to state index j, else 0.
+        """
+
+        params = self.params
+        observed = params["all_observed"]         # ['h','u','v','smb']
+        vec_inputs = params["vec_inputs"]         # ['h','s','u','v','bed','fric','smb']
+
+        # Recompute index map for the *current full state vector*
+        vecs, indx_map, _ = icesee_get_index(**self.model_kwargs)
+
+        # COLLECT OBSERVATION INDICES
+        obs_indices = np.concatenate([indx_map[key] for key in observed]).astype(int)
+
+        # SAFETY CHECK
+        if obs_indices.max() >= n_model:
+            raise ValueError(
+                f"H_matrix error: obs index {obs_indices.max()} >= state size {n_model}. "
+                "likely vec_inputs or nd inconsistent."
+            )
+
+        m_obs = obs_indices.size
+
+        # H: zero everywhere except H[i, obs_indices[i]] = 1
+        H = np.zeros((m_obs, n_model))
+        H[np.arange(m_obs), obs_indices] = 1.0
+
+        return H
+
+    def H_matrix__(self, n_model):
+        """
+        Build observation operator H for multi-variable ice-sheet DA
+        WITHOUT changing the outer pipeline.
+        H returns a dense matrix of shape (m_obs, n_model).
+        """
+
+        # unpack parameters
+        params = self.params
+        observed = params['all_observed']       # e.g., ['h','u','v','smb']
+        vec_inputs = params['vec_inputs']       # full list like ['h','s','u','v','bed','fric','smb']
+
+        # Full state indexing
+        vecs, indx_map, dim_per_proc = icesee_get_index(**self.model_kwargs)
+
+        # Build consistent obs index list
+        obs_indices = []
+        for key in observed:
+            obs_indices.append(indx_map[key])
+        obs_indices = np.concatenate(obs_indices)
+
+        # Number of observations
+        m_obs = obs_indices.size
+
+        # Allocate H
+        H = np.zeros((m_obs, n_model))
+
+        # Fill H with identity rows at observation positions
+        H[np.arange(m_obs), obs_indices] = 1.0
+        print(f"observed indices: {obs_indices}")
+
+        return H
+
+    def H_matrix_(self, n_model):
         """ observation operator matrix
         """
         n = n_model
@@ -59,9 +192,20 @@ class UtilsFunctions:
             state_variables_size = ndim*self.params["num_state_vars"]
             # parameters are not required to observe the state variables
             num_params_size = n - state_variables_size
-            H_param = np.zeros(num_params_size)
-            H[:,state_variables_size:] = H_param
-            
+            # H_param = np.zeros(num_params_size)
+            # H[:,state_variables_size:] = H_param
+
+        # lets have zeros for unobserved variables and parameters
+        all_observed = self.params['all_observed']
+        vec_inputs = self.params['vec_inputs']
+        ndim = n // self.params["total_state_param_vars"]
+        vecs, indx_map, dim_per_proc = icesee_get_index(**self.model_kwargs)
+        for ii, key in enumerate(vec_inputs):
+            if key in all_observed:
+                H[:, indx_map[key]] = H[:, indx_map[key]]
+            else:
+                H[:, indx_map[key]] = 0
+
         return H
 
     def Obs_fun(self, virtual_obs):
@@ -81,6 +225,12 @@ class UtilsFunctions:
         else:
             n = virtual_obs.shape[0]
 
+        dum = np.dot(self.H_matrix(n), virtual_obs)
+        with h5py.File('Htest.h5', 'w') as f:
+            f.create_dataset('H', data=self.H_matrix(n))
+            f.create_dataset('virtual_obs', data=virtual_obs)
+            f.create_dataset('H_virtual_obs', data=dum)
+        # exit(0)
         return np.dot(self.H_matrix(n), virtual_obs)
 
     def JObs_fun(self, n_model):
@@ -142,7 +292,7 @@ class UtilsFunctions:
             obs_max = min(obs_max_cfg, t_max)
 
             if freq_obs <= 0.0 or obs_start > obs_max:
-                return np.array([]), np.array([], dtype=int), 0, np.array([])
+                return np.array([]), np.array([], dtype=int), 0
 
             # --- Build ideal observation times ---
             n_obs = int(np.floor((obs_max - obs_start) / freq_obs)) + 1
@@ -153,12 +303,20 @@ class UtilsFunctions:
             tol = 1e-6 * dt_grid
 
             # For each t in the model time grid, check if it’s close to any obs time
+            # obs_idx = []
+            # for i, ti in enumerate(t):
+            #     if np.any(np.abs(ti - obs_t_req) < tol):
+            #         obs_idx.append(i)
+            # obs_idx = np.array(obs_idx, dtype=int)
+
             obs_idx = []
-            for i, ti in enumerate(t):
-                if np.any(np.abs(ti - obs_t_req) < tol):
+            for tobs in obs_t_req:
+                i = np.argmin(np.abs(t - tobs))
+                if abs(t[i] - tobs) <= 0.5 * dt_grid:
                     obs_idx.append(i)
 
-            obs_idx = np.array(obs_idx, dtype=int)
+            obs_idx = np.array(sorted(set(obs_idx)), dtype=int)
+
             obs_t_aligned = t[obs_idx]
             num_observations = len(obs_idx)
 
@@ -226,18 +384,50 @@ class UtilsFunctions:
 
         statevec_true = kwargs.get('statevec_true', None)
         assert statevec_true is not None, "statevec_true is required"
-        nd, nt = statevec_true.shape
+        # nd, nt = statevec_true.shape
+        params = kwargs.get('params')
+        nd = kwargs.get('nd', params.get('nd', statevec_true.shape[0]))
+        nt = kwargs.get('nt', params.get('nt', statevec_true.shape[1]))
+        Ly = kwargs.get('Ly', self.params.get('Ly', None))
+        Lx = kwargs.get('Lx', self.params.get('Lx', None))
+        model_name = kwargs.get('model_name', None)
 
         # Observation schedule
         obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
         ind_m = np.asarray(ind_m, dtype=int)  # 1-based
+        print(f"[ICESEE] observation times: {obs_t}, indices: {ind_m}, total: {m_obs}")
+
+        # Bed snapshots specified in *years*
+        bed_snaps = np.asarray(kwargs.get('bed_obs_snapshot', []), dtype=float)
+
+        obs_t = np.asarray(obs_t, dtype=float)
+
+        bed_snap_cols = []
+        bed_time_to_col = {}
+
+        for bed_time in bed_snaps:
+            # find the nearest observation time (in *years*)
+            diffs = np.abs(obs_t - bed_time)
+            j = int(np.argmin(diffs))           # 0-based column index
+            bed_snap_cols.append(j)
+            bed_time_to_col[bed_time] = j       # map "year" -> column
+
+        # Optional: unique + sorted
+        bed_snap_cols = sorted(set(bed_snap_cols))
+
+        print("[ICESEE] obs_t:", obs_t)
+        print("[ICESEE] bed_snaps (years):", bed_snaps)
+        print("[ICESEE] bed_snap_cols:", bed_snap_cols)
+        print("[ICESEE] obs_t at bed_snap_cols:", obs_t[bed_snap_cols])
+
 
         # Index maps
         vecs, indx_map, _ = icesee_get_index(statevec_true, **kwargs)
         vec_inputs = list(kwargs['vec_inputs'])
 
         # Preallocate observations
-        hu_obs = np.zeros((nd, self.params["number_obs_instants"]))
+        # hu_obs = np.zeros((nd, self.params["number_obs_instants"]))
+        hu_obs = np.zeros((nd, m_obs))
 
         # hdim / nd handling (unchanged)
         total_state_param_vars = self.params["total_state_param_vars"]
@@ -269,11 +459,11 @@ class UtilsFunctions:
         # Options (use whichever you pass in):
         #   - bed_obs_indices: exact indices into bed subvector (0..len(bed)-1)
         #   - bed_obs_mask: boolean mask over bed subvector
-        #   - bed_obs_stride_km: spacing (km) to convert to every-nth point along x
+        #   - bed_obs_stride: spacing (km) to convert to every-nth point along x
         #   - bed_obs_spacing: spacing (points) = every n-th point
         # Needs Lx for stride_km->points if you use it. Pull from kwargs or params.
         Lx = kwargs.get('Lx', self.params.get('Lx', None))
-        bed_stride_km = kwargs.get('bed_obs_stride_km', None)
+        bed_stride_km = kwargs.get('bed_obs_stride', None)
         bed_spacing_pts = kwargs.get('bed_obs_spacing', None)
         bed_indices_user = kwargs.get('bed_obs_indices', None)
         bed_mask_user = kwargs.get('bed_obs_mask', None)
@@ -314,56 +504,227 @@ class UtilsFunctions:
                 mask[::n] = True
 
             # Priority 4: spacing in km (needs Lx)
-            elif (bed_stride_km is not None) and (Lx is not None):
-                # Convert stride in km → every-nth point, assuming uniform x-grid
-                # Use (hdim-1) intervals to estimate dx; fall back safely.
-                intervals = max(hdim - 1, 1)
-                dx_m = float(Lx) / intervals
-                # n = max(int(round((bed_stride_km * 1000.0) / max(dx_m, 1e-12))), 1)
-                n = max(int(round((bed_stride_km) / max(dx_m, 1e-12))), 1)
-                mask = np.zeros(local_len, dtype=bool)
-                mask[::n] = True
+            # elif (bed_stride_km is not None) and (Lx is not None):
+            #     # Convert stride in km → every-nth point, assuming uniform x-grid
+            #     # Use (hdim-1) intervals to estimate dx; fall back safely.
+            #     intervals = max(hdim - 1, 1)
+            #     dx_m = float(Lx) / intervals
+            #     # n = max(int(round((bed_stride_km * 1000.0) / max(dx_m, 1e-12))), 1)
+            #     n = max(int(round((bed_stride_km) / max(dx_m, 1e-12))), 1)
+            #     mask = np.zeros(local_len, dtype=bool)
+            #     mask[::n] = True
+
+            # Priority 4: spacing in km (LiDAR-like stripes in 2D)
+            elif (bed_stride_km is not None) and (Lx is not None) and (Ly is not None):
+                # if model_name == 'issm' or model_name == 'ISSM':
+                if re.match(r'(?i)^issm$', str(model_name)):
+                    icesee_path   = kwargs.get('icesee_path')
+                    data_path     = kwargs.get('data_path')
+
+                    # get the model dimensions from issm mesh
+                    file_path = f'{icesee_path}/{data_path}/mesh_idxy_{0}.h5'
+                    # check if file exists, if not raise error to inform the user to generate the mesh
+                    try:
+                        with h5py.File(file_path, 'r') as f:
+                            x_param = f['/fric_x'][:]   # shape (fdim,)
+                            y_param = f['/fric_y'][:]   # shape (fdim,)
+                            # print(f"[ICESEE] ISSM mesh dimensions: hdim={hdim}, fdim={fdim}")
+                    except FileNotFoundError:
+                        raise FileNotFoundError(
+                            f"ISSM mesh file '{file_path}' not found. "
+                            "Please generate the mesh indicies before running ICESEE."
+                        )
+
+                    y_param = np.asarray(y_param/1000.0, dtype=float).reshape(-1)
+                    x_param = np.asarray(x_param/1000.0, dtype=float).reshape(-1)
+                    y_min, y_max = np.min(y_param), np.max(y_param)
+                    x_min, x_max = np.min(x_param), np.max(x_param)
+
+                    local_len = x_param.size
+
+                    # number of nominal flight lines in y
+                    bed_stride_km = bed_stride_km/1000.0
+                    n_lines = max(int(np.floor((y_max - y_min) / bed_stride_km)) + 1, 1)
+                    y_lines = y_min + np.arange(n_lines) * bed_stride_km
+
+                    # tracks perpendicular to the ice flow direction
+                    x_lines = np.arange(x_min, x_max+1e-6, bed_stride_km)
+                    
+                    # band half-width: half the nominal y-spacing
+                    # if n_lines > 1:
+                    #     dy_nom = (y_max - y_min) / (n_lines - 1)
+                    # else:
+                    #     dy_nom = (y_max - y_min) if (y_max > y_min) else bed_stride_km
+                    # band = 0.5 * dy_nom
+
+                    # mask = np.zeros(local_len, dtype=bool)
+                    # for y_line in y_lines:
+                    #     mask |= np.abs(y_param - y_line) <= band
+
+                    if x_lines.size > 1:
+                        dx_nom = (x_max - x_min) / (x_lines.size - 1)
+                    else:
+                        dx_nom = bed_stride_km
+                    band = 0.5 * dx_nom
+
+                    mask = np.zeros(local_len, dtype=bool)
+                    for x_line in x_lines:
+                        mask |= np.abs(x_param - x_line) <= band
+
+                    print(f"[ICESEE<-ISSM] bed LiDAR mask for '{k}': {mask.sum()} of {local_len} points observed")
+
+                else:
+                    #*--- based on assumptions of 2D grid layout ---*#
+                    # We assume hdim is the x-dimension (Nx)
+                    Nx = int(hdim)
+                    Ny = int(local_len // Nx) if Nx > 0 else 1
+                    if Nx * Ny != local_len:
+                        # Fallback: cannot infer 2D layout, revert to 1D thinning in x
+                        intervals = max(hdim - 1, 1)
+                        dx = float(Lx) / intervals  # in km (if Lx is in km)
+                        n = max(int(round(bed_stride_km / max(dx, 1e-12))), 1)
+                        mask = np.zeros(local_len, dtype=bool)
+                        mask[::n] = True
+                    else:
+                        # Build a 2D LiDAR-like mask: whole flight lines along x,
+                        # spaced every bed_stride_km in y.
+                        intervals_y = max(Ny - 1, 1)
+                        dy = float(Ly) / intervals_y  # km per grid cell in y
+
+                        # How many grid points in y between flight lines?
+                        stride_y_pts = max(int(round(bed_stride_km / max(dy, 1e-12))), 1)
+
+                        # Optionally: along-track thinning in x (keep all points by default)
+                        along_track_stride_pts = 1  # or make this another parameter
+
+                        mask2d = np.zeros((Ny, Nx), dtype=bool)
+
+                        # Select every stride_y_pts-th row as a LiDAR flight line,
+                        # and optionally thin along x.
+                        for j in range(0, Ny, stride_y_pts):
+                            mask2d[j, ::along_track_stride_pts] = True
+
+                        # Flatten back to 1D in the same order as your state vector
+                        mask = mask2d.ravel(order="C")
+
+
+                        print(f"[ICESEE] bed 2D mask for key '{k}': Ny={Ny}, Nx={Nx}, stride_y_pts={stride_y_pts}")
 
             # Save per-key mask (over the bed subvector)
             bed_mask_map[k] = mask
 
-        # === Main loop ===
-        for step in range(nt):
-            if (km < m_obs) and (step + 1 == ind_m[km]):  # 1-based compare
-                for ii, key in enumerate(vec_inputs):
-                    idx = key_idx_map[key]
-                    bed_flag = key_is_bed[key]
+        obs_set = set(kwargs["observed_vars"] + kwargs["observed_params"])
+        # Map each bed snapshot time to the obs column
+        bed_time_to_col = {t: col for col, t in enumerate(ind_m)}
 
-                    if (ii < kwargs['num_state_vars'] or key in observed_params) and (not bed_flag):
-                        sigma = error_R[idx, km]
-                        hu_obs[idx, km] = statevec_true[idx, step + 1] + np.random.normal(0.0, sigma, size=idx.size)
-                    else:
-                        hu_obs[idx, km] = 0.0
+        # for step in range(nt):
+        #     if (km < m_obs) and (step + 1 == ind_m[km]):
+        #         for key in vec_inputs:
+        #             idx = key_idx_map[key]
+        #             bed_flag = key_is_bed[key]
 
-                    # bed* special snapshot logic with sparse mask
-                    if bed_flag:
-                        if km_temp < len(bed_snaps) and (step + 1 == bed_snaps[km_temp]):
-                            # Only observe on masked subset; zeros elsewhere
-                            mask = bed_mask_map.get(key, None)
-                            if mask is None:
-                                # if no mask computed (shouldn't happen), observe all
-                                mask = np.ones(idx.size, dtype=bool)
+        #             # ---------- STANDARD VARIABLES ----------
+        #             if key in obs_set and not bed_flag:
+        #                 sigma = error_R[idx, km]
+        #                 hu_obs[idx, km] = (
+        #                     statevec_true[idx, step+1] +
+        #                     np.random.normal(0.0, sigma, size=idx.size)
+        #                 )
+        #             else:
+        #                 hu_obs[idx, km] = 0.0
 
-                            # Local (bed-subvector) to global indices mapping:
-                            # idx is the global index array; mask is over the bed-subvector order
-                            # We need global indices for the masked positions:
-                            idx_obs = idx[mask]
+        #             # ---------- BED SPECIAL CASE --------------
+        #             if bed_flag and (step+1 in bed_time_to_col):
+        #                 col = bed_time_to_col[step+1]
+        #                 mask = bed_mask_map[key]
+        #                 idx_obs = idx[mask]
+        #                 if idx_obs.size > 0:
+        #                     sigma_obs = error_R[idx_obs, col]
+        #                     hu_obs[idx_obs, col] = (
+        #                         statevec_true[idx_obs, step+1] +
+        #                         np.random.normal(0.0, sigma_obs, size=idx_obs.size)
+        #                     )
+        #                 # print("Nonzero bed obs:", np.nonzero(hu_obs[bed_ind,:]))
 
-                            if idx_obs.size > 0:
-                                sigma_obs = error_R[idx_obs, km]
-                                hu_obs[idx_obs, km] = statevec_true[idx_obs, step + 1] + np.random.normal(
-                                    0.0, sigma_obs, size=idx_obs.size
-                                )
-                            # leave unmasked positions as zeros
-                            km_temp += 1
-                km += 1
+        #         km += 1
 
-        return hu_obs, error_R.T
+        # instead of bed snapshots being tied to time steps, lets pass in actual times
+        #  if the bed time is in the observation times, then we take the closest observation time.
+        # for key in vec_inputs:
+        #     if key_is_bed[key]:
+        #         # continue
+        #         obs_t = np.asarray(obs_t, dtype=float)
+        #         bed_snaps = np.asarray(bed_snaps, dtype=float)
+
+        #         bed_snaps_idx = []
+        #         for bed_time in bed_snaps:
+        #             # distances to all obs times
+        #             diffs = np.abs(obs_t - bed_time)
+        #             # index of closest obs time
+        #             idx = int(np.argmin(diffs))
+        #             bed_snaps_idx.append(idx)
+
+        # for km, step_time in enumerate(ind_m):
+        #     for key in vec_inputs:
+        #         idx = indx_map[key]
+
+        #         #   ---- normal variables ----
+        #         if key in obs_set and not key_is_bed[key]:
+        #             sigma = error_R[idx, km]
+        #             hu_obs[idx, km] = (
+        #                 statevec_true[idx, step_time-1] +
+        #                 np.random.normal(0.0, sigma, size=idx.size)
+        #             )
+        #         else:
+        #             hu_obs[idx, km] = 0.0
+        #             # print("\ntttt-----------\n:"); print(key); exit(0)
+        #         #   ---- bed special case ----
+        #         if key_is_bed[key] and (step_time in bed_snaps_idx):
+        #             if step_time in bed_snaps_idx:
+        #                 col =  bed_time_to_col[step_time]
+        #                 mask = bed_mask_map[key]
+        #                 idx_obs = idx[mask]
+        #                 # if idx_obs.size > 0:
+        #                 sigma_obs = error_R[idx_obs, col]
+        #                 # print(f"hu_obs[idx_obs, col]: {hu_obs[idx_obs, col]}, col: {col}, step_time: {step_time}, idx_obs: {idx_obs}, mask: {mask}")
+        #                 hu_obs[idx_obs, col] = (
+        #                     statevec_true[idx_obs, step_time-1] +
+        #                     np.random.normal(0.0, sigma_obs, size=idx_obs.size)
+        #                 )
+        for km, step_time in enumerate(ind_m):
+            # step_time is an index into statevec_true's time axis (1..nt)
+            for key in vec_inputs:
+                idx = indx_map[key]
+
+                # ---- non-bed vars (normal observations) ----
+                if key in obs_set and not key_is_bed[key]:
+                    sigma = error_R[idx, km]
+                    hu_obs[idx, km] = (
+                        statevec_true[idx, step_time] +
+                        np.random.normal(0.0, sigma, size=idx.size)
+                    )
+                else:
+                    hu_obs[idx, km] = 0.0
+
+                # ---- bed special case ----
+                if key_is_bed[key] and (km in bed_snap_cols):
+                    col = km
+                    mask = bed_mask_map[key]
+                    idx_obs = idx[mask]
+
+                    if idx_obs.size > 0:
+                        sigma_obs = error_R[idx_obs, col]
+                        hu_obs[idx_obs, col] = (
+                            statevec_true[idx_obs, step_time] +
+                            np.random.normal(0.0, sigma_obs, size=idx_obs.size)
+                        )
+
+
+            # print(bed_mask_map);exit(0)
+            if len(bed_mask_map.keys()) == 0:
+                print("[ICESEE] Warning: bed_mask_map is empty. No bed observations will be created.")
+
+        return hu_obs, error_R.T, bed_mask_map
 
     
     def bed(self, x):
