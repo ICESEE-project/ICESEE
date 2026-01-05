@@ -8,6 +8,7 @@
 # --- python imports ---
 import sys
 import os
+import copy
 
 os.environ["OMP_NUM_THREADS"] = "1"
 
@@ -212,7 +213,12 @@ def run_model(ensemble, **kwargs):
     # create firedrake functions from the ensemble members
     h = Function(Q)
     # h.dat.data[:] = ensemble[indx_map["h"],ens]
-    h.dat.data[:] = ensemble[indx_map["h"]]
+    # h.dat.data[:] = ensemble[indx_map["h"]]
+    h.dat.data[:] = copy.deepcopy(ensemble[indx_map["h"]])
+
+     # create firedrake functions from the ensemble members
+     # u = Function(V)
+     #
 
     u = Function(V)
     # u.dat.data[:,0] = ensemble[indx_map["u"],ens]
@@ -224,7 +230,7 @@ def run_model(ensemble, **kwargs):
     h, u = Icepack(solver, h, u, a, b, dt, h0, fluidity = A, friction = C)
 
     # return a list of the updated state variables
-    updated_state = {'h': h.dat.data_ro,
+    updated_state = {'h': copy.deepcopy(h.dat.data_ro),
                      'u': u.dat.data_ro[:,0],
                      'v': u.dat.data_ro[:,1]}
     

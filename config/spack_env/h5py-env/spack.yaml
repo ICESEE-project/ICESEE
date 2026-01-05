@@ -1,0 +1,44 @@
+spack:
+  view: false
+  concretizer:
+    unify: when_possible
+  config:
+    install_tree:
+      root: /storage/home/hcoda1/8/bkyanjo3/r-arobel3-0/h5py-env/opt/spack
+  compilers:
+  - compiler:
+      spec: gcc@13
+      paths:
+        cc: /usr/bin/gcc
+        cxx: /usr/bin/g++
+        f77: /usr/bin/gfortran
+        fc: /usr/bin/gfortran
+      flags: {}
+      operating_system: rhel9
+      target: x86_64
+      modules: []
+      environment: {}
+      extra_rpaths: []
+  packages:
+    all:
+      compiler: [gcc@13]
+    mpi:
+      buildable: false
+      externals:
+      - spec: openmpi@5.0.7%gcc@13
+        prefix: /storage/home/hcoda1/8/bkyanjo3/r-arobel3-0/openmpi
+    python:
+      version: [3.11.8]
+    py-h5py:
+      version: [3.10.0]
+  specs:
+  - python@3.11.8
+  - py-pip
+  - py-setuptools
+  - py-pkgconfig
+  - py-wheel    # Added to ensure wheel is available
+  - hdf5@1.12.1 +mpi
+  - py-h5py@3.10.0 +mpi
+  - py-venv-packages@0.1    # Custom package for pip installations
+  repos:
+  - /storage/home/hcoda1/8/bkyanjo3/r-arobel3-0/h5py-env/icesee-spack

@@ -18,13 +18,14 @@ from scipy.stats import multivariate_normal
 # src_dir = os.path.join(project_root, 'src', 'parallelization')
 # sys.path.insert(0, src_dir)
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
+from ICESEE.config._utility_imports import icesee_get_index
 
 
 # Move `worker` to global scope
 def worker(args):
     """Wrapper function for multiprocessing."""
     ens_idx, ensemble_member, nd, Q_err, params, model_kwargs= args
-    return EnsembleKalmanFilter.forecast_step_single(ens_idx, ensemble_member, nd, Q_err, params, **model_kwargs)
+    return EnsembleKalmanFilter.forecast_step_single(ensemble_member[:, ens_idx], **model_kwargs)
 
 class EnsembleKalmanFilter:
     def __init__(self, Observation_vec=None, Cov_obs=None, Cov_model=None, \
@@ -53,7 +54,7 @@ class EnsembleKalmanFilter:
         self.parallel_manager       = parallel_manager
     
     # Forecast step
-    def forecast_step(self, ensemble=None, forecast_step_single=None, Q_err=None, **model_kwargs):
+    def forecast_step(self, ensemble=None, forecast_step_single=None, **model_kwargs):
         """
         Forecast step for the Ensemble Kalman Filter (EnKF).
         
@@ -66,19 +67,30 @@ class EnsembleKalmanFilter:
         Returns:
             ensemble: ndarray - Updated ensemble matrix.
         """
+        Q_err = model_kwargs.get("Q_err")
         
         if re.match(r"\Aserial\Z", self.parallel_flag, re.IGNORECASE):
             # Serial forecast step
             nd, Nens = ensemble.shape # Get the number of ensemble members
-            state_block_size = nd // self.parameters["total_state_param_vars"] 
-
+            state_block_size = nd if nd == self.parameters["total_state_param_vars"]  or nd < self.parameters["total_state_param_vars"] else nd // self.parameters["total_state_param_vars"]
+            # print(f"nd: {nd}, Nens: {Nens}, state_block_size: {state_block_size}")
+            # print("[ICESEE] Running serial forecast step ...")
+            # print(ensemble[:,0])
+            vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
             # Loop over the ensemble members
             for ens in range(Nens):
-                ensemble[:,ens] = forecast_step_single(ens=ens, ensemble=ensemble, nd=nd, \
-                                              **model_kwargs)
+                updated_state = forecast_step_single(ensemble=ensemble[:, ens], **model_kwargs)
+                # for ii,var in enumerate(model_kwargs["vec_inputs"]):
+                #     start_idx = ii * state_block_size
+                #     end_idx   = start_idx + state_block_size
+                #     ensemble[start_idx:end_idx,ens] = updated_state[var]
                 q0 = multivariate_normal.rvs(np.zeros(nd), Q_err)
 
-                ensemble[:state_block_size,ens] = ensemble[:state_block_size,ens] + q0[:state_block_size]
+                # ensemble[:state_block_size,ens] = ensemble[:state_block_size,ens] + q0[:state_block_size]
+                for key in model_kwargs["vec_inputs"]:
+                    ensemble[indx_map[key],ens] = updated_state[key] + q0[:updated_state[key].size]
+             
+
             return ensemble
 
         # Using divide and conquer parallelization with MPI for non-MPI application in forecast_step_single
@@ -107,7 +119,7 @@ class EnsembleKalmanFilter:
 
             # Perform forecast step
             for ens in range(local_ensemble.shape[1]):
-                local_ensemble[:, ens] = forecast_step_single(ens=ens, ensemble=local_ensemble, nd=nd,  **model_kwargs)
+                local_ensemble[:, ens] = forecast_step_single(ensemble=local_ensemble[:,ens], **model_kwargs)
 
             # Avoid gather; update ensemble in place
             gathered_ensemble = comm.allgather(local_ensemble)
@@ -136,7 +148,7 @@ class EnsembleKalmanFilter:
             print(f"\nranks: {rank}, size: {size}\n")
 
             for ens in range(ensemble.shape[1]):
-                ensemble[:, ens] = forecast_step_single(ens=ens, ensemble=ensemble, nd=nd,  **model_kwargs)
+                ensemble[:, ens] = forecast_step_single(ensemble=ensemble[:, ens], **model_kwargs)
 
             gathered_ensemble = self.parallel_manager.all_gather_data(comm, ensemble)
             #  initalize the ensemble to be returned
@@ -230,7 +242,7 @@ class EnsembleKalmanFilter:
 
             # Create delayed tasks for each ensemble member
             tasks = [
-                    delayed(forecast_step_single)(ens, ensemble, nd, Q_err, self.parameters, **model_kwargs)
+                    delayed(forecast_step_single)(ensemble[:, ens], **model_kwargs)
                     for ens in range(Nens)
                 ]
 
@@ -258,11 +270,11 @@ class EnsembleKalmanFilter:
                 Remote function to perform forecast step for a single ensemble member.
                 This function will be executed in parallel by Ray workers.
                 """
-                return forecast_step_single(ensemble_member, nd, Q_err, parameters, **model_kwargs)
+                return forecast_step_single(ensemble_member, **model_kwargs)
 
             # Launch tasks in parallel using Ray
             futures = [
-                ray_worker.remote(ensemble[:, ens].copy(), nd, Q_err, self.parameters, model_kwargs)
+                ray_worker.remote(ensemble[:, ens].copy())
                 for ens in range(Nens)
             ]
 
@@ -302,7 +314,7 @@ class EnsembleKalmanFilter:
                             with openmp("single"): #one thread does the work, others wait
                                 numThrds = omp_get_num_threads() #get number of threads
                             for ens in range(threadID,Nens,numThrds):
-                                partialEnsembles[:,threadID] = forecast_step_single(ens, ensemble, nd, Q_err, self.parameters, processed_args)
+                                partialEnsembles[:,threadID] = forecast_step_single(ensemble=ensemble[:,ens], **processed_args)
                                 
                         return partialEnsembles
 

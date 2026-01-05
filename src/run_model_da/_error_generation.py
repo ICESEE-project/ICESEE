@@ -348,6 +348,36 @@ def generate_enkf_field(ii_sig, Lx, hdim, num_vars, rh=None, grid_extension=2, v
     if rh is None:
         rh = Lx / 10  # Default decorrelation length
 
+    # Handle trivial case: no spatial dimension
+    if hdim < 10:
+        if verbose:
+            print(f"[ICESEE] hdim={hdim} too small for spatial field — using Gaussian noise.")
+        # return np.random.randn(num_vars)
+        # Effective decorrelation length to set cross-variable correlation
+        if isinstance(rh, (list, np.ndarray)):
+            rh_eff = float(np.mean(rh))
+        elif isinstance(rh, dict):
+            # If dict, average any numeric entries; fallback to default if empty
+            vals = [v for v in rh.values() if isinstance(v, (int, float))]
+            rh_eff = float(np.mean(vals)) if len(vals) > 0 else (Lx / 10.0)
+        else:
+            rh_eff = float(rh)
+
+        # Convert decorrelation length to an AR(1)-like correlation between adjacent variables.
+        # Larger rh/Lx -> stronger correlation (rho closer to 1).
+        r = max(rh_eff / float(Lx), 1e-8)
+        rho = np.exp(-1.0 / r)  # in (0,1)
+
+        # Toeplitz covariance: Cov[i,j] = rho^{|i-j|}, unit variance on diagonal
+        idx = np.arange(hdim)
+        cov = rho ** np.abs(idx[:, None] - idx[None, :])
+
+        if verbose:
+            print(f"[ICESEE] hdim={hdim} => MVN across variables; rho≈{rho:.3f}")
+
+        sample = np.random.multivariate_normal(mean=np.zeros(hdim), cov=cov)
+        return sample
+
     # check if rh is a array
     if isinstance(rh, (list, np.ndarray)):
       

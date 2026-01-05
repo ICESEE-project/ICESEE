@@ -14,6 +14,7 @@ import sys
 import os
 import re
 import importlib
+import traceback
 
 class SupportedModels:
     """
@@ -103,20 +104,34 @@ class SupportedModels:
 
         # Validate directory name to ensure it's a valid Python module name
         if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', dir_name):
-            print(f"Invalid directory name '{dir_name}' for module import. Falling back to default module.")
+            if self.rank == 0:
+                print(f"[ICESEE] Invalid directory name '{dir_name}' for module import. Falling back to default module.")
         else:
             try:
-                model_module = importlib.import_module(dynamic_module_path)
-                if self.rank == 0:
-                    if self.verbose:
-                        # Print a message indicating the successful loading of the dynamic module
-                        print(f"[ICESEE] Successfully loaded example-specific {model_info['description']} from {dynamic_module_path}.")
-                return model_module
+                # Check if the module exists before attempting to import
+                module_spec = importlib.util.find_spec(dynamic_module_path)
+                if module_spec is None:
+                    if self.rank == 0:
+                        print(f"[ICESEE] Dynamic example module {dynamic_module_path} not found. Falling back to default module.")
+                else:
+                    # Import the module and handle any errors
+                    try:
+                        model_module = importlib.import_module(dynamic_module_path)
+                        if self.rank == 0 and self.verbose:
+                            print(f"[ICESEE] Successfully loaded example-specific {model_info['description']} from {dynamic_module_path}.")
+                        return model_module
+                    except Exception as e:
+                        if self.rank == 0:
+                            print(f"[ICESEE ERROR] Error in dynamic module {dynamic_module_path}: {e}")
+                            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+                            print(f"Traceback details:\n{tb_str}")
+                        self.comm.Abort(1) if self.comm else sys.exit(1)
             except ImportError as e:
                 if self.rank == 0:
+                    print(f"[ICESEE] Dynamic example module {dynamic_module_path} not found: {e}. Falling back to default module.")
                     if self.verbose:
-                        # Print a message indicating the failure to load the dynamic module
-                        print(f"[ICESEE] Dynamic example module {dynamic_module_path} not found: {e}. Falling back to default module.")
+                        tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+                        print(f"Traceback details:\n{tb_str}")
 
         # Fall back to the default module
         try:
@@ -127,4 +142,7 @@ class SupportedModels:
             
             return model_module
         except ImportError as e:
-            raise ImportError(f"Failed to import module for model '{self.model}': {e}")
+            print(f"[ICESEE ERROR] Failed to import module for model '{self.model}': {e}")
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
+            self.comm.Abort(1) if self.comm else sys.exit(1)
