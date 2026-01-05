@@ -46,7 +46,7 @@ class UtilsFunctions:
 
         params = self.params
         observed = params["all_observed"]     # e.g., ['h','u','v','smb','bed']
-        vec_inputs = params["vec_inputs"]     # ['h','s','u','v','bed','fric','smb']
+        vec_inputs = self.model_kwargs["vec_inputs"]     # ['h','s','u','v','bed','fric','smb']
 
         # --- Recompute index map ---
         vecs, indx_map, _ = icesee_get_index(**self.model_kwargs)
@@ -59,7 +59,7 @@ class UtilsFunctions:
 
         bed_aliases = {'bed', 'bedrock', 'bed_topography', 'bedtopo', 'bedtopography'}
         key_is_bed = {k: (k in bed_aliases) for k in vec_inputs}
-        key_idx_map = {k: np.asarray(indx_map[k], dtype=int) for k in vec_inputs}
+        # key_idx_map = {k: np.asarray(indx_map[k], dtype=int) for k in vec_inputs}
 
         # --- Collect observation indices, but apply masks to bed ---
         all_obs_indices = []

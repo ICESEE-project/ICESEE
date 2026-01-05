@@ -289,7 +289,7 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                 dset = f['ensemble']
                 ens_mean = f['ensemble_mean']
 
-                hdim =  model_kwargs.get("nd", params['nd'])//len(model_kwargs.get("all_observed", []))
+                # hdim =  model_kwargs.get("nd", params['nd'])//len(model_kwargs.get("all_observed", []))
 
                 # open full ensemble dataset before analysis
                 # inversion_flag = model_kwargs.get("inversion_flag", False)
@@ -448,86 +448,56 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                     # get velcity and friction from inversion -------------
                     # mean_now = np.mean(recvbuf, axis=1)
                     if model_kwargs.get("inversion_flag", False):
-                        # for ii, vec in enumerate(model_kwargs.get("vec_inputs", [])):
-                        #     if vec.lower() in ["coefficient","friction","friction_coefficient", 'fcoef']:
-                        #         fcoef_prior = dset[indx_map[vec], :, timestep-1]
-                                # recvbuf[indx_map[vec], :] = fcoef_prior
+                        # update model_kwargs for inversion
+                        model_kwargs["vec_inputs"] = copy.deepcopy(model_kwargs.get("vec_inputs_old", []))
+                        model_kwargs["nd"] = model_kwargs.get("nd_old", None)
+                        vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                        with h5py.File(f'{model_kwargs.get("data_path")}/ensemble_before_analysis_step_{timestep:04d}.h5', 'a') as f_before:
+                            data_before = f_before['ensemble_before_analysis']
+                            data_before_arr = data_before[:, :].copy()
 
-                        #TODO: test this part
-                        # recvbuf[:, :] =  dset[:, :, timestep-1]
-                        # recompute the mean_now after updating friction
-                        mean_now = np.mean(recvbuf, axis=1)
-                        # call inverse step to get velocity fields, and new friction
-                        model_module   = model_kwargs.get("model_module", None)
-                        data = model_module.inverse_step_single(ensemble=mean_now, **model_kwargs)
-                        # for key, value in data.items():
-                            # if key.lower() in ["vx","velocity_x","vel_x","v_x"]:
-                            #     anomaly = recvbuf[indx_map[key], :] - value[:, np.newaxis]
-                            #     velocity_x_prior = dset[indx_map[key], :, timestep-1]
-                            #     recvbuf[indx_map[key], :] = value[:, np.newaxis]
-                            # if key.lower() in ["vy","velocity_y","vel_y","v_y"]:
-                            #     velocity_y_prior = dset[indx_map[key], :, timestep-1]
-                            #     anomaly = recvbuf[indx_map[key], :] - value[:, np.newaxis]
-                                # recvbuf[indx_map[key], :] = value[:, np.newaxis]
-                        #     if key.lower() in ["coefficient","friction","friction_coefficient", 'fcoef']:
-                        #         recvbuf[indx_map[key], :] = value[:, np.newaxis]
-                        # del mean_now
-                        # gc.collect()
+                            hdim = data_before_arr.shape[0] // len(model_kwargs.get("vec_inputs", []))
+                        
+                            # update data_before with recvbuf
+                            for ii, key in enumerate (model_kwargs.get("vec_inputs_new", [])):
+                                # print('key:\n', key)
+                                start = ii*hdim
+                                end = start + hdim      
+                                data_before_arr[indx_map[key], :] = recvbuf[start:end, :]
+                                # data_before[indx_map[key], :] = recvbuf[indx_map[key], :]
+                            #TODO: test this part
+                            # recvbuf[:, :] =  dset[:, :, timestep-1]
+                            # recompute the mean_now after updating friction
+                            # mean_now = np.mean(recvbuf, axis=1)
+                            mean_now = np.mean(data_before_arr, axis=1)
+                            # call inverse step to get velocity fields, and new friction
+                            model_module   = model_kwargs.get("model_module", None)
+                            data = model_module.inverse_step_single(ensemble=mean_now, **model_kwargs)
+                            for key, value in data.items():
+                                # if key.lower() in ["vx","velocity_x","vel_x","v_x"]:
+                                #     anomaly = recvbuf[indx_map[key], :] - value[:, np.newaxis]
+                                #     velocity_x_prior = dset[indx_map[key], :, timestep-1]
+                                #     recvbuf[indx_map[key], :] = value[:, np.newaxis]
+                                # if key.lower() in ["vy","velocity_y","vel_y","v_y"]:
+                                #     velocity_y_prior = dset[indx_map[key], :, timestep-1]
+                                #     anomaly = recvbuf[indx_map[key], :] - value[:, np.newaxis]
+                                    # recvbuf[indx_map[key], :] = value[:, np.newaxis]
+                                if key.lower() in ["coefficient","friction","friction_coefficient", 'fcoef']:
+                                    data_before_arr[indx_map[key], :] = value[:, np.newaxis]
+                            del mean_now
+                            gc.collect()
 
-                dset[:, :, timestep] = recvbuf
-                ens_mean[:, timestep] = np.mean(recvbuf, axis=1)
+                        dset[:, :, timestep] = data_before_arr
+                        ens_mean[:, timestep] = np.mean(data_before_arr, axis=1)
+                    
+                    else:
+                        dset[:, :, timestep] = recvbuf
+                        ens_mean[:, timestep] = np.mean(recvbuf, axis=1)
+
+                # dset[:, :, timestep] = data_before
+                # ens_mean[:, timestep] = np.mean(data_before, axis=1)
                 del bed_prior, bed_now
                 gc.collect()
-
-                # ISSM *------
-                # di = 0.8930
-                # rho_ice = 917.0
-                # rho_sw = 1028.0
-                # nd = model_kwargs.get("nd", params['nd'])
-                # ndim = nd // params["total_state_param_vars"]
-                # state_block_size = ndim*params["num_state_vars"]
-                # thickness = recvbuf[:ndim,:]
-                # surface = recvbuf[ndim:2*ndim,:]
-                # bed = recvbuf[state_block_size:5*ndim,:]
-
-                # pos = np.where(thickness < 1)
-                # thickness[pos] = 1.0
-                # ocean_levelset = thickness + (bed/di)
-                # # Floating ice (ocean_levelset < 0) find the indices
-                # pos = np.where(ocean_levelset < 0)
-                # surface[pos] = thickness[pos]* ((rho_sw - rho_ice)/rho_sw)
-                # recvbuf[ndim:2*ndim,:] = surface
-                # base = surface - thickness
-
-                # pos_base = np.where(base < bed)
-                # base[pos_base] = base[pos_base]
-
-                # # grounded ice
-                # pos_grounded = np.where(ocean_levelset >= 0)
-                # base[pos_grounded] = bed[pos_grounded]
-
-                # # update surface, bed and thickness in recvbuf
-                # recvbuf[ndim:2*ndim,:] = base + thickness
-                # # recvbuf[state_block_size:5*ndim,:] = bed
-                # recvbuf[:ndim,:] = thickness
-                # # -------*ISSM
-                # del thickness, surface, bed, ocean_levelset, pos, base, pos_base, pos_grounded
-                # gc.collect()
-
-                # read base data from h5file and compute the mean base from all ensembles_base_*.h5 files
-                # base_data = np.zeros((nd, Nens))
-                # for ens in range(Nens):
-                #     filename = os.path.join(model_kwargs.get('data_path'), f'ensemble_base_{ens}.h5')
-                #     with h5py.File(filename, 'r') as f_base:
-                #         base_data[:, ens] = f_base['base'][:]
-                # base_mean = np.mean(base_data, axis=1)
-                # del base_data
-                # gc.collect()
-                # base_mean = 
-
-                # dset[:, :, timestep] = recvbuf
-                # # ens_mean[:, timestep] = ensemble_mean
-                # ens_mean[:, timestep] = np.mean(recvbuf, axis=1)
 
                 if model_kwargs.get("DEnKF_flag", False):
                     ensemble_mean = np.mean(dset[:, :, timestep], axis=1)

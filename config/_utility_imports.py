@@ -264,6 +264,9 @@ if not flag_jupyter:
         'initialize_ensemble':enkf_params.get('initialize_ensemble', True),
         'initial_spread_factor': enkf_params.get('initial_spread_factor', 1.0),
         'observed_vars': enkf_params.get('observed_vars', []),
+        'vel_idx': int(float(enkf_params.get('vel_idx', 2))),
+        'inversion_flag': enkf_params.get('inversion_flag', False),
+        'friction_idx': int(float(enkf_params.get('friction_idx', 5))),
     }
 
 

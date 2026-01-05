@@ -381,7 +381,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             friction_ref = mean_friction*ones(md.mesh.numberofvertices,1);
 
             % %-- temporal testing settings
-            h5file = fullfile(icesee_path, data_path, sprintf('ensemble_friction_%d.h5', ens_id));
+            % h5file = fullfile(icesee_path, data_path, sprintf('ensemble_friction_%d.h5', ens_id));
             % If file exists from a previous run (possibly with different sizes), remove it
             % if exist(h5file, 'file')
             %     delete(h5file);
@@ -519,8 +519,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % Verbose settings
             md.verbose = verbose('convergence', false, 'solution', true);
 
-            % md.transient.requested_outputs = {'default', 'FrictionCoefficient', 'Thickness', 'Surface','Base','Bed'};
-            md.transient.requested_outputs = {'default',  'Thickness', 'Surface','Base','Bed'};
+            md.transient.requested_outputs = {'default', 'FrictionCoefficient', 'Thickness', 'Surface','Base','Bed'};
+            % md.transient.requested_outputs = {'default',  'Thickness', 'Surface','Base','Bed'};
 
             % Solve transient
             md = solve(md, 'Transient','runtimename',false);
@@ -544,36 +544,36 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                     'Vx', result_0, 'Vx';
                     'Vy', result_0, 'Vy';
                     'bed', result_0, 'Bed';
+                    'coefficient', result_0, 'FrictionCoefficient'
             };
-                    % 'coefficient', result_0, 'FrictionCoefficient'};
 
             writeToHDF5(filename, data);
 
             % write vx,vy, fcoeff, thickness, surface, bed, oceanlevelset, maskground to h5 file for each ensemble member
-            filename_ens_init = fullfile(icesee_path, data_path, sprintf('ens_init%d.h5', ens_id));
-            data = {'vx', result_0, 'Vx';
-                    'vy', result_0, 'Vy';
-                    'vel', result_0, 'Vel';
-                    % 'fcoeff', result_0, 'FrictionCoefficient';
-                    'thickness', result_0, 'Thickness';
-                    'surface', result_0, 'Surface';
-                    'bed', result_0, 'Bed';
-                    'oceanlevelset', result_0, 'MaskOceanLevelset';
-                    'base', result_0, 'Base';
-                    %'maskground', result_0, 'MaskGroundedice'
-                    };
-            writeToHDF5(filename_ens_init, data);
+            % filename_ens_init = fullfile(icesee_path, data_path, sprintf('ens_init%d.h5', ens_id));
+            % data = {'vx', result_0, 'Vx';
+            %         'vy', result_0, 'Vy';
+            %         'vel', result_0, 'Vel';
+            %         'fcoeff', result_0, 'FrictionCoefficient';
+            %         'thickness', result_0, 'Thickness';
+            %         'surface', result_0, 'Surface';
+            %         'bed', result_0, 'Bed';
+            %         'oceanlevelset', result_0, 'MaskOceanLevelset';
+            %         'base', result_0, 'Base';
+            %         %'maskground', result_0, 'MaskGroundedice'
+            %         };
+            % writeToHDF5(filename_ens_init, data);
 
             % Also write initial velocities to a separate HDF5 file
-            if exist(h5file, 'file')
-                delete(h5file);
-            end
-            h5create(h5file, '/coefficient', md.mesh.numberofvertices, 'Datatype', 'double');
-            h5write(h5file, '/coefficient', md.friction.coefficient);
-            h5create(h5file, '/Vx', md.mesh.numberofvertices, 'Datatype', 'double');
-            h5create(h5file, '/Vy', md.mesh.numberofvertices, 'Datatype', 'double');
-            h5write(h5file, '/Vx', md.results.TransientSolution(end).Vx);
-            h5write(h5file, '/Vy', md.results.TransientSolution(end).Vy);
+            % if exist(h5file, 'file')
+            %     delete(h5file);
+            % end
+            % h5create(h5file, '/coefficient', md.mesh.numberofvertices, 'Datatype', 'double');
+            % h5write(h5file, '/coefficient', md.friction.coefficient);
+            % h5create(h5file, '/Vx', md.mesh.numberofvertices, 'Datatype', 'double');
+            % h5create(h5file, '/Vy', md.mesh.numberofvertices, 'Datatype', 'double');
+            % h5write(h5file, '/Vx', md.results.TransientSolution(end).Vx);
+            % h5write(h5file, '/Vy', md.results.TransientSolution(end).Vy);
 
             % Break and return to avoid further processing
             return;
@@ -663,9 +663,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         
             % parameters for bed and friction
             md.geometry.bed = h5read(filename, '/bed');
+            md.friction.coefficient = h5read(filename, '/coefficient');
 
             % read from temporal friction file--------------------------------
-            h5file = fullfile(icesee_path, data_path, sprintf('ensemble_friction_%d.h5', ens_id));
+            % h5file = fullfile(icesee_path, data_path, sprintf('ensemble_friction_%d.h5', ens_id));
             % fcoeff = h5read(h5file, '/coefficient');
             % md.friction.coefficient = fcoeff;
             % md.initialization.vx = h5read(h5file, '/Vx');;
@@ -673,11 +674,11 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % md.initialization.vel = sqrt(md.initialization.vx.^2 + md.initialization.vy.^2);
             % -----------------------------------------------------------------
 
-            friction_ref = mean_friction*ones(md.mesh.numberofvertices,1);
-            md.friction.coefficient = friction_ref;
+            % friction_ref = mean_friction*ones(md.mesh.numberofvertices,1);
+            % md.friction.coefficient = friction_ref;
 
             % %-- temporal testing settings ---
-            h5file = fullfile(icesee_path, data_path, sprintf('ensemble_friction_%d.h5', ens_id));
+            % h5file = fullfile(icesee_path, data_path, sprintf('ensemble_friction_%d.h5', ens_id));
             % If file exists from a previous run (possibly with different sizes), remove it
             % if exist(h5file, 'file')
             %     delete(h5file);
@@ -724,8 +725,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.geometry.surface = md.geometry.base + md.geometry.thickness;
 
             % % Outputs and verbosity
-            % md.transient.requested_outputs = {'default','FrictionCoefficient','Thickness','Base','Bed'};
-            md.transient.requested_outputs = {'default','Thickness','Surface','Base','Bed'};
+            md.transient.requested_outputs = {'default','FrictionCoefficient','Thickness','Base','Bed'};
+            % md.transient.requested_outputs = {'default','Thickness','Surface','Base','Bed'};
             md.verbose = verbose('all', false);
             md.verbose.solution = true;
 
@@ -760,20 +761,20 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                     'Vy', result_0, 'Vy';
                     'bed', result_1, 'Bed';
                     % 'coefficient', result_2, 'coefficient'};
-                    % 'coefficient', result_2, 'FrictionCoefficient'};
-                    };
+                    'coefficient', result_2, 'FrictionCoefficient'};
+                    
 
             writeToHDF5(filename, data);
 
-            if exist(h5file, 'file')
-                delete(h5file);
-            end
-            h5create(h5file, '/coefficient', md.mesh.numberofvertices, 'Datatype', 'double');
-            h5write(h5file, '/coefficient', md.friction.coefficient);
-            h5create(h5file, '/Vx', md.mesh.numberofvertices, 'Datatype', 'double');
-            h5create(h5file, '/Vy', md.mesh.numberofvertices, 'Datatype', 'double');
-            h5write(h5file, '/Vx', md.results.TransientSolution(end).Vx);
-            h5write(h5file, '/Vy', md.results.TransientSolution(end).Vy);
+            % if exist(h5file, 'file')
+            %     delete(h5file);
+            % end
+            % h5create(h5file, '/coefficient', md.mesh.numberofvertices, 'Datatype', 'double');
+            % h5write(h5file, '/coefficient', md.friction.coefficient);
+            % h5create(h5file, '/Vx', md.mesh.numberofvertices, 'Datatype', 'double');
+            % h5create(h5file, '/Vy', md.mesh.numberofvertices, 'Datatype', 'double');
+            % h5write(h5file, '/Vx', md.results.TransientSolution(end).Vx);
+            % h5write(h5file, '/Vy', md.results.TransientSolution(end).Vy);
         else
           
             % fprintf('[MATLAB ---] Running model for ensemble ID %d, step %d\n', ens_id, k);
@@ -810,12 +811,12 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         
             % parameters for bed and friction
             md.geometry.bed = h5read(filename, '/bed');
-            % md.friction.coefficient = h5read(filename, '/coefficient');
+            md.friction.coefficient = h5read(filename, '/coefficient');
 
             % read from temporal friction file--------------------------------
-            h5file = fullfile(icesee_path, data_path, sprintf('ensemble_friction_%d.h5', ens_id));
-            fcoeff = h5read(h5file, '/coefficient');
-            md.friction.coefficient = fcoeff;
+            % h5file = fullfile(icesee_path, data_path, sprintf('ensemble_friction_%d.h5', ens_id));
+            % fcoeff = h5read(h5file, '/coefficient');
+            % md.friction.coefficient = fcoeff;
             % md.initialization.vx = h5read(h5file, '/Vx');;
             % md.initialization.vy = h5read(h5file, '/Vy');;
             % md.initialization.vel = sqrt(md.initialization.vx.^2 + md.initialization.vy.^2);
@@ -878,8 +879,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Verbose settings
             md.verbose = verbose('convergence', false, 'solution', true);
-            % md.transient.requested_outputs = {'default','FrictionCoefficient','Thickness','Base','Bed'};
-            md.transient.requested_outputs = {'default','Thickness','Surface','Base','Bed'};
+            md.transient.requested_outputs = {'default','FrictionCoefficient','Thickness','Base','Bed'};
+            % md.transient.requested_outputs = {'default','Thickness','Surface','Base','Bed'};
 
             % Solve transient
             md = solve(md, 'Transient','runtimename',false);
@@ -951,20 +952,20 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                     'Vx', result_0, 'vx';
                     'Vy', result_0, 'vy';
                     'bed', result_1, 'bed';
-                    % 'coefficient', result_2, 'coefficient'};
-            };
+                    'coefficient', result_2, 'coefficient'};
+            
 
             writeToHDF5(filename, data);
 
-            if exist(h5file, 'file')
-                delete(h5file);
-            end
-            h5create(h5file, '/coefficient', md.mesh.numberofvertices, 'Datatype', 'double');
-            h5write(h5file, '/coefficient', md.friction.coefficient);
-            h5create(h5file, '/Vx', md.mesh.numberofvertices, 'Datatype', 'double');
-            h5create(h5file, '/Vy', md.mesh.numberofvertices, 'Datatype', 'double');
-            h5write(h5file, '/Vx', md.initialization.vx);
-            h5write(h5file, '/Vy', md.initialization.vy);
+            % if exist(h5file, 'file')
+            %     delete(h5file);
+            % end
+            % h5create(h5file, '/coefficient', md.mesh.numberofvertices, 'Datatype', 'double');
+            % h5write(h5file, '/coefficient', md.friction.coefficient);
+            % h5create(h5file, '/Vx', md.mesh.numberofvertices, 'Datatype', 'double');
+            % h5create(h5file, '/Vy', md.mesh.numberofvertices, 'Datatype', 'double');
+            % h5write(h5file, '/Vx', md.initialization.vx);
+            % h5write(h5file, '/Vy', md.initialization.vy);
 
             % base data
             % data_base = {'Base', result_1, 'base'};
@@ -1036,7 +1037,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.initialization.vel  = sqrt(md.initialization.vx.^2 + md.initialization.vy.^2);
         % md.geometry.bed       = h5read(filename, '/bed');
         % md.geometry.base      = h5read(filename, '/Surface') - h5read(filename, '/Thickness');
-        % md.friction.coefficient = h5read(filename, '/coefficient');
+        md.friction.coefficient = h5read(filename, '/coefficient');
         % md.friction.coefficient = mean_friction*ones(md.mesh.numberofvertices,1);
         md.initialization.pressure=md.materials.rho_ice*md.constants.g*h5read(filename, '/Thickness');
 
@@ -1048,10 +1049,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.mask.ocean_levelset = h5read(filename, '/Thickness') + h5read(filename, '/bed') / di;
 
         % read from temporal friction file--------------------------------
-        ens_id_=0;
-        h5file = fullfile(icesee_path, data_path, sprintf('ensemble_friction_%d.h5', ens_id_));
-        fcoeff = h5read(h5file, '/coefficient');
-        md.friction.coefficient = fcoeff;
+        % ens_id_=0;
+        % h5file = fullfile(icesee_path, data_path, sprintf('ensemble_friction_%d.h5', ens_id_));
+        % fcoeff = h5read(h5file, '/coefficient');
+        % md.friction.coefficient = fcoeff;
         % md.friction.coefficient=mean_friction*ones(md.mesh.numberofvertices,1);
 
         % md.friction.p=ones(md.mesh.numberofelements,1);
@@ -1133,34 +1134,59 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
         fcoef = md.friction.coefficient;
         md.friction.coefficient = md.results.StressbalanceSolution.FrictionCoefficient;
-        md.initialization.vx = md.results.StressbalanceSolution.Vx;
-        md.initialization.vy = md.results.StressbalanceSolution.Vy;
-        md.initialization.vel = md.results.StressbalanceSolution.Vel;
+        % md.initialization.vx = md.results.StressbalanceSolution.Vx;
+        % md.initialization.vy = md.results.StressbalanceSolution.Vy;
+        % md.initialization.vel = md.results.StressbalanceSolution.Vel;
 
-        % plotmodel(md,'data',md.friction.coefficient);
+        md.initialization.vx = md.initialization.vx;
+        md.initialization.vy = md.initialization.vy;
+        md.geometry.thickness = h5read(filename, '/Thickness');
+        md.geometry.surface   = h5read(filename, '/Surface');
+        md.geometry.bed       = h5read(filename, '/bed');
+
+
+        % Save ensemble outputs in HDF5
+        filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
+
+        % result_0 = md.results.TransientSolution(end);
+        result_0 = md.initialization;
+        % result_1 = md.results.TransientSolution(end);
+        result_1 = md.geometry;
+        result_2 = md.friction;
+        % result_2 = md.results.TransientSolution(end);
+
+        data = {'Thickness', result_1, 'thickness';
+                % 'Base', result_1, 'base';
+                'Surface', result_1, 'surface';
+                'Vx', result_0, 'vx';
+                'Vy', result_0, 'vy';
+                'bed', result_1, 'bed';
+                'coefficient', result_2, 'coefficient'};
+        
+        writeToHDF5(filename, data);
 
         % save friction and velocity to file
         % h5file = fullfile(icesee_path, data_path, 'friction_vel_inversion.h5');
-        for ens_id_=0:nens
-            h5file = fullfile(icesee_path, data_path, sprintf('ensemble_friction_%d.h5', ens_id_));
-            % h5file = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
-            if exist(h5file, 'file')
-                delete(h5file);
-            end
-            % h5create(h5file, '/Thickness', nsize, 'Datatype', 'double');
-            % h5create(h5file, '/Surface',   nsize,  'Datatype', 'double');
-            h5create(h5file, '/Vx',   nsize,  'Datatype', 'double');
-            h5create(h5file, '/Vy',   nsize,  'Datatype', 'double');
-            % h5create(h5file, '/Vel', nsize, 'Datatype', 'double');
-            % h5create(h5file, '/bed', nsize, 'Datatype', 'double');
-            h5create(h5file, '/coefficient', nsize, 'Datatype', 'double');
+        % for ens_id_=0:nens
+        %     h5file = fullfile(icesee_path, data_path, sprintf('ensemble_friction_%d.h5', ens_id_));
+        %     % h5file = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
+        %     if exist(h5file, 'file')
+        %         delete(h5file);
+        %     end
+        %     % h5create(h5file, '/Thickness', nsize, 'Datatype', 'double');
+        %     % h5create(h5file, '/Surface',   nsize,  'Datatype', 'double');
+        %     h5create(h5file, '/Vx',   nsize,  'Datatype', 'double');
+        %     h5create(h5file, '/Vy',   nsize,  'Datatype', 'double');
+        %     % h5create(h5file, '/Vel', nsize, 'Datatype', 'double');
+        %     % h5create(h5file, '/bed', nsize, 'Datatype', 'double');
+        %     h5create(h5file, '/coefficient', nsize, 'Datatype', 'double');
 
-            % Now write the data – shapes match exactly
-            h5write(h5file, '/Vx',   md.results.StressbalanceSolution.Vx);
-            h5write(h5file, '/Vy',   md.results.StressbalanceSolution.Vy);
-            % h5write(h5file, '/Vel', md.results.StressbalanceSolution.Vel);
-            h5write(h5file, '/coefficient', md.results.StressbalanceSolution.FrictionCoefficient);
-        end
+        %     % Now write the data – shapes match exactly
+        %     h5write(h5file, '/Vx',   md.results.StressbalanceSolution.Vx);
+        %     h5write(h5file, '/Vy',   md.results.StressbalanceSolution.Vy);
+        %     % h5write(h5file, '/Vel', md.results.StressbalanceSolution.Vel);
+        %     h5write(h5file, '/coefficient', md.results.StressbalanceSolution.FrictionCoefficient);
+        % end
         % h5write(h5file, '/Thickness', md.geometry.thickness);
         % h5write(h5file, '/Surface',   md.geometry.surface);
         % h5write(h5file, '/bed', md.geometry.bed);

@@ -166,24 +166,24 @@ def run_model(ensemble, **kwargs):
     #  --- Joint Estimations ---
     if kwargs["joint_estimation"]:
         bed = ensemble[indx_map['bed']]
-        # coefficient = ensemble[indx_map['coefficient']]
+        coefficient = ensemble[indx_map['coefficient']]
     else: 
         if k == 0:
             bed_int = ensemble[indx_map['bed']]
-            # coefficient_int = ensemble[indx_map['coefficient']]
+            coefficient_int = ensemble[indx_map['coefficient']]
         bed = bed_int
-        # coefficient = coefficient_int
+        coefficient = coefficient_int
 
     # Write ensemble data to HDF5 file to be accessed by ISSM on the Matlab side
     with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
-        # for key in vec_inputs:
-        #     f.create_dataset(key, data=ensemble[indx_map[key]])
-        f.create_dataset('Thickness', data=ensemble[indx_map['Thickness']])
-        # f.create_dataset('Base', data=ensemble[indx_map['Base']])
-        f.create_dataset('Surface', data=ensemble[indx_map['Surface']])
-        f.create_dataset('Vx', data=ensemble[indx_map['Vx']])
-        f.create_dataset('Vy', data=ensemble[indx_map['Vy']])
-        f.create_dataset('bed', data=bed)
+        for key in vec_inputs:
+            f.create_dataset(key, data=ensemble[indx_map[key]])
+        # f.create_dataset('Thickness', data=ensemble[indx_map['Thickness']])
+        # # f.create_dataset('Base', data=ensemble[indx_map['Base']])
+        # f.create_dataset('Surface', data=ensemble[indx_map['Surface']])
+        # f.create_dataset('Vx', data=ensemble[indx_map['Vx']])
+        # f.create_dataset('Vy', data=ensemble[indx_map['Vy']])
+        # f.create_dataset('bed', data=bed)
         # f.create_dataset('coefficient', data=coefficient)
 
 
@@ -213,37 +213,37 @@ def run_model(ensemble, **kwargs):
         # --Joint Estimations--
         if kwargs["joint_estimation"]:
             updated_state['bed'] = f['bed'][:].reshape(-1, order='F')
-            # updated_state['coefficient'] = f['coefficient'][0]
+            updated_state['coefficient'] = f['coefficient'][:].reshape(-1, order='F')
             # write to a temporary file to store fricition coefficient for next timestep
-            temp_coeff_filename = f'{icesee_path}/{data_path}/temp_coefficient_{ens_id}.h5'
+            # temp_coeff_filename = f'{icesee_path}/{data_path}/temp_coefficient_{ens_id}.h5'
             
-            if k == 0:
-                if os.path.exists(temp_coeff_filename):
-                    os.remove(temp_coeff_filename)
-                with h5py.File(temp_coeff_filename, 'w') as temp_f:
-                    params = kwargs.get('params', {})
-                    ndim = updated_state['Thickness'].shape[0]
-                    f_dset = temp_f.create_dataset('coefficient', (ndim, kwargs.get('nt', params['nt']) + 1), dtype='f8')
-                    vx_dset = temp_f.create_dataset('Vx', (ndim, kwargs.get('nt', params['nt']) + 1), dtype='f8')
-                    vy_dset = temp_f.create_dataset('Vy', (ndim, kwargs.get('nt', params['nt']) + 1), dtype='f8')
-                    fcoef_file= f'{icesee_path}/{data_path}/ensemble_friction_{ens_id}.h5'
-                    with h5py.File(fcoef_file, 'r') as fcoef_f:
-                        f_dset[:,0] = fcoef_f['coefficient'][:].reshape(-1, order='F')
-                        vx_dset[:,0] = fcoef_f['Vx'][:].reshape(-1, order='F')
-                        vy_dset[:,0] = fcoef_f['Vy'][:].reshape(-1, order='F')
-            else:
-                with h5py.File(temp_coeff_filename, 'a') as temp_f:
-                    f_dset = temp_f['coefficient']
-                    vx_dset = temp_f['Vx']
-                    vy_dset = temp_f['Vy']
-                    fcoef_file= f'{icesee_path}/{data_path}/ensemble_friction_{ens_id}.h5'
-                    with h5py.File(fcoef_file, 'r') as fcoef_f:
-                        f_dset[:,k] = fcoef_f['coefficient'][:].reshape(-1, order='F')
-                        vx_dset[:,k] = fcoef_f['Vx'][:].reshape(-1, order='F')
-                        vy_dset[:,k] = fcoef_f['Vy'][:].reshape(-1, order='F')
+            # if k == 0:
+            #     if os.path.exists(temp_coeff_filename):
+            #         os.remove(temp_coeff_filename)
+            #     with h5py.File(temp_coeff_filename, 'w') as temp_f:
+            #         params = kwargs.get('params', {})
+            #         ndim = updated_state['Thickness'].shape[0]
+            #         f_dset = temp_f.create_dataset('coefficient', (ndim, kwargs.get('nt', params['nt']) + 1), dtype='f8')
+            #         vx_dset = temp_f.create_dataset('Vx', (ndim, kwargs.get('nt', params['nt']) + 1), dtype='f8')
+            #         vy_dset = temp_f.create_dataset('Vy', (ndim, kwargs.get('nt', params['nt']) + 1), dtype='f8')
+            #         fcoef_file= f'{icesee_path}/{data_path}/ensemble_friction_{ens_id}.h5'
+            #         with h5py.File(fcoef_file, 'r') as fcoef_f:
+            #             f_dset[:,0] = fcoef_f['coefficient'][:].reshape(-1, order='F')
+            #             vx_dset[:,0] = fcoef_f['Vx'][:].reshape(-1, order='F')
+            #             vy_dset[:,0] = fcoef_f['Vy'][:].reshape(-1, order='F')
+            # else:
+            #     with h5py.File(temp_coeff_filename, 'a') as temp_f:
+            #         f_dset = temp_f['coefficient']
+            #         vx_dset = temp_f['Vx']
+            #         vy_dset = temp_f['Vy']
+            #         fcoef_file= f'{icesee_path}/{data_path}/ensemble_friction_{ens_id}.h5'
+            #         with h5py.File(fcoef_file, 'r') as fcoef_f:
+            #             f_dset[:,k] = fcoef_f['coefficient'][:].reshape(-1, order='F')
+            #             vx_dset[:,k] = fcoef_f['Vx'][:].reshape(-1, order='F')
+            #             vy_dset[:,k] = fcoef_f['Vy'][:].reshape(-1, order='F')
         else:
             bed_int = bed
-            # coefficient_int = coefficient
+            coefficient_int = coefficient
             
     os.chdir(icesee_path)
 
@@ -307,24 +307,24 @@ def run_model_inverse(ensemble, **kwargs):
     #  --- Joint Estimations ---
     if kwargs["joint_estimation"]:
         bed = ensemble[indx_map['bed']]
-        # coefficient = ensemble[indx_map['coefficient']]
+        coefficient = ensemble[indx_map['coefficient']]
     else:
         if k == 0:
             bed_int = ensemble[indx_map['bed']]
-            # coefficient_int = ensemble[indx_map['coefficient']]
+            coefficient_int = ensemble[indx_map['coefficient']]
         bed = bed_int
-        # coefficient = coefficient_int
+        coefficient = coefficient_int
 
     # Write ensemble data to HDF5 file to be accessed by ISSM on the Matlab side
     with h5py.File(input_filename, 'w') as f:
-        # for key in vec_inputs:
-        #     f.create_dataset(key, data=ensemble[indx_map[key]])
-        f.create_dataset('Thickness', data=ensemble[indx_map['Thickness']])
-        # f.create_dataset('Base', data=ensemble[indx_map['Base']])
-        f.create_dataset('Surface', data=ensemble[indx_map['Surface']])
-        f.create_dataset('Vx', data=ensemble[indx_map['Vx']])
-        f.create_dataset('Vy', data=ensemble[indx_map['Vy']])
-        f.create_dataset('bed', data=bed)
+        for key in vec_inputs:
+            f.create_dataset(key, data=ensemble[indx_map[key]])
+        # f.create_dataset('Thickness', data=ensemble[indx_map['Thickness']])
+        # # f.create_dataset('Base', data=ensemble[indx_map['Base']])
+        # f.create_dataset('Surface', data=ensemble[indx_map['Surface']])
+        # f.create_dataset('Vx', data=ensemble[indx_map['Vx']])
+        # f.create_dataset('Vy', data=ensemble[indx_map['Vy']])
+        # f.create_dataset('bed', data=bed)
         # f.create_dataset('coefficient', data=coefficient)
 
     # Run ISSM model to update state and parameters
@@ -338,51 +338,51 @@ def run_model_inverse(ensemble, **kwargs):
     kwargs.update({'k':k})
 
     # Read output from HDF5 file to be accessed by ICESEE on the Python side
-    # output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
-    output_filename = f'{icesee_path}/{data_path}/ensemble_friction_{ens_id}.h5'
+    output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
+    # output_filename = f'{icesee_path}/{data_path}/ensemble_friction_{ens_id}.h5'
     if not os.path.exists(output_filename):
         print("[ICESEE run_model Error] File does not exist: {output_filename}")
         return None
     
     updated_state = {}
-    with h5py.File(output_filename, 'r') as f:
-        # Read full 1D fields (nvert,)
-        # updated_state['Thickness'] = np.asarray(f['Thickness'][:]).ravel()
-        # updated_state['Surface']   = np.asarray(f['Surface'][:]).ravel()
-        updated_state['Vx']        = np.asarray(f['Vx'][:]).ravel()
-        updated_state['Vy']        = np.asarray(f['Vy'][:]).ravel()
-
-        # # --Joint Estimations--
+    with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+        updated_state['Thickness'] = f['Thickness'][:].reshape(-1, order='F')
+        # updated_state['Base'] = f['Base'][0]
+        updated_state['Surface'] = f['Surface'][:].reshape(-1, order='F')
+        updated_state['Vx'] = f['Vx'][:].reshape(-1, order='F')
+        updated_state['Vy'] = f['Vy'][:].reshape(-1, order='F')
+        
+        # --Joint Estimations--
         if kwargs["joint_estimation"]:
-        #     # updated_state['bed']        = np.asarray(f['bed'][:]).ravel()
-            updated_state['coefficient'] = np.asarray(f['coefficient'][:]).ravel()
-            temp_coeff_filename = f'{icesee_path}/{data_path}/temp_coefficient_{ens_id}.h5'
-            ndim = updated_state['coefficient'].shape[0]
+            updated_state['bed'] = f['bed'][:].reshape(-1, order='F')
+            updated_state['coefficient'] = f['coefficient'][:].reshape(-1, order='F')
+            # temp_coeff_filename = f'{icesee_path}/{data_path}/temp_coefficient_{ens_id}.h5'
+            # ndim = updated_state['coefficient'].shape[0]
     
-            if k == 0:
-                if os.path.exists(temp_coeff_filename):
-                    os.remove(temp_coeff_filename)
-                with h5py.File(temp_coeff_filename, 'w') as temp_f:
-                    params = kwargs.get('params', {})
-                    f_dset = temp_f.create_dataset('coefficient', (ndim, kwargs.get('nt', params['nt']) + 1), dtype='f8')
-                    vx_dset = temp_f.create_dataset('Vx', (ndim, kwargs.get('nt', params['nt']) + 1), dtype='f8')
-                    vy_dset = temp_f.create_dataset('Vy', (ndim, kwargs.get('nt', params['nt']) + 1), dtype='f8')
-                    fcoef_file= f'{icesee_path}/{data_path}/ensemble_friction_{ens_id}.h5'
-                    with h5py.File(fcoef_file, 'r') as fcoef_f:
-                       f_dset[:,0] = fcoef_f['coefficient'][:].reshape(-1, order='F')
-                       vx_dset[:,0] = fcoef_f['Vx'][:].reshape(-1, order='F')
-                       vy_dset[:,0] = fcoef_f['Vy'][:].reshape(-1, order='F')
+            # if k == 0:
+            #     if os.path.exists(temp_coeff_filename):
+            #         os.remove(temp_coeff_filename)
+            #     with h5py.File(temp_coeff_filename, 'w') as temp_f:
+            #         params = kwargs.get('params', {})
+            #         f_dset = temp_f.create_dataset('coefficient', (ndim, kwargs.get('nt', params['nt']) + 1), dtype='f8')
+            #         vx_dset = temp_f.create_dataset('Vx', (ndim, kwargs.get('nt', params['nt']) + 1), dtype='f8')
+            #         vy_dset = temp_f.create_dataset('Vy', (ndim, kwargs.get('nt', params['nt']) + 1), dtype='f8')
+            #         fcoef_file= f'{icesee_path}/{data_path}/ensemble_friction_{ens_id}.h5'
+            #         with h5py.File(fcoef_file, 'r') as fcoef_f:
+            #            f_dset[:,0] = fcoef_f['coefficient'][:].reshape(-1, order='F')
+            #            vx_dset[:,0] = fcoef_f['Vx'][:].reshape(-1, order='F')
+            #            vy_dset[:,0] = fcoef_f['Vy'][:].reshape(-1, order='F')
 
-            else:
-                with h5py.File(temp_coeff_filename, 'a') as temp_f:
-                    f_dset = temp_f['coefficient']
-                    vx_dset = temp_f['Vx']
-                    vy_dset = temp_f['Vy']
-                    fcoef_file= f'{icesee_path}/{data_path}/ensemble_friction_{ens_id}.h5'
-                    with h5py.File(fcoef_file, 'r') as fcoef_f:
-                          f_dset[:,k] = fcoef_f['coefficient'][:].reshape(-1, order='F')
-                          vx_dset[:,k] = fcoef_f['Vx'][:].reshape(-1, order='F')
-                          vy_dset[:,k] = fcoef_f['Vy'][:].reshape(-1, order='F')
+            # else:
+            #     with h5py.File(temp_coeff_filename, 'a') as temp_f:
+            #         f_dset = temp_f['coefficient']
+            #         vx_dset = temp_f['Vx']
+            #         vy_dset = temp_f['Vy']
+            #         fcoef_file= f'{icesee_path}/{data_path}/ensemble_friction_{ens_id}.h5'
+            #         with h5py.File(fcoef_file, 'r') as fcoef_f:
+            #               f_dset[:,k] = fcoef_f['coefficient'][:].reshape(-1, order='F')
+            #               vx_dset[:,k] = fcoef_f['Vx'][:].reshape(-1, order='F')
+            #               vy_dset[:,k] = fcoef_f['Vy'][:].reshape(-1, order='F')
                        
         # else:
         #     # keep the original bed, coefficient (already extracted above)

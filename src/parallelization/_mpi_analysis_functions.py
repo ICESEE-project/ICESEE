@@ -90,8 +90,18 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
         # q0 = np.array(q0).T  # Convert to shape (nd, Nens)
         # q0 = q0 - np.mean(q0, axis=1).reshape(-1, 1)  # Ensure mean is zero
         # Eta = np.dot(H, q0)  # mxNens, ensemble perturbations
+        # print(f"[DEBUG] _eta before transpose: {np.array(_eta).shape} total_state_param_vars: {params['total_state_param_vars']} hdim: {hdim}\n")
         _eta= np.array(_eta).T  # Convert to shape (nd, Nens)
-        
+
+        if model_kwargs.get("inversion_flag", False):
+            _eta_invert = np.empty((ensemble_vec.shape[0], Nens))
+            for ii, key in enumerate(model_kwargs['vec_inputs']):
+                if ii not in model_kwargs['excluded_indices']:
+                    start = ii * hdim
+                    end = start + hdim
+                    _eta_invert[start:end, :] = _eta[start:end, :]
+            _eta = copy.deepcopy(_eta_invert)
+
         _eta -= np.mean(_eta, axis=1).reshape(-1, 1)  # Ensure mean is zero
         Eta = np.dot(H, _eta)  # mxNens, ensemble perturbations
         # o--->

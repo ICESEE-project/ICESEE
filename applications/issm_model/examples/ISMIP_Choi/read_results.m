@@ -15,9 +15,9 @@ data_file_paths = '_modelrun_datasets';
 
 % time steps
 % k_array = [10, 30, 50, 80,120];  % multiple time steps
-% k_array=[25, 45, 60, 80, 101, 137, 162];
+k_array=[25, 45, 60, 80, 101, 137, 270];
 % k_array=[30, 40, 80,160, 180];
-k_array=[20, 80,120, 160, 240, 350, 450];
+% k_array=[20, 80,120, 160, 240, 350, 450];
 % k_array=[1];
 dt = 0.2;
 global nvar;
@@ -740,14 +740,17 @@ function [md_true, md_nurged, md_ens] = setup_model_states(k, dt, model_true_sta
     Vy = ensemble_vec_mean(3*hdim+1:4*hdim, k);
     Vel = sqrt(Vx.^2 + Vy.^2);
     ens_bed = ensemble_vec_mean(4*hdim+1:5*hdim, k);
-    % ens_bed = ensemble_vec_mean(2*hdim+1:3*hdim, k);
-    % ens_fcoeff = ensemble_vec_mean(5*hdim+1:6*hdim, k);
+    ens_fcoeff = ensemble_vec_mean(5*hdim+1:6*hdim, k);
+
+
     % read friction from temp file
-    icesee_path='/Users/bkyanjo3/da_project/ICESEE/applications/issm_model/examples/ISMIP_Choi';
-    % data_path= '_modelrun_datasets';
-    global data_file_paths;
-    h5file = fullfile(icesee_path, data_file_paths, sprintf('temp_coefficient_%d.h5', 0));
-    ens_fcoeff = h5read(h5file, '/coefficient'); ens_fcoeff = ens_fcoeff(k,:)';
+    % icesee_path='/Users/bkyanjo3/da_project/ICESEE/applications/issm_model/examples/ISMIP_Choi';
+    % % data_path= '_modelrun_datasets';
+    % global data_file_paths;
+    % h5file = fullfile(icesee_path, data_file_paths, sprintf('temp_coefficient_%d.h5', 0));
+    % ens_fcoeff = h5read(h5file, '/coefficient'); ens_fcoeff = ens_fcoeff(k,:)';
+
+
     % Vx = h5read(h5file, '/Vx');
     % Vy = h5read(h5file, '/Vy');
     % Vx = Vx(k,:)'; Vx = Vx(k,:)';

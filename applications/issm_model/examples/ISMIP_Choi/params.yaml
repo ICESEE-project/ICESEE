@@ -39,9 +39,9 @@ enkf-parameters:
 
   # num_state_vars: 4             # State variables: ice thickness (H), velocities (u, v)
   num_state_vars: 4             # State variables: ice thickness (H), surface elevation (S)
-  num_param_vars: 1             # Parameter variables: friction coefficient (C), bed topography (B)
-  # vec_inputs: ['Thickness', 'Surface','Vx','Vy','bed','coefficient'] # State vector inputs (ice surface and velocities)
-  vec_inputs: ['Thickness', 'Surface','Vx','Vy','bed'] # State vector inputs (ice thickness, surface, velocities, bed topography)
+  num_param_vars: 2             # Parameter variables: friction coefficient (C), bed topography (B)
+  vec_inputs: ['Thickness', 'Surface','Vx','Vy','bed','coefficient'] # State vector inputs (ice surface and velocities)
+  # vec_inputs: ['Thickness', 'Surface','Vx','Vy','bed'] # State vector inputs (ice thickness, surface, velocities, bed topography)
   observed_vars: ['Surface','Vx', 'Vy']  # Observed variables (ice thickness, velocities, bed topography)
   # observed_vars: ['Surface']  # Observed variables (ice surface elevation)
   observed_params: ['bed']   # Parameters to estimate (friction coefficient, bed topography)
@@ -56,11 +56,11 @@ enkf-parameters:
   bed_obs_stride: 4000          # Spacing of bedrock elevation observations (30 km)
 
   # Statistical parameters
-  sig_obs: [0, 2.8, 3.0, 1.5, 1.5]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
-  sig_Q: [0.08, 0.08, 0.08, 0.01, 0.01]          # Process noise std dev (adjusted for H, Vx, Vy)
+  sig_obs: [0, 2.8, 3.0, 1.5, 1.5,0]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
+  sig_Q: [0.08, 0.08, 0.08, 0.01, 0.01,0.01]          # Process noise std dev (adjusted for H, Vx, Vy)
   # length_scale: [300,220,180,150,320,250]               # Length scale for covariance (5 km for friction, per paper)
   # length_scale: [212,218,213,205, 212]               # Length scale for covariance (5 km for bed topography, per paper)
-  length_scale: [95,94,95,90, 95] 
+  length_scale: [95,94,95,90, 95,95] 
 
   seed: 42                       # Seed for random number generator
   inflation_factor: 1.0       # Inflation factor (optimal range 1.10–1.18 from paper)
@@ -68,8 +68,8 @@ enkf-parameters:
   # Estimation flags
   joint_estimation: True       # Enable joint state and parameter estimation
   parameter_estimation: True    # Enable parameter estimation
-  # joint_estimated_params: ['bed', 'coefficient']  # parameters to be jointly estimated
-  joint_estimated_params: ['bed']  # parameters to be jointly estimated
+  joint_estimated_params: ['bed', 'coefficient']  # parameters to be jointly estimated
+  # joint_estimated_params: ['bed']  # parameters to be jointly estimated
 
   # Nudged parameters
   sill_friction: 10000      # Sill friction coefficient (90000 Pa s/m from paper)

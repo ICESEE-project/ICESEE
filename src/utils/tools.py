@@ -337,9 +337,12 @@ def icesee_get_index(vec=None, **kwargs):
         else:
             comm = kwargs.get("comm_world", None)
         
-        len_vec = params["total_state_param_vars"]
-        dim_list_param = np.array(kwargs.get('dim_list', None)) // len_vec
+        # len_vec = params["total_state_param_vars"]
+        len_vec = len(vec_inputs)
+        dim_list_param = np.array(kwargs.get('dim_list', None)) // len(kwargs.get('vec_inputs_old', None))
+        dim_list_param = dim_list_param[:len_vec]
         hdim = nd // len_vec
+        # print(f"[ICESEE-debug] len_vec: {len_vec}, dim_list_param: {dim_list_param}, hdim: {hdim}\n")
 
         if comm is None:
             rank = 0
