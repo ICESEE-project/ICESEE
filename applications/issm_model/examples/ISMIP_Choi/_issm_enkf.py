@@ -220,7 +220,8 @@ def generate_nurged_state(**kwargs):
     with h5py.File(bed_kriging_file, 'r') as f:
         bed_field = f['bed_ens'][...]
 
-    bed_field = np.mean(bed_field, axis=0)
+    # bed_field = np.mean(bed_field, axis=0)
+    bed_field = bed_field[0, :]
 
 
     # import netCDF4
@@ -240,7 +241,7 @@ def generate_nurged_state(**kwargs):
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
     with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
         # -- write the friction field
-        # f.create_dataset('coefficient', data=friction_field)
+        f.create_dataset('coefficient', data=friction_field)
         # -- write the bed field
         f.create_dataset('bed', data=bed_field)
 
@@ -408,7 +409,7 @@ def initialize_ensemble(ens, **kwargs):
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
     with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
         # -- write the friction field
-        # f.create_dataset('coefficient', data=friction_field)
+        f.create_dataset('coefficient', data=friction_field)
         # -- write the bed field
         f.create_dataset('bed', data=bed_field)
     #*-----------------------

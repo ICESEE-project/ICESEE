@@ -289,43 +289,6 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                 dset = f['ensemble']
                 ens_mean = f['ensemble_mean']
 
-                # hdim =  model_kwargs.get("nd", params['nd'])//len(model_kwargs.get("all_observed", []))
-
-                # open full ensemble dataset before analysis
-                # inversion_flag = model_kwargs.get("inversion_flag", False)
-                # if inversion_flag:
-                #     print(f"[ICESEE-debug] Rank {rank} performing analysis at time step ..."); exit(0)
-                #     with h5py.File(f'{model_kwargs.get("data_path")}/ensemble_before_analysis_step_{timestep:04d}.h5', 'r') as f_before:
-                #         data_before = f_before['ensemble_before_analysis']
-                #         model_module   = model_kwargs.get("model_module", None)
-                #         print('[ICESEE inversion] - running inverse step to get full state before analysis...')
-                        
-                #         vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
-                        
-                #         for ii, key in enumerate (model_kwargs.get("vec_inputs_new", [])):
-                #             # print('key:\n', key)
-                #             start = ii*hdim
-                #             end = start + hdim      
-                #             data_before[indx_map[key], :] = recvbuf[start:end, :]
-                #             # data_before[indx_map[key], :] = recvbuf[indx_map[key], :]
-                        
-                #         data = model_module.inverse_step_single(ensemble=data_before, **model_kwargs)
-                #         for key, value in data.items():
-                #             data_before[indx_map[key], :] = value
-
-                #         # Build global indices in correct full-state order
-                #         # obs_indices = np.concatenate([indx_map[key] for key in model_kwargs.get("all_observed", [])])
-
-                #         # # (nd_new, Nens) must match recvbuf
-                #         # data_before[obs_indices, :] = recvbuf.copy()
-
-
-                #     # Write gathered data
-                #     dset[:, :, timestep] = data_before
-                #     ens_mean[:, timestep] = np.mean(data_before, axis=1)
-                # else:
-                    # Write gathered data
-
                 # apply a relaxation factor to bed
                 vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
                 thickness_idx = 0; surface_idx = 0; bed_idx = 0

@@ -163,6 +163,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         time_generation_true_and_wrong_state = MPI.Wtime() - time_generation_true_and_wrong_state
 
         comm_world.Barrier()
+        # exit(0);
 
         # --- Generate the Synthetic ObservationsObservations ---------------------------------------------------
         # --- time generation of synthetic observations ---
