@@ -25,8 +25,8 @@ modeling-parameters:
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 50                      # Number of ensemble members (paper uses 50)
-  freq_obs: 4 #4                 # Frequency of observations (annual, as per paper)
-  obs_max_time: 44          # Maximum time for observations (30 years)
+  freq_obs: 2 #4                 # Frequency of observations (annual, as per paper)
+  obs_max_time: 20            # Maximum time for observations (30 years)
   obs_start_time: 0            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
@@ -52,7 +52,7 @@ enkf-parameters:
   inversion_flag: 1         # Enable inversion for friction coefficient
 
   # bed topography observations settings
-  bed_obs_snapshot: [0]        # Bedrock elevation observations at 30 years
+  bed_obs_snapshot: [0, 4, 8, 12, 16, 20 ]        # Bedrock elevation observations at 30 years
   bed_obs_stride: 4000          # Spacing of bedrock elevation observations (30 km)
 
   # Statistical parameters
@@ -60,7 +60,7 @@ enkf-parameters:
   sig_Q: [0.08, 0.05, 0.08, 0.01, 0.01,0.01]          # Process noise std dev (adjusted for H, Vx, Vy)
   # length_scale: [300,220,180,150,320,250]               # Length scale for covariance (5 km for friction, per paper)
   # length_scale: [212,218,213,205, 212]               # Length scale for covariance (5 km for bed topography, per paper)
-  length_scale: [88,85,90,85, 88,85]               # Length scale for covariance (2 km for bed topography, adjusted for resolution)
+  length_scale: [88,85,83,78, 88,75]               # Length scale for covariance (2 km for bed topography, adjusted for resolution)
 
   seed: 42                       # Seed for random number generator
   inflation_factor: 1.0       # Inflation factor (optimal range 1.10–1.18 from paper)
