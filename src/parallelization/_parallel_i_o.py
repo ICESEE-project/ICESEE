@@ -459,6 +459,9 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                     # ens_mean[:, timestep] = np.mean(data_before, axis=1)
                     del bed_prior, bed_now
                     gc.collect()
+                else:
+                    dset[:, :, timestep] = recvbuf
+                    ens_mean[:, timestep] = np.mean(recvbuf, axis=1)
 
                 if model_kwargs.get("DEnKF_flag", False):
                     ensemble_mean = np.mean(dset[:, :, timestep], axis=1)
