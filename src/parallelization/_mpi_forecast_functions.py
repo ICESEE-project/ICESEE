@@ -107,7 +107,7 @@ def parallel_forecast_step_default_run(**model_kwargs):
                 updated_state = model_module.forecast_step_single(ensemble=ensemble_vec,**model_kwargs)
 
                 #fetch the updated state
-                vecs, indx_map, dim_per_proc = icesee_get_index(ensemble_vec, **model_kwargs)
+                vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
                 for key,value in updated_state.items():
                     ensemble_vec[indx_map[key]] = value
 
@@ -167,6 +167,11 @@ def parallel_forecast_step_default_run(**model_kwargs):
                         noise_all.append(Z)
                 noise_ = np.concatenate(noise_all, axis=0)
                 ensemble_vec[:state_block_size] = ensemble_vec[:state_block_size] + noise_[:state_block_size]
+                # ensemble_vec[hdim:state_block_size] = ensemble_vec[hdim:state_block_size] + noise_[hdim:state_block_size]
+
+                # for ii, key in enumerate(model_kwargs['observed_vars']):
+                #         if ii < params["num_state_vars"]:
+                #             ensemble_vec[indx_map[key]] += noise_[indx_map[key]]
                 noise = np.concatenate(q0, axis=0)
                 model_kwargs.update({"noise": noise})  # save the noise to the model_kwargs dictionary
 
@@ -231,6 +236,9 @@ def parallel_forecast_step_default_run(**model_kwargs):
         if rank_world == 0:
             ensemble_vec = [arr for sublist in gathered_ensemble_global for arr in sublist if arr is not None]
             ensemble_vec = np.column_stack(ensemble_vec) 
+
+            # cap ensemble_vec to (nd,nens) dimensions
+            ensemble_vec = ensemble_vec[:, :Nens]
             
             # get the shape of the ensemble
             shape_ens = np.array(ensemble_vec.shape, dtype=np.int32)
@@ -362,7 +370,7 @@ def parallel_forecast_step_default_run(**model_kwargs):
     # --- compute the mean
     _time_forecast_ensemble_mean_generation = MPI.Wtime()
     ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], Nens, comm_world, root=0)
-    time_forecast_ensemble_generation += MPI.Wtime() - _time_forecast_ensemble_mean_generation
+    time_forecast_ensemble_mean_generation += MPI.Wtime() - _time_forecast_ensemble_mean_generation
 
     # update model_kwargs with timing variables and other parameters
     model_kwargs.update({
@@ -447,9 +455,11 @@ def parallel_forecast_step_default_full_parallel_run(**model_kwargs):
                 # Ensure all ranks in the subcommunicator are synchronized before running
                 subcomm.Barrier()
                 ens = ensemble_id
+                _local_time_forecast_file_writing_0 = MPI.Wtime()
                 # ---- read from file ----
                 ensemble_vec = enkf_parallel_io.read_forecast(k, ens)
                 # ---- end of read from file ----
+                time_forecast_file_writing_0 = MPI.Wtime() - _local_time_forecast_file_writing_0
 
                 # Call the forecast step function
                 # hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
@@ -525,8 +535,12 @@ def parallel_forecast_step_default_full_parallel_run(**model_kwargs):
                 del noise_all, q0, noise_, W
                 time_forecast_noise_generation += MPI.Wtime() - _time_forecast_noise_generation
 
+                #  time forecast file writing
+                _time_forecast_file_writing = MPI.Wtime()
                 # enkf_parallel_io.write_forecast(k + 1 if k < nt - 1 else k, ensemble_vec, ens)
+                # ensemble_vec_block = 
                 enkf_parallel_io.write_forecast(k + 1 if k < nt - 1 else k, ensemble_vec, ens)
+                time_forecast_file_writing += MPI.Wtime() - _time_forecast_file_writing + time_forecast_file_writing_0
 
                 shape_ens = np.array(ensemble_vec.shape, dtype=np.int32)
 
@@ -652,8 +666,14 @@ def parallel_forecast_step_default_full_parallel_run(**model_kwargs):
     # --- compute the mean
     _time_forecast_ensemble_mean_generation = MPI.Wtime()
     # enkf_parallel_io.compute_forecast_mean_chunked(k + 1 if k < nt - 1 else k)
-    enkf_parallel_io.compute_forecast_mean_chunked_v2(k + 1 if k < nt - 1 else k)
-    time_forecast_ensemble_generation += MPI.Wtime() - _time_forecast_ensemble_mean_generation
+     # only compute the mean only when we have to observe (sine we can gnerate the during post-processing)
+    km = model_kwargs.get("km", 0)
+    k = model_kwargs.get("k", 0)
+    tobserve = model_kwargs.get("tobserve")
+    m_obs = model_kwargs.get("m_obs", params["number_obs_instants"])
+    if (km < m_obs) and (k+1 == tobserve[km]):
+        enkf_parallel_io.compute_forecast_mean_chunked_v2(k + 1 if k < nt - 1 else k, flag='initial')
+    time_forecast_ensemble_mean_generation += MPI.Wtime() - _time_forecast_ensemble_mean_generation
 
     # update model_kwargs with timing variables and other parameters
     model_kwargs.update({

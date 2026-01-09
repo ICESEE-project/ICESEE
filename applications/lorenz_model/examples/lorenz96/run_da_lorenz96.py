@@ -22,18 +22,16 @@ from ICESEE.applications.lorenz_model.examples.lorenz96._lorenz96_model import i
 rank, size, comm, _ = ParallelManager().icesee_mpi_init(params)
 
 # --- Ensemble Parameters ---
-params.update({
-    "nt": int(float(modeling_params["num_years"])/float(modeling_params["dt"])),
-    "dt": float(modeling_params["dt"]),
-    "nd": int(float(enkf_params["num_state_vars"])),
-})
+params.update({"nt": int(float(modeling_params["num_years"])/float(modeling_params["dt"])),"nd": int(float(enkf_params["num_state_vars"]))})
 
 # --- model parameters ---
-kwargs.update({ "dt":params["dt"], "seed":float(enkf_params["seed"]),
-          "t":np.linspace(0, int(float(modeling_params["num_years"])), params["nt"] + 1), 
-          "u0True": np.array([1,1,1]), "u0b": np.array([2.0,3.0,4.0]), 
-          "sigma":float(physical_params["sigma"]), "beta":eval(physical_params["beta"]),
-          "rho":float(physical_params["rho"]),
+kwargs.update({ "nt": params["nt"],
+                "nd": params["nd"],
+                "dt": float(modeling_params["dt"]), "seed":float(enkf_params["seed"]),
+                "t":np.linspace(0, int(float(modeling_params["num_years"])), params["nt"] + 1), 
+                "u0True": np.array([1,1,1]), "u0b": np.array([2.0,3.0,4.0]), 
+                "sigma":float(physical_params["sigma"]), "beta":eval(physical_params["beta"]),
+                "rho":float(physical_params["rho"]),
 })
 
 

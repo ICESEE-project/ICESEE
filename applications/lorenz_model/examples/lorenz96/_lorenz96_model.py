@@ -29,9 +29,11 @@ def Lorenz96(state, **kwargs):
 
     x,y,z = state # Unpack the state vector
     f = np.zeros(3) # Create an empty vector to store the derivatives
+    # print(f"[Debug] State inside Lorenz96: x={x}, y={y}, z={z}")  # Debug print statement
     f[0] = sigma*(y-x)  
     f[1] = x*(rho-z)-y
     f[2] = x*y - beta*z
+    # print(f"[Debug] State inside Lorenz96: x={x}, y={y}, z={z} f={f}")  # Debug print statement
     return f
 
 # --- 4th order Runge-Kutta integrator --- 
@@ -59,7 +61,7 @@ def run_model(ensemble, **kwargs):
     """
 
     # call the icesee_get_index function to get the indices of the state variables
-    vecs, indx_map, dim_per_proc = icesee_get_index(ensemble, **kwargs)
+    vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
      
     # Call the RK4 function to push the state forward in time
     state = RK4(Lorenz96, ensemble, **kwargs)

@@ -38,19 +38,22 @@ enkf-parameters:
   num_state_vars: 3       # number of state variables  [h,u,v]
   num_param_vars: 1       # number of parameter variables [smb]
   vec_inputs: ['h','u','v','smb']
+  observed_vars: ['h','u','v']   #['h','u','v']
   observed_params: ['smb']  #['smb']
 
-  generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state:    1  # Generate true state for synthetic observations
-  generate_nurged_state:  1  # Generate nudged state for synthetic observations
+  generate_synthetic_obs: 0  # Generate synthetic observations for testing
+  generate_true_state:    0  # Generate true state for synthetic observations
+  generate_nurged_state:  0  # Generate nudged state for synthetic observations
+  initialize_ensemble: 1
   use_ensemble_pertubations: 1 # Use ensemble perturbations for ensemble state
+  initial_spread_factor: 1.25
   sequential_ensemble_initialization: 1  # Sequential ensemble initialization (True for sequential, False for parallel)
 
   # Statistical parameters (based on the number of state variables)
   sig_model: [0.1,0.1,0.1] # model error standard deviation
   sig_obs: [5,0.5,0.1,0.1]   # observation error standard deviation
   sig_Q: [0.8,0.4,0.01,0.08]    # process noise standard deviation
-  length_scale: [96,96,90,80] #[150, 150, 150, 150]   # length scale for the covariance matrix, can be a list
+  length_scale: [96,96,90,93] #[150, 150, 150, 150]   # length scale for the covariance matrix, can be a list
 
   Q_rho: 0.95 
 
@@ -80,3 +83,8 @@ enkf-parameters:
   execution_mode: 1                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
   data_path: _modelrun_datasets
  
+  # restart parameters (only suppoertd for fully parallel runs)
+  restart_enabled: 1        # Enable restart functionality
+  force_fresh_start: 1     # Force fresh start even if checkpoints exist
+  checkpoint_every: 5           # Frequency of checkpoints (every 5 assimilation cycles)
+  base_seed: 42 

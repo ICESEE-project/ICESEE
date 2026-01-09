@@ -12,6 +12,7 @@ import numpy as np
 import bigmpi4py as BM
 from scipy.stats import multivariate_normal, beta
 from mpi4py import MPI
+from ICESEE.src.utils.tools import icesee_get_index
 
 
 # def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_chunk, comm, model_kwargs, output_file="icesee_ensemble_data.h5"):
@@ -287,10 +288,179 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
             with h5py.File(output_file, 'a') as f:
                 dset = f['ensemble']
                 ens_mean = f['ensemble_mean']
-                
-                # Write gathered data
-                dset[:, :, timestep] = recvbuf
-                ens_mean[:, timestep] = ensemble_mean
+
+                # apply a relaxation factor to bed
+                vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                thickness_idx = 0; surface_idx = 0; bed_idx = 0
+                for ii, vec in enumerate(model_kwargs.get("vec_inputs", [])):
+                    # dumy variables to hold indices
+                    # thickness_idx = 0; surface_idx = 0; bed_idx = 0
+                    if vec.lower() in ["thickness","ice_thickness","h","Thickness"]:
+                        thickness_idx = indx_map[vec]
+                    # else:
+                    #     thickness_idx = 0
+                    if vec.lower() in ["surface","ice_surface","s","Surface"]:
+                        surface_idx = indx_map[vec]
+                    # else:
+                    #     surface_idx = 0
+                    if vec.lower() in ["bed","bedrock","base","bedtopography"]:
+                        bed_idx = indx_map[vec]
+                    # else:
+                    #     bed_idx = 0
+
+                for ii, vec in enumerate(model_kwargs.get("vec_inputs", [])):
+                    if vec.lower() in ["bed","bedrock","base","bedtopography"]:
+                        bed_prior = dset[indx_map[vec], :, timestep-1]
+                        bed_now = recvbuf[indx_map[vec], :]
+
+                        thickness = recvbuf[thickness_idx,:]
+                        di = 0.8930
+                        ocean_levelset = thickness + (recvbuf[bed_idx,:]/di)
+                        pos_bed = np.where(ocean_levelset > 0) # no floating ice
+
+                        # only update bed if observation is available
+                        # for bed_snaps in model_kwargs.get("bed_obs_snapshot", []):
+                        dt = model_kwargs.get("dt", params['dt'])
+                            # if timestep*dt == bed_snaps:
+                        t = timestep * dt
+                        for bed_snap in model_kwargs.get("bed_obs_snapshot", []):
+                            if np.isclose(t, bed_snap, rtol=0, atol=1e-12):
+                                do_bed_snap = True
+                                break
+                            else:
+                                do_bed_snap = False
+                        if do_bed_snap:
+                            # if True:
+                            # relaxation_factor = 0.05
+                            # relaxation_factor = (eta + beta_t)*dt + sqrt(dt)*sigma*rho*bed_error
+                            eta = 1.0
+                            rho = model_kwargs.get("rho", 1.0) 
+                            sigma = 1e-3
+                            X5 = model_kwargs.get("X5", None)
+                            beta_0 = 0.001 # initial bais
+                            # beta_k = beta_0 \prod_{i=1}^{Nens} (X5_i)
+                            beta_t = beta_0
+                            for i in range(X5.shape[0]):
+                                for j in range(X5.shape[0]):
+                                    beta_t *= X5[j,i]
+                            for i, sig in enumerate(params["sig_Q"]):
+                                if i == ii:
+                                    sigma = sig
+                            relaxation_factor = (eta+beta_t)*dt + np.sqrt(dt)*sigma*rho
+                            # put cap on relaxation factor to avoid instability 
+                            if relaxation_factor > 1.5:
+                                relaxation_factor = np.sqrt(dt)*sigma*rho
+                            relaxation_factor = min(relaxation_factor, 0.5)
+                            recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
+                            # bed anomaly
+                            # bed_now_mean = np.mean(bed_prior, axis=1)
+                            # anomaly = bed_now - bed_now_mean[:, np.newaxis]
+                            # recvbuf[indx_map[vec], :] = bed_now_mean[:, np.newaxis] + relaxation_factor * anomaly    
+                        else:
+                            # do_bed_snap = False
+                            relaxation_factor = 0.05 # damping factor
+                            recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
+                            # recvbuf[pos_bed, :] = bed_prior[pos_bed]
+
+                    # if vec.lower() in ["thickness","ice_thickness","h","Thickness"]:
+                    #     thickness_idx = indx_map[vec]
+                    # if vec.lower() in ["surface","ice_surface","s","Surface"]:
+                    #     surface_idx = indx_map[vec]
+                    # if vec.lower() in ["bed","bedrock","base","bedtopography"]:
+                    #     bed_idx = indx_map[vec]
+                    
+                # check for negative thickness
+                # ISSM *------
+                if model_kwargs.get("model_name", "").lower() == "issm":
+                    di = 0.8930
+                    rho_ice = 917.0
+                    rho_sw = 1028.0
+                    nd = model_kwargs.get("nd", params['nd'])
+                    ndim = nd // params["total_state_param_vars"]
+                    state_block_size = ndim*params["num_state_vars"]
+                    
+                    thickness = recvbuf[thickness_idx,:]
+                    surface = recvbuf[surface_idx,:]
+                    bed = recvbuf[bed_idx,:]
+
+                    pos = np.where(thickness < 1)
+                    thickness[pos] = 1.0
+                    ocean_levelset = thickness + (bed/di)
+                    # Floating ice (ocean_levelset < 0) find the indices
+                    pos = np.where(ocean_levelset < 0)
+                    surface[pos] = thickness[pos]* ((rho_sw - rho_ice)/rho_sw)
+                    # recvbuf[ndim:2*ndim,:] = surface
+                    recvbuf[surface_idx, :] = surface
+                    base = surface - thickness
+
+                    pos_base = np.where(base < bed)
+                    base[pos_base] = base[pos_base]
+
+                    # grounded ice
+                    pos_grounded = np.where(ocean_levelset > 0)
+                    base[pos_grounded] = bed[pos_grounded]
+
+                    # update surface, bed and thickness in recvbuf
+                    recvbuf[surface_idx, :] = base + thickness
+                    # recvbuf[state_block_size:5*ndim,:] = bed
+                    recvbuf[thickness_idx,:] = thickness
+                    # -------*ISSM
+                    del thickness, surface, bed, ocean_levelset, pos, base, pos_base, pos_grounded
+                    gc.collect()
+
+                    # get velcity and friction from inversion -------------
+                    # mean_now = np.mean(recvbuf, axis=1)
+                    if model_kwargs.get("inversion_flag", False):
+                        # update model_kwargs for inversion
+                        model_kwargs["vec_inputs"] = copy.deepcopy(model_kwargs.get("vec_inputs_old", []))
+                        model_kwargs["nd"] = model_kwargs.get("nd_old", None)
+                        vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                        with h5py.File(f'{model_kwargs.get("data_path")}/ensemble_before_analysis_step_{timestep:04d}.h5', 'a') as f_before:
+                            data_before = f_before['ensemble_before_analysis']
+                            data_before_arr = data_before[:, :].copy()
+
+                            hdim = data_before_arr.shape[0] // len(model_kwargs.get("vec_inputs", []))
+                        
+                            # update data_before with recvbuf
+                            for ii, key in enumerate (model_kwargs.get("vec_inputs_new", [])):
+                                # print('key:\n', key)
+                                start = ii*hdim
+                                end = start + hdim      
+                                data_before_arr[indx_map[key], :] = recvbuf[start:end, :]
+                                # data_before[indx_map[key], :] = recvbuf[indx_map[key], :]
+                            #TODO: test this part
+                            # recvbuf[:, :] =  dset[:, :, timestep-1]
+                            # recompute the mean_now after updating friction
+                            # mean_now = np.mean(recvbuf, axis=1)
+                            mean_now = np.mean(data_before_arr, axis=1)
+                            # call inverse step to get velocity fields, and new friction
+                            model_module   = model_kwargs.get("model_module", None)
+                            data = model_module.inverse_step_single(ensemble=mean_now, **model_kwargs)
+                            for key, value in data.items():
+                                # if key.lower() in ["vx","velocity_x","vel_x","v_x"]:
+                                #     anomaly = recvbuf[indx_map[key], :] - value[:, np.newaxis]
+                                #     velocity_x_prior = dset[indx_map[key], :, timestep-1]
+                                #     recvbuf[indx_map[key], :] = value[:, np.newaxis]
+                                # if key.lower() in ["vy","velocity_y","vel_y","v_y"]:
+                                #     velocity_y_prior = dset[indx_map[key], :, timestep-1]
+                                #     anomaly = recvbuf[indx_map[key], :] - value[:, np.newaxis]
+                                    # recvbuf[indx_map[key], :] = value[:, np.newaxis]
+                                if key.lower() in ["coefficient","friction","friction_coefficient", 'fcoef']:
+                                    data_before_arr[indx_map[key], :] = value[:, np.newaxis]
+                            del mean_now
+                            gc.collect()
+
+                        dset[:, :, timestep] = data_before_arr
+                        ens_mean[:, timestep] = np.mean(data_before_arr, axis=1)
+                    
+                    else:
+                        dset[:, :, timestep] = recvbuf
+                        ens_mean[:, timestep] = np.mean(recvbuf, axis=1)
+
+                # dset[:, :, timestep] = data_before
+                # ens_mean[:, timestep] = np.mean(data_before, axis=1)
+                del bed_prior, bed_now
+                gc.collect()
 
                 if model_kwargs.get("DEnKF_flag", False):
                     ensemble_mean = np.mean(dset[:, :, timestep], axis=1)
@@ -512,11 +682,12 @@ def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, model_kwargs
                 # Create dataset with total dimensions
                 dset = f.create_dataset('ensemble', (nd, Nens, model_kwargs.get('nt', params['nt']) + 1), dtype=dtype)
                 # Write full ensemble
-                dset[:, :, 0] = full_ensemble
+                dset[:, :, 0] = full_ensemble[:,:Nens]
 
                 # Create and write ensemble mean
                 ens_mean = f.create_dataset('ensemble_mean', (nd, model_kwargs.get('nt', params['nt']) + 1), dtype=dtype)
                 ens_mean[:, 0] = ensemble_mean
+                # ens_mean[:, 0] = full_ensemble[:, 0]
 
                 if model_kwargs.get("DEnKF_flag", False):
                     ensemble_mean = np.mean(dset[:, :, 0], axis=1)
@@ -525,7 +696,7 @@ def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, model_kwargs
             with h5py.File(output_file, 'a') as f:
                 dset = f['ensemble']
                 # Write full ensemble for current timestep
-                dset[:, :, timestep] = full_ensemble
+                dset[:, :, timestep] = full_ensemble[:,:Nens]
 
                 ens_mean = f['ensemble_mean']
                 ens_mean[:, timestep] = ensemble_mean
@@ -581,6 +752,7 @@ def parallel_write_full_ensemble_from_root_full_parallel_run(timestep, ensemble_
                     # Create and write ensemble mean
                     ens_mean = f.create_dataset('ensemble_mean', (nd, model_kwargs.get('nt', params['nt']) + 1), dtype=dtype)
                     ens_mean[:, 0] = ensemble_mean
+                    # ens_mean[:, 0] = full_ensemble[:, 0]
 
                     if model_kwargs.get("DEnKF_flag", False):
                         ensemble_mean = np.mean(dset[:, :, 0], axis=1)

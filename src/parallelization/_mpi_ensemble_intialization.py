@@ -9,9 +9,10 @@ import numpy as np
 import h5py
 import gc
 import zarr
+import os
 from mpi4py import MPI
 
-from ICESEE.src.utils.tools import icesee_get_index
+from ICESEE.src.utils.tools import icesee_get_index, env_flag
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
                               generate_pseudo_random_field_1d, \
@@ -46,6 +47,7 @@ def ensemble_initialization(**model_kwargs):
     subcomm_size_min   = model_kwargs.get("subcomm_size_min", 1)
     rng           = model_kwargs.get("rng", np.random.default_rng())
     rank_seed = model_kwargs.get("rank_seed", 0)
+    alpha = model_kwargs.get("initial_spread_factor")
 
 
     sub_rank  = subcomm.Get_rank()
@@ -53,6 +55,8 @@ def ensemble_initialization(**model_kwargs):
     size_world = comm_world.Get_size()
 
     time_init_noise_generation = 0.0
+    time_init_file_writing     = 0.0
+    time_init_ensemble_mean_computation = 0.0
 
     if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
         if params["default_run"] and size_world <= params["Nens"] and not (model_kwargs.get("sequential_ensemble_initialization", False)):
@@ -67,7 +71,7 @@ def ensemble_initialization(**model_kwargs):
             model_kwargs.update({"statevec_ens":np.zeros([params["nd"], params["Nens"]])})
 
             # get the ensemble matrix   
-            vecs, indx_map, dim_per_proc = icesee_get_index(model_kwargs["statevec_ens"], **model_kwargs)
+            vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
             ensemble_vec = np.zeros_like(model_kwargs["statevec_ens"])
 
             if model_kwargs["joint_estimation"] or params["localization_flag"]:
@@ -101,7 +105,7 @@ def ensemble_initialization(**model_kwargs):
                     # noise = generate_enkf_field(**model_kwargs)
                     noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
-                    ensemble_vec[:, ens] += noise
+                    ensemble_vec[:, ens] += alpha*noise
 
                     # for ii, sig in enumerate(params["sig_Q"]):
                     #     if ii <=params["num_state_vars"]:
@@ -109,9 +113,15 @@ def ensemble_initialization(**model_kwargs):
                     #         end_idx = start_idx + hdim
                     #         # make sure the noise has zero mean
                     #         noise[start_idx:end_idx] *=sig
-                    #         noise[start_idx:end_idx] -= np.mean(noise[start_idx:end_idx])
-                    #         inflated_noise = noise[start_idx:end_idx] / np.max(np.abs(noise[start_idx:end_idx]))
-                    #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] + inflated_noise
+                    # #         noise[start_idx:end_idx] -= np.mean(noise[start_idx:end_idx])
+                    # #         inflated_noise = noise[start_idx:end_idx] / np.max(np.abs(noise[start_idx:end_idx]))
+                    #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx]
+
+                    # for ii, sig in enumerate(params["sig_Q"]):
+                    #     # if ii <=params["num_state_vars"]:
+                    #     start_idx = ii * hdim
+                    #     end_idx = start_idx + hdim
+                    #     ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
 
                     del noise  # Free memory immediately
 
@@ -193,7 +203,23 @@ def ensemble_initialization(**model_kwargs):
                     # noise = generate_enkf_field(**model_kwargs)
                     noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
-                    ensemble_vec[:,ens] += noise
+
+                    # lets inflate the noise to increase the spread
+                    model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
+                    # exclude bed variables from observed variables
+                    all_observed = model_kwargs['observed_vars_params']
+                    model_kwargs['all_observed'] = all_observed; params['all_observed'] = all_observed
+                    nd_new = len(all_observed) * hdim
+                    model_kwargs['nd_observed'] = nd_new
+                    # for ii, key in enumerate(all_observed):
+                    #     # if ii < params["num_state_vars"]:
+                    #     ensemble_vec[indx_map[key], ens] += alpha * noise[indx_map[key]]
+                        # if ii < params["num_state_vars"]:
+                        #     start_idx = ii * hdim
+                        #     end_idx = start_idx + hdim
+                        #     ensemble_vec[start_idx:end_idx, ens] += alpha * noise[start_idx:end_idx]
+                            
+                    ensemble_vec[:,ens] += alpha*noise
                     # for ii, sig in enumerate(params["sig_Q"]):
                     #     if ii <=params["num_state_vars"]:
                     #         start_idx = ii * hdim
@@ -216,7 +242,10 @@ def ensemble_initialization(**model_kwargs):
             if diff >= 0:
                 # split the diff amaongest all processors
                 min_model_nprocs = max(model_nprocs-1, 1) 
-                model_nprocs = max(min_model_nprocs, model_nprocs + (diff // size_world))
+                if model_kwargs.get('ICESEE_PERFORMANCE_TEST') or env_flag("ICESEE_PERFORMANCE_TEST", default=False):
+                    model_nprocs = model_nprocs
+                else:
+                    model_nprocs = max(min_model_nprocs, model_nprocs + (diff // size_world))
             else:
                 model_nprocs = model_nprocs
 
@@ -238,14 +267,14 @@ def ensemble_initialization(**model_kwargs):
             # write the ensemble to the file
 
             # -- time ensemble mean computation ---
-            time_init_ensemble_mean_computation = MPI.Wtime()
+            _time_init_ensemble_mean_computation = MPI.Wtime()
             ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
-            time_init_ensemble_mean_computation = MPI.Wtime() - time_init_ensemble_mean_computation
+            time_init_ensemble_mean_computation += MPI.Wtime() - _time_init_ensemble_mean_computation
 
             # ---time file writing ---
-            time_init_file_writing = MPI.Wtime()
+            _time_init_file_writing = MPI.Wtime()
             parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
-            time_init_file_writing = MPI.Wtime() - time_init_file_writing
+            time_init_file_writing += MPI.Wtime() - _time_init_file_writing
 
         # comm_world.Bcast(ensemble_vec, root=0)
         # hdim = params["nd"] // params["total_state_param_vars"]
@@ -343,9 +372,9 @@ def ensemble_initialization(**model_kwargs):
             ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
             time_init_ensemble_mean_computation = MPI.Wtime() - time_init_ensemble_mean_computation
 
-            time_init_file_writing = MPI.Wtime()
+            _time_init_file_writing = MPI.Wtime()
             parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
-            time_init_file_writing = MPI.Wtime() - time_init_file_writing
+            time_init_file_writing += MPI.Wtime() - _time_init_file_writing
             
         elif params["sequential_run"]:
             comm_world.Barrier()
@@ -420,12 +449,15 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
     rank_seed = model_kwargs.get("rank_seed", 0)
     data_path = model_kwargs.get("data_path", "_modeldatasets")
     enkf_parallel_io = model_kwargs.get("enkf_parallel_io", None)
+    alpha       = model_kwargs.get("initial_spread_factor")
 
     sub_rank     = subcomm.Get_rank()
     rank_world   = comm_world.Get_rank()
     size_world   = comm_world.Get_size()
 
     time_init_noise_generation = 0.0
+    time_init_file_writing     = 0.0
+    time_init_ensemble_mean_computation = 0.0
 
     if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
         if params["default_run"] and size_world <= params["Nens"] and not (model_kwargs.get("sequential_ensemble_initialization", False)):
@@ -477,10 +509,12 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
                     noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
                     # ensemble_vec[:,ens] += noise
-                    ensemble_vec += noise
-
+                    ensemble_vec += alpha*noise
+                      
+                    _time_init_file_writing = MPI.Wtime()    
                     enkf_parallel_io.write_forecast(0, ensemble_vec, ensemble_id)
                     # enkf_parallel_io.datasets[0][:, ens] = ensemble_vec
+                    time_init_file_writing += MPI.Wtime() - _time_init_file_writing
          
         else:
             if rank_world == 0:
@@ -529,7 +563,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
                     # noise = generate_enkf_field(**model_kwargs)
                     noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
-                    ensemble_vec[:,ens] += noise
+                    ensemble_vec[:,ens] += alpha*noise
                     # for ii, sig in enumerate(params["sig_Q"]):
                     #     if ii <=params["num_state_vars"]:
                     #         start_idx = ii * hdim
@@ -549,6 +583,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
                 shape_ens = np.empty(2,dtype=np.int32)
                 # pos, gs_model, L_C
 
+            _time_init_file_writing = MPI.Wtime()    
             # scatter  enkf_parallel_io.nd_local_world of the ensemble to all processors
             localshape = enkf_parallel_io.nd_local_world
             all_local_shapes = comm_world.gather(localshape)
@@ -564,12 +599,15 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
             local_ensemble = np.empty((localshape, params["Nens"]), dtype=np.float64)
             comm_world.Scatterv([ensemble_vec, counts_rows, displacement_rows, MPI.DOUBLE], local_ensemble, root=0)
             enkf_parallel_io.datasets[0][localshape, :] = local_ensemble
+            time_init_file_writing += MPI.Wtime() - _time_init_file_writing
 
         comm_world.Barrier()
-        time_init_ensemble_mean_computation = MPI.Wtime()
+        _time_init_ensemble_mean_computation = MPI.Wtime()
         # enkf_parallel_io.compute_forecast_mean_chunked(0)
-        enkf_parallel_io.compute_forecast_mean_chunked_v2(0)
-        time_init_ensemble_mean_computation = MPI.Wtime() - time_init_ensemble_mean_computation
+        enkf_parallel_io.compute_forecast_mean_chunked_v2(k=0,flag="initial")
+        # ens_mean = enkf_parallel_io.compute_forecast_mean(0)
+        # ens_mean = .datasets[0][:, :].mean(axis=1)
+        time_init_ensemble_mean_computation += MPI.Wtime() - _time_init_ensemble_mean_computation
 
         # now reset the model_nprocs
         if rank_world == 0:
@@ -577,7 +615,10 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
             if diff >= 0:
                 # split the diff amaongest all processors
                 min_model_nprocs = max(model_nprocs-1, 1) 
-                model_nprocs = max(min_model_nprocs, model_nprocs + (diff // size_world))
+                if model_kwargs.get('ICESEE_PERFORMANCE_TEST') or env_flag("ICESEE_PERFORMANCE_TEST", default=False):
+                    model_nprocs = params.get("model_nprocs", 1)
+                else:
+                    model_nprocs = max(min_model_nprocs, model_nprocs + (diff // size_world))
             else:
                 model_nprocs = model_nprocs
 
@@ -638,7 +679,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
                         time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
                         # initial_data[key][:state_block_size] += noise[:state_block_size]
                         # noise = noise / np.max(np.abs(noise))
-                        initial_data[key] += noise
+                        initial_data[key] += alpha*noise
                     else:
                         N_size = params["total_state_param_vars"] * hdim
                         _time_init_noise_generation = MPI.Wtime()
@@ -674,11 +715,11 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
             
             time_init_ensemble_mean_computation = MPI.Wtime()
             ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
-            time_init_ensemble_mean_computation = MPI.Wtime() - time_init_ensemble_mean_computation
+            time_init_ensemble_mean_computation += MPI.Wtime() - _time_init_ensemble_mean_computation
 
-            time_init_file_writing = MPI.Wtime()
+            _time_init_file_writing = MPI.Wtime()
             parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
-            time_init_file_writing = MPI.Wtime() - time_init_file_writing
+            time_init_file_writing += MPI.Wtime() - _time_init_file_writing
             
         elif params["sequential_run"]:
             comm_world.Barrier()
@@ -718,7 +759,7 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
 
     if params.get("default_run", False):
         return model_kwargs, None, time_init_noise_generation, \
-               time_init_ensemble_mean_computation, None, \
+               time_init_ensemble_mean_computation,time_init_file_writing, \
                 None, None, None, None
     else:
         return model_kwargs, ensemble_vec, time_init_noise_generation, \

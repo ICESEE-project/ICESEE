@@ -145,7 +145,7 @@ if not flag_jupyter:
 
     # --- Ensemble Parameters ---
     params.update({
-        'nt': int(float(modeling_params['num_years'])) * int(float(modeling_params['timesteps_per_year'])), # number of time steps
+        'nt': int(float(modeling_params['num_years']) * float(modeling_params['timesteps_per_year'])), # number of time steps
         'dt': 1.0 / float(modeling_params['timesteps_per_year']),
         'num_state_vars': int(float(enkf_params.get('num_state_vars', 1))),
         'num_param_vars': int(float(enkf_params.get('num_param_vars', 0))),
@@ -162,13 +162,14 @@ if not flag_jupyter:
         'use_random_fields': bool(enkf_params.get('use_random_fields', False)),
         'execution_mode'   : int(enkf_params.get('execution_mode', 1)),  # 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
         'serial_file_creation': bool(enkf_params.get('serial_file_creation', True)),
-        'batch_size': int(enkf_params.get('batch_size', 50)),
         'chunk_size': int(enkf_params.get('chunk_size', 5000)),
         'joint_estimated_params': enkf_params.get('joint_estimated_params', []),
         'coupled_model_datasets_dir': enkf_params.get('coupled_model_datasets', 'data'),
         'vec_inputs': enkf_params['vec_inputs'],
+        'collective_threshold': int(enkf_params.get('collective_threshold', 16)), # threshold for switching to collective I/O
+        'batch_size': int(enkf_params.get('batch_size', 1)), # number of time steps to process in each batch
     })
-
+    
     # --- incase CL args not provided ---
     if Nens == 1:
         params['Nens'] = int(float(enkf_params.get('Nens', 1)))
@@ -177,7 +178,7 @@ if not flag_jupyter:
         params['data_path'] = enkf_params.get('data_path', '_modelrun_datasets')
 
     if model_nprocs == 0:
-        params['model_nprocs'] = enkf_params.get('model_nprocs', 1) 
+        params['model_nprocs'] = enkf_params.get('model_nprocs', 0) 
     
     if run_flag:
         execution_flag = params.get('execution_flag')
@@ -245,7 +246,29 @@ if not flag_jupyter:
         'sequential_ensemble_initialization': enkf_params.get('sequential_ensemble_initialization', False),
         'observations_available': enkf_params.get('observations_available', False),
         'obs_data_path': enkf_params.get('obs_data_path', params.get('coupled_model_datasets_dir', 'data') + '/observations_data.h5'),
+        'create_ensemble_dataset': enkf_params.get('create_ensemble_dataset', True),
+        'restart_enabled': enkf_params.get('restart_enabled', True),
+        'force_fresh_start': enkf_params.get('force_fresh_start', False),
+        'checkpoint_every': int(enkf_params.get('checkpoint_every', 1)),
+        'base_seed': int(enkf_params.get('base_seed', 42)),
+        'k_start_override': enkf_params.get('k_start_override', None),
+        'ICESEE_PERFORMANCE_TEST': bool(enkf_params.get('ICESEE_PERFORMANCE_TEST', False)), # this is an environment variable
+        'h5_file_compression': enkf_params.get('h5_file_compression', None), # e.g., 'gzip' or 'lzf' or 'szip' or None
+        'h5_file_compression_level': int(enkf_params.get('h5_file_compression_level', 4)), # 0-9 for gzip, 1-9 for szip, ignored for lzf and None
+        'h5_file_chunk_size': int(enkf_params.get('h5_file_chunk_size', 1000)),
+        'bed_obs_snapshot':enkf_params.get('bed_obs_snapshot', []),# list of time snapshots to observe bed variables
+        'bed_obs_stride':enkf_params.get('bed_obs_stride',None ), # spatial stride in km for bed observations
+        'bed_obs_spacing':enkf_params.get('bed_obs_spacing', None), # observation spacing every n grid points {int}
+        'bed_obs_indices':enkf_params.get('bed_obs_indices', None), # specific indices to observe {list} (bed subvector indices)
+        'bed_obs_mask':enkf_params.get('bed_obs_mask', None), # boolean mask array for bed observations {np.array}
+        'initialize_ensemble':enkf_params.get('initialize_ensemble', True),
+        'initial_spread_factor': enkf_params.get('initial_spread_factor', 1.0),
+        'observed_vars': enkf_params.get('observed_vars', []),
+        'vel_idx': int(float(enkf_params.get('vel_idx', 2))),
+        'inversion_flag': enkf_params.get('inversion_flag', False),
+        'friction_idx': int(float(enkf_params.get('friction_idx', 5))),
     }
+
 
     # # update kwargs dictonary with params
     kwargs.update({'physical_params': physical_params})

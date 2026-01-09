@@ -15,6 +15,7 @@ import h5py
 import numpy as np
 from mpi4py import MPI
 import os
+import re
 import glob
 import gc
 import zarr
@@ -24,6 +25,7 @@ import shutil
 from numcodecs import blosc
 import time
 import functools
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 blosc.use_threads = False
 
@@ -73,7 +75,9 @@ def retry_on_failure(
     return decorator
 
 class EnKF_fully_parallel_IO:
-    def __init__(self, file_prefix, nd, nens, nt, subcomm, mpi_comm, params, serial_file_creation=False, base_path="enkf_data", batch_size=50):
+    def __init__(self, file_prefix, nd, nens, nt, subcomm, mpi_comm, params, \
+                 serial_file_creation=False, base_path="enkf_data", batch_size=50,\
+                 h5_file_compression=None, h5_file_compression_level=4, h5_file_chunk_size=1000):
         try:
             self.nd = nd
             self.nens = nens
@@ -88,30 +92,13 @@ class EnKF_fully_parallel_IO:
             self.size = self.comm.Get_size() if nens >= mpi_comm.Get_size() else mpi_comm.Get_size()
             self.subcomm = subcomm
             self.serial_file_creation = serial_file_creation
+            self.h5_file_compression = h5_file_compression
+            self.h5_file_compression_level = h5_file_compression_level
+            self.h5_file_chunk_size = h5_file_chunk_size
 
-            # # Divide nd among ranks
-            # nd_local_base = nd // self.size
-            # remainder = nd % self.size
-            # if self.rank < remainder:
-            #     self.nd_local = nd_local_base + 1
-            #     self.nd_start = self.rank * (nd_local_base + 1)
-            # else:
-            #     self.nd_local = nd_local_base
-            #     self.nd_start = remainder * (nd_local_base + 1) + (self.rank - remainder) * nd_local_base
-            # self.nd_end = self.nd_start + self.nd_local
-
-            # # foranalysis lets use mpi_com
-            # size_world = mpi_comm.Get_size()
-            # rank_world = mpi_comm.Get_rank()
-            # nd_local_base_world = nd // size_world
-            # remainder_world = nd % size_world
-            # if rank_world < remainder_world:
-            #     self.nd_local_world = nd_local_base_world + 1
-            #     self.nd_start_world = rank_world * (nd_local_base_world + 1)
-            # else:
-            #     self.nd_local_world = nd_local_base_world
-            #     self.nd_start_world = remainder_world * (nd_local_base_world + 1) + (rank_world - remainder_world) * nd_local_base_world
-            # self.nd_end_world = self.nd_start_world + self.nd_local_world
+            # collective I/O threshold (32 is a reasonable default for many systems)
+            self.collective_threshold = int(params.get("collective_threshold", 16))
+            self.use_collective_io = (self.mpi_comm.Get_size() >= self.collective_threshold)
 
             def partition_1d(n, size, rank):
                 q, r = divmod(n, size)
@@ -154,6 +141,16 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
+    def _create_file_collective(self, fname):
+        import h5py, h5py.h5p as h5p, h5py.h5f as h5f, h5py.h5fd as h5fd
+        fapl = h5p.create(h5p.FILE_ACCESS)
+        fapl.set_fapl_mpio(self.comm, MPI.Info.Create())
+        # collective metadata flags
+        fapl.set_all_coll_metadata_ops(1)
+        fapl.set_coll_metadata_write(1)
+        fid = h5f.create(bytes(fname, 'utf-8'), flags=h5f.ACC_TRUNC, fapl=fapl)
+        return h5py.File(fid)
+
     def _create_batch_serial(self, t_start):
         try:
             start = MPI.Wtime()
@@ -161,31 +158,38 @@ class EnKF_fully_parallel_IO:
             self.files = []
             self.datasets = []
             self.current_batch_start = t_start
-            nfiles = min(self.batch_size, self.nt - t_start)
+            # nfiles = min(self.batch_size, self.nt - t_start)
+            # --- PATCH: create at least one file and clamp to nt ---
+            remaining = max(0, self.nt - t_start)
+            if remaining == 0:
+                print(f"[Rank {self.rank}] WARNING: no files to create (t_start={t_start}, nt={self.nt})")
+                return
+            
+            nfiles = min(self.batch_size, remaining)
+            t_end = t_start + nfiles
+            print(f"[Rank {self.rank}] Creating batch from {t_start} to {t_end - 1} ({nfiles} files, nt={self.nt})")
 
             if MPI.COMM_WORLD.Get_rank() == 0:
                 for t in range(t_start, t_start + nfiles):
-                    fname = f"{self.base_path}/{self.file_prefix}_{t:04d}.h5"
+                    fname = f"{self.base_path}/{self.file_prefix}_ens_{t:04d}.h5"
                     with h5py.File(fname, 'w') as f:
-                        row_chunk = min(1024, self.nd)
+                        # row_chunk = min(1024, self.nd)
+                        row_chunk = self.nd_local_world
+                        # col_chunk = min(32, self.nens)
                         col_chunk = 1
                         f.create_dataset(
                             'states', (self.nd, self.nens),
                             chunks=(row_chunk, col_chunk),
                             # compression="gzip", compression_opts=4,
-                            compression="lzf",
+                            # compression="lzf",
+                            compression=None,
                             dtype='f8'
                         )
-                        # f.create_dataset(
-                        #     'states', (self.nd, self.nens),
-                        #     chunks=(row_chunk, col_chunk),
-                        #     dtype='f8'
-                        # )
                         
             self.mpi_comm.Barrier()
 
             for t in range(t_start, t_start + nfiles):
-                fname = f"{self.base_path}/{self.file_prefix}_{t:04d}.h5"
+                fname = f"{self.base_path}/{self.file_prefix}_ens_{t:04d}.h5"
                 f = h5py.File(fname, 'a', driver='mpio', comm=self.comm)
                 # f = h5py.File(fname, 'a', driver='mpio', comm=self.mpi_comm)
                 f.atomic = False
@@ -211,13 +215,16 @@ class EnKF_fully_parallel_IO:
                 f = h5py.File(fname, 'w', driver='mpio', comm=self.comm)
                 # f = h5py.File(fname, 'w', driver='mpio', comm=self.mpi_comm)
                 f.atomic = False
-                row_chunk = min(1024, self.nd)
+                # row_chunk = min(1024, self.nd)
+                row_chunk = self.nd_local_world
+                # col_chunk = min(32, self.nens)
                 col_chunk = 1
                 dset = f.create_dataset(
                     'states', (self.nd, self.nens),
                     chunks=(row_chunk, col_chunk),
                     # compression="gzip", compression_opts=4,
-                    compression="lzf",
+                    # compression="lzf",
+                    compression=None,
                     dtype='f8'
                 )
                 self.files.append(f)
@@ -227,6 +234,13 @@ class EnKF_fully_parallel_IO:
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
+    
+    def _make_dxpl(self):
+        import h5py.h5p as h5p, h5py.h5fd as h5fd
+        dxpl = h5p.create(h5p.DATASET_XFER)
+        mode = h5fd.MPIO_COLLECTIVE if self.use_collective_io else h5fd.MPIO_INDEPENDENT
+        dxpl.set_dxpl_mpio(mode)
+        return dxpl
 
     @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD)  # Reduce retries/delays for efficiency
     def _create_batch(self, t_start):
@@ -256,10 +270,10 @@ class EnKF_fully_parallel_IO:
     def _close_batch(self):
         try:
             for f in self.files:
-                try:
-                    f.flush()
-                except Exception:
-                    pass
+                # try:
+                #     f.flush()
+                # except Exception:
+                #     pass
                 f.close()
             self.files = []
             self.datasets = []
@@ -284,249 +298,67 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def write_IC(self, t, ens_idx):
-        try:
-            self._ensure_batch(t)
-            batch_idx = 0 # t = 0 first_batch
-            start = MPI.Wtime()
-            data = self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx]
-            read_time = MPI.Wtime() - start
-            return data
-        except Exception as e:
-            print(f"Error occurred in read_forecast: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
+    def _rw_select(self, ds, start_row, nrows, col0, ncols, buf=None, write=False):
+        import numpy as np, h5py.h5s as h5s
+        file_space = ds.id.get_space()
+        file_space.select_hyperslab((start_row, col0), (nrows, ncols))
+        mem_shape = (nrows,) if ncols == 1 else (nrows, ncols)
+        mem_space = h5s.create_simple(mem_shape)
+        dxpl = self._make_dxpl()
+        if write:
+            ds.id.write(mem_space, file_space, np.ascontiguousarray(buf), dxpl=dxpl)
+        else:
+            out = np.empty(mem_shape, dtype='f8', order='C')
+            ds.id.read(mem_space, file_space, out, dxpl=dxpl)
+            return out
 
-    def _flush_and_world_barrier(self, t):
-        """
-        Flush the file containing time index t and then synchronize all ranks
-        in the WORLD communicator so that subsequent readers see all writes.
-        """
-        try:
-            self._ensure_batch(t)
-            batch_idx = t - self.current_batch_start
-
-            # Flush file metadata & data to storage.
-            # (h5py flushes the file; dataset-level flush is not exposed.)
-            if 0 <= batch_idx < len(self.files):
-                self.files[batch_idx].flush()
-
-            # IMPORTANT: use the WORLD / parent communicator so disjoint
-            # subcomms also synchronize before any reader proceeds.
-            self.mpi_comm.Barrier()
-        except Exception as e:
-            print(f"Error in _flush_and_world_barrier: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
-
+    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD) 
     def read_forecast(self, t, ens_idx):
-        try:
-            self._ensure_batch(t)
-            batch_idx = t - self.current_batch_start
-            start = MPI.Wtime()
-            data = self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx]
-            # print(f"[ICESEE] Finished reading forecast ensemble {ens_idx} ensemble shape: {data.shape} norm {np.linalg.norm(data)}")
-            read_time = MPI.Wtime() - start
-            return data
-        except Exception as e:
-            print(f"Error occurred in read_forecast: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
+        self._ensure_batch(t)
+        batch_idx = t - self.current_batch_start
+        start = MPI.Wtime()
+        data = self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx]
+        # data = self._rw_select(self.datasets[batch_idx],
+        #                self.nd_start, self.nd_local, ens_idx, 1, write=False).reshape(-1)
 
+        return data
+       
+
+    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD) 
     def write_forecast(self, t, data, ens_idx):
-        try:
-            self._ensure_batch(t)
-            batch_idx = t - self.current_batch_start
-            start = MPI.Wtime()
-            self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx] = data
-            self.files[batch_idx].flush()  # Ensure data is written to disk
-            write_time = MPI.Wtime() - start
-        except Exception as e:
-            print(f"Error occurred in write_forecast: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
+        self._ensure_batch(t)
+        batch_idx = t - self.current_batch_start
+        ds = self.datasets[batch_idx]
+        ds[self.nd_start:self.nd_end, ens_idx] = data
+        # self._rw_select(self.datasets[batch_idx],
+        #         self.nd_start, self.nd_local, ens_idx, 1, buf=data, write=True)
 
+    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD) 
     def read_analysis(self, t, ens_idx):
-        try:
-            self._ensure_batch(t)
-            batch_idx = t - self.current_batch_start
-            start = MPI.Wtime()
-            data = self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx]
-            # print(f"[ICESEE] Finished reading analysisensemble {ens_idx} ensemble shape: {data.shape} norm {np.linalg.norm(data)}")
-            read_time = MPI.Wtime() - start
-            return data
-        except Exception as e:
-            print(f"Error occurred in read_analysis: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
+        # try:
+        self._ensure_batch(t)
+        batch_idx = t - self.current_batch_start
+        start = MPI.Wtime()
+        data = self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx]
+        # data = self._rw_select(self.datasets[batch_idx],
+        #                self.nd_start_world, self.nd_local_world, ens_idx, 1, write=False).reshape(-1)
+        # print(f"[ICESEE] Finished reading analysisensemble {ens_idx} ensemble shape: {data.shape} norm {np.linalg.norm(data)}")
+        read_time = MPI.Wtime() - start
+        return data
+       
 
+    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD) 
     def write_analysis(self, t, data, ens_idx):
-        try:
-            self._ensure_batch(t)
-            batch_idx = t - self.current_batch_start
-            start = MPI.Wtime()
-            # self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx] = data
-            self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx] = data
-            self.files[batch_idx].flush()  # Ensure data is written to disk
-            write_time = MPI.Wtime() - start
-        except Exception as e:
-            print(f"Error occurred in write_analysis: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
-
-    def write_matrix(self, t, dataset_name, data, ens_idx):
-        try:
-            self._ensure_batch(t)
-            batch_idx = t - self.current_batch_start
-            start = MPI.Wtime()
-            self.files[batch_idx][dataset_name][self.nd_start:self.nd_end, ens_idx] = data
-            write_time = MPI.Wtime() - start
-        except Exception as e:
-            print(f"Error occurred in write_matrix: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
-
-    def read_matrix(self, t, dataset_name, ens_idx):
-        try:
-            self._ensure_batch(t)
-            batch_idx = t - self.current_batch_start
-            start = MPI.Wtime()
-            data = self.files[batch_idx][dataset_name][self.nd_start:self.nd_end, ens_idx]
-            read_time = MPI.Wtime() - start
-            return data
-        except Exception as e:
-            print(f"Error occurred in read_matrix: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
-
-    def gather_matrix(self, t, dataset_name):
-        try:
-            self._ensure_batch(t)
-            batch_idx = t - self.current_batch_start
-            start = MPI.Wtime()
-            local_data = self.files[batch_idx][dataset_name][self.nd_start:self.nd_end, :]
-            counts = self.mpi_comm.allgather(self.nd_local)
-            displacements = self.mpi_comm.allgather(self.nd_start)
-            global_data = np.zeros((self.nd, self.nens), dtype='f8')
-            self.mpi_comm.Allgatherv(local_data, [global_data, counts, displacements, MPI.DOUBLE])
-            gather_time = MPI.Wtime() - start
-            return global_data
-        except Exception as e:
-            print(f"Error occurred in gather_matrix: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
-
-    def compute_forecast_mean(self, t):
-        try:
-            self._ensure_batch(t)
-            comm = self.mpi_comm
-            rank = comm.Get_rank()
-            size = comm.Get_size()
-
-            batch_idx = t - self.current_batch_start
-            start = MPI.Wtime()
-
-            self.mpi_comm.barrier()
-            local_data = self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, :]
-            local_mean = np.mean(local_data, axis=1).astype('f8', copy=False)
-
-            local_row_count = np.array([local_mean.shape[0]], dtype='i8')
-            global_row_counts = np.zeros(size, dtype='i8') if rank == 0 else None
-            comm.Gather(local_row_count, global_row_counts, root=0)
-
-            if rank == 0:
-                displacements = np.zeros(size, dtype='i8')
-                displacements[1:] = np.cumsum(global_row_counts[:-1])
-                total_rows = np.sum(global_row_counts)
-                global_mean = np.zeros(total_rows, dtype='f8')
-            else:
-                displacements = None
-                global_mean = None
-
-            comm.Gatherv(local_mean, [global_mean, global_row_counts, displacements, MPI.DOUBLE], root=0)
-
-            if rank == 0:
-                result = global_mean
-                file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-                with h5py.File(file_path, 'a') as f:
-                    if 'mean' not in f:
-                        f.create_dataset(
-                            'mean', (self.nd, self.nt),
-                            chunks=(min(self.nd,1000),1),
-                            dtype='f8'
-                        )
-                    f['mean'][:, t] = result
-            self.mpi_comm.barrier()
-        except Exception as e:
-            print(f"Error occurred in compute_forecast_mean: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
-
-    @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
-    def compute_forecast_mean_chunked_gather(self, t, ens_chunk_size=1):
-        try:
-            self._ensure_batch(t)
-            comm = self.mpi_comm
-            rank = comm.Get_rank()
-            size = comm.Get_size()
-
-            batch_idx = t - self.current_batch_start
-            start = MPI.Wtime()
-
-            local_rows = self.nd_end_world - self.nd_start_world
-            local_sum = np.zeros(local_rows, dtype='f8')
-
-            for start_ens in range(0, self.nens, ens_chunk_size):
-                end_ens = min(start_ens + ens_chunk_size, self.nens)
-                local_data = self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, start_ens:end_ens]
-                partial_sum = np.sum(local_data, axis=1).astype('f8', copy=False)
-                local_sum += partial_sum
-
-            local_mean = local_sum / self.nens
-
-            local_row_count = np.array([local_mean.shape[0]], dtype='i8')
-            global_row_counts = np.zeros(size, dtype='i8') if rank == 0 else None
-            comm.Gather(local_row_count, global_row_counts, root=0)
-
-            if rank == 0:
-                displacements = np.zeros(size, dtype='i8')
-                displacements[1:] = np.cumsum(global_row_counts[:-1])
-                total_rows = np.sum(global_row_counts)
-                global_mean = np.zeros(total_rows, dtype='f8')
-            else:
-                displacements = None
-                global_mean = None
-
-            comm.Gatherv(local_mean, [global_mean, global_row_counts, displacements, MPI.DOUBLE], root=0)
-
-            if rank == 0:
-                result = global_mean
-                file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-                with h5py.File(file_path, 'a') as f:
-                    if 'mean' not in f:
-                        f.create_dataset(
-                            'mean', (self.nd, self.nt),
-                            chunks=(min(self.nd,1000),1),
-                            dtype='f8'
-                        )
-                    f['mean'][:, t] = result
-        except Exception as e:
-            print(f"Error occurred in compute_forecast_mean_chunked_gather: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
+        # try:
+        self._ensure_batch(t)
+        batch_idx = t - self.current_batch_start
+        start = MPI.Wtime()
+        # self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx] = data
+        self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx] = data
+        # self._rw_select(self.datasets[batch_idx],
+        #         self.nd_start_world, self.nd_local_world, ens_idx, 1, buf=data, write=True)
     
-    def compute_forecast_mean_chunked_v2(self, k):
+    def compute_forecast_mean_chunked_v2(self, k, flag=None):
         """
         Simple & hang-free:
         - running sum in RAM (length = local_rows)
@@ -559,9 +391,11 @@ class EnKF_fully_parallel_IO:
 
             # ---- Running sum while reading ensembles ------------------------------
             local_sum = np.zeros(max(local_rows, 0), dtype='f8')
+            batch_idx = k - self.current_batch_start
             for ens_idx in range(self.nens):
                 if local_rows > 0:
-                    v = self.read_analysis(k, ens_idx)
+                    # v = self.read_analysis(k, ens_idx)
+                    v = self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx]
                     v = np.asarray(v, dtype='f8')
                     if v.ndim != 1 or v.size != local_rows:
                         v = v.reshape(-1)
@@ -573,11 +407,20 @@ class EnKF_fully_parallel_IO:
             # ---- Parallel HDF5: collective create + collective write -------------
             file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
 
+            if flag == 'initial':
+                if rank == 0 and k==0: # remove old file if any
+                    try:
+                        shutil.rmtree(file_path)
+                    except OSError:
+                        pass
+                comm.Barrier()
+
             # Dataset transfer property list: COLLECTIVE for the write
             dxpl = h5p.create(h5p.DATASET_XFER)
             dxpl.set_dxpl_mpio(h5fd.MPIO_COLLECTIVE)
 
             with h5py.File(file_path, 'a', driver='mpio', comm=comm) as f:
+    
                 # --- Collective dataset creation: ALL ranks must take the same branch
                 exists_local = ('mean' in f)
                 # If any rank sees it, treat as exists for all to avoid split branches
@@ -615,164 +458,6 @@ class EnKF_fully_parallel_IO:
 
         except Exception as e:
             print(f"Error in compute_forecast_mean_chunked_v2: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
-
-    # @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
-    def compute_forecast_mean_chunked(self, t, ens_chunk_size=None, use_collective_io=False, max_ranks=4):
-        self._ensure_batch(t)
-        comm = self.mpi_comm
-        rank = comm.Get_rank()
-        size = comm.Get_size()
-
-        import numpy as np
-        import h5py.h5p as h5p
-        import h5py.h5s as h5s
-        import h5py.h5fd as h5fd
-        try:
-            if size == 2:
-                max_ranks = 1
-                active_ranks = 1
-            else:
-                max_ranks = min(8, (size // 2) + 1)
-                active_ranks = min(max_ranks, size)
-
-            # Exclude ranks with no work
-            color = 0 if (rank < active_ranks) else MPI.UNDEFINED
-            sub_comm = comm.Split(color, rank)
-            active = sub_comm != MPI.COMM_NULL
-
-            if active:
-                sub_rank = sub_comm.Get_rank()
-                sub_size = sub_comm.Get_size()
-
-                local_rows = (self.nd_end_world - self.nd_start_world) if rank == 0 else 0
-                local_rows = sub_comm.bcast(local_rows, root=0)
-                rows_per_rank = local_rows // sub_size
-                extra_rows = local_rows % sub_size
-                nd_start = sub_rank * rows_per_rank + min(sub_rank, extra_rows)
-                nd_end = nd_start + rows_per_rank + (1 if sub_rank < extra_rows else 0)
-
-                batch_idx = t - self.current_batch_start
-                ds = self.datasets[batch_idx]
-
-                if ens_chunk_size is None:
-                    bytes_per_element = 8
-                    target_memory = 1e9
-                    ens_chunk_size = max(1, int(target_memory / (nd_end - nd_start) / bytes_per_element))
-                    ens_chunk_size = min(ens_chunk_size, self.nens)
-                    if sub_rank == 0:
-                        print(f"Dynamic ens_chunk_size: {ens_chunk_size}")
-
-                local_sum = np.zeros(nd_end - nd_start, dtype='f8')
-
-                dxpl = h5p.create(h5p.DATASET_XFER)
-                if use_collective_io:
-                    dxpl.set_dxpl_mpio(h5fd.MPIO_COLLECTIVE)
-                else:
-                    dxpl.set_dxpl_mpio(h5fd.MPIO_INDEPENDENT)
-
-                t_io = 0.0
-                t_comp = 0.0
-                start_total = MPI.Wtime()
-
-                buffers = [np.empty((nd_end - nd_start, ens_chunk_size), dtype='f8') for _ in range(2)]
-                current_buffer = 0
-
-                for start_ens in range(0, self.nens, ens_chunk_size):
-                    end_ens = min(start_ens + ens_chunk_size, self.nens)
-                    chunk_cols = end_ens - start_ens
-
-                    if chunk_cols < ens_chunk_size:
-                        buffers[current_buffer] = np.empty((nd_end - nd_start, chunk_cols), dtype='f8')
-
-                    t_start_io = MPI.Wtime()
-                    file_space = ds.id.get_space()
-                    file_space.select_hyperslab((self.nd_start_world + nd_start, start_ens), (nd_end - nd_start, chunk_cols))
-                    mem_space = h5s.create_simple((nd_end - nd_start, chunk_cols))
-                    ds.id.read(mem_space, file_space, buffers[current_buffer], dxpl=dxpl)
-                    t_io += MPI.Wtime() - t_start_io
-
-                    if start_ens > 0:
-                        t_start_comp = MPI.Wtime()
-                        local_sum += np.sum(buffers[1 - current_buffer], axis=1)
-                        t_comp += MPI.Wtime() - t_start_comp
-
-                    current_buffer = 1 - current_buffer
-
-                t_start_comp = MPI.Wtime()
-                local_sum += np.sum(buffers[current_buffer], axis=1)
-                t_comp += MPI.Wtime() - t_start_comp
-
-                local_mean = local_sum / self.nens
-
-                file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-                sub_comm.Barrier()
-                t_start_io = MPI.Wtime()
-                f = h5py.File(file_path, 'a', driver='mpio', comm=sub_comm)
-
-                if 'mean' not in f:
-                    chunk_rows = min(self.nd, 1000)
-                    f.create_dataset(
-                        'mean', (self.nd, self.nt),
-                        chunks=(chunk_rows, 1),
-                        dtype='f8'
-                    )
-
-                out_ds = f['mean']
-                file_space = out_ds.id.get_space()
-                file_space.select_hyperslab((self.nd_start_world + nd_start, t), (nd_end - nd_start, 1))
-                mem_space = h5s.create_simple((nd_end - nd_start,))
-                out_ds.id.write(mem_space, file_space, local_mean, dxpl=dxpl)
-
-                f.close()
-                t_io += MPI.Wtime() - t_start_io
-                sub_comm.Barrier()
-
-                if sub_rank == 0:
-                    print(f"Total time: {MPI.Wtime() - start_total:.2f}s, I/O: {t_io:.2f}s, Compute: {t_comp:.2f}s")
-
-            comm.Barrier()
-        except Exception as e:
-            print(f"Error occurred in compute_forecast_mean_chunked: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
-
-    def _compute_forecast_mean_chunked(self, t, ens_chunk_size=1):
-        try:
-            self._ensure_batch(t)
-            comm = self.mpi_comm
-            rank = comm.Get_rank()
-            size = comm.Get_size()
-
-            batch_idx = t - self.current_batch_start
-            start = MPI.Wtime()
-
-            local_rows = self.nd_end_world - self.nd_start_world
-            local_sum = np.zeros(local_rows, dtype='f8')
-
-            for start_ens in range(0, self.nens, ens_chunk_size):
-                end_ens = min(start_ens + ens_chunk_size, self.nens)
-                local_data = self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, start_ens:end_ens]
-                partial_sum = np.sum(local_data, axis=1).astype('f8', copy=False)
-                local_sum += partial_sum
-
-            local_mean = local_sum / self.nens
-
-            file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-            with h5py.File(file_path, 'a', driver='mpio', comm=comm) as f:
-                if 'mean' not in f:
-                    if rank == 0:
-                        f.create_dataset(
-                            'mean', (self.nd, self.nt),
-                            chunks=(min(self.nd, 1000), 1),
-                            dtype='f8'
-                        )
-                comm.Barrier()
-        except Exception as e:
-            print(f"Error occurred in _compute_forecast_mean_chunked: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
@@ -817,156 +502,371 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Abort(1)
 
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
+    def generate_observation_schedule_(self, **kwargs):
+        # try:
+        t = np.array(kwargs["t"])
+        freq_obs = self.params["freq_obs"]
+        obs_start_time = self.params["obs_start_time"]
+        obs_max_time = self.params["obs_max_time"]
+
+        max_t = np.max(t)
+        obs_max_time = min(obs_max_time, max_t)
+
+        obs_t = np.arange(obs_start_time, obs_max_time + freq_obs, freq_obs)
+        obs_t = obs_t[obs_t <= obs_max_time]
+
+        obs_idx = []
+        for time in obs_t:
+            idx = np.argmin(np.abs(t - time))
+            obs_idx.append(idx)
+        obs_idx = np.array(obs_idx, dtype=int)
+
+        num_observations = len(obs_idx)
+        if len(obs_idx) != num_observations:
+            print(f"[WARNING] obs_idx length {len(obs_idx)} does not match num_observations {num_observations}")
+        # print(f"[DEBUG] obs_t: {obs_t}, obs_idx: {obs_idx}, num_observations: {num_observations}")
+        return obs_t, obs_idx, num_observations
+    
+    @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
+    # def generate_observation_schedule(self, **kwargs):
+    #     """
+    #     Build an observation schedule by snapping desired observation times to the nearest
+    #     entries in the model time grid `t`. Works for any uniform or nonuniform `t`.
+    #     Returns:
+    #         obs_t_req      : requested observation times (continuous)
+    #         obs_idx        : integer indices into `t` (strictly increasing, unique)
+    #         num_observations
+    #         obs_t_aligned  : times actually used (t[obs_idx])
+    #     """
+    #     import numpy as np
+
+    #     # --- Inputs ---
+    #     t = np.asarray(kwargs["t"], dtype=float)  # model time grid (physical units)
+    #     if t.ndim != 1 or t.size == 0:
+    #         raise ValueError("`t` must be a 1D non-empty array of times.")
+
+    #     freq_obs      = float(self.params["freq_obs"])
+    #     obs_start     = float(self.params["obs_start_time"])
+    #     obs_max_cfg   = float(self.params["obs_max_time"])
+
+    #     # --- Bound the observation window to the provided time grid ---
+    #     t_min, t_max = float(t[0]), float(t[-1])
+    #     if obs_start < t_min:
+    #         obs_start = t_min
+    #     obs_max = min(obs_max_cfg, t_max)
+
+    #     if freq_obs <= 0.0 or obs_start > obs_max:
+    #         # No observations possible
+    #         return np.array([]), np.array([], dtype=int), 0, np.array([])
+
+    #     # --- Create the requested observation times robustly (avoid float drift) ---
+    #     n_obs = int(np.floor((obs_max - obs_start) / freq_obs)) + 1
+    #     obs_t_req = obs_start + np.arange(n_obs, dtype=float) * freq_obs
+    #     # clip for safety
+    #     obs_t_req = obs_t_req[(obs_t_req >= t_min) & (obs_t_req <= obs_max)]
+
+    #     # --- Snap each requested time to the nearest index in `t` using searchsorted ---
+    #     # searchsorted gives insertion points; choose the closer neighbor
+    #     insert_pos = np.searchsorted(t, obs_t_req, side="left")
+    #     left_idx   = np.clip(insert_pos - 1, 0, t.size - 1)
+    #     right_idx  = np.clip(insert_pos,     0, t.size - 1)
+
+    #     choose_right = (np.abs(t[right_idx] - obs_t_req) < np.abs(t[left_idx] - obs_t_req))
+    #     nearest_idx  = np.where(choose_right, right_idx, left_idx).astype(int)
+
+    #     # --- Deduplicate while preserving order (handles freq_obs finer than grid) ---
+    #     # This ensures strictly increasing indices for downstream code.
+    #     uniq_mask = np.r_[True, nearest_idx[1:] != nearest_idx[:-1]]
+    #     obs_idx = nearest_idx[uniq_mask]
+
+    #     #  aligned times on the model grid
+    #     obs_t_aligned = t[obs_idx]
+
+    #     num_observations = obs_idx.size
+
+    #     # ensure unique indices
+    #     return obs_t_req, obs_idx, num_observations
+    
+    @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
     def generate_observation_schedule(self, **kwargs):
-        try:
-            t = np.array(kwargs["t"])
-            freq_obs = self.params["freq_obs"]
-            obs_start_time = self.params["obs_start_time"]
-            obs_max_time = self.params["obs_max_time"]
+        import numpy as np
 
-            max_t = np.max(t)
-            obs_max_time = min(obs_max_time, max_t)
+        t = np.asarray(kwargs["t"], dtype=float)
+        if t.ndim != 1 or t.size == 0:
+            raise ValueError("`t` must be a 1D non-empty array of times.")
+        t_min, t_max = float(t[0]), float(t[-1])
 
-            obs_t = np.arange(obs_start_time, obs_max_time + freq_obs, freq_obs)
-            obs_t = obs_t[obs_t <= obs_max_time]
+        freq_obs = float(self.params["freq_obs"])
+        obs_start = float(self.params["obs_start_time"])
+        obs_max_cfg = float(self.params["obs_max_time"])
 
-            obs_idx = []
-            for time in obs_t:
-                idx = np.argmin(np.abs(t - time))
-                obs_idx.append(idx)
-            obs_idx = np.array(obs_idx, dtype=int)
+        obs_start = max(obs_start, t_min)
+        obs_max = min(obs_max_cfg, t_max)
 
-            num_observations = len(obs_idx)
-            return obs_t, obs_idx, num_observations
-        except Exception as e:
-            print(f"Error occurred in generate_observation_schedule: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
+        if freq_obs <= 0.0 or obs_start > obs_max:
+            return np.array([]), np.array([], dtype=int), 0, np.array([])
+
+        # --- Build ideal observation times ---
+        n_obs = int(np.floor((obs_max - obs_start) / freq_obs)) + 1
+        obs_t_req = obs_start + np.arange(n_obs, dtype=float) * freq_obs
+
+        # --- Match model time points to observation times ---
+        dt_grid = np.min(np.diff(t)) if len(t) > 1 else 1.0
+        tol = 1e-6 * dt_grid
+
+        # For each t in the model time grid, check if it’s close to any obs time
+        obs_idx = []
+        for i, ti in enumerate(t):
+            if np.any(np.abs(ti - obs_t_req) < tol):
+                obs_idx.append(i)
+
+        obs_idx = np.array(obs_idx, dtype=int)
+        obs_t_aligned = t[obs_idx]
+        num_observations = len(obs_idx)
+
+        return obs_t_req, obs_idx, num_observations
+
+    
+    # @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
+    # def _create_synthetic_observations(self, **kwargs):
+    #     synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path')
+    #     error_R_zarr_path = kwargs.get('error_R_zarr_path')
+    #     nd = self.nd
+    #     nt = self.nt
+
+    #     obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
+    #     m = m_obs
+    #     m_R = m_obs * 2 + 1
+
+    #     rank = self.mpi_comm.Get_rank()
+    #     size = self.mpi_comm.Get_size()
+
+    #     if kwargs.get('joint_estimation', False) or self.params.get('localization_flag', False):
+    #         hdim = nd // self.params["total_state_param_vars"]
+    #     else:
+    #         hdim = nd // self.params["total_state_param_vars"]
+
+    #     if rank == 0:
+    #         print("[ICESEE] Generating synthetic observations ...")
+    #         obs_file = f"{self.base_path}/synthetic_obs.h5"
+    #         # Remove existing file to avoid corruption
+    #         # if os.path.exists(obs_file):
+    #         #     print(f"[ICESEE] Removing existing {obs_file}...")
+    #         #     os.remove(obs_file)
+            
+    #         # statevec_true = zarr.open_array(store=f"{self.base_path}/statevec_true.zarr", mode='r+')
+    #         # read from HDF5 directly to avoid Zarr overhead for small nd
+    #         with h5py.File(f"{self.base_path}/true_nurged_states.h5", 'r') as f:
+    #             statevec_true = f['true_state'][:]
+    #         _, indx_map, _ = icesee_get_index(**kwargs)
+            
+    #         try:
+    #             with h5py.File(obs_file, 'a') as f:
+    #                 if 'hu_obs' in f or 'error_R' in f:
+    #                     print(f"[ICESEE] Warning: {obs_file} already contains 'hu_obs' or 'error_R'. Overwriting datasets.")
+    #                     del f['hu_obs']
+    #                     del f['error_R']
+
+    #                 if 'hu_obs' not in f:
+    #                     f.create_dataset('hu_obs', (nd, m_obs), chunks=(min(1000, nd), min(50, m_obs)), dtype='f8')
+    #                 if 'error_R' not in f:
+    #                     f.create_dataset('error_R', (nd, m_obs * 2 + 1), chunks=(min(1000, nd), min(50, m_obs * 2 + 1)), dtype='f8')
+    #                 hu_obs = f['hu_obs']
+    #                 error_R = f['error_R']
+    #                 # print(f"[ICESEE] error_R shape: {error_R.shape},  m_R: {m_R}, m: {m}, nd: {nd}, hdim: {hdim}")
+
+    #                 for i, sig in enumerate(self.params["sig_obs"]):
+    #                     start_idx = i * hdim
+    #                     end_idx = start_idx + hdim
+    #                     error_R[start_idx:end_idx, :] = np.ones((hdim, 1)) * sig
+
+    #                 km = 0
+    #                 km_temp = 0
+    #                 for step in range(nt):
+    #                     # if (km < m_obs) and (step + 1 == ind_m[km]):
+    #                     if (km < m_obs) and (step == ind_m[km]):
+    #                         # for key in kwargs['vec_inputs']:
+    #                         for ii, key in enumerate(kwargs['vec_inputs']):
+    #                             if ii < kwargs['num_state_vars']:
+    #                                 # print(f"[ICESEE] Generating obs at time step {step+1} for key {key} at obs index {km}")
+    #                                 hu_obs[indx_map[key], km] = statevec_true[indx_map[key], step + 1] + \
+    #                                                             np.random.normal(0, error_R[indx_map[key], km], len(indx_map[key]))
+    #                             else:
+    #                                 hu_obs[indx_map[key], km] = np.zeros(len(indx_map[key]))
+
+    #                             if key == 'bed' or key == 'bedrock' or key == 'bed_topography' or key == 'bedtopo' or key == 'bedtopography':
+    #                                 if step+1 == kwargs.get('bed_obs_snapshot', 0)[km_temp]:
+    #                                     hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
+    #                                     km_temp += 1
+    #                         km += 1
+    #         except Exception as e:
+    #             print(f"[ICESEE] Error in HDF5 operations: {e}")
+    #             raise
+    #     self.mpi_comm.Barrier()
+    #     return ind_m, m_obs
 
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
     def _create_synthetic_observations(self, **kwargs):
-        try:
-            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path')
-            error_R_zarr_path = kwargs.get('error_R_zarr_path')
-            nd = self.nd
-            nt = self.nt
+        import os
+        import h5py
+        import numpy as np
 
-            obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
-            m = m_obs
-            m_R = m_obs*2 +1
+        synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path')
+        error_R_zarr_path = kwargs.get('error_R_zarr_path')
+        nd = self.nd
+        nt = self.nt
 
-            # print(f"\n m={m}, m_R={m_R} \n")
+        obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
+        ind_m = np.asarray(ind_m, dtype=int)
+        m = m_obs
+        m_R = m_obs * 2 + 1
 
-            rank = self.mpi_comm.Get_rank()
-            size = self.mpi_comm.Get_size()
+        rank = self.mpi_comm.Get_rank()
+        size = self.mpi_comm.Get_size()
 
-            if rank == 0:
-                if os.path.exists(synthetic_obs_zarr_path):
-                    shutil.rmtree(synthetic_obs_zarr_path)
-                if os.path.exists(error_R_zarr_path):
-                    shutil.rmtree(error_R_zarr_path)
-            self.mpi_comm.Barrier()
+        # Grid/meta
+        total_state_param_vars = self.params["total_state_param_vars"]
+        hdim = nd // total_state_param_vars
+
+        if rank == 0:
+            print("[ICESEE] Generating synthetic observations ...")
+            obs_file = f"{self.base_path}/synthetic_obs.h5"
+
             
-            if rank == 0:
-                hu_obs = zarr.create_array(store=synthetic_obs_zarr_path, shape=(nd, m), chunks=(min(1000, nd), min(50, m)), dtype='f8', overwrite=True)
-                error_R = zarr.create_array(store=error_R_zarr_path, shape=(nd, m_R), chunks=(min(1000, nd), min(50, m_R)), dtype='f8', overwrite=True)
-            
-            self.mpi_comm.Barrier()
-            hu_obs = zarr.open_array(store=synthetic_obs_zarr_path, mode='r+')
-            error_R = zarr.open_array(store=error_R_zarr_path, mode='r+')
-            self.mpi_comm.Barrier()
+            with h5py.File(f"{self.base_path}/true_nurged_states.h5", 'r') as f:
+                statevec_true = f['true_state'][:]  # shape (nd, nt?) often nt+1 columns
 
-            if kwargs.get('joint_estimation', False) or self.params.get('localization_flag', False):
-                hdim = nd // self.params["total_state_param_vars"]
-            else:
-                hdim = nd // self.params["total_state_param_vars"]
-
-            # if rank == 0:
-            #     for i, sig in enumerate(self.params["sig_obs"]):
-            #         start_idx = i*hdim
-            #         end_idx = start_idx + hdim
-            #         error_R[start_idx:end_idx,:] = np.ones((hdim,1)) * sig
-            # self.mpi_comm.Barrier()
-
-            statevec_true = zarr.open_array(store=f"{self.base_path}/statevec_true.zarr", mode='r+')
+            # Build indices map once
             _, indx_map, _ = icesee_get_index(**kwargs)
-            if self.nd < 10000:
-                if rank==0:
-                    print("[ICESEE] Generating synthetic observations ...")
+            vec_inputs = list(kwargs['vec_inputs'])
+
+            # Optional: params + helpers
+            num_state_vars = kwargs.get('num_state_vars', self.params.get('num_state_vars'))
+            observed_params = set(kwargs.get('observed_params', []))
+            bed_aliases = {'bed', 'bedrock', 'bed_topography', 'bedtopo', 'bedtopography'}
+            key_is_bed = {k: (k in bed_aliases) for k in vec_inputs}
+            key_idx_map = {k: np.asarray(indx_map[k], dtype=int) for k in vec_inputs}
+
+            # ---- Bed snapshot & sparsity controls ----
+            bed_snaps = kwargs.get('bed_obs_snapshot', [])
+            if isinstance(bed_snaps, (list, np.ndarray)):
+                bed_snaps = list(bed_snaps)
+            else:
+                bed_snaps = []  # safe default
+
+            # Options for sparsity
+            Lx = kwargs.get('Lx', self.params.get('Lx', None))
+            bed_stride_km = kwargs.get('bed_obs_stride_km', None)   # e.g., 30 (km)
+            bed_spacing_pts = kwargs.get('bed_obs_spacing', None)   # e.g., 5 (points)
+            bed_indices_user = kwargs.get('bed_obs_indices', None)  # explicit indices (0..len(bed)-1)
+            bed_mask_user = kwargs.get('bed_obs_mask', None)        # boolean mask over bed-subvector
+
+            # Precompute a mask per bed-like key (over its local subvector order)
+            bed_mask_map = {}
+            for k in vec_inputs:
+                if not key_is_bed[k]:
+                    continue
+                idx = key_idx_map[k]            # global indices for bed subvector
+                local_len = idx.size
+                mask = np.ones(local_len, dtype=bool)  # default: observe all (original behavior)
+
+                if isinstance(bed_mask_user, (list, np.ndarray)):
+                    msk = np.asarray(bed_mask_user, dtype=bool)
+                    if msk.size == local_len:
+                        mask = msk
+                    elif msk.size > 0:
+                        rep = int(np.ceil(local_len / msk.size))
+                        mask = np.tile(msk, rep)[:local_len]
+                elif isinstance(bed_indices_user, (list, np.ndarray)):
+                    mask = np.zeros(local_len, dtype=bool)
+                    idxs = np.asarray(bed_indices_user, dtype=int)
+                    idxs = idxs[(idxs >= 0) & (idxs < local_len)]
+                    mask[idxs] = True
+                elif isinstance(bed_spacing_pts, (int, np.integer)) and bed_spacing_pts > 1:
+                    n = int(bed_spacing_pts)
+                    mask = np.zeros(local_len, dtype=bool)
+                    mask[::n] = True
+                elif (bed_stride_km is not None) and (Lx is not None):
+                    # Convert stride in km → every-nth point assuming uniform x-grid of length Lx
+                    intervals = max(hdim - 1, 1)
+                    dx_m = float(Lx) / intervals
+                    n = max(int(round((bed_stride_km) / max(dx_m, 1e-12))), 1)
+                    mask = np.zeros(local_len, dtype=bool)
+                    mask[::n] = True
+
+                bed_mask_map[k] = mask
+
+            # ---- Create / overwrite output datasets ----
+            try:
+                with h5py.File(obs_file, 'a') as f:
+                    if 'hu_obs' in f or 'error_R' in f:
+                        print(f"[ICESEE] Warning: {obs_file} already contains 'hu_obs' or 'error_R'. Overwriting datasets.")
+                        if 'hu_obs' in f: del f['hu_obs']
+                        if 'error_R' in f: del f['error_R']
+
+                    hu_obs = f.create_dataset('hu_obs', (nd, m_obs),
+                                            chunks=(min(1000, nd), min(50, m_obs)),
+                                            dtype='f8')
+                    error_R = f.create_dataset('error_R', (nd, m_obs * 2 + 1),
+                                            chunks=(min(1000, nd), min(50, m_obs * 2 + 1)),
+                                            dtype='f8')
+
+                    # Fill error_R by blocks (broadcast, no extra allocs)
+                    sig_obs = np.asarray(self.params["sig_obs"]).reshape(-1)
+                    # pad/truncate for safety
+                    if sig_obs.size < total_state_param_vars:
+                        sig_obs = np.pad(sig_obs, (0, total_state_param_vars - sig_obs.size), mode='edge')
+                    elif sig_obs.size > total_state_param_vars:
+                        sig_obs = sig_obs[:total_state_param_vars]
+
+                    for i, sig in enumerate(sig_obs):
+                        s = i * hdim
+                        e = s + hdim
+                        error_R[s:e, :] = sig  # broadcast
+
+                    # === Main loop ===
                     km = 0
+                    km_temp = 0
                     for step in range(nt):
-                        if (km<m_obs) and (step+1 == ind_m[km]):
-                            for key in kwargs['vec_inputs']:
-                                # hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1]
-                                hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
+                        if (km < m_obs) and (step == ind_m[km]):  
+                            # guard to avoid OOB if nt doesn't include t0 column
+                            tcol = step + 1 if (step + 1) < statevec_true.shape[1] else step
+
+                            for ii, key in enumerate(vec_inputs):
+                                idx = key_idx_map[key]
+                                bed_flag = key_is_bed[key]
+
+                                if (ii < num_state_vars or key in observed_params) and (not bed_flag):
+                                    sigma = error_R[idx, km]
+                                    hu_obs[idx, km] = statevec_true[idx, tcol] + \
+                                                    np.random.normal(0.0, sigma, size=idx.size)
+                                else:
+                                    # keep zeros (parameters not observed at this instant)
+                                    hu_obs[idx, km] = 0.0
+
+                                # bed* special snapshot (sparse)
+                                if bed_flag:
+                                    if km_temp < len(bed_snaps) and ((step + 1) == bed_snaps[km_temp]):
+                                        # only on masked subset; rest stay zero
+                                        mask = bed_mask_map.get(key, None)
+                                        if mask is None:
+                                            mask = np.ones(idx.size, dtype=bool)
+                                        idx_obs = idx[mask]
+                                        if idx_obs.size > 0:
+                                            sigma_obs = error_R[idx_obs, km]
+                                            hu_obs[idx_obs, km] = statevec_true[idx_obs, tcol] + \
+                                                                np.random.normal(0.0, sigma_obs, size=idx_obs.size)
+                                        km_temp += 1
 
                             km += 1
-                    # print(f"\n nd = {nd}, Nens = {self.nens}, nt = {nt}\n")        
-                self.mpi_comm.Barrier()
-            else:
-                if rank == 0:
-                    print("[ICESEE] Generating synthetic observations in parallel ...")
-                    # print(f"\n nd = {nd}, Nens = {self.nens}, nt = {nt}\n")
-                if size >= m_obs:
-                    obs_per_process = m_obs // size
-                    remainder = m_obs % size
-                    start_obs = rank * obs_per_process + min(rank, remainder)
-                    num_obs = obs_per_process + 1 if rank < remainder else obs_per_process
 
-                    rows_per_process = hdim // size
-                    row_remainder = hdim % size
-                    row_start = rank * rows_per_process + min(rank, row_remainder)
-                    row_end = row_start + (rows_per_process + 1 if rank < row_remainder else rows_per_process)
+            except Exception as e:
+                print(f"[ICESEE] Error in HDF5 operations: {e}")
+                raise
 
-                    for km in range(start_obs, start_obs + num_obs):
-                        if km < m_obs:
-                            step = ind_m[km] - 1
-                            if 0 <= step < nt:
-                                for key in kwargs['vec_inputs']:
-                                    indices = indx_map[key]
-                                    local_indices = indices[(indices >= row_start) & (indices < row_end)]
-                                    if len(local_indices) > 0:
-                                        state_data = statevec_true[local_indices, step]
-                                        error_data = error_R[local_indices, km]
-                                        result = state_data + np.random.normal(0, error_data, len(local_indices))
-                                        if result.shape != (len(local_indices),):
-                                            raise ValueError(f"Rank {rank}: Shape mismatch at km={km}: expected {len(local_indices)}, got {result.shape}")
-                                        hu_obs[local_indices, km] = result
-                    self.mpi_comm.Barrier()
-                else:
-                    obs_per_process = m_obs // size
-                    remainder = m_obs % size
-                    start_obs = rank * obs_per_process + min(rank, remainder)
-                    num_obs = obs_per_process + 1 if rank < remainder else obs_per_process
+        self.mpi_comm.Barrier()
+        return ind_m, m_obs
 
-                    rows_per_process = nd // size
-                    row_remainder = nd % size
-                    row_start = rank * rows_per_process + min(rank, row_remainder)
-                    row_end = min(row_start + (rows_per_process + 1 if rank < row_remainder else rows_per_process), nd)
-
-                    for km in range(start_obs, start_obs + num_obs):
-                        if km < m_obs:
-                            step = ind_m[km] - 1
-                            if 0 <= step < nt:
-                                for key in kwargs['vec_inputs']:
-                                    indices = indx_map[key]
-                                    local_indices = indices[(indices >= row_start) & (indices < row_end)]
-                                    if len(local_indices) > 0:
-                                        state_data = statevec_true[local_indices, step]
-                                        error_data = error_R[local_indices, km]
-                                        result = state_data + np.random.normal(0, error_data, len(local_indices))
-                                        if result.shape != (len(local_indices),):
-                                            raise ValueError(f"Rank {rank}: Shape mismatch at km={km}: expected {len(local_indices)}, got {result.shape}")
-                                        hu_obs[local_indices, km] = result
-                    self.mpi_comm.Barrier()
-
-            return obs_t, m_obs
-        except Exception as e:
-            print(f"Error in _create_synthetic_observations: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
 
     def H_matrix(self, **kwargs):
         try:
@@ -974,6 +874,8 @@ class EnKF_fully_parallel_IO:
             nd = self.nd
             m_obs = kwargs.get('m_obs')
             m = m_obs * 2 + 1
+            obs_t, ind_m, _m_obs = self.generate_observation_schedule(**kwargs)
+            # print(f"\n[ICESEE] Creating H matrix of shape ({m}, {nd}) and m_obs={m_obs} ... computed m_obs={_m_obs}\n")
             di = int((nd - 2) / (2 * m_obs))
 
             H_matrix_file = zarr.create_array(store=zarr_path, shape=(m, nd), chunks=(min(50, m), min(1000, nd)), dtype='f8', overwrite=True)
@@ -1073,7 +975,7 @@ class EnKF_fully_parallel_IO:
             # ---- Eta and D'
             # Eta = HA - Hmean[:, None]
             Eta = HA_global - Hmean_global[:, None]                   # (m, Nens)
-            print(f"\n[Rank {self.mpi_comm.Get_rank()}] H_local norm : {np.linalg.norm(H_local)}, ens_mean_local norm: {np.linalg.norm(ens_mean_local)}, synthetic_obs_local norm: {np.linalg.norm(synthetic_obs_local)}\n")
+            # print(f"\n[Rank {self.mpi_comm.Get_rank()}] H_local norm : {np.linalg.norm(H_local)}, ens_mean_local norm: {np.linalg.norm(ens_mean_local)}, synthetic_obs_local norm: {np.linalg.norm(synthetic_obs_local)}\n")
 
             # D' = (d - Hmean) broadcast across columns
             d_minus_Hmean = (d_global - Hmean_global)                 # (m,)
@@ -1088,7 +990,7 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def compute_X5_utils(self, **kwargs):
+    def compute_X5_util_(self, **kwargs):
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
         k = kwargs.get('k')
@@ -1122,7 +1024,7 @@ class EnKF_fully_parallel_IO:
                 synthetic_obs_local = f['hu_obs'][self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
             # *---rememdy for now---*
 
-            print(f"\n[Rank {self.mpi_comm.Get_rank()}] H_local norm : {np.linalg.norm(H_local)}, ens_mean_local norm: {np.linalg.norm(ens_mean_local)}, synthetic_obs_local norm: {np.linalg.norm(synthetic_obs_local)}\n")
+            # print(f"\n[Rank {self.mpi_comm.Get_rank()}] H_local norm : {np.linalg.norm(H_local)}, ens_mean_local norm: {np.linalg.norm(ens_mean_local)}, synthetic_obs_local norm: {np.linalg.norm(synthetic_obs_local)}\n")
 
             # --- d = H * y_obs (one GEMV + one Allreduce)
             d_local = H_local @ synthetic_obs_local              # (m,)
@@ -1135,11 +1037,16 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Allreduce(Hmean_local, Hmean_global, op=MPI.SUM)  # 2nd collective
 
             # --- Read all ensemble states locally and batch into a matrix
+            _local_analysis_time = MPI.Wtime()
             # Shape: (local_nd, Nens)
-            States_local = np.empty((local_nd, Nens), dtype=H_local.dtype, order='C')
+            # States_local = np.empty((local_nd, Nens), dtype=H_local.dtype, order='C')
+            States_local =zarr.zeros((local_nd, Nens), dtype=H_local.dtype, store=f"{self.base_path}/States_local_{self.mpi_comm.Get_rank()}.zarr", chunks=(local_nd, 1), overwrite=True)
             for j in range(Nens):
                 # States_local[:, j] = self.read_analysis(k, j)  # each returns local slice (local_nd,) 
                 States_local[:, j] = self.read_analysis(k, j)  # each returns local slice (local_nd,)
+            _local_analysis_time = MPI.Wtime() - _local_analysis_time
+            kwargs["time_analysis_file_writing"] += _local_analysis_time
+
 
             # --- HA for all ensemble members in one GEMM + one Allreduce on the whole matrix
             # local (m, local_nd) @ (local_nd, Nens) -> (m, Nens)
@@ -1153,16 +1060,16 @@ class EnKF_fully_parallel_IO:
                 op=MPI.SUM
             )
 
-            # print(f"\n[Rank {self.mpi_comm.Get_rank()}] HA norm: {np.linalg.norm(HA)},Hmean norm: {np.linalg.norm(Hmean_global)}, d norm: {np.linalg.norm(d_global)}\n")
 
             # --- Eta = HA - Hmean[:, None]
             Eta = HA - Hmean_global[:, None]             # (m, Nens)
 
             # --- D' = (d - Hmean)[:, None], same for all ensemble members
             Dprime = (d_global - Hmean_global)[:, None] * np.ones((1, Nens), dtype=HA.dtype)
-            
 
-            return Dprime, Eta, HA
+            # print(f"\n[Rank {self.mpi_comm.Get_rank()}] norms H: {np.linalg.norm(H_matrix)},  ens_mean:{np.linalg.norm(np.mean(States_local, axis=1))}, d: {np.linalg.norm(d_local)} D: {np.linalg.norm(d_global.reshape(-1,1) + Eta)}, HA: {np.linalg.norm(HA)}, Eta: {np.linalg.norm(Eta)}, ensemble_vec: {np.linalg.norm(States_local)} \n")
+
+            return Dprime, Eta, HA, kwargs
         except Exception as e:
             print(f"Error in compute_X5_utils: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
@@ -1170,27 +1077,126 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Abort(1)
 
 
-    def compute_X5_modified(self, **kwargs):
+    def compute_X5_utils(self, km, **kwargs):
+        """
+        Parallel EnKF X5 minimal utilities:
+        d_global   = H @ y_obs
+        Hbar       = H @ ensemble_mean
+        Dprime     = d_global - Hbar
+        HAprime    = Eta (from H @ ensemble_perturbations)
+        """
+
+        import numpy as np, h5py, zarr, sys, traceback
+        from mpi4py import MPI
+
+        comm  = self.mpi_comm
+        rank  = comm.Get_rank()
+        size  = comm.Get_size()
+
+        try:
+            # ----------------------------------------------------------------------
+            # Parameters and file paths
+            # ----------------------------------------------------------------------
+            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
+            # synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
+            m                       = kwargs.get('m_obs') * 2 + 1
+            Nens                    = self.nens
+
+            i0, i1 = self.nd_start_world, self.nd_end_world
+            local_nd = i1 - i0
+
+            # Choose MPI datatype dynamically (float32 or float64)
+            mpi_type = MPI._typedict[np.dtype(np.float64).char]
+
+            # ----------------------------------------------------------------------
+            # Load local column block of H and local slices of ensemble_mean, obs
+            # ----------------------------------------------------------------------
+            H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')
+            H_local  = np.asarray(H_matrix[:, i0:i1], dtype=np.float64, order='C')  # (m, local_nd)
+
+            # Synthetic observation local slice (y)
+            # synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
+            # y_local = np.asarray(synthetic_obs[i0:i1, km], dtype=np.float64)  # (local_nd,)
+            obs_file = f"{self.base_path}/synthetic_obs.h5"
+            with h5py.File(obs_file, 'r', driver='mpio', comm=self.mpi_comm) as f:
+                y_local = np.asarray(f['hu_obs'][i0:i1, km], dtype=np.float64)  # (local_nd,)
+
+            # Ensemble mean local slice
+            mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
+            with h5py.File(mean_file_path, 'r', driver='mpio', comm=comm) as f:
+                ensemble_mean_local = np.asarray(f['mean'][i0:i1, km], dtype=np.float64)  # (local_nd,)
+
+            # ----------------------------------------------------------------------
+            # Compute d = H * y_obs   (GEMV + Allreduce)
+            # ----------------------------------------------------------------------
+            d_local = H_local @ y_local                    # (m,)
+            d_global = np.empty_like(d_local)
+            comm.Allreduce([d_local, mpi_type], [d_global, mpi_type], op=MPI.SUM)
+
+            # ----------------------------------------------------------------------
+            # Compute Hbar = H * ensemble_mean   (GEMV + Allreduce)
+            # ----------------------------------------------------------------------
+            Hbar_local = H_local @ ensemble_mean_local     # (m,)
+            Hbar_global = np.empty_like(Hbar_local)
+            comm.Allreduce([Hbar_local, mpi_type], [Hbar_global, mpi_type], op=MPI.SUM)
+
+            # ----------------------------------------------------------------------
+            # Compute Eta = H * (ensemble_vec - ensemble_mean)
+            # ----------------------------------------------------------------------
+            # Each rank reads its local portion of ensemble states
+            States_local = np.empty((local_nd, Nens), dtype=np.float64, order='C')
+            for j in range(Nens):
+                States_local[:, j] = np.asarray(self.read_analysis(km, j), dtype=np.float64)
+
+            # Compute local ensemble perturbations
+            perturb_local = States_local - ensemble_mean_local[:, None]  # (local_nd, Nens)
+
+            # Project ensemble perturbations into observation space
+            Eta_local = H_local @ perturb_local                          # (m, Nens)
+            Eta = Eta_local.copy(order='C')
+            comm.Allreduce(MPI.IN_PLACE, [Eta, mpi_type], op=MPI.SUM)    # (m, Nens)
+
+            # ----------------------------------------------------------------------
+            # Compute Dprime and HAprime (final outputs)
+            # ----------------------------------------------------------------------
+            Dprime  = (d_global - Hbar_global).reshape(m, 1)             # (m,1)
+            HAprime = Eta                                                # (m,Nens)
+
+            # Optional: diagnostics
+            if rank == 0:
+                print(f"[rank {rank}] Shapes -> Dprime: {Dprime.shape}, HAprime: {HAprime.shape}")
+
+            return Dprime, Eta, HAprime, kwargs
+
+        except Exception as e:
+            print(f"[rank {rank}] Error in compute_X5_utils: {e}")
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
+            comm.Abort(1)
+
+
+    def compute_X5_modified(self, km, **kwargs):
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
         try:
             m = kwargs.get('m_obs') * 2 + 1
             Nens = self.nens
 
-            Dprime, Eta, HA = self.compute_X5_utils(**kwargs)
+            # Dprime, Eta, HA, kwargs = self.compute_X5_utils_(km, **kwargs)
+            Dprime, Eta, HAprime, kwargs  = self.compute_X5_utils(km, **kwargs)
             # print(f"\n [Rank {self.mpi_comm.Get_rank()}] Dprime norm: {np.linalg.norm(Dprime)}, Eta norm: {np.linalg.norm(Eta)}, HA norm: {np.linalg.norm(HA)} \n")
             # Dprime, Eta, HA = self.compute_X5_utils_batch(**kwargs)
 
             # compute the HAbar
             # HAbar = np.mean(HA, axis=1)
             # HAprime = HA - HAbar[:, np.newaxis]
-            one_N = np.ones((Nens,Nens))/Nens
-            HAprime= HA@(np.eye(Nens) - one_N) # mxNens
+            # one_N = np.ones((Nens,Nens))/Nens
+            # HAprime= HA@(np.eye(Nens) - one_N) # mxNens
 
             # compute HAprime + Eta
             HAprime_Eta = HAprime + Eta
            
-            print(f"\n[Rank {self.mpi_comm.Get_rank()}] HAprime_Eta norm: {np.linalg.norm(HAprime_Eta)}, shape: {HAprime_Eta.shape}\n")
+            # print(f"\n[Rank {self.mpi_comm.Get_rank()}] HAprime_Eta norm: {np.linalg.norm(HAprime_Eta)}, shape: {HAprime_Eta.shape}\n")
             # print(f"\n [Rank {self.mpi_comm.Get_rank()}] Dprime_local shape: {Dprime_local.shape} HAprime_local shape: {HAprime_local.shape} HAprime_Eta_local shape: {HAprime_Eta_local.shape}\n ")
 
             # compute SVD of HAprime_Eta
@@ -1235,7 +1241,8 @@ class EnKF_fully_parallel_IO:
             # print(f"[ICESEE] Rank: {rank_world} X3 shape: {X3.shape}")
             # compute X4 = (HAprime.T)*X3 # Nens x Nens
             X4 = np.dot(HAprime.T, X3)
-            del X2, X3, U, HAprime, HA, Eta, Dprime
+            # del X2, X3, U, HAprime, HA, Eta, Dprime
+            del X2, X3, U, HAprime, HAprime_Eta, Eta, Dprime
             gc.collect()
 
             # compute X5 = X4 + I
@@ -1243,13 +1250,13 @@ class EnKF_fully_parallel_IO:
             # sum of each column of X5 should be 1
             if np.sum(X5, axis=0).all() != 1.0:
                 print(f"\n[ICESEE] Sum of each X5 column is not 1.0: {np.sum(X5, axis=0)}\n")
-            print(f"[ICESEE] Rank: {self.mpi_comm.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
+            # print(f"[ICESEE] Rank: {self.mpi_comm.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
             del X4; gc.collect()
 
-            return X5
+            return X5, kwargs
 
         except Exception as e:
-            print(f"Error in compute_X5_root_optimized: {e}")
+            print(f"Error in compute_X5_modified: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
@@ -1273,7 +1280,7 @@ class EnKF_fully_parallel_IO:
 
             # call the compute X5 function
             # X5 = self.compute_X5_(k, **kwargs)
-            X5 = self.compute_X5_modified(**kwargs)
+            X5, kwargs = self.compute_X5_modified(**kwargs)
             # compute column sums for X5
 
             # ---
@@ -1300,9 +1307,11 @@ class EnKF_fully_parallel_IO:
             pertubations = zarr.create_array(store=pertubations_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
             analysis_updates = zarr.create_array(store=analysis_updates_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
 
+            _local_analysis_time0 = MPI.Wtime()
             for i in range(Nens):
                 # all_states_zarr[:, i] = self.read_analysis(k, i)
                 all_states_zarr[:, i] = self.read_analysis(k, i)
+            _local_analysis_time0 = MPI.Wtime() - _local_analysis_time0
 
             # Compute analysis updates for all paucall ensembles using matrix multiplication
             analysis_updates = all_states_zarr @ X5  # Matrix multiplication
@@ -1332,26 +1341,31 @@ class EnKF_fully_parallel_IO:
                     analysis_updates[start:end, :] = np.maximum(analysis_updates[start:end, :], min_thickness)
 
             # Write back all analysis updates
+            _local_analysis_time1 = MPI.Wtime()
             for j in range(Nens):
                 self.write_analysis(k, analysis_updates[:, j], j)
+            _local_analysis_time1 = MPI.Wtime() - _local_analysis_time1
+            kwargs["time_analysis_file_writing"] += (_local_analysis_time0 + _local_analysis_time1)
 
             # compute the anlysis mean and write to h5 file
-            yi = np.sum(X5, axis=1)
-            analysis_mean = np.dot(all_states_zarr, yi) / Nens
-            # print(f"[Rank {self.mpi_comm.Get_rank()}]  shape: {analysis_mean.shape} shape_ {self.nd_end_world - self.nd_start_world}")
-            file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-            with h5py.File(file_path, 'a', driver='mpio', comm=self.mpi_comm) as f:
-                if 'mean' not in f:
-                    if rank == 0:
-                        f.create_dataset(
-                            'mean', (self.nd, self.nt),
-                            chunks=(min(self.nd, 1000), 1),
-                            dtype='f8'
-                        )
-                comm.Barrier()
-                f['mean'][self.nd_start_world:self.nd_end_world, k] = analysis_mean
-
-            print(f"\n[ICESEE] Rank {rank} completed analysis update for time step {k+1}/{nt} analysis_mean norm {np.linalg.norm(analysis_mean)}\n")
+            _time_analysis_mean = MPI.Wtime()
+            if kwargs.get('compute_analysis_mean', False):
+                yi = np.sum(X5, axis=1)
+                analysis_mean = np.dot(all_states_zarr, yi) / Nens
+                # print(f"[Rank {self.mpi_comm.Get_rank()}]  shape: {analysis_mean.shape} shape_ {self.nd_end_world - self.nd_start_world}")
+                file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
+                with h5py.File(file_path, 'a', driver='mpio', comm=self.mpi_comm) as f:
+                    if 'mean' not in f:
+                        if rank == 0:
+                            f.create_dataset(
+                                'mean', (self.nd, self.nt),
+                                chunks=(min(self.nd, 1000), 1),
+                                dtype='f8'
+                            )
+                    comm.Barrier()
+                    f['mean'][self.nd_start_world:self.nd_end_world, k] = analysis_mean
+            kwargs["time_analysis_ensemble_mean_generation"] += (MPI.Wtime() - _time_analysis_mean)
+            # print(f"\n[ICESEE] Rank {rank} completed analysis update for time step {k+1}/{nt} analysis_mean norm {np.linalg.norm(analysis_mean)}\n")
 
             # clean up zarr file
             # if os.path.exists(zarr_path):
@@ -1363,6 +1377,7 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Barrier()
             # del all_states_zarr
             gc.collect()
+            return kwargs
             # ----**** --------------------------------------------------------
 
         except Exception as e:
@@ -1379,3 +1394,5 @@ class EnKF_fully_parallel_IO:
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
+
+    
