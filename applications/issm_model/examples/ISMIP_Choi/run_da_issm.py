@@ -72,6 +72,19 @@ model_kwargs = {
                 'nugget_bed': enkf_params.get('nugget_bed', 200),      
                 'deepwater_melting_rate': float(modeling_params.get('deepwater_melting_rate', 200)),
                 'smb': float(modeling_params.get('smb', 0.0)),
+                'vel_idx': int(float(enkf_params.get('vel_idx', 2))),
+                'inversion_flag': enkf_params.get('inversion_flag', False),
+                'friction_idx': int(float(enkf_params.get('friction_idx', 5))),
+                'min_friction': float(enkf_params.get('min_friction', 2000)),
+                'max_friction': float(enkf_params.get('max_friction', 4000)),
+                'Nens': int(float(params.get('Nens'))),
+                'bed_relaxation_factor': float(enkf_params.get('bed_relaxation_factor', 0.05)),
+                'initial_bed_bias': float(enkf_params.get('initial_bed_bias', 0.0015)),
+                'abs_vel_weight': float(enkf_params.get('abs_vel_weight', 1.0)),
+                'rel_vel_weight': float(enkf_params.get('rel_vel_weight', 1.0)),
+                'tikhonov_regularization_weight': float(enkf_params.get('tikhonov_regularization_weight', 1e-13)),
+                'b_nurge': float(enkf_params.get('b_nurge', 0)),
+                's_nurge': float(enkf_params.get('s_nurge', 0)),
 }
 
 # observation schedule
@@ -87,6 +100,7 @@ kwargs.update(model_kwargs)
 shutil.copy(os.path.join(icesee_cwd,'..','..','issm_utils','matlab2python', 'issm_env.m'), issm_examples_dir)
 shutil.copy(os.path.join(icesee_cwd,'..','..','issm_utils','matlab2python', 'matlab_server.m'), issm_examples_dir)
 shutil.copy(os.path.join(icesee_cwd, f'model_kwargs_{ens_id}.mat'), issm_examples_dir)
+shutil.copy(os.path.join(icesee_cwd, f'Domain.exp'), issm_examples_dir)
 shutil.copy(os.path.join(icesee_cwd, model_kwargs.get('ParamFile')), issm_examples_dir)
                          
 # --- change directory to the examples directory ---

@@ -1,0 +1,80 @@
+physical-parameters:
+  # Domain parameters
+  Lx: 50e2        # (m)
+  Ly: 12e2        # (m)
+  nx: 12         # number of elements in the x-direction
+  ny: 8      # number of elements in the y-direction
+  degree: 2       # degree of the polynomial basis functions
+
+  # Bedrock slopes 
+  b_in: 200       # (m) above sea level at the inflow
+  b_out: -400.0     # (m) at the terminus
+
+  # Surface Elevation
+  s_in: 850       # (m)
+  s_out: 50       # (m)
+
+  # Guess for initial velocity
+  u_in:  20       # (m/yr)
+  u_out: 2400     # (m/yr)
+
+modeling-parameters:
+  # Model parameters
+  T: 255.0                # (K) temperature
+  a_in: 1.7               # accumulation rate at the inflow
+  da:   -2.7              # change of accumulation rate
+  a_in_p: 0.17            # nurged accumulation rate at the inflow
+  da_p: -0.27           # nurged change of accumulation rate
+  num_years: 100          # number of years to run the model
+  timesteps_per_year: 2   # number of timesteps per year
+
+enkf-parameters:
+  # Ensemble Kalman Filter parameters
+  Nens: 40                      # number of ensemble members (now set in the command line)
+  freq_obs: 7              # frequency of observations
+  obs_max_time: 65         # maximum time for observations
+  obs_start_time: 5             # start time for observations
+
+  num_state_vars: 3       # number of state variables  [h,u,v]
+  num_param_vars: 1       # number of parameter variables [smb]
+  vec_inputs: ['h','u','v','smb']
+  observed_params: ['smb']  #['smb']
+
+  generate_synthetic_obs: 1  # Generate synthetic observations for testing
+  generate_true_state:    1  # Generate true state for synthetic observations
+  generate_nurged_state:  1  # Generate nudged state for synthetic observations
+  use_ensemble_pertubations: 1 # Use ensemble perturbations for ensemble state
+  sequential_ensemble_initialization: 0  # Sequential ensemble initialization (True for sequential, False for parallel)
+
+  # Statistical parameters (based on the number of state variables)
+  sig_model: [0.1,0.1,0.1] # model error standard deviation
+  sig_obs: [5,0.5,0.1,0.1]   # observation error standard deviation
+  sig_Q: [0.4,0.4,0.01,0.08]    # process noise standard deviation
+  length_scale: [110,90,90,10] #[150, 150, 150, 150]   # length scale for the covariance matrix, can be a list
+
+  Q_rho: 0.95 
+
+  seed: 1                 # seed for random number generator
+  inflation_factor: 1.12          # inflation factor
+  localization_flag: False      # localization flag: True, False
+
+  # estimation flags
+  joint_estimation: True # joint estimation flag: True, False
+  parameter_estimation: True # parameter estimation flag: True, False
+
+  # nurged parameters
+  h_nurge_ic: 350         # nurged increment for initial thickness
+  u_nurge_ic: 0         # nurged increment for initial velocity
+  nurged_entries_percentage: 0.25 #%     # percentage of nurged entries in the state vector
+
+  # enkf model parameters
+  model_name: "icepack"               # name of the model
+  model_solver: "solver_weertman"     # name of the solver
+  filter_type: "EnKF"               # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
+  local_analysis: False           # local analysis flag: True, False, global analysis is default
+  parallel_flag: "MPI_model"             # parallel flag: Serial, MPI, MPI_model
+  n_modeltasks: 1                     # number of model tasks (for MPI)
+  commandlinerun: "True"              # command line run flag: True, False
+  execution_flag: 0                  #`execution flag: 0 ->default, 1 -> sequntial, 2 -> even_distribution_of_problem size, 3 -> even_distribution_of_problem size with load balancing
+  data_path: _modelrun_datasets
+ 
