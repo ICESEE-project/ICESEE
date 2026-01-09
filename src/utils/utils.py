@@ -722,7 +722,9 @@ class UtilsFunctions:
 
             # print(bed_mask_map);exit(0)
             if len(bed_mask_map.keys()) == 0:
-                print("[ICESEE] Warning: bed_mask_map is empty. No bed observations will be created.")
+                # print("[ICESEE] Warning: bed_mask_map is empty. No bed observations will be created.")
+                # load false bed mask
+                pass
 
         return hu_obs, error_R.T, bed_mask_map
 

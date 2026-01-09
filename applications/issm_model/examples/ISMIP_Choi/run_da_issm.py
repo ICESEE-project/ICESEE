@@ -75,7 +75,16 @@ model_kwargs = {
                 'vel_idx': int(float(enkf_params.get('vel_idx', 2))),
                 'inversion_flag': enkf_params.get('inversion_flag', False),
                 'friction_idx': int(float(enkf_params.get('friction_idx', 5))),
+                'min_friction': float(enkf_params.get('min_friction', 2000)),
+                'max_friction': float(enkf_params.get('max_friction', 4000)),
                 'Nens': int(float(params.get('Nens'))),
+                'bed_relaxation_factor': float(enkf_params.get('bed_relaxation_factor', 0.05)),
+                'initial_bed_bias': float(enkf_params.get('initial_bed_bias', 0.0015)),
+                'abs_vel_weight': float(enkf_params.get('abs_vel_weight', 1.0)),
+                'rel_vel_weight': float(enkf_params.get('rel_vel_weight', 1.0)),
+                'tikhonov_regularization_weight': float(enkf_params.get('tikhonov_regularization_weight', 1e-13)),
+                'b_nurge': float(enkf_params.get('b_nurge', 0)),
+                's_nurge': float(enkf_params.get('s_nurge', 0)),
 }
 
 # observation schedule
