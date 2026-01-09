@@ -112,13 +112,13 @@ def generate_true_state(**kwargs):
         if kwargs["joint_estimation"]:
             statevec_true[indx_map["smb"],k+1] = a.dat.data_ro
 
-    update_state = {'h': statevec_true[indx_map["h"],:], 
-                    'u': statevec_true[indx_map["u"],:], 
-                    'v': statevec_true[indx_map["v"],:]}
-    # -- for joint estimation --
-    if kwargs["joint_estimation"]:
-        update_state['smb'] = statevec_true[indx_map["smb"],:]
-    return update_state
+    # update_state = {'h': statevec_true[indx_map["h"],:], 
+    #                 'u': statevec_true[indx_map["u"],:], 
+    #                 'v': statevec_true[indx_map["v"],:]}
+    # # -- for joint estimation --
+    # if kwargs["joint_estimation"]:
+    #     update_state['smb'] = statevec_true[indx_map["smb"],:]
+    # return update_state
 
 # --- initialize the ensemble members ---
 def initialize_ensemble(ens, **kwargs):
@@ -243,7 +243,9 @@ def generate_nurged_state(**kwargs):
 
     #  create a bump -100 to 0
     # h_indx = int(np.ceil(nurged_entries+1))
-    hdim = vecs['h'].shape[0]
+    # hdim = vecs['h'].shape[0]
+    h_index_map = indx_map["h"]
+    hdim = indx_map["h"].shape[0]
 
      # intialize the accumulation rate if joint estimation is enabled at the initial time step
     if kwargs["joint_estimation"]:
@@ -326,4 +328,4 @@ def generate_nurged_state(**kwargs):
             a    = firedrake.interpolate(a_in + da_ * x / Lx, Q)
             statevec_nurged[indx_map["smb"],k+1] = a.dat.data_ro
 
-    return statevec_nurged
+    # return statevec_nurged

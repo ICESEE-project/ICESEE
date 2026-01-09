@@ -192,7 +192,7 @@ class ParallelManager:
         self.size_world = self.COMM_WORLD.Get_size()
         self.rank_world = self.COMM_WORLD.Get_rank()
 
-        # if self.model_nprocs is None: use model_nprocs = size_world or subcomm_size
+        # if self.model_nprocs is None: use model_nprocs = size_world or subcomm_size_min
         self.model_nprocs = params.get("model_nprocs")
 
         # remove data file
@@ -226,9 +226,9 @@ class ParallelManager:
             if self.rank_world == 0: print("[ICESEE] Running default parallel mode")
             if Nens >= self.size_world: 
                 # Divide ranks into `size` subcommunicators
-                subcomm_size = min(self.size_world, Nens)  # Use at most `Nens` groups
-                self.color = self.rank_world % subcomm_size  # Group ranks into `subcomm_size` subcommunicators
-                self.key = self.rank_world // subcomm_size  # Ordering within each subcommunicator
+                subcomm_size_min = min(self.size_world, Nens)  # Use at most `Nens` groups
+                self.color = self.rank_world % subcomm_size_min  # Group ranks into `subcomm_size_min` subcommunicators
+                self.key = self.rank_world // subcomm_size_min  # Ordering within each subcommunicator
                 
                 #  here ens_id = number
                 self.ens_id = self.color # only needed for initializations as we will only have color ranks available either way
@@ -292,27 +292,27 @@ class ParallelManager:
 
             if Nens >= size_world: 
                 # Divide ranks into `size` subcommunicators
-                subcomm_size = min(size_world, Nens)  # Use at most `Nens` groups
-                color = rank_world % subcomm_size  # Group ranks into `subcomm_size` subcommunicators
-                key = rank_world // subcomm_size  # Ordering within each subcommunicator
+                subcomm_size_min = min(size_world, Nens)  # Use at most `Nens` groups
+                color = rank_world % subcomm_size_min  # Group ranks into `subcomm_size_min` subcommunicators
+                key = rank_world // subcomm_size_min  # Ordering within each subcommunicator
                 
                 # Determine how many rounds of processing are needed
-                rounds = (Nens + subcomm_size - 1) // subcomm_size  # Ceiling division
-            
+                rounds = (Nens + subcomm_size_min - 1) // subcomm_size_min  # Ceiling division
+               
             else:
                 # More processes than ensembles, map processes to ensembles efficiently
                 color = rank_world % Nens  
                 key = rank_world // Nens   
                 
                 rounds = 1  # Only one round of processing needed
-                subcomm_size = None
+                subcomm_size_min = None
             
             subcomm = comm_world.Split(color, key)
             # get rank and size for each subcommunicator
             sub_rank = subcomm.Get_rank() # Rank within the subcommunicator
             sub_size = subcomm.Get_size() # Size of the subcommunicator
 
-            return rounds, color, sub_rank, sub_size, subcomm, subcomm_size, rank_world, size_world, comm_world, None, None
+            return rounds, color, sub_rank, sub_size, subcomm, subcomm_size_min, rank_world, size_world, comm_world, None, None
         
         if params.get("even_distribution", False):
             # --- Properly Distribute Tasks for All Cases ---

@@ -1,14 +1,16 @@
 # =============================================================================
 # @Author: Brian Kyanjo
 # @Date: 2024-09-24
-# @Description: This script includes the observation operator and its Jacobian 
-#               for the EnKF data assimilation scheme. It also includes the bed
-#               topography function used in the model.
+# @Description: This script includes the some of the utility functions used in the
+#               EnKF data assimilation scheme. 
 # =============================================================================
 
 # import libraries
+import h5py
 import numpy as np
 import re
+import sys
+import traceback
 from collections.abc import Iterable
 from scipy.stats import norm
 from scipy.interpolate import interp1d
@@ -24,7 +26,7 @@ def isiterable(obj):
     return isinstance(obj, Iterable)
 
 class UtilsFunctions:
-    def __init__(self, params,ensemble=None):
+    def __init__(self, params=None,model_kwargs=None, ensemble=None):
         """
         Initialize the utility functions with model parameters.
         
@@ -33,8 +35,140 @@ class UtilsFunctions:
         """
         self.params   = params
         self.ensemble = ensemble
-    
+        self.model_kwargs = model_kwargs
+
     def H_matrix(self, n_model):
+        """
+        Build dense observation operator H, but EXCLUDE masked-out
+        bed observation points. Only real observations (including bed
+        subsampling) appear in H.
+        """
+
+        params = self.params
+        observed = params["all_observed"]     # e.g., ['h','u','v','smb','bed']
+        vec_inputs = self.model_kwargs["vec_inputs"]     # ['h','s','u','v','bed','fric','smb']
+
+        # --- Recompute index map ---
+        vecs, indx_map, _ = icesee_get_index(**self.model_kwargs)
+
+        # --- Retrieve bed masks (must already exist) ---
+        # Expected shape: bed_mask_map[key] → boolean mask over local bed subvector
+        bed_mask_map = self.model_kwargs.get("bed_mask_map", {})
+        # print(f"[ICESEE] H_matrix: bed_mask_map keys: {list(bed_mask_map.keys())}")
+        # print(f"[ICESEE] H_matrix: bed_mask_map contents: {bed_mask_map}")
+
+        bed_aliases = {'bed', 'bedrock', 'bed_topography', 'bedtopo', 'bedtopography'}
+        key_is_bed = {k: (k in bed_aliases) for k in vec_inputs}
+        # key_idx_map = {k: np.asarray(indx_map[k], dtype=int) for k in vec_inputs}
+
+        # --- Collect observation indices, but apply masks to bed ---
+        all_obs_indices = []
+
+        for key in observed:
+            idx = np.asarray(indx_map[key], dtype=int)
+
+            if key == "bed" and key in bed_mask_map:
+            # if key_is_bed.get(key, False) and key in bed_mask_map:
+                # Apply the sparse mask
+                mask = np.asarray(bed_mask_map[key], dtype=bool)[0]
+                # mask = np.asarray(bed_mask_map[key], dtype=bool)
+                # print(mask.shape)
+                # print(idx.shape)
+                if mask.size != idx.size:
+                    raise ValueError(
+                        f"bed_mask_map['{key}'] length {mask.size} does not "
+                        f"match bed vector length {idx.size}"
+                    )
+
+                # Only keep bed points that are actually observed
+                idx = idx[mask]
+
+            # Add (possibly filtered) indices
+            all_obs_indices.append(idx)
+
+        # Flatten
+        obs_indices = np.concatenate(all_obs_indices).astype(int)
+
+        # --- Safety ---
+        if obs_indices.max() >= n_model:
+            raise ValueError(
+                f"H_matrix error: obs index {obs_indices.max()} >= state size {n_model}"
+            )
+
+        # --- Allocate H ---
+        m_obs = obs_indices.size
+        H = np.zeros((m_obs, n_model))
+        H[np.arange(m_obs), obs_indices] = 1.0
+
+        return H
+
+
+    def _H_matrix(self, n_model):
+        """
+        Build dense observation operator H.
+        H has shape (m_obs, n_model).
+        H(i,j) = 1 if observation i corresponds to state index j, else 0.
+        """
+
+        params = self.params
+        observed = params["all_observed"]         # ['h','u','v','smb']
+        vec_inputs = params["vec_inputs"]         # ['h','s','u','v','bed','fric','smb']
+
+        # Recompute index map for the *current full state vector*
+        vecs, indx_map, _ = icesee_get_index(**self.model_kwargs)
+
+        # COLLECT OBSERVATION INDICES
+        obs_indices = np.concatenate([indx_map[key] for key in observed]).astype(int)
+
+        # SAFETY CHECK
+        if obs_indices.max() >= n_model:
+            raise ValueError(
+                f"H_matrix error: obs index {obs_indices.max()} >= state size {n_model}. "
+                "likely vec_inputs or nd inconsistent."
+            )
+
+        m_obs = obs_indices.size
+
+        # H: zero everywhere except H[i, obs_indices[i]] = 1
+        H = np.zeros((m_obs, n_model))
+        H[np.arange(m_obs), obs_indices] = 1.0
+
+        return H
+
+    def H_matrix__(self, n_model):
+        """
+        Build observation operator H for multi-variable ice-sheet DA
+        WITHOUT changing the outer pipeline.
+        H returns a dense matrix of shape (m_obs, n_model).
+        """
+
+        # unpack parameters
+        params = self.params
+        observed = params['all_observed']       # e.g., ['h','u','v','smb']
+        vec_inputs = params['vec_inputs']       # full list like ['h','s','u','v','bed','fric','smb']
+
+        # Full state indexing
+        vecs, indx_map, dim_per_proc = icesee_get_index(**self.model_kwargs)
+
+        # Build consistent obs index list
+        obs_indices = []
+        for key in observed:
+            obs_indices.append(indx_map[key])
+        obs_indices = np.concatenate(obs_indices)
+
+        # Number of observations
+        m_obs = obs_indices.size
+
+        # Allocate H
+        H = np.zeros((m_obs, n_model))
+
+        # Fill H with identity rows at observation positions
+        H[np.arange(m_obs), obs_indices] = 1.0
+        print(f"observed indices: {obs_indices}")
+
+        return H
+
+    def H_matrix_(self, n_model):
         """ observation operator matrix
         """
         n = n_model
@@ -58,9 +192,20 @@ class UtilsFunctions:
             state_variables_size = ndim*self.params["num_state_vars"]
             # parameters are not required to observe the state variables
             num_params_size = n - state_variables_size
-            H_param = np.zeros(num_params_size)
-            H[:,state_variables_size:] = H_param
-            
+            # H_param = np.zeros(num_params_size)
+            # H[:,state_variables_size:] = H_param
+
+        # lets have zeros for unobserved variables and parameters
+        all_observed = self.params['all_observed']
+        vec_inputs = self.params['vec_inputs']
+        ndim = n // self.params["total_state_param_vars"]
+        vecs, indx_map, dim_per_proc = icesee_get_index(**self.model_kwargs)
+        for ii, key in enumerate(vec_inputs):
+            if key in all_observed:
+                H[:, indx_map[key]] = H[:, indx_map[key]]
+            else:
+                H[:, indx_map[key]] = 0
+
         return H
 
     def Obs_fun(self, virtual_obs):
@@ -80,6 +225,12 @@ class UtilsFunctions:
         else:
             n = virtual_obs.shape[0]
 
+        dum = np.dot(self.H_matrix(n), virtual_obs)
+        with h5py.File('Htest.h5', 'w') as f:
+            f.create_dataset('H', data=self.H_matrix(n))
+            f.create_dataset('virtual_obs', data=virtual_obs)
+            f.create_dataset('H_virtual_obs', data=dum)
+        # exit(0)
         return np.dot(self.H_matrix(n), virtual_obs)
 
     def JObs_fun(self, n_model):
@@ -97,78 +248,486 @@ class UtilsFunctions:
         return self.H_matrix(n_model)
 
     
-    def generate_observation_schedule(self,**kwargs):
-        """
-        Generate observation times and indices from a given array of time points.
+    # def generate_observation_schedule(self, **kwargs):
+    #     try:
+    #         t = np.array(kwargs["t"])
+    #         freq_obs = self.params["freq_obs"]
+    #         obs_start_time = self.params["obs_start_time"]
+    #         obs_max_time = self.params["obs_max_time"]
 
-        Parameters:
-            t (list or np.ndarray): Array of time points.
-            freq_obs (int): Frequency of observations in the same unit as `t`.
-            obs_max_time (int): Maximum observation time in the same unit as `t`.
+    #         max_t = np.max(t)
+    #         obs_max_time = min(obs_max_time, max_t)
 
-        Returns:
-            obs_t (list): Observation times.
-            obs_idx (list): Indices corresponding to observation times in `t`.
-        """
-        # unpack kwargs
-        t = kwargs["t"]
+    #         obs_t = np.arange(obs_start_time, obs_max_time + freq_obs, freq_obs)
+    #         obs_t = obs_t[obs_t <= obs_max_time]
 
-        # Convert input to a numpy array for easier manipulation
-        t = np.array(t)
-        
-        # Generate observation times
-        obs_t = np.arange(self.params["obs_start_time"], self.params["obs_max_time"] + self.params["freq_obs"], self.params["freq_obs"])
-        # obs_t = np.linspace(obs_start_time, obs_max_time, int(obs_max_time/freq_obs)+1)
-        
-        # Find indices of observation times in the original array
-        obs_idx = np.array([np.where(t == time)[0][0] for time in obs_t if time in t]).astype(int)
+    #         obs_idx = []
+    #         for time in obs_t:
+    #             idx = np.argmin(np.abs(t - time))
+    #             obs_idx.append(idx)
+    #         obs_idx = np.array(obs_idx, dtype=int)
 
-        # print(f"Number of observation instants: {len(obs_idx)} at times: {t[obs_idx]}")
-        
-        # number of observation instants
-        num_observations = len(obs_idx)
+    #         num_observations = len(obs_idx)
+    #         return obs_t, obs_idx, num_observations
+    #     except Exception as e:
+    #         print(f"Error occurred in generate_observation_schedule: {e}")
+    #         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+    #         print(f"Traceback details:\n{tb_str}")
+    #         # self.mpi_comm.Abort(1)
 
-        return obs_t, obs_idx, num_observations
+    def generate_observation_schedule(self, **kwargs):
+        try:
+            import numpy as np
+
+            t = np.asarray(kwargs["t"], dtype=float)
+            if t.ndim != 1 or t.size == 0:
+                raise ValueError("`t` must be a 1D non-empty array of times.")
+            t_min, t_max = float(t[0]), float(t[-1])
+
+            freq_obs = float(self.params["freq_obs"])
+            obs_start = float(self.params["obs_start_time"])
+            obs_max_cfg = float(self.params["obs_max_time"])
+
+            obs_start = max(obs_start, t_min)
+            obs_max = min(obs_max_cfg, t_max)
+
+            if freq_obs <= 0.0 or obs_start > obs_max:
+                return np.array([]), np.array([], dtype=int), 0
+
+            # --- Build ideal observation times ---
+            n_obs = int(np.floor((obs_max - obs_start) / freq_obs)) + 1
+            obs_t_req = obs_start + np.arange(n_obs, dtype=float) * freq_obs
+
+            # --- Match model time points to observation times ---
+            dt_grid = np.min(np.diff(t)) if len(t) > 1 else 1.0
+            tol = 1e-6 * dt_grid
+
+            # For each t in the model time grid, check if it’s close to any obs time
+            # obs_idx = []
+            # for i, ti in enumerate(t):
+            #     if np.any(np.abs(ti - obs_t_req) < tol):
+            #         obs_idx.append(i)
+            # obs_idx = np.array(obs_idx, dtype=int)
+
+            obs_idx = []
+            for tobs in obs_t_req:
+                i = np.argmin(np.abs(t - tobs))
+                if abs(t[i] - tobs) <= 0.5 * dt_grid:
+                    obs_idx.append(i)
+
+            obs_idx = np.array(sorted(set(obs_idx)), dtype=int)
+
+            obs_t_aligned = t[obs_idx]
+            num_observations = len(obs_idx)
+
+            return obs_t_req, obs_idx, num_observations
+        except Exception as e:
+            print(f"Error occurred in generate_observation_schedule: {e}")
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
     
     # --- Create synthetic observations ---
-    def _create_synthetic_observations(self,**kwargs):
-        """create synthetic observations"""
+    # def _create_synthetic_observations(self,**kwargs):
+    #     """create synthetic observations"""
+    #     statevec_true = kwargs.get('statevec_true', None)
+    #     nd, nt = statevec_true.shape
+
+    #     obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
+
+    #     vecs, indx_map, _ = icesee_get_index(statevec_true, **kwargs)
+
+    #     # create synthetic observations
+    #     hu_obs = np.zeros((nd,self.params["number_obs_instants"]))
+
+    #     # check if params["sig_obs"] is a scalar
+    #     # if isinstance(self.params["sig_obs"], (int, float)):
+    #     #     self.params["sig_obs"] = np.ones(self.params["nt"]+1) * self.params["sig_obs"]
+    #     if kwargs.get('joint_estimation', False) or self.params.get('localization_flag', False):
+    #         hdim = statevec_true.shape[0] // self.params["total_state_param_vars"]
+    #     else:
+    #         hdim = statevec_true.shape[0] // self.params["total_state_param_vars"]
+    #         nd = hdim * self.params["num_state_vars"]
+
+
+    #     error_R = np.zeros((nd, m_obs * 2 + 1))
+    #     for i, sig in enumerate(self.params["sig_obs"]):
+    #         start_idx = i*hdim
+    #         end_idx = start_idx + hdim
+    #         error_R[start_idx:end_idx,:] = np.ones((hdim,1)) * sig
+
+    #     # print(f"[ICESEE] vec_inputs: {kwargs['vec_inputs']}")
+    #     bed_flag = (key == 'bed' or key == 'bedrock' or key == 'bed_topography' or key == 'bedtopo' or key == 'bedtopography')
+    #     km = 0
+    #     km_temp = 0
+    #     for step in range(nt):
+    #         if (km<m_obs) and (step+1 == ind_m[km]):
+    #             # for key in kwargs['vec_inputs']:
+    #             for ii, key in enumerate(kwargs['vec_inputs']):
+    #                 if (ii < kwargs['num_state_vars'] or key in kwargs.get('observed_params', [])) and not bed_flag:
+    #                     hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
+    #                 else:
+    #                     # fill with zeros for parameters
+    #                     hu_obs[indx_map[key],km] = np.zeros(len(indx_map[key]))
+
+    #                 if key == 'bed' or key == 'bedrock' or key == 'bed_topography' or key == 'bedtopo' or key == 'bedtopography':
+    #                     if step+1 == kwargs.get('bed_obs_snapshot', 0)[km_temp]:
+    #                         hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
+    #                         km_temp += 1
+
+    #             km += 1
+
+    #     return hu_obs, error_R.T
+
+    def _create_synthetic_observations(self, **kwargs):
+        """create synthetic observations (same logic; bed snapshots are sparse by spacing/mask)"""
+        import numpy as np
+
         statevec_true = kwargs.get('statevec_true', None)
-        nd, nt = statevec_true.shape
+        assert statevec_true is not None, "statevec_true is required"
+        # nd, nt = statevec_true.shape
+        params = kwargs.get('params')
+        nd = kwargs.get('nd', params.get('nd', statevec_true.shape[0]))
+        nt = kwargs.get('nt', params.get('nt', statevec_true.shape[1]))
+        Ly = kwargs.get('Ly', self.params.get('Ly', None))
+        Lx = kwargs.get('Lx', self.params.get('Lx', None))
+        model_name = kwargs.get('model_name', None)
 
+        # Observation schedule
         obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
+        ind_m = np.asarray(ind_m, dtype=int)  # 1-based
+        print(f"[ICESEE] observation times: {obs_t}, indices: {ind_m}, total: {m_obs}")
 
+        # Bed snapshots specified in *years*
+        bed_snaps = np.asarray(kwargs.get('bed_obs_snapshot', []), dtype=float)
+
+        obs_t = np.asarray(obs_t, dtype=float)
+
+        bed_snap_cols = []
+        bed_time_to_col = {}
+
+        for bed_time in bed_snaps:
+            # find the nearest observation time (in *years*)
+            diffs = np.abs(obs_t - bed_time)
+            j = int(np.argmin(diffs))           # 0-based column index
+            bed_snap_cols.append(j)
+            bed_time_to_col[bed_time] = j       # map "year" -> column
+
+        # Optional: unique + sorted
+        bed_snap_cols = sorted(set(bed_snap_cols))
+
+        print("[ICESEE] obs_t:", obs_t)
+        print("[ICESEE] bed_snaps (years):", bed_snaps)
+        print("[ICESEE] bed_snap_cols:", bed_snap_cols)
+        print("[ICESEE] obs_t at bed_snap_cols:", obs_t[bed_snap_cols])
+
+
+        # Index maps
         vecs, indx_map, _ = icesee_get_index(statevec_true, **kwargs)
+        vec_inputs = list(kwargs['vec_inputs'])
 
-        # create synthetic observations
-        hu_obs = np.zeros((nd,self.params["number_obs_instants"]))
+        # Preallocate observations
+        # hu_obs = np.zeros((nd, self.params["number_obs_instants"]))
+        hu_obs = np.zeros((nd, m_obs))
 
-        # check if params["sig_obs"] is a scalar
-        # if isinstance(self.params["sig_obs"], (int, float)):
-        #     self.params["sig_obs"] = np.ones(self.params["nt"]+1) * self.params["sig_obs"]
-        if kwargs.get('joint_estimation', False) or self.params.get('localization_flag', False):
-            hdim = statevec_true.shape[0] // self.params["total_state_param_vars"]
-        else:
-            hdim = statevec_true.shape[0] // self.params["total_state_param_vars"]
+        # hdim / nd handling (unchanged)
+        total_state_param_vars = self.params["total_state_param_vars"]
+        hdim = statevec_true.shape[0] // total_state_param_vars
+        if not (kwargs.get('joint_estimation', False) or self.params.get('localization_flag', False)):
+            nd = hdim * self.params["num_state_vars"]
 
+        # Build error_R (nd, m_obs*2+1), unchanged
         error_R = np.zeros((nd, m_obs * 2 + 1))
-        for i, sig in enumerate(self.params["sig_obs"]):
-            start_idx = i*hdim
+        sig_obs = self.params["sig_obs"]
+        for i, sig in enumerate(sig_obs):
+            start_idx = i * hdim
             end_idx = start_idx + hdim
-            error_R[start_idx:end_idx,:] = np.ones((hdim,1)) * sig
+            error_R[start_idx:end_idx, :] = sig  # broadcast
 
+        # Fast memberships & cached indices
+        observed_params = set(kwargs.get('observed_params', []))
+        bed_aliases = {'bed', 'bedrock', 'bed_topography', 'bedtopo', 'bedtopography'}
+        key_is_bed = {k: (k in bed_aliases) for k in vec_inputs}
+        key_idx_map = {k: np.asarray(indx_map[k], dtype=int) for k in vec_inputs}
+
+        # ---- Bed snapshot control (same timing logic) ----
+        bed_snaps = kwargs.get('bed_obs_snapshot', [])
+        bed_snaps = list(bed_snaps) if isinstance(bed_snaps, (list, np.ndarray)) else []
         km = 0
-        for step in range(nt):
-            if (km<m_obs) and (step+1 == ind_m[km]):
-                # hu_obs[:,km] = statevec_true[:,step+1] + norm(loc=0,scale=self.params["sig_obs"][step+1]).rvs(size=nd)
-                # hu_obs[:,km] = statevec_true[:,step+1] + np.random.normal(0,self.params["sig_obs"][step+1],nd)
-                # TODO: start from here tomorrow.
-                for key in kwargs['vec_inputs']:
-                    hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
+        km_temp = 0
 
-                km += 1
+        # ---- Build a sparse-observation mask for each bed-like key ----
+        # Options (use whichever you pass in):
+        #   - bed_obs_indices: exact indices into bed subvector (0..len(bed)-1)
+        #   - bed_obs_mask: boolean mask over bed subvector
+        #   - bed_obs_stride: spacing (km) to convert to every-nth point along x
+        #   - bed_obs_spacing: spacing (points) = every n-th point
+        # Needs Lx for stride_km->points if you use it. Pull from kwargs or params.
+        Lx = kwargs.get('Lx', self.params.get('Lx', None))
+        bed_stride_km = kwargs.get('bed_obs_stride', None)
+        bed_spacing_pts = kwargs.get('bed_obs_spacing', None)
+        bed_indices_user = kwargs.get('bed_obs_indices', None)
+        bed_mask_user = kwargs.get('bed_obs_mask', None)
 
-        return hu_obs, error_R.T
+        bed_mask_map = {}
+        for k in vec_inputs:
+            if not key_is_bed[k]:
+                continue
+            bed_idx = key_idx_map[k]               # global indices into statevec
+            local_len = bed_idx.size               # size of the bed subvector
+
+            # Default: observe all (original behavior)
+            mask = np.ones(local_len, dtype=bool)
+
+            # Priority 1: explicit mask
+            if isinstance(bed_mask_user, (list, np.ndarray)):
+                mask = np.asarray(bed_mask_user, dtype=bool)
+                if mask.size != local_len:
+                    # Try to safely broadcast smaller masks by stepping
+                    if mask.ndim == 1 and mask.size > 0:
+                        step = int(np.ceil(local_len / mask.size))
+                        rep = int(np.ceil(local_len / mask.size))
+                        mask = np.tile(mask, rep)[:local_len]
+                    else:
+                        mask = np.ones(local_len, dtype=bool)
+
+            # Priority 2: explicit indices
+            elif isinstance(bed_indices_user, (list, np.ndarray)):
+                mask = np.zeros(local_len, dtype=bool)
+                idxs = np.asarray(bed_indices_user, dtype=int)
+                idxs = idxs[(idxs >= 0) & (idxs < local_len)]
+                mask[idxs] = True
+
+            # Priority 3: spacing in points
+            elif isinstance(bed_spacing_pts, (int, np.integer)) and bed_spacing_pts > 1:
+                n = int(bed_spacing_pts)
+                mask = np.zeros(local_len, dtype=bool)
+                mask[::n] = True
+
+            # Priority 4: spacing in km (needs Lx)
+            # elif (bed_stride_km is not None) and (Lx is not None):
+            #     # Convert stride in km → every-nth point, assuming uniform x-grid
+            #     # Use (hdim-1) intervals to estimate dx; fall back safely.
+            #     intervals = max(hdim - 1, 1)
+            #     dx_m = float(Lx) / intervals
+            #     # n = max(int(round((bed_stride_km * 1000.0) / max(dx_m, 1e-12))), 1)
+            #     n = max(int(round((bed_stride_km) / max(dx_m, 1e-12))), 1)
+            #     mask = np.zeros(local_len, dtype=bool)
+            #     mask[::n] = True
+
+            # Priority 4: spacing in km (LiDAR-like stripes in 2D)
+            elif (bed_stride_km is not None) and (Lx is not None) and (Ly is not None):
+                # if model_name == 'issm' or model_name == 'ISSM':
+                if re.match(r'(?i)^issm$', str(model_name)):
+                    icesee_path   = kwargs.get('icesee_path')
+                    data_path     = kwargs.get('data_path')
+
+                    # get the model dimensions from issm mesh
+                    file_path = f'{icesee_path}/{data_path}/mesh_idxy_{0}.h5'
+                    # check if file exists, if not raise error to inform the user to generate the mesh
+                    try:
+                        with h5py.File(file_path, 'r') as f:
+                            x_param = f['/fric_x'][:]   # shape (fdim,)
+                            y_param = f['/fric_y'][:]   # shape (fdim,)
+                            # print(f"[ICESEE] ISSM mesh dimensions: hdim={hdim}, fdim={fdim}")
+                    except FileNotFoundError:
+                        raise FileNotFoundError(
+                            f"ISSM mesh file '{file_path}' not found. "
+                            "Please generate the mesh indicies before running ICESEE."
+                        )
+
+                    y_param = np.asarray(y_param/1000.0, dtype=float).reshape(-1)
+                    x_param = np.asarray(x_param/1000.0, dtype=float).reshape(-1)
+                    y_min, y_max = np.min(y_param), np.max(y_param)
+                    x_min, x_max = np.min(x_param), np.max(x_param)
+
+                    local_len = x_param.size
+
+                    # number of nominal flight lines in y
+                    bed_stride_km = bed_stride_km/1000.0
+                    n_lines = max(int(np.floor((y_max - y_min) / bed_stride_km)) + 1, 1)
+                    y_lines = y_min + np.arange(n_lines) * bed_stride_km
+
+                    # tracks perpendicular to the ice flow direction
+                    x_lines = np.arange(x_min, x_max+1e-6, bed_stride_km)
+                    
+                    # band half-width: half the nominal y-spacing
+                    # if n_lines > 1:
+                    #     dy_nom = (y_max - y_min) / (n_lines - 1)
+                    # else:
+                    #     dy_nom = (y_max - y_min) if (y_max > y_min) else bed_stride_km
+                    # band = 0.5 * dy_nom
+
+                    # mask = np.zeros(local_len, dtype=bool)
+                    # for y_line in y_lines:
+                    #     mask |= np.abs(y_param - y_line) <= band
+
+                    if x_lines.size > 1:
+                        dx_nom = (x_max - x_min) / (x_lines.size - 1)
+                    else:
+                        dx_nom = bed_stride_km
+                    band = 0.5 * dx_nom
+
+                    mask = np.zeros(local_len, dtype=bool)
+                    for x_line in x_lines:
+                        mask |= np.abs(x_param - x_line) <= band
+
+                    print(f"[ICESEE<-ISSM] bed LiDAR mask for '{k}': {mask.sum()} of {local_len} points observed")
+
+                else:
+                    #*--- based on assumptions of 2D grid layout ---*#
+                    # We assume hdim is the x-dimension (Nx)
+                    Nx = int(hdim)
+                    Ny = int(local_len // Nx) if Nx > 0 else 1
+                    if Nx * Ny != local_len:
+                        # Fallback: cannot infer 2D layout, revert to 1D thinning in x
+                        intervals = max(hdim - 1, 1)
+                        dx = float(Lx) / intervals  # in km (if Lx is in km)
+                        n = max(int(round(bed_stride_km / max(dx, 1e-12))), 1)
+                        mask = np.zeros(local_len, dtype=bool)
+                        mask[::n] = True
+                    else:
+                        # Build a 2D LiDAR-like mask: whole flight lines along x,
+                        # spaced every bed_stride_km in y.
+                        intervals_y = max(Ny - 1, 1)
+                        dy = float(Ly) / intervals_y  # km per grid cell in y
+
+                        # How many grid points in y between flight lines?
+                        stride_y_pts = max(int(round(bed_stride_km / max(dy, 1e-12))), 1)
+
+                        # Optionally: along-track thinning in x (keep all points by default)
+                        along_track_stride_pts = 1  # or make this another parameter
+
+                        mask2d = np.zeros((Ny, Nx), dtype=bool)
+
+                        # Select every stride_y_pts-th row as a LiDAR flight line,
+                        # and optionally thin along x.
+                        for j in range(0, Ny, stride_y_pts):
+                            mask2d[j, ::along_track_stride_pts] = True
+
+                        # Flatten back to 1D in the same order as your state vector
+                        mask = mask2d.ravel(order="C")
+
+
+                        print(f"[ICESEE] bed 2D mask for key '{k}': Ny={Ny}, Nx={Nx}, stride_y_pts={stride_y_pts}")
+
+            # Save per-key mask (over the bed subvector)
+            bed_mask_map[k] = mask
+
+        obs_set = set(kwargs["observed_vars"] + kwargs["observed_params"])
+        # Map each bed snapshot time to the obs column
+        bed_time_to_col = {t: col for col, t in enumerate(ind_m)}
+
+        # for step in range(nt):
+        #     if (km < m_obs) and (step + 1 == ind_m[km]):
+        #         for key in vec_inputs:
+        #             idx = key_idx_map[key]
+        #             bed_flag = key_is_bed[key]
+
+        #             # ---------- STANDARD VARIABLES ----------
+        #             if key in obs_set and not bed_flag:
+        #                 sigma = error_R[idx, km]
+        #                 hu_obs[idx, km] = (
+        #                     statevec_true[idx, step+1] +
+        #                     np.random.normal(0.0, sigma, size=idx.size)
+        #                 )
+        #             else:
+        #                 hu_obs[idx, km] = 0.0
+
+        #             # ---------- BED SPECIAL CASE --------------
+        #             if bed_flag and (step+1 in bed_time_to_col):
+        #                 col = bed_time_to_col[step+1]
+        #                 mask = bed_mask_map[key]
+        #                 idx_obs = idx[mask]
+        #                 if idx_obs.size > 0:
+        #                     sigma_obs = error_R[idx_obs, col]
+        #                     hu_obs[idx_obs, col] = (
+        #                         statevec_true[idx_obs, step+1] +
+        #                         np.random.normal(0.0, sigma_obs, size=idx_obs.size)
+        #                     )
+        #                 # print("Nonzero bed obs:", np.nonzero(hu_obs[bed_ind,:]))
+
+        #         km += 1
+
+        # instead of bed snapshots being tied to time steps, lets pass in actual times
+        #  if the bed time is in the observation times, then we take the closest observation time.
+        # for key in vec_inputs:
+        #     if key_is_bed[key]:
+        #         # continue
+        #         obs_t = np.asarray(obs_t, dtype=float)
+        #         bed_snaps = np.asarray(bed_snaps, dtype=float)
+
+        #         bed_snaps_idx = []
+        #         for bed_time in bed_snaps:
+        #             # distances to all obs times
+        #             diffs = np.abs(obs_t - bed_time)
+        #             # index of closest obs time
+        #             idx = int(np.argmin(diffs))
+        #             bed_snaps_idx.append(idx)
+
+        # for km, step_time in enumerate(ind_m):
+        #     for key in vec_inputs:
+        #         idx = indx_map[key]
+
+        #         #   ---- normal variables ----
+        #         if key in obs_set and not key_is_bed[key]:
+        #             sigma = error_R[idx, km]
+        #             hu_obs[idx, km] = (
+        #                 statevec_true[idx, step_time-1] +
+        #                 np.random.normal(0.0, sigma, size=idx.size)
+        #             )
+        #         else:
+        #             hu_obs[idx, km] = 0.0
+        #             # print("\ntttt-----------\n:"); print(key); exit(0)
+        #         #   ---- bed special case ----
+        #         if key_is_bed[key] and (step_time in bed_snaps_idx):
+        #             if step_time in bed_snaps_idx:
+        #                 col =  bed_time_to_col[step_time]
+        #                 mask = bed_mask_map[key]
+        #                 idx_obs = idx[mask]
+        #                 # if idx_obs.size > 0:
+        #                 sigma_obs = error_R[idx_obs, col]
+        #                 # print(f"hu_obs[idx_obs, col]: {hu_obs[idx_obs, col]}, col: {col}, step_time: {step_time}, idx_obs: {idx_obs}, mask: {mask}")
+        #                 hu_obs[idx_obs, col] = (
+        #                     statevec_true[idx_obs, step_time-1] +
+        #                     np.random.normal(0.0, sigma_obs, size=idx_obs.size)
+        #                 )
+        for km, step_time in enumerate(ind_m):
+            # step_time is an index into statevec_true's time axis (1..nt)
+            for key in vec_inputs:
+                idx = indx_map[key]
+
+                # ---- non-bed vars (normal observations) ----
+                if key in obs_set and not key_is_bed[key]:
+                    sigma = error_R[idx, km]
+                    hu_obs[idx, km] = (
+                        statevec_true[idx, step_time] +
+                        np.random.normal(0.0, sigma, size=idx.size)
+                    )
+                else:
+                    hu_obs[idx, km] = 0.0
+
+                # ---- bed special case ----
+                if key_is_bed[key] and (km in bed_snap_cols):
+                    col = km
+                    mask = bed_mask_map[key]
+                    idx_obs = idx[mask]
+
+                    if idx_obs.size > 0:
+                        sigma_obs = error_R[idx_obs, col]
+                        hu_obs[idx_obs, col] = (
+                            statevec_true[idx_obs, step_time] +
+                            np.random.normal(0.0, sigma_obs, size=idx_obs.size)
+                        )
+
+
+            # print(bed_mask_map);exit(0)
+            if len(bed_mask_map.keys()) == 0:
+                # print("[ICESEE] Warning: bed_mask_map is empty. No bed observations will be created.")
+                # load false bed mask
+                pass
+
+        return hu_obs, error_R.T, bed_mask_map
+
     
     def bed(self, x):
         """
@@ -192,417 +751,6 @@ class UtilsFunctions:
         b = sillamp * (-2 * jnp.arccos((1 - sillsmooth) * jnp.sin(jnp.pi * x / (2 * xsill))) / jnp.pi - 1)
         return b
     
-    def inflate_ensemble(self,in_place=True):
-        """
-        Inflate ensemble members by a given factor.
-        
-        Args: 
-            ensemble: ndarray (n x N) - The ensemble matrix of model states (n is state size, N is ensemble size).
-            inflation_factor: float - scalar or iterable length equal to model states
-            in_place: bool - whether to update the ensemble in place
-        Returns:
-            inflated_ensemble: ndarray (n x N) - The inflated ensemble.
-        """
-        # check if the inflation factor is scalar
-        if np.isscalar(self.params['inflation_factor']):
-            _scalar = True
-            _inflation_factor = float(self.params['inflation_factor'])
-        elif isiterable(self.params['inflation_factor']):
-            if len(self.params['inflation_factor']) == self.ensemble.shape[0]:
-                _inflation_factor[:] = self.params['inflation_factor'][:]
-                _scalar = False
-            else:
-                raise ValueError("Inflation factor length must be equal to the state size")
-        
-        # check if we need inflation
-        if _scalar:
-            if _inflation_factor == 1.0:
-                return self.ensemble
-            elif _inflation_factor < 0.0:
-                raise ValueError("Inflation factor must be positive scalar")
-        else:
-            _inf = False
-            for i in _inflation_factor:
-                if i>1.0:
-                    _inf = True
-                    break
-            if not _inf:
-                return self.ensemble
-        
-        ens_size = self.ensemble.shape[1]
-        mean_vec = np.mean(self.ensemble, axis=1)
-        if in_place:
-            inflated_ensemble = self.ensemble
-            for ens_idx in range(ens_size):
-                state = inflated_ensemble[:, ens_idx]
-                if _scalar:
-                    state = (state - mean_vec) * _inflation_factor
-                else:
-                    state = (state - mean_vec) * _inflation_factor
-
-                inflated_ensemble[:, ens_idx] = state + mean_vec
-        else:
-            inflated_ensemble = np.zeros(self.ensemble.shape)
-            for ens_idx in range(ens_size):
-                state = self.ensemble[:, ens_idx].copy()
-                if _scalar:
-                    state = (state - mean_vec) * _inflation_factor
-                else:
-                    state = (state - mean_vec) * _inflation_factor
-
-                inflated_ensemble[:, ens_idx] = state + mean_vec
-        
-        return inflated_ensemble
-    
-    def _inflate_ensemble(self,rescale=False):
-        """inflate ensemble members by a given factor"""
-
-        _inflation_factor = float(self.params['inflation_factor'])
-        x = np.mean(self.ensemble, axis=0, keepdims=True)
-        X = self.ensemble - x
-
-        # rescale the ensemble to correct the variance
-        if rescale:
-            N, M = self.ensemble.shape
-            X *= np.sqrt(N/(N-1))
-
-        x = x.squeeze(axis=0)
-
-        if _inflation_factor == 1.0:
-            return self.ensemble
-        else:
-            return x + _inflation_factor * X
-
-
-    def _localization_matrix(self,euclidean_distance, localization_radius, loc_type='Gaspari-Cohn'):     
-        """
-        Calculate the localization matrix based on the localization type, euclean_distance and radius
-        of influence.
-        
-        Parameters:
-        euclidean_distance (numpy array): The Euclidean distance between the observation and state
-        localization_radius (float or numpy array): Distance beyond which the localization matrix is tapered to zero.
-        method (str): The localization method.
-        
-        Returns:
-        numpy array: The localization matrix (same size as the Euclidean distance).
-        """
-
-        # Get original shape
-        dist_size = euclidean_distance.shape
-
-        # Gaspari-Cohn localization
-        if re.match(r'\Agaspari(_|-)*cohn\Z', loc_type, re.IGNORECASE):
-            # Normalize distances relative to localization radius
-            radius = euclidean_distance.flatten() / (0.5 * localization_radius)
-
-            # Initialize localization matrix with zeros
-            localization_matrix = np.zeros_like(radius)
-
-            # Gaspari-Cohn function
-            mask0 = radius < 1
-            mask1 = (radius >= 1) & (radius < 2)
-
-            # Compute values where radius < 1
-            loc_func0 = (((-0.25 * radius + 0.5) * radius + 0.625) * radius - 5.0 / 3.0) * radius**2 + 1
-            localization_matrix[mask0] = loc_func0[mask0]
-
-            # Compute values where 1 <= radius < 2
-            radius_safe = np.where(radius == 0, 1e-10, radius)  # Avoid division by zero
-            loc_func1 = ((((1.0 / 12.0 * radius_safe - 0.5) * radius_safe + 0.625) * radius_safe + 5.0 / 3.0) * radius_safe - 5.0) * radius_safe + 4.0 - 2.0 / 3.0 / radius_safe
-            localization_matrix[mask1] = loc_func1[mask1]
-            return localization_matrix.reshape(dist_size)
-        # Gaussian localization
-        elif re.match(r'\Agaussian\Z', loc_type, re.IGNORECASE):
-            return np.exp(-0.5 * (euclidean_distance / localization_radius)**2)
-
-        else:
-            raise ValueError(f"Unknown localization type: {loc_type}")
-
-    import numpy as np
-
-    def compute_sample_correlations_vectorized(self, shuffled_ens, forward_ens):
-        """
-        Compute sample correlations between shuffled_ens and forward_ens in a vectorized manner.
-        
-        Parameters:
-            shuffled_ens (np.ndarray): Array of shape (n_members, n_variables) representing the shuffled ensemble.
-            forward_ens (np.ndarray): Array of shape (n_members, n_variables) representing the forward ensemble.
-        
-        Returns:
-            np.ndarray: An array of correlation coefficients (one per variable).
-        """
-        # Number of ensemble members
-        Nens = self.ensemble.shape[1]
-
-        # Compute means for each variable (column-wise)
-        mean_shuffled = np.mean(shuffled_ens, axis=0)
-        mean_forward = np.mean(forward_ens, axis=0)
-
-        # Center the ensembles by subtracting the means
-        centered_shuffled = shuffled_ens - mean_shuffled
-        centered_forward = forward_ens - mean_forward
-
-        # Compute the covariance for each variable (element-wise multiplication, then sum over rows)
-        cov = np.sum(centered_shuffled * centered_forward, axis=0) / (Nens - 1)
-
-        # Compute the standard deviations for each variable with Bessel's correction (ddof=1)
-        std_shuffled = np.std(shuffled_ens, axis=0, ddof=1)
-        std_forward = np.std(forward_ens, axis=0, ddof=1)
-
-        # Calculate the correlation coefficient for each variable
-        correlations = cov / (std_shuffled * std_forward)
-
-        return correlations
-
-    
-    def _adaptive_localization(self, euclidean_distance=None, 
-                              localization_radius=None, ensemble_init=None, loc_type='Gaspari-Cohn'):
-        """Adaptively calculates the radius of influence for each observation density
-           which is then used to dynamically compute the localization matrix.
-           returns: adaptive localization matrix
-        @reference: See https://doi.org/10.1016/j.petrol.2019.106559 for more details
-        """
-
-        # get the shape of the ensemble size
-        nd, Nens = self.ensemble.shape
-
-        # if localization radius is not provided, use the adaptive method
-        if localization_radius is None:
-            # correlation based localization
-            if Nens >= 30:
-                # random shuffle the initial ensemble
-                np.random.shuffle(ensemble_init)
-                # ensemble members after forward simulation
-                forward_ens = self.ensemble
-
-                # get initial sample correlation btn the shuffled and forward ens
-                # sample_ind
-                # sample_correlations = self.compute_sample_correlations_vectorized(shuffled_ens, forward_ens)
-                sample_correlations = np.corrcoef(ensemble_init, forward_ens, rowvar=False)
-                
-                # # subsitute noise field of sample_correlations 
-                # sample_correlations[np.isnan(sample_correlations)] = 0
-
-                # use the MAD rule to estimate noise levels; sig_gs = median(abs(eta_gs))/0.6745
-                sig_gs = np.median(np.abs(sample_correlations), axis=0) / 0.6745
-
-                # use the universal rule to subsitute noise fields; theta_gs = sqrt(2*ln(number of rho_gs))*sig_gs
-                theta_gs = np.sqrt(2 * np.log(Nens)) * sig_gs
-
-                # construct the tapering matrix by applying the the estimated noise levels 
-                # to the sample correlations
-                tapering_matrix = np.exp(-0.5 * (sample_correlations / theta_gs)**2)
-
-            # distance based localization
-            else:
-                # if the dist between the model variable and the observation is zero, then the weight is 1
-                if np.any(euclidean_distance == 0): 
-                    localization_matrix = np.ones(self.ensemble.shape[0])
-                    return localization_matrix
-
-                # use a type based on variance  
-                var = np.var(self.ensemble,axis=0)
-                avg_var = np.mean(var)
-                localization_radius = self.params['base_radius'] * np.sqrt(1 + self.params['scaling_factor'] * np.sqrt(avg_var))
-
-                # call the localization matrix function
-                localization_matrix = self._localization_matrix(euclidean_distance, localization_radius)
-                return localization_matrix
-        else:
-            # call the localization matrix function
-            localization_matrix = self._localization_matrix(euclidean_distance, localization_radius)
-            return localization_matrix
-
-    import numpy as np
-
-    def _adaptive_localization_v2(self, cutoff_distance):
-        """
-        Compute an adaptive localization matrix based on ensemble correlations.
-
-        Parameters:
-        cutoff_distance (numpy array): Predefined cutoff distances for localization.
-
-        Returns:
-        numpy array: The computed localization matrix.
-        """
-        # Get ensemble size
-        nd, Nens = self.ensemble.shape
-
-        # Compute correlation matrix
-        R = np.corrcoef(self.ensemble, rowvar=False)
-
-        # Compute threshold for localization radius
-        rad_flag = 1 / np.sqrt(Nens - 1)
-
-        # Find the first occurrence where correlation drops below threshold
-        mask = R < rad_flag  # Boolean mask
-
-        # Get the first (i, j) index where R[i, j] < rad_flag
-        indices = np.argwhere(mask)  # Get all (i, j) pairs that satisfy the condition
-        
-        if indices.size > 0:
-            first_i = indices[0, 0]  # First valid row index
-            radius = cutoff_distance[first_i]  # Assign corresponding cutoff distance
-
-            # Call the localization matrix function with the scalar radius
-            localization_matrix = self._localization_matrix(cutoff_distance, radius)
-            return localization_matrix
-
-        # Return None if no valid index found (handle this case as needed)
-        return None
-
-    def rmse(self,truth, estimate):
-        """
-        Calculate the Root Mean Squared Error (RMSE) between the true and estimated values.
-        
-        Parameters:
-        truth (numpy array): The true values.
-        estimate (numpy array): The estimated values.
-        
-        Returns:
-        float: The RMSE value.
-        """
-        return np.sqrt(np.mean((truth - estimate) ** 2))
-
-    def compute_euclidean_distance(self, grid_x, grid_y):
-        """
-        Compute the Euclidean distance matrix between all grid points.
-
-        Parameters:
-        grid_x (numpy array): X-coordinates of the grid points (1D array).
-        grid_y (numpy array): Y-coordinates of the grid points (1D array).
-
-        Returns:
-        numpy array: Euclidean distance matrix (NxN, where N = number of grid points).
-        """
-        # Stack X, Y coordinates into (N, 2) array where N is the number of points
-        grid_points = np.column_stack((grid_x.ravel(), grid_y.ravel()))
-
-        # Compute pairwise Euclidean distances
-        distance_matrix = cdist(grid_points, grid_points, metric='euclidean')
-
-        return distance_matrix
-    
-    def gaspari_cohn(self,r):
-        """
-        Compute the Gaspari-Cohn localization function.
-        
-        Parameters:
-        r (numpy array): Normalized distance (d / r0), where d is the Euclidean distance 
-                        and r0 is the localization radius.
-        
-        Returns:
-        numpy array: Localization weights corresponding to r.
-        """
-        gc = np.zeros_like(r)  # Initialize localization weights
-
-        # Case 0 <= r < 1
-        mask1 = (r >= 0) & (r < 1)
-        gc[mask1] = (((-0.25 * r[mask1] + 0.5) * r[mask1] + 0.625) * r[mask1] - 5.0 / 3.0) * r[mask1]**2 + 1
-
-        # Case 1 <= r < 2
-        mask2 = (r >= 1) & (r < 2)
-        gc[mask2] = ((((1.0 / 12.0 * r[mask2] - 0.5) * r[mask2] + 0.625) * r[mask2] + 5.0 / 3.0) * r[mask2] - 5.0) * r[mask2] + 4.0 - 2.0 / (3.0 * np.where(r[mask2] == 0, 1e-10, r[mask2]))
-
-        # Case r >= 2 (default to 0)
-        return gc
-    
-    def create_tapering_matrix(self,grid_x, grid_y, localization_radius):
-        """
-        Create a tapering matrix using the Gaspari-Cohn localization function.
-
-        Parameters:
-        grid_x (numpy array): X-coordinates of grid points (1D array).
-        grid_y (numpy array): Y-coordinates of grid points (1D array).
-        localization_radius (float): Cutoff radius beyond which correlations are zero.
-
-        Returns:
-        numpy array: Tapering matrix (NxN), where N = number of grid points.
-        """
-        # Compute Euclidean distance matrix
-        distance_matrix = self.compute_euclidean_distance(grid_x, grid_y)
-        # print(distance_matrix)
-
-        # Normalize distances by the localization radius
-        # if is radius is a scalar
-        if np.isscalar(localization_radius):
-            r = distance_matrix / (0.5*localization_radius)
-        else:
-            if localization_radius.shape[0] == distance_matrix.shape[0]:
-                r = distance_matrix / 0.5*localization_radius[:, None]
-                # r = np.ones_like(distance_matrix)*localization_radius[:, None]
-            elif localization_radius.shape[0] > distance_matrix.shape[0]:  
-                obs_indices = np.arange(distance_matrix.shape[0])  # Select only the required points
-                r = distance_matrix / 0.5*localization_radius[obs_indices, None]
-                # r = np.ones_like(distance_matrix)*localization_radius[obs_indices, None]
-
-        # Normalize distances by the localization radius
-        # r = distance_matrix / localization_radius
-        if False:
-            # create a localization matrix without distance
-            r = np.ones_like(distance_matrix)*localization_radius
-
-        # Compute tapering matrix using Gaspari-Cohn function
-        tapering_matrix = self.gaspari_cohn(r)
-        # print(f"tapering matrix: {tapering_matrix}")
-
-        return tapering_matrix
-
-    def compute_adaptive_localization_radius(self, grid_x, grid_y, base_radius=2.0, method='variance'):
-        """
-        Compute an adaptive localization radius for each grid point.
-
-        Parameters:
-        ensemble (numpy array): Ensemble state matrix (N_grid x N_ens).
-        grid_x (numpy array): X-coordinates of grid points (1D array).
-        grid_y (numpy array): Y-coordinates of grid points (1D array).
-        base_radius (float): Default radius before adaptation.
-        method (str): 'variance', 'observation_density', or 'correlation'.
-
-        Returns:
-        numpy array: Adaptive localization radius for each grid point.
-        """
-        num_points, Nens = self.ensemble.shape  # Get grid size and ensemble size
-        adaptive_radius = np.full(num_points, base_radius)  # Default radius
-
-        if method == 'variance':
-            # Compute ensemble variance at each grid point
-            ensemble_variance = np.var(self.ensemble, axis=1)
-
-            # Normalize variance (relative to max spread)
-            normalized_variance = ensemble_variance / np.max(ensemble_variance)
-
-            # Scale localization radius based on variance
-            adaptive_radius *= (1 + normalized_variance)
-
-        elif method == 'observation_density':
-            # Compute observation density (using a Gaussian kernel approach)
-            grid_points = np.column_stack((grid_x.ravel(), grid_y.ravel()))
-            obs_density = np.sum(np.exp(-cdist(grid_points, grid_points, 'euclidean')**2 / base_radius**2), axis=1)
-
-            # Normalize observation density
-            normalized_density = obs_density / np.max(obs_density)
-
-            # Decrease localization radius in high-density regions
-            adaptive_radius *= (1 - normalized_density)
-
-        elif method == 'correlation':
-            # Compute correlation matrix from the ensemble
-            correlation_matrix = np.corrcoef(self.ensemble, rowvar=True)
-
-            # Set radius where correlation drops below 1/sqrt(Nens-1)
-            threshold = 1 / np.sqrt(Nens - 1)
-            for i in range(num_points):
-                below_threshold = np.where(correlation_matrix[i, :] < threshold)[0]
-                if below_threshold.size > 0:
-                    adaptive_radius[i] = base_radius * np.min(below_threshold) / num_points  # Scale adaptively
-
-        else:
-            raise ValueError("Invalid method. Choose 'variance', 'observation_density', or 'correlation'.")
-
-        return adaptive_radius
-
     def compute_smb_mask(self,  k, km,  state_block_size, hu_obs=None, smb_init=None, smb_clim=None, model_kwargs=None):
         """
         Compute a robust SMB mask based on observations (if available) or ensemble statistics.

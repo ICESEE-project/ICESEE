@@ -815,13 +815,19 @@ def install_matlab_engine(matlab_root):
         os.chdir(current_dir)
 
 
-def setup_ensemble_data(Nens, base_data_dir='./Models/ens_id_0', base_kwargs_file='model_kwargs_0.mat'):
+def setup_ensemble_data(Nens, base_data_dir='./Models/ens_id_0', base_kwargs_file='model_kwargs_0.mat', kwargs=None):
     import os
     import shutil
     from mpi4py import MPI
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
+
+    generate_true_state = kwargs.get('generate_true_state', 0)
+    generate_nurged_state = kwargs.get('generate_nurged_state', 0)
+    generate_synthetic_obs = kwargs.get('generate_synthetic_obs', 0)
+
+    flag = generate_true_state and generate_nurged_state and generate_synthetic_obs
     
     base_data_dir = os.path.abspath(base_data_dir)
     base_kwargs_file = os.path.abspath(base_kwargs_file)
@@ -837,8 +843,8 @@ def setup_ensemble_data(Nens, base_data_dir='./Models/ens_id_0', base_kwargs_fil
             kwargs_file = f'model_kwargs_{ens}.mat'
             
             if ens != 0:  # Skip ens_id_0 (base directory)
-                # if os.path.exists(ens_dir):
-                #     shutil.rmtree(ens_dir)
+                if os.path.exists(ens_dir) and flag:
+                    shutil.rmtree(ens_dir)
                 os.makedirs(ens_dir, exist_ok=True)
                 
             #     for root, _, files in os.walk(base_data_dir):
@@ -873,7 +879,7 @@ def setup_ensemble_data(Nens, base_data_dir='./Models/ens_id_0', base_kwargs_fil
         return ensemble_dir, ensemble_kwargs
     return None, None
 
-def setup_reference_data(reference_data_dir, reference_data, use_reference_data=True):
+def setup_reference_data(reference_data_dir, reference_data, use_reference_data, kwargs):
     """
     Parameters:
     - reference_data_dir: Directory containing the reference data file.
@@ -892,6 +898,12 @@ def setup_reference_data(reference_data_dir, reference_data, use_reference_data=
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
 
+    generate_true_state = kwargs.get('generate_true_state', 0)
+    generate_nurged_state = kwargs.get('generate_nurged_state', 0)
+    generate_synthetic_obs = kwargs.get('generate_synthetic_obs', 0)
+
+    flag = generate_true_state and generate_nurged_state and generate_synthetic_obs
+
     # Resolve symbolic links for paths to avoid SameFileError
     initial_data = os.path.realpath(os.path.abspath(os.path.join(reference_data_dir, reference_data)))
     rank_data_dir = os.path.realpath(os.path.abspath(f'./Models/ens_id_{rank}'))
@@ -903,7 +915,9 @@ def setup_reference_data(reference_data_dir, reference_data, use_reference_data=
         if not os.path.isfile(initial_data):
             raise FileNotFoundError(f"[Rank {rank}] Reference data {initial_data} not found")
 
-        # Create destination directory
+        # remove existing file dir if it exists
+        if os.path.exists(rank_data_dir) and flag:
+            shutil.rmtree(rank_data_dir)
         os.makedirs(rank_data_dir, exist_ok=True)
 
         # Check if source and destination are the same file
