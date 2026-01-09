@@ -13,30 +13,31 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
     data_path    = char(kwargs.data_path);
     devmode      = logical(kwargs.devmode);
     issm_example_dir     = char(kwargs.issm_examples_dir);
-
     deepwater_melting_rate = double(kwargs.deepwater_melting_rate);
     smb = double(kwargs.smb);
     mean_friction  = double(kwargs.mean_friction);
-
     reference_data = char(kwargs.reference_data);
     nens = double(kwargs.Nens);
-    
     wrong_reference_data = 'wrong_reference_data.mat';
+    min_friction = double(kwargs.min_friction);
+    max_friction = double(kwargs.max_friction);
+    abs_vel_weight = double(kwargs.abs_vel_weight);
+    rel_vel_weight = double(kwargs.rel_vel_weight);
+    tikhonov_regularization_weight = double(kwargs.tikhonov_regularization_weight);
+
 
     % Get the current working directory
     cwd = pwd;
     [issmroot,~,~] = fileparts(fileparts(cwd));
 
     % number of variables
-    nvar = 5;
+    nvar = 6;
     rng(1000 + ens_id, 'twister');   % ens_id = ensemble index
 
     % set initail ens_id
     ens_id_init = 0;
-    h_perturb = 150;
-    s_perturb = 25;
-    b_perturb = 60;
-    nurged_entries_percentage = 0.25;
+    s_perturb = double(kwargs.s_nurge);
+    b_perturb = double(kwargs.b_nurge);
 
     output_frequency = 1; % make sure this is set to 1 for coupling with ICESEE
 
@@ -190,7 +191,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % vy = h5read(h5file, '/v_y');
         % vel = h5read(h5file, '/vel');
 
-        md.friction.coefficient = friction_ref + coefficient;
+        % md.friction.coefficient = friction_ref + coefficient;
+        md.friction.coefficient = friction_ref;
         md.friction.p=ones(md.mesh.numberofelements,1);
         md.friction.q=ones(md.mesh.numberofelements,1);
 
@@ -413,8 +415,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
            
 
             %  update the friction and bed
-            md.friction.coefficient = friction_ref + coefficient;
-            % md.friction.coefficient = friction_ref;
+            % md.friction.coefficient = friction_ref + coefficient;
+            md.friction.coefficient = friction_ref;
             md.friction.p=ones(md.mesh.numberofelements,1);
             md.friction.q=ones(md.mesh.numberofelements,1);
 
@@ -966,27 +968,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
         disp(['--- Ensemble ID: ', num2str(ens_id), '  Inverse Assimilation step: ', num2str(k)]);
         obs_col = obs_u(km,:)';            
-    
-        % vx_obs = obs_col(2*nsize + 1 : 3*nsize); 
-        % vy_obs = obs_col(3*nsize + 1 : 4*nsize);  
+     
         vx_obs = obs_col(vel_idx*nsize + 1 : (vel_idx+1)*nsize); 
         vy_obs = obs_col((vel_idx+1)*nsize + 1 : (vel_idx+2)*nsize);
-
-        % vx_obs = md.results.TransientSolution(km).Vx;
-        % vy_obs = md.results.TransientSolution(km).Vy;
         vel_obs = sqrt(vx_obs.^2 + vy_obs.^2);  
-        % md.geometry.thickness = md.results.TransientSolution(km).Thickness;
-        % md.geometry.surface   = md.results.TransientSolution(km).Surface;
-        % md.geometry.bed       = md.results.TransientSolution(km).Bed;
-        % md.geometry.base      = md.geometry.surface - md.geometry.thickness;
-
-
-        % % fetch friction coefficient initial guess
-        % filename = fullfile(icesee_path, data_path, sprintf('friction_bed_%d.h5', ens_id));
-        % % bed = h5read(filename, '/bed');
-        % fcoef = h5read(filename, '/coefficient');
-
-        % md.friction.coefficient = fcoef;
 
         % fetch the updated, vx, vy, h, s, bed, and base
         filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
@@ -1008,40 +993,18 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
         md.mask.ocean_levelset = h5read(filename, '/Thickness') + h5read(filename, '/bed') / di;
 
-        % read from temporal friction file--------------------------------
-        % ens_id_=0;
-        % h5file = fullfile(icesee_path, data_path, sprintf('ensemble_friction_%d.h5', ens_id_));
-        % fcoeff = h5read(h5file, '/coefficient');
-        % md.friction.coefficient = fcoeff;
-        % md.friction.coefficient=mean_friction*ones(md.mesh.numberofvertices,1);
-
-        % md.friction.p=ones(md.mesh.numberofelements,1);
-        % md.friction.q=ones(md.mesh.numberofelements,1);
-        % no friction applied on floating ice
-        % pos=find(md.mask.groundedice_levelset<0);
-
         % no friction applied on floating ice
         pos = find(md.mask.ocean_levelset < 0);
         md.friction.coefficient(pos)=0; %TODO: check the impact of this
-        % md.friction.coefficient(pos)=2000;
         md.groundingline.migration='SubelementMigration';
 
         % set boundary conditions and other parameters
-        % md=SetMarineIceSheetBC(md);
+
         md.basalforcings.floatingice_melting_rate = zeros(md.mesh.numberofvertices,1);
         md.basalforcings.groundedice_melting_rate = zeros(md.mesh.numberofvertices,1);
         md.thermal.spctemperature                 = md.initialization.temperature;
         md.masstransport.spcthickness             = NaN*ones(md.mesh.numberofvertices,1);
 
-        % md.initialization.vx = h5read(h5file, '/Vx');
-        % md.initialization.vy = h5read(h5file, '/Vy');
-        % md.initialization.vel = sqrt(md.initialization.vx.^2 + md.initialization.vy.^2);
-        % -----------------------------------------------------------------
-
-
-        % print size here for debugging
-        % disp(['Size of vx_obs: ', num2str(length(vx_obs))]);
-        % disp(['Size of md.initialization.vx: ', num2str(length(md.initialization.vx))]);
 
         hvertices=[10000;500;5000;7500];
         gradation=1.7;
@@ -1052,9 +1015,6 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
         %results of previous run are taken as observations
         md.inversion=m1qn3inversion();
-        % md.inversion.vx_obs		= md.initialization.vx;
-        % md.inversion.vy_obs		= md.initialization.vy;
-        % md.inversion.vel_obs	= md.initialization.vel;
 
         md.inversion.vx_obs = vx_obs;
         md.inversion.vy_obs = vy_obs;
@@ -1067,21 +1027,16 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.inversion.gttol=1.0e-4;
         md.verbose=verbose('control',true);
 
-        % md = setflowequation(md,'SSA','all');
-
         md.inversion.maxsteps = maxsteps;
         md.inversion.cost_functions=[101 103 501];
         md.inversion.cost_functions_coefficients=ones(md.mesh.numberofvertices,3);
-        md.inversion.cost_functions_coefficients(:,1)=1;
-        md.inversion.cost_functions_coefficients(:,2)=1;
-        md.inversion.cost_functions_coefficients(:,3)=1e-13;
-        % md.inversion.cost_functions_coefficients(:,1)=1;
-        % md.inversion.cost_functions_coefficients(:,2)=1;
-        % md.inversion.cost_functions_coefficients(:,3)=8e-15;
+        md.inversion.cost_functions_coefficients(:,1)=abs_vel_weight;
+        md.inversion.cost_functions_coefficients(:,2)=rel_vel_weight;
+        md.inversion.cost_functions_coefficients(:,3)=tikhonov_regularization_weight;
 
         md.inversion.control_parameters={'FrictionCoefficient'};
-        md.inversion.min_parameters=2000*ones(md.mesh.numberofvertices,1);
-        md.inversion.max_parameters=4000*ones(md.mesh.numberofvertices,1);
+        md.inversion.min_parameters=min_friction*ones(md.mesh.numberofvertices,1);
+        md.inversion.max_parameters=max_friction*ones(md.mesh.numberofvertices,1);
 
         md.stressbalance.restol=0.01;
         md.stressbalance.reltol=0.1;
@@ -1094,9 +1049,6 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
         fcoef = md.friction.coefficient;
         md.friction.coefficient = md.results.StressbalanceSolution.FrictionCoefficient;
-        % md.initialization.vx = md.results.StressbalanceSolution.Vx;
-        % md.initialization.vy = md.results.StressbalanceSolution.Vy;
-        % md.initialization.vel = md.results.StressbalanceSolution.Vel;
 
         md.initialization.vx = md.initialization.vx;
         md.initialization.vy = md.initialization.vy;
@@ -1124,32 +1076,6 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                 'coefficient', result_2, 'coefficient'};
         
         writeToHDF5(filename, data);
-
-        % save friction and velocity to file
-        % h5file = fullfile(icesee_path, data_path, 'friction_vel_inversion.h5');
-        % for ens_id_=0:nens
-        %     h5file = fullfile(icesee_path, data_path, sprintf('ensemble_friction_%d.h5', ens_id_));
-        %     % h5file = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
-        %     if exist(h5file, 'file')
-        %         delete(h5file);
-        %     end
-        %     % h5create(h5file, '/Thickness', nsize, 'Datatype', 'double');
-        %     % h5create(h5file, '/Surface',   nsize,  'Datatype', 'double');
-        %     h5create(h5file, '/Vx',   nsize,  'Datatype', 'double');
-        %     h5create(h5file, '/Vy',   nsize,  'Datatype', 'double');
-        %     % h5create(h5file, '/Vel', nsize, 'Datatype', 'double');
-        %     % h5create(h5file, '/bed', nsize, 'Datatype', 'double');
-        %     h5create(h5file, '/coefficient', nsize, 'Datatype', 'double');
-
-        %     % Now write the data – shapes match exactly
-        %     h5write(h5file, '/Vx',   md.results.StressbalanceSolution.Vx);
-        %     h5write(h5file, '/Vy',   md.results.StressbalanceSolution.Vy);
-        %     % h5write(h5file, '/Vel', md.results.StressbalanceSolution.Vel);
-        %     h5write(h5file, '/coefficient', md.results.StressbalanceSolution.FrictionCoefficient);
-        % end
-        % h5write(h5file, '/Thickness', md.geometry.thickness);
-        % h5write(h5file, '/Surface',   md.geometry.surface);
-        % h5write(h5file, '/bed', md.geometry.bed);
     end
 end
 

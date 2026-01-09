@@ -337,9 +337,8 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                             rho = model_kwargs.get("rho", 1.0) 
                             sigma = 1e-3
                             X5 = model_kwargs.get("X5", None)
-                            beta_0 = 0.001 # initial bais
                             # beta_k = beta_0 \prod_{i=1}^{Nens} (X5_i)
-                            beta_t = beta_0
+                            beta_t = model_kwargs.get("initial_bed_bias", 0.0015)
                             for i in range(X5.shape[0]):
                                 for j in range(X5.shape[0]):
                                     beta_t *= X5[j,i]
@@ -352,13 +351,12 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                                 relaxation_factor = np.sqrt(dt)*sigma*rho
                             relaxation_factor = min(relaxation_factor, 0.5)
                             recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
-                            # bed anomaly
-                            # bed_now_mean = np.mean(bed_prior, axis=1)
-                            # anomaly = bed_now - bed_now_mean[:, np.newaxis]
-                            # recvbuf[indx_map[vec], :] = bed_now_mean[:, np.newaxis] + relaxation_factor * anomaly    
+
+                            # update bed bias
+                            # model_kwargs["initial_bed_bias"] = beta_t  
                         else:
                             # do_bed_snap = False
-                            relaxation_factor = 0.05 # damping factor
+                            relaxation_factor = model_kwargs.get("bed_relaxation_factor", 0.05)
                             recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
                             # recvbuf[pos_bed, :] = bed_prior[pos_bed]
 
@@ -457,10 +455,10 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                         dset[:, :, timestep] = recvbuf
                         ens_mean[:, timestep] = np.mean(recvbuf, axis=1)
 
-                # dset[:, :, timestep] = data_before
-                # ens_mean[:, timestep] = np.mean(data_before, axis=1)
-                del bed_prior, bed_now
-                gc.collect()
+                    # dset[:, :, timestep] = data_before
+                    # ens_mean[:, timestep] = np.mean(data_before, axis=1)
+                    del bed_prior, bed_now
+                    gc.collect()
 
                 if model_kwargs.get("DEnKF_flag", False):
                     ensemble_mean = np.mean(dset[:, :, timestep], axis=1)
