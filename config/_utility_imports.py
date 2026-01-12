@@ -267,6 +267,11 @@ if not flag_jupyter:
         'vel_idx': int(float(enkf_params.get('vel_idx', 2))),
         'inversion_flag': enkf_params.get('inversion_flag', False),
         'friction_idx': int(float(enkf_params.get('friction_idx', 5))),
+        'bed_relaxation_factor': float(enkf_params.get('bed_relaxation_factor', 0.05)), # relaxation factor for bed elevation updates (-1 < factor <= 1) (when bed is not observed)
+        'initial_bed_bias': float(enkf_params.get('initial_bed_bias', 0.0015)), # initial bias for bed elevation (in model units)
+        'abs_vel_weight': float(enkf_params.get('abs_vel_weight', 1.0)), # weight for absolute velocity in inversion
+        'rel_vel_weight': float(enkf_params.get('rel_vel_weight', 1.0)), # weight for relative velocity in inversion
+        'tikhonov_regularization_weight': float(enkf_params.get('tikhonov_regularization_weight', 1e-13)), # Tikhonov regularization weight for inversion
     }
 
 
