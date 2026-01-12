@@ -14,9 +14,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 
 # --- import model functions --- 
 
-import ICESEE.applications.icepack_model.example.modelfunc as mf
-
-
+import ICESEE.applications.icepack_model.examples.idealized_pig.modelfunc as mf
 
 
 # ---- firedrake imports ----
@@ -25,18 +23,12 @@ from firedrake import Constant, interpolate, assemble, inner, dx, ds, conditiona
 from firedrake.petsc import PETSc
 
 
-
-
-
 # ---- icepack imports ----
 
 import icepack
 import icepack.models.friction
 from icepack.constants import ice_density as rhoI, weertman_sliding_law as m, glen_flow_law as n
 import icepack.models
-
-
-
 
 
 # --- miscellaneous imports -- 
@@ -55,11 +47,8 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
-
-
 # --- Utility imports ---
 from ICESEE.config._utility_imports import icesee_get_index
-
 
 
 # ---- model initial state ---
@@ -81,17 +70,6 @@ def initialState(h0, s0, u0, zb, grounded0, floating0, Q):
 
 # ---- initial mesh ---
 
-
-# def initializeMesh(Params):
-    
-#     meshI = mf.getMeshFromCheckPoint(Params['inputParams']['initFile'])
-#     mesh, Q, V, meshOpts = \
-#         mf.setupMesh(Params['inputParams']['meshFile'], degree=1,
-#                      meshOversample=2,
-#                      newMesh=meshI)
-
-#     return mesh, meshOpts, Q, V
-
 def initializeMesh(**kwargs):
     
     initFile = kwargs["initFile"]
@@ -109,41 +87,11 @@ def initializeMesh(**kwargs):
 
 # ---- initializing the run ---- 
 
-# def initializeRun(forward_solver, mesh, Q, V, params):
-
-
-#     with firedrake.CheckpointFile(params['inputParams']['initFile'],'r') as checkpoint:
-#         velocity = checkpoint.load_function(mesh, "velocity", idx=20000) # idx index set to the LAST time step of the SS run (20,000 for 1000 year run)
-#         h0 = checkpoint.load_function(mesh, "thickness", idx=20000)
-#         s0 = checkpoint.load_function(mesh, "surface", idx=20000)
-#         bed = checkpoint.load_function(mesh, "bed")
-#         grounded0 = checkpoint.load_function(mesh, "grounded")
-#         floating0 = checkpoint.load_function(mesh, "floating")
-#         A0 = checkpoint.load_function(mesh, "fluidity")
-#         beta0 = checkpoint.load_function(mesh, "extended_beta")
-
-#     """ find initial velocity """
-#     uThresh = firedrake.Constant(Params['iceParams']['uThresh'])
-#     u0 = forward_solver.diagnostic_solve(velocity=velocity, thickness=h0,
-#                                                 surface=s0,
-#                                                 beta=beta0, fluidity=A0, 
-#                                                 grounded=grounded0,
-#                                                 floating=floating0,
-#                                                 uThresh=uThresh)
-    
-#     """ define initial state """
-#     h, hLast, s, u, zF, grounded, floating = initialState(h0, s0, u0, bed, grounded0, floating0, Q)
-
-#     """ define smb and melt """
-#     smb = readSMB(Params['inputParams']['SMBFile'],Q)
-
-#     return h, h0, s, s0, u, bed, zF, grounded, floating, A0, beta0, smb
-
-def initializeRun(forward_solver, mesh, Q, V, **kwargs):
+def initializeRun(kwargs, forward_solver, mesh, Q, V):
 
 
     with firedrake.CheckpointFile(kwargs["initFile"],'r') as checkpoint:
-        velocity = checkpoint.load_function(mesh, "velocity", idx=20000) # idx index set to the LAST time step of the SS run (20,000 for 1000 year run)
+        velocity = checkpoint.load_function(mesh, "velocity", idx=20000) # idx index set to the LAST time step of the steady-state run (20,000 for 1000 year run)
         h0 = checkpoint.load_function(mesh, "thickness", idx=20000)
         s0 = checkpoint.load_function(mesh, "surface", idx=20000)
         bed = checkpoint.load_function(mesh, "bed")
@@ -153,7 +101,7 @@ def initializeRun(forward_solver, mesh, Q, V, **kwargs):
         beta0 = checkpoint.load_function(mesh, "extended_beta")
 
     """ find initial velocity """
-    uThresh = firedrake.Constant(kwargs["physical"]['uThresh'])
+    uThresh = firedrake.Constant(kwargs['uThresh'])
     u0 = forward_solver.diagnostic_solve(velocity=velocity, thickness=h0,
                                                 surface=s0,
                                                 beta=beta0, fluidity=A0, 
@@ -165,7 +113,7 @@ def initializeRun(forward_solver, mesh, Q, V, **kwargs):
     h, hLast, s, u, zF, grounded, floating = initialState(h0, s0, u0, bed, grounded0, floating0, Q)
 
     """ define smb and melt """
-    smb = readSMB(kwargs["SMBFile"],Q)
+    smb = readSMB(kwargs,Q)
 
     return h, h0, s, s0, u, bed, zF, grounded, floating, A0, beta0, smb
 
@@ -173,27 +121,14 @@ def initializeRun(forward_solver, mesh, Q, V, **kwargs):
 
 
 # ---- basal friction model --- 
-
-# def schoofFriction(velocity, grounded, beta, uThresh):
+def schoofFriction(velocity, grounded, beta, uThresh):
     
     
-#     C = grounded * beta**2
-#     mExp = (1./m + 1.)
-#     U = firedrake.sqrt(firedrake.inner(velocity, velocity))
-
-#     return C * ((uThresh**mExp + U**mExp)**(m/(m+1.)) - uThresh)
-
-def schoofFriction(**kwargs):
-    
-    
-    C = kwargs["grounded"] * kwargs["beta0"]**2
+    C = grounded * beta**2
     mExp = (1./m + 1.)
-    U = firedrake.sqrt(firedrake.inner(kwargs["u"], kwargs["u"]))
+    U = firedrake.sqrt(firedrake.inner(velocity, velocity))
 
-    return C * ((uThresh**mExp + U**mExp)**(m/(m+1.)) - kwargs["physical"][uThresh])
-
-
-
+    return C * ((uThresh**mExp + U**mExp)**(m/(m+1.)) - uThresh)
 
 
 
@@ -212,7 +147,7 @@ def regViscosity(**kwargs):
 
 # --- read in the SMB file --- 
 
-def readSMB(**kwargs, Q):
+def readSMB(kwargs, Q):
 
     
     if not os.path.exists(kwargs["SMBFile"]):
@@ -228,7 +163,7 @@ def readSMB(**kwargs, Q):
 
 # --- Basal melt rate field --- 
 
-def BasalMeltRate(step, floating, Q, s, h, scenario='control', **kwargs):
+def BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control'):
 
 
     # Draft depth (negative below sea level): z = s - h
@@ -245,7 +180,7 @@ def BasalMeltRate(step, floating, Q, s, h, scenario='control', **kwargs):
     
     # The period over which BMR increases shortens by 'x' years
     else:
-        melt_max = ((final_bmr - beginning_bmr)/(kwargs["numerical"]["num_years"] - kwargs["bmr_increase_time"])) * ((step - (kwargs["bmr_increase_time"]/kwargs["dt"])) * kwargs["dt"]) + beginning_bmr
+        melt_max = ((final_bmr - beginning_bmr)/(kwargs["num_years"] - kwargs["bmr_increase_time"])) * ((step - (kwargs["bmr_increase_time"]/kwargs["dt"])) * kwargs["dt"]) + beginning_bmr
     
     
 
@@ -290,18 +225,13 @@ def BasalMeltRate(step, floating, Q, s, h, scenario='control', **kwargs):
 
 
 
-
-
-
 # --- Checking the ice thickness ---
 
-def checkThickness(h, thresh, **kwargs):
+def checkThickness(kwargs, h, thresh):
     
     h = icepack.interpolate(firedrake.max_value(thresh, h), kwargs["Q"])
 
     return h
-
-
 
 
 
@@ -338,47 +268,6 @@ def initialize_model(**kwargs):
     comm = kwargs.get('comm')
 
 
-    paths     = kwargs["paths"]
-    physical  = kwargs["physical"]
-    numerical = kwargs["numerical"]
-    experiment = kwargs["experiments"]
-
-    ## Choose which experiment to run 
-    if experiment == 0: 
-        pass
-    
-    elif experiment == 1:
-        pass
-
-    elif experiment == 2:
-        pass
-
-    # Params = {
-    #     "inputParams": {
-    #         "initFile":  "",
-    #         "paramsFile": paths["paramsFile"],
-    #         "meshFile":  paths["meshFile"],
-    #         "SMBFile":   paths["SMBFile"],
-    #     },
-    #     "iceParams": {
-    #         "water_to_ice": float(physical["water_to_ice"]),
-    #         "water_density": float(physical["water_density"]),
-    #         "GLThresh": int(physical["GLThresh"]),
-    #         "uThresh": float(physical["uThresh"]),
-    #     },
-    #     "runParams": {
-    #         "final time": float(numerical["num_years"]),
-    #         "dt": float(numerical["dt"]),
-    #         "tag": str(numerical.get("tag", "001")),
-    #     },
-    # } 
-    initFile = kwargs["initFile"]
-    paramsFile = kwargs["paramsFile"]
-    meshFile = kwargs["meshFile"]
-    SMBFile = kwargs["SMBFile"]
-
-   
-
     # ---- Mesh, spaces ----
     mesh, meshOpts, Q, V = initializeMesh(**kwargs)
 
@@ -395,13 +284,13 @@ def initialize_model(**kwargs):
 
 
     # ---- Initial fields ----
-    h, h0, s, s0, u, bed, zF, grounded, floating, A0, beta0, smb = initializeRun(forward_solver, mesh, Q, V, **kwargs)
+    h, h0, s, s0, u, bed, zF, grounded, floating, A0, beta0, smb = initializeRun(kwargs, forward_solver, mesh, Q, V)
 
 
 
     # ---- Initial basal melt  ----
     k = 0 # time step (ICESEE uses 'k' as the time-stepping index)
-    basal_melt_field, melt_max0 = BasalMeltRate(step=k, floating=floating, Q=Q, s=s0, h=h0, scenario="control", **kwargs)
+    basal_melt_field, melt_max0 = BasalMeltRate(kwargs, step=k, floating=floating, Q=Q, s=s0, h=h0, scenario="control")
     
 
 
@@ -415,15 +304,15 @@ def initialize_model(**kwargs):
 
 
 # --- icepack model ---
-def Icepack(solver, h, u, a, b, dt, h0, **kwargs):
+def Icepack(kwargs, solver, h, u, a, b, dt, h0):
     """inputs: solver - icepack solver
                 h - ice thickness
                 u - ice velocity
-                a - ice accumulation
+                a - net ice accumulation
                 b - ice bed
                 dt - time step
                 h0 - ice thickness inflow
-                *kwargs - additional arguments for the model
+                kwargs - additional arguments for the model
         outputs: h - updated ice thickness
                  u - updated ice velocity
     """
@@ -444,7 +333,7 @@ def Icepack(solver, h, u, a, b, dt, h0, **kwargs):
     floating, grounded = mf.flotationMask(s, zF, kwargs["Q"]) # for the floating mask, 1 = floating, 0 = grounded 
 
     # update basal friction to reduce near the grounding line
-    betaScale = mf.reduceNearGLBeta(s, kwargs["s0"], zF, grounded, kwargs["Q"], kwargs["physical"]["GLThresh"])
+    betaScale = mf.reduceNearGLBeta(s, kwargs["s0"], zF, grounded, kwargs["Q"], kwargs["GLThresh"])
     beta = icepack.interpolate(kwargs["beta0"] * betaScale, kwargs["Q"])
 
     u = solver.diagnostic_solve(
@@ -453,7 +342,7 @@ def Icepack(solver, h, u, a, b, dt, h0, **kwargs):
         surface = s,
         beta = beta,
         fluidity = kwargs["A0"],
-        uThresh = kwargs["physical"]["uThresh"],
+        uThresh = kwargs["uThresh"],
         floating = floating,
         grounded = grounded,
     )
@@ -474,13 +363,13 @@ def run_model(ensemble, **kwargs):
 
     # unpack the **kwargs
     
-    k       = kwargs.get('k')
-    bed     = kwargs.get('bed', None)                  # bed topography
+    k       = kwargs.get('k')                           # step number in the time loop
+    bed     = kwargs.get('bed', None)                   # bed topography
     dt      = kwargs.get('dt', None)                    # time step size 
     h0      = kwargs.get('h0', None)                    # initial thickness
     s0      = kwargs.get('s0', None)                    # initial elevation 
     A0      = kwargs.get('A0', None)                    # fluidity parameter
-    beta0   = kwargs.get('beta0', None)                 # basal friction coefficient parameter NEED TO FIX
+    beta0   = kwargs.get('beta0', None)                 # basal friction coefficient parameter
     Q       = kwargs.get('Q', None)                     # scalar function space
     V       = kwargs.get('V', None)                     # vector function space
     floating = kwargs.get('floating')
@@ -498,52 +387,52 @@ def run_model(ensemble, **kwargs):
     h = ensemble[indx_map["h"]]
     s = ensemble[indx_map["s"]]
 
-    # conditionals for depth-dependent basal melt rate function
+    ### Conditionals for depth-dependent basal melt rate function
     ### Select forcing scenario between 1935 - 2017 
     if step < (6/dt):
-        basal_melt_field, melt_max = BasalMeltRate(step, floating, Q, s, h, scenario='control') # 1935 - 1941
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1935 - 1941
    
     elif (6 / dt) <= step < (15/dt):
-        basal_melt_field, melt_max = BasalMeltRate(step, floating, Q, s, h, scenario='warm') # 1941 - 1950
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1941 - 1950
     
     elif (15 / dt) <= step < (18/dt):
-        basal_melt_field, melt_max = BasalMeltRate(step, floating, Q, s, h, scenario='control') # 1950 - 1953
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1950 - 1953
     
     elif (18/ dt) <= step < (20/dt):
-        basal_melt_field, melt_max = BasalMeltRate(step, floating, Q, s, h, scenario='warm') # 1953 - 1955
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1953 - 1955
         
     elif (20/ dt) <= step < (25/dt):
-        basal_melt_field, melt_max = BasalMeltRate(step, floating, Q, s, h, scenario='control') # 1955 - 1960
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1955 - 1960
         
     elif (25/ dt) <= step < (27/dt):
-        basal_melt_field, melt_max = BasalMeltRate(step, floating, Q, s, h, scenario='warm') # 1960 - 1962
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1960 - 1962
         
     elif (27/ dt) <= step < (31/dt):
-        basal_melt_field, melt_max = BasalMeltRate(step, floating, Q, s, h, scenario='control') # 1962 - 1966
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1962 - 1966
         
     elif (31/ dt) <= step < (40/dt):
-        basal_melt_field, melt_max = BasalMeltRate(step, floating, Q, s, h, scenario='warm') # 1966 - 1975
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1966 - 1975
         
     elif (40/ dt) <= step < (48/dt):
-        basal_melt_field, melt_max = BasalMeltRate(step, floating, Q, s, h, scenario='control') # 1975 - 1983
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1975 - 1983
         
     elif (48/dt) <= step < (50/dt):
-        basal_melt_field, melt_max = BasalMeltRate(step, floating, Q, s, h, scenario='warm') # 1983 - 1985
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1983 - 1985
         
     elif (50/ dt) <= step < (59/dt):
-        basal_melt_field, melt_max = BasalMeltRate(step, floating, Q, s, h, scenario='control') # 1985 - 1994
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1985 - 1994
         
     elif (59/ dt) <= step < (64/dt):
-        basal_melt_field, melt_max = BasalMeltRate(step, floating, Q, s, h, scenario='warm') # 1994 - 2000
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1994 - 2000
         
     elif (64/ dt) <= step < (69/dt):
-        basal_melt_field, melt_max = BasalMeltRate(step, floating, Q, s, h, scenario='control') # 2000 - 2005
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 2000 - 2005
         
     elif (69/ dt) <= step < (76/dt):
-        basal_melt_field, melt_max = BasalMeltRate(step, floating, Q, s, h, scenario='warm') # 2005 - 2012
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 2005 - 2012
         
     elif (76/ dt) <= step:
-        basal_melt_field, melt_max = BasalMeltRate(step, floating, Q, s, h, scenario='control') # 2012 - 2017
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 2012 - 2017
 
 
     # ----- joint estimation --------
@@ -554,7 +443,7 @@ def run_model(ensemble, **kwargs):
         basal_melt = Function(Q)
         basal_melt.dat.data[:] = bmr_vec.copy()
    
-   else:
+    else:
         basal_melt = kwargs.get('basal_melt_field', None)
         
         if basal_melt is None:
@@ -578,7 +467,7 @@ def run_model(ensemble, **kwargs):
     s.dat.data[:] = ensemble[indx_map["s"]]
 
     # call the ice stream model to update the state variables
-    h, u, s = Icepack(solver, h, u, a=a_net, b, dt, h0)
+    h, u, s = Icepack(kwargs, solver, h, u, a_net, bed, dt, h0)
 
     # return a list of the updated state variables
     updated_state = {'h': h.dat.data_ro,

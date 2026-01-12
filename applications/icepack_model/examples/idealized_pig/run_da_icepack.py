@@ -22,7 +22,7 @@ import modelfunc as mf
 from modelfunc import firedrakeSmooth, flotationHeight, flotationMask
 
 from ICESEE.config._utility_imports import *
-from ICESEE.config._utility_imports import (params, kwargs, paths, modeling_params, enkf_params)
+#from ICESEE.config._utility_imports import params, kwargs, paths, modeling_params, enkf_params
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_model import initialize_model, initialState, initializeMesh
 from ICESEE.src.run_model_da.run_models_da import icesee_model_data_assimilation
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
@@ -36,11 +36,10 @@ PETSc.Sys.Print("Fetching the model parameters ...")
 
 
 
-
 # --- Ensemble Parameters ---
 
 num_years = float(modeling_params["num_years"])
-dt = float(modeling_params["dt"])   # time step size
+dt = float(modeling_params["timesteps_per_year"])   # time step size
 nt = int(round(num_years / dt))     # total number of time steps
 
 params.update({"nt": nt, "dt": dt}) # update the parameter dictionary
@@ -55,21 +54,16 @@ PETSc.Sys.Print("Initializing icepack model ...")
 
 kwargs.update({
     "comm": comm,
-    "paths": paths,                 # initFile, meshFile, SMBFile, geomFile
-    "physical": modeling_params,    # water_to_ice, water_density, GL threshold, u threshold
-    "numerical": modeling_params,   # num_years, dt, tag
     "initFile": modeling_params["initFile"],
     "paramsFile": modeling_params["paramsFile"],
     "meshFile": modeling_params["meshFile"],
     "SMBFile": modeling_params["SMBFile"],
-    "experiments": int(modeling_params["experiments"]),
+    "dt": modeling_params["timesteps_per_year"],
+    "num_years": modeling_params["num_years"],
     "bmr_increase_time": int(modeling_params["bmr_increase_time"]),
-    "wrong_basal_melt_field": float(enkf_params["wrong_basal_melt_field"]),
 })
 
 h, h0, s, s0, u, bed, zF, grounded, floating, A0, beta0, smb, basal_melt_field, Q, V, forward_solver = initialize_model(**kwargs)
-
-
 
 
 
@@ -79,7 +73,7 @@ params["nd"] = h0.dat.data.size * params["total_state_param_vars"] # get the siz
 
 kwargs.update({
 
-    "smb" = smb, 
+    "smb": smb, 
     "h": h, 
     "h0": h0, 
     "s": s, 
@@ -91,7 +85,6 @@ kwargs.update({
     "Q":Q,
     "V":V,
     "bed": bed,
-    "dt":params["dt"],
     "seed":float(enkf_params["seed"]),  
     "zF": zF,
     "grounded": grounded,

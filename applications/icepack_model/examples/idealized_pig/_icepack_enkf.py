@@ -6,6 +6,7 @@
 # ==============================================================================
 
 import numpy as np
+import tqdm
 
 # --- import run_simulation function from the available examples ---
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_model import *
@@ -38,10 +39,8 @@ def generate_true_state(**kwargs):
     Q  = kwargs.get('Q', None)
     V  = kwargs.get('V', None)
     h0 = kwargs.get('h0', None)
-    u0 = kwargs.get('u0', None)
-    h = kwargs.get('h', None)
-    u = kwargs.get('u0', None)
-    s = kwargs.get('s', None)
+    u0 = kwargs.get('u', None)
+    s0 = kwargs.get('s0', None)
     solver = kwargs.get('solver', None)
     statevec_true = kwargs["statevec_true"]
 
@@ -49,10 +48,10 @@ def generate_true_state(**kwargs):
     vecs, indx_map, dim_per_proc = icesee_get_index(statevec_true, **kwargs)
     
     # --- fetch the state variables ---
-    statevec_true[indx_map["h"],0] = h.dat.data_ro
-    statevec_true[indx_map["u"],0] = u.dat.data_ro[:,0]
-    statevec_true[indx_map["v"],0] = u.dat.data_ro[:,1]
-    statevec_true[indx_map["s"],0] = s.dat.data_ro
+    statevec_true[indx_map["h"],0] = h0.dat.data_ro
+    statevec_true[indx_map["u"],0] = u0.dat.data_ro[:,0]
+    statevec_true[indx_map["v"],0] = u0.dat.data_ro[:,1]
+    statevec_true[indx_map["s"],0] = s0.dat.data_ro
 
     # intialize the accumulation rate if joint estimation is enabled at the initial time step
     if kwargs["joint_estimation"]:
@@ -60,13 +59,18 @@ def generate_true_state(**kwargs):
 
     #h = h0.copy(deepcopy=True)
     #u = u0.copy(deepcopy=True) 
-    h = h.copy(deepcopy=True)
-    u = u.copy(deepcopy=True)
+    h = h0.copy(deepcopy=True)
+    u = u0.copy(deepcopy=True)
+    s = s0.copy(deepcopy=True)
+
+    print("entering the for loop")
     
-    for k in range(kwargs['nt']):
-        
+    #for k in range(kwargs['nt']):
+    for k in tqdm.tqdm(kwargs["nt"], desc = "Processing times"):
+        print(f"inside the for loop at timestep {k}")
+        print(f"[debug:] time step: {k+1}")
         # call the ice stream model to update the state variables
-        h, u, s = Icepack(solver, h, u, a, b, dt, h0, **kwargs)
+        h, u, s = Icepack(kwargs, solver, h, u, a, b, dt, h0)
 
         statevec_true[indx_map["h"],k+1] = h.dat.data_ro
         statevec_true[indx_map["u"],k+1] = u.dat.data_ro[:,0]
@@ -159,7 +163,7 @@ def generate_nurged_state(**kwargs):
     u0 = kwargs.get('u0', None)
     solver = kwargs.get('solver', None)
     #a_in_p = kwargs.get('a_in_p', None)
-    wrong_basal_melt_field: kwargs.get('wrong_basal_melt_field', None),
+    wrong_basal_melt_field = kwargs.get('wrong_basal_melt_field', None),
     basal_melt_field = kwargs.get('basal_melt_field'),
     #da_p = kwargs.get('da_p', None)
     #da = kwargs.get('da', None)
@@ -221,7 +225,7 @@ def generate_nurged_state(**kwargs):
         u.dat.data[:,1] = v_perturbed
         h0 = h.copy(deepcopy=True)
         # call the solver
-        h, u = Icepack(solver, h, u, a, b, dt, h0, fluidity = A0, friction = beta0)
+        h, u = Icepack(kwargs, solver, h, u, a, b, dt, h0)
 
         # update the nurged state with the solution
         h_perturbed = h.dat.data_ro
