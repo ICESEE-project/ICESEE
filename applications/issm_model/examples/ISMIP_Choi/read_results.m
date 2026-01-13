@@ -8,21 +8,23 @@ close all; clearvars; clear all
 
 global data_file_paths nvar ensemble_vec_full ...
         label_t t nt colorbar_gap
-data_file_paths = '_modelrun_datasets';
+% data_file_paths = '_modelrun_datasets';
 % data_file_paths = '_goodgrounding';
+data_file_paths ='_modelrun_working_0';
 nvar = 6;
 colorbar_gap=0.73;
 
 % ---------------- user toggles ----------------
 make_plots       = 0;
-make_multi_plots = 1;   % <-- ON (restored)
+make_multi_plots = 0;   % <-- ON (restored)
 frames_plot      = 0;
+compute_rmse     = 1;
 
 % ---------------- time steps ------------------
 % k_array = [0, 20,  60, 80, 89, 130, 330, 499]+1;
 % k_array= [ 0, 20,80, 120, 160, 220, 250, 320, 450]+1;
 % k_array = [0, 20, 80, 120, 160, 240, 360, 499] +1;
-k_array = [20, 40, 70,100, 120, 180, 250]+1;
+k_array = [0, 10, 40, 70,100, 120, 180, 250]+1;
 dt      = 0.2;
 
 % ---------------- Load essentials --------------
@@ -101,9 +103,9 @@ md_ens    = md;
 % plot_rmse_timeseries(out);
 
 %% ------ RMSE -----
-compute_rmse_timeseries(k_array, dt, t, model_true_state, model_nurged_state, ensemble_vec_mean,md_true, md_nurged, md_ens, md, 'geometry.thickness');
-
-
+if compute_rmse
+    compute_rmse_timeseries(k_array, dt, t, model_true_state, model_nurged_state, ensemble_vec_mean,md_true, md_nurged, md_ens, md, 'geometry.thickness');
+end
 
 % ---------------- GL evolution plot ------------
 plot_gl_on_bed_evolution( ...
@@ -199,7 +201,6 @@ function [md_true, md_nurged, md_ens] = setup_model_states( ...
     md_true.mask.ocean_levelset     = H + bed/di;
 
     % --- WRONG (nurged) ---
-    model_nurged_state(:, 1) = (squeeze(ensemble_vec_full(1,1,:)))';
     H  = model_nurged_state(1:hdim, k);
     S  = model_nurged_state(hdim+1:2*hdim, k);
     B  = S - H;
@@ -220,7 +221,7 @@ function [md_true, md_nurged, md_ens] = setup_model_states( ...
     md_nurged.mask.ocean_levelset   = H + bed/di;
 
     % --- ENSEMBLE MEAN ---
-    ensemble_vec_mean(:, 1) = (squeeze(ensemble_vec_full(1,1,:)))';
+    ensemble_vec_mean(:, 1) = model_nurged_state(:, 1);
     H  = ensemble_vec_mean(1:hdim, k);
     S  = ensemble_vec_mean(hdim+1:2*hdim, k);
     B  = S - H;
@@ -310,13 +311,14 @@ function plot_gl_on_bed_evolution( ...
     minLen_ens   = 5e4;
     minArea      = 1;
 
-    keepLargestOnly_true  = false;
-    keepLargestOnly_wrong = false;
+    keepLargestOnly_true  = true;
+    keepLargestOnly_wrong = true;
+    keepLargestOnly_ens   = false;
     keepTopK_ens          = 4;   % allow 2 longest for ensemble (prevents “loss”)
     keepTopK_true         = 4;
     keepTopK_wrong        = 4;
     global t label_t nt
-
+    nt = 251;
     for idx = 1:nk
         k = k_array(idx);
         label_t = iff(k == nt-1, t(nt), t(k));
@@ -372,8 +374,8 @@ function plot_gl_on_bed_evolution( ...
 
         hold(ax,'on');
         plot_gl_contour_filtered(Xg, Yg, Phi_true,  'k','-',  2.0, minLen_true,  minArea, keepLargestOnly_true,  keepTopK_true);
-        plot_gl_contour_filtered(Xg, Yg, Phi_wrong, 'r','-', 2.0, minLen_wrong, minArea, keepLargestOnly_wrong, keepTopK_wrong);
-        plot_gl_contour_filtered(Xg, Yg, Phi_ens,   'c','-.',  2.0, minLen_ens,   minArea, false,               keepTopK_ens);
+        plot_gl_contour_filtered(Xg, Yg, Phi_wrong, 'r','-', 2.0, minLen_wrong, minArea, keepLargestOnly_wrong,  keepTopK_wrong);
+        plot_gl_contour_filtered(Xg, Yg, Phi_ens,   'c','-.',  2.0, minLen_ens,   minArea, keepLargestOnly_ens,  keepTopK_ens);
 
         overlay_gl_window_points(gca, md_true_k, md_nurged_k, md_ens_k, ...
         [gl_mid.x(idx), gl_mid.y(idx)], ...
@@ -409,7 +411,7 @@ function plot_gl_on_bed_evolution( ...
     end
 
     % % ---- Shared colorbar ----
-    colorbar_gap0=0.76;
+    colorbar_gap0=0.8;
     for i = 1:nrows, colormap(axs(i), parula); end
     cb = colorbar(axs(end), 'Position',[colorbar_gap0 0.25 0.025 0.45]);
     ylabel(cb, [bg_title units_str], 'FontSize',12,'FontWeight','bold');
@@ -1286,14 +1288,56 @@ function out = compute_rmse_timeseries_allt(dt, t, model_true_state, model_nurge
     out.mask_grounded = mask_grounded;
 end
 
-function r = rmse_masked(a, b, mask)
+function r = rmse_masked(a, b, mask_na, mask_true)
+    % b is true
     a = a(:); b = b(:);
-    mask = logical(mask(:));
-    good = mask & isfinite(a) & isfinite(b);
+    mask_na = logical(mask_na(:));
+    mask_true = logical(mask_true(:));
+    % good_na = mask_na & isfinite(a) & isfinite(b);
+    % good_true = mask_true & isfinite(a) & isfinite(b);
+    % good = mask_na & isfinite(a) & isfinite(b);
+    good = mask_na & isfinite(a) & isfinite(b);
     if ~any(good)
         r = NaN;
         return;
     end
+    % if ~any(good_true)
+    %     r = NaN;
+    %     return;
+    % end
+    % d = a(good_na) - b(good_true);
+    d = a(good) - b(good);
+    r = sqrt(mean(d.^2));
+end
+
+function r = rmse_masked_pair(a, b, mask_a, mask_b, domain)
+%RMSE_MASKED_PAIR RMSE between a and b on a chosen mask domain.
+% domain: 'a' | 'b' | 'intersection'
+
+    if nargin < 5 || isempty(domain)
+        domain = 'c';
+    end
+
+    a = a(:); b = b(:);
+    mask_a = logical(mask_a(:));
+    mask_b = logical(mask_b(:));
+
+    switch lower(domain)
+        case 'a'
+            good = mask_a & isfinite(a) & isfinite(b);
+        case 'b'
+            good = mask_b & isfinite(a) & isfinite(b);
+        case 'c'
+            good = (mask_a & mask_b) & isfinite(a) & isfinite(b);
+        otherwise
+            error('domain must be ''a'', ''b'', or ''c''.');
+    end
+
+    if ~any(good)
+        r = NaN;
+        return;
+    end
+
     d = a(good) - b(good);
     r = sqrt(mean(d.^2));
 end
@@ -1305,7 +1349,7 @@ function out = compute_rmse_timeseries_(k_array, dt, t, model_true_state, model_
     % rmse_as = nan(nk,1);
 
     nt = size(model_true_state, 2);
-    nt = 330;
+    nt = 251;
     kvec = 1:nt-1;
 
     nk = nt;
@@ -1628,6 +1672,32 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
 
     y_center = 0.5*(min(y) + max(y));  % channel centerline
 
+    % freeze the reference mask:
+    % pick the index corresponding to year 24
+    % k_obs_end = find(abs(t - 24.0) == min(abs(t - 24.0)), 1);
+     k_end =k_array(end);
+
+     [md_true_obs, md_nurged_obs, md_ens_obs] = setup_model_states(k_end, dt, ...
+            model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md);
+    
+    % --- Per-state masks (TRUE / NURGED / ENS) ---
+    H_true = md_true_obs.geometry.thickness(:);
+    H_n    = md_nurged_obs.geometry.thickness(:);
+    H_e    = md_ens_obs.geometry.thickness(:);
+    % 
+    g_true = (md_true_obs.mask.ocean_levelset(:)   > 0);
+    g_n    = (md_nurged_obs.mask.ocean_levelset(:) > 0);
+    g_e    = (md_ens_obs.mask.ocean_levelset(:)    > 0);
+
+    f_true = (md_true_obs.mask.ocean_levelset(:)   < 0);
+    f_n    = (md_nurged_obs.mask.ocean_levelset(:) < 0);
+    f_e    = (md_ens_obs.mask.ocean_levelset(:)    < 0);
+    % 
+    ice_true = (H_true > 0);
+    ice_n    = (H_n    > 0);
+    ice_e    = (H_e    > 0);
+        
     % -------------------------------
     % Main loop
     % -------------------------------
@@ -1639,27 +1709,34 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
             md_true, md_nurged, md_ens, md);
 
         % --- Per-state masks (TRUE / NURGED / ENS) ---
-        H_true = md_true_k.geometry.thickness(:);
-        H_n    = md_nurged_k.geometry.thickness(:);
-        H_e    = md_ens_k.geometry.thickness(:);
-        
-        g_true = (md_true_k.mask.ocean_levelset(:)   > 0);
-        g_n    = (md_nurged_k.mask.ocean_levelset(:) > 0);
-        g_e    = (md_ens_k.mask.ocean_levelset(:)    > 0);
-        
-        f_true = (md_true_k.mask.ocean_levelset(:)   < 0);
-        f_n    = (md_nurged_k.mask.ocean_levelset(:) < 0);
-        f_e    = (md_ens_k.mask.ocean_levelset(:)    < 0);
-        
-        ice_true = (H_true > 0);
-        ice_n    = (H_n    > 0);
-        ice_e    = (H_e    > 0);
+        % H_true = md_true_k.geometry.thickness(:);
+        % H_n    = md_nurged_k.geometry.thickness(:);
+        % H_e    = md_ens_k.geometry.thickness(:);
+        % % 
+        % g_true = (md_true_k.mask.ocean_levelset(:)   > 0);
+        % g_n    = (md_nurged_k.mask.ocean_levelset(:) > 0);
+        % g_e    = (md_ens_k.mask.ocean_levelset(:)    > 0);
+        % 
+        % f_true = (md_true_k.mask.ocean_levelset(:)   < 0);
+        % f_n    = (md_nurged_k.mask.ocean_levelset(:) < 0);
+        % f_e    = (md_ens_k.mask.ocean_levelset(:)    < 0);
+        % % 
+        % ice_true = (H_true > 0);
+        % ice_n    = (H_n    > 0);
+        % ice_e    = (H_e    > 0);
         
         % --- Evaluation domains (INTERSECTION) ---
         % Thickness + friction: grounded ice intersection
-        mask_grounded_no = g_true & g_n & ice_true & ice_n;   % true ∩ nurged
-        mask_grounded_as = g_true & g_e & ice_true & ice_e;   % true ∩ ens
-        
+        % mask_grounded_no = g_true & g_n & ice_true & ice_n;   % true ∩ nurged
+        % mask_grounded_as = g_true & g_e & ice_true & ice_e;   % true ∩ ens
+        mask_grounded_no = g_n & ice_n; 
+        mask_grounded_as = g_e & ice_e;
+        mask_grounded_true = g_true & ice_true;
+
+        mask_grounded_no_c = g_n & ice_n; 
+        mask_grounded_as_c = g_e & ice_e;
+        mask_grounded_true_c = g_true & ice_true;
+
         % Velocity: floating ice intersection
         mask_floating_no = f_true & f_n & ice_true & ice_n;
         mask_floating_as = f_true & f_e & ice_true & ice_e;
@@ -1670,8 +1747,10 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
         H_nurged = md_nurged_k.geometry.thickness(:);
         H_ens    = md_ens_k.geometry.thickness(:);
 
-        rmse_h_no(ii) = rmse_masked(H_nurged, H_true, mask_grounded_no);
-        rmse_h_as(ii) = rmse_masked(H_ens,    H_true, mask_grounded_as);
+        % rmse_h_no(ii) = rmse_masked(H_nurged, H_true, mask_grounded_no, mask_grounded_true);
+        % rmse_h_as(ii) = rmse_masked(H_ens,    H_true, mask_grounded_as, mask_grounded_true);
+        rmse_h_no(ii) = rmse_masked_pair(H_nurged, H_true, mask_grounded_no, mask_grounded_true,'b');
+        rmse_h_as(ii) = rmse_masked_pair(H_ens,    H_true, mask_grounded_as, mask_grounded_true,'b');
 
         % ============================================================
         % (2) Velocity RMSE on TRUE floating ice
@@ -1680,8 +1759,13 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
         v_nurged = md_nurged_k.initialization.vel(:);
         v_ens    = md_ens_k.initialization.vel(:);
         
-        rmse_vel_no(ii) = rmse_masked(v_nurged, v_true, mask_floating_no);
-        rmse_vel_as(ii) = rmse_masked(v_ens,    v_true, mask_floating_as);
+        % rmse_vel_no(ii) = rmse_masked(v_nurged, v_true, mask_floating_no);
+        % rmse_vel_as(ii) = rmse_masked(v_ens,    v_true, mask_floating_as);
+        % rmse_vel_no(ii) = rmse_masked(v_nurged, v_true, mask_grounded_no, mask_grounded_true);
+        % rmse_vel_as(ii) = rmse_masked(v_ens,    v_true, mask_grounded_as, mask_grounded_true);
+        rmse_vel_no(ii) = rmse_masked_pair(v_nurged, v_true, mask_grounded_no, mask_grounded_true,'b');
+        rmse_vel_as(ii) = rmse_masked_pair(v_ens,    v_true, mask_grounded_as, mask_grounded_true,'b');
+
 
         % ============================================================
         % (3) Friction coefficient RMSE on TRUE grounded ice
@@ -1690,8 +1774,10 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
         C_nurged = md_nurged_k.friction.coefficient(:);
         C_ens    = md_ens_k.friction.coefficient(:);
 
-        rmse_c_no(ii) = rmse_masked(C_nurged, C_true, mask_grounded_no);
-        rmse_c_as(ii) = rmse_masked(C_ens,    C_true, mask_grounded_as);
+        % rmse_c_no(ii) = rmse_masked(C_nurged, C_true, mask_grounded_no, mask_grounded_true);
+        % rmse_c_as(ii) = rmse_masked(C_ens,    C_true, mask_grounded_as, mask_grounded_true);
+        rmse_c_no(ii) = rmse_masked_pair(C_nurged, C_true,  mask_grounded_no_c, mask_grounded_true_c,'b');
+        rmse_c_as(ii) = rmse_masked_pair(C_ens,    C_true, mask_grounded_as_c, mask_grounded_true_c,'b');
 
         % ============================================================
         % (4) Grounding line centerline “star distance”
@@ -1763,41 +1849,49 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     % -------------------------------
     figure('Position',[200 200 1100 900]); clf;
 
-    subplot(4,1,1);
+    ax1 = subplot(4,1,1);
     plot(out.time, out.rmse_h_no, 'r-', 'LineWidth',1.5); hold on
     plot(out.time, out.rmse_h_as, 'b-', 'LineWidth',1.5); hold off
-    grid on; ylabel('RMSE','FontWeight','bold');
-    title('\bfThickness (grounded ice)','Interpreter','tex');
+    grid on; ylabel('RMSE (m)','FontWeight','bold');
+    title('\bf (a) Thickness (grounded ice)','Interpreter','tex');
     legend({'No assimilation','Assimilated'}, 'Location','best');
+    ylim(ax1, [20,350]); xlim(ax1, [-1,50])
 
-    subplot(4,1,2);
+    ax2 = subplot(4,1,2);
     plot(out.time, out.rmse_vel_no, 'r-', 'LineWidth',1.5); hold on
     plot(out.time, out.rmse_vel_as, 'b-', 'LineWidth',1.5); hold off
-    grid on; ylabel('RMSE','FontWeight','bold');
-    title('\bfVelocity (floating ice)','Interpreter','tex');
+    grid on; ylabel('RMSE (m/yr)','FontWeight','bold');
+    title('\bf (b) Velocity (grounded ice)','Interpreter','tex');
     legend({'No assimilation','Assimilated'}, 'Location','best');
+    xlim(ax2, [-1,50]);
 
-    subplot(4,1,3);
+    ax3 = subplot(4,1,3);
     plot(out.time, out.rmse_c_no, 'r-', 'LineWidth',1.5); hold on
     plot(out.time, out.rmse_c_as, 'b-', 'LineWidth',1.5); hold off
-    grid on; ylabel('RMSE','FontWeight','bold');
-    title('\bfFriction coefficient (grounded ice)','Interpreter','tex');
+    grid on; ylabel('RMSE (Pa m^{-1/3} yr^{-1/3})','FontWeight','bold');
+    title('\bf (c) Friction coefficient (grounded ice)','Interpreter','tex');
     legend({'No assimilation','Assimilated'}, 'Location','best');
+    xlim(ax3, [-1,50])
 
     ax4 = subplot(4,1,4);
     plot(out.time, out.dist_no, 'r-', 'LineWidth',1.5); hold on
     plot(out.time, out.dist_as, 'b-', 'LineWidth',1.5); hold off
     grid on; xlabel('Time (years)','FontWeight','bold');
     ylabel('|Δx| (m)','FontWeight','bold');
-    title('\bfAbsolute distance between GL “star” positions (centerline)','Interpreter','tex');
+    title('\bf (d) Absolute distance between GL positions along the centerline','Interpreter','tex');
     legend({'No assimilation','Assimilated'}, 'Location','best');
-    ylim(ax4, [-1e4,6e4]);
+    ylim(ax4, [-1e4,6e4]); xlim(ax4, [-1,50])
 
    set(findall(gcf,'Type','axes'), 'FontWeight','bold');
-   % set(findall(gcf,'Type','axes'), ...
-   %  'FontWeight','bold', ...
-   %  'LineWidth',1.2, ...
-   %  'TickDir','out');
+   axs = findall(gcf,'Type','axes');
+    
+    set(axs, ...
+        'Box','on', ...
+        'LineWidth',1.8, ...          % thick box
+        'TickDir','out', ...          % ticks outward
+        'TickLength',[0.004 0.004], ... % shorter ticks
+        'XAxisLocation','bottom', ... % no top ticks
+        'YAxisLocation','left');      % no right ticks
 
     % ---- Save figure (300 dpi) ----
     % Use folder relative to THIS script (not MATLAB's current folder)
