@@ -14,10 +14,18 @@
 | `ICESEE_PERFORMANCE_TEST` | this is an environment variable | bool | False | No | None | YAML |
 | `Nens` | Parameter for nens in dictionary | Unknown | Computed | No | None | Dictionary |
 | `Q_rho` | YAML configuration parameter for q rho | float | 1.0 | No | None | YAML |
+| `abs_vel_weight` | weight for absolute velocity in inversion | float | 1.0 | No | None | YAML |
 | `base_seed` | YAML configuration parameter for base seed | int | 42 | No | None | YAML |
-| `batch_size` | YAML configuration parameter for batch size | int | 50 | No | None | YAML |
+| `batch_size` | number of time steps to process in each batch | int | 1 | No | None | YAML |
+| `bed_obs_indices` | specific indices to observe {list} (bed subvector indices) | NoneType | None | No | None | YAML |
+| `bed_obs_mask` | boolean mask array for bed observations {np.array} | NoneType | None | No | None | YAML |
+| `bed_obs_snapshot` | list of time snapshots to observe bed variables | list | [] | No | None | YAML |
+| `bed_obs_spacing` | observation spacing every n grid points {int} | NoneType | None | No | None | YAML |
+| `bed_obs_stride` | spatial stride in km for bed observations | NoneType | None | No | None | YAML |
+| `bed_relaxation_factor` | relaxation factor for bed elevation updates (-1 < factor <= 1) (when bed is not observed) | float | 0.05 | No | None | YAML |
 | `checkpoint_every` | YAML configuration parameter for checkpoint every | int | 1 | No | None | YAML |
 | `chunk_size` | YAML configuration parameter for chunk size | int | 5000 | No | None | YAML |
+| `collective_threshold` | threshold for switching to collective I/O | int | 16 | No | None | YAML |
 | `commandlinerun` | Parameter for commandlinerun in dictionary | Unknown | Computed | No | None | Dictionary |
 | `coupled_model_datasets` | YAML configuration parameter for coupled model datasets | str | data | No | None | YAML |
 | `coupled_model_datasets_dir` | YAML configuration parameter for coupled model datasets dir | str | data | No | None | YAML |
@@ -30,6 +38,7 @@
 | `flag_jupyter` | leave entire routine | bool | True | No | None | Internal |
 | `force_fresh_start` | YAML configuration parameter for force fresh start | bool | False | No | None | YAML |
 | `freq_obs` | YAML configuration parameter for freq obs | int | 1 | No | None | YAML |
+| `friction_idx` | YAML configuration parameter for friction idx | int | 5 | No | None | YAML |
 | `generate_nurged_state` | YAML configuration parameter for generate nurged state | bool | True | No | None | YAML |
 | `generate_synthetic_obs` | YAML configuration parameter for generate synthetic obs | bool | True | No | None | YAML |
 | `generate_true_state` | YAML configuration parameter for generate true state | bool | True | No | None | YAML |
@@ -38,6 +47,10 @@
 | `h5_file_compression` | e.g., 'gzip' or 'lzf' or 'szip' or None | NoneType | None | No | None | YAML |
 | `h5_file_compression_level` | 0-9 for gzip, 1-9 for szip, ignored for lzf and None | int | 4 | No | None | YAML |
 | `inflation_factor` | YAML configuration parameter for inflation factor | float | 1.0 | No | None | YAML |
+| `initial_bed_bias` | initial bias for bed elevation (in model units) | float | 0.0015 | No | None | YAML |
+| `initial_spread_factor` | YAML configuration parameter for initial spread factor | float | 1.0 | No | None | YAML |
+| `initialize_ensemble` | YAML configuration parameter for initialize ensemble | bool | True | No | None | YAML |
+| `inversion_flag` | Controls inversion flag behavior in script logic | bool | False | No | None | YAML |
 | `joint_estimated_params` | Variable used for joint estimated params in script logic | Unknown | Unknown | No | None | Variable |
 | `joint_estimation` | add joint estimation flag to params | Unknown | Unknown | No | None | Dictionary |
 | `k_start_override` | YAML configuration parameter for k start override | NoneType | None | No | None | YAML |
@@ -56,11 +69,13 @@
 | `obs_start_time` | YAML configuration parameter for obs start time | int | 1 | No | None | YAML |
 | `observations_available` | --- Observations Parameters --- | bool | False | No | None | YAML |
 | `observed_params` | YAML configuration parameter for observed params | list | [] | No | None | YAML |
+| `observed_vars` | YAML configuration parameter for observed vars | list | [] | No | None | YAML |
 | `parallel_flag` | Controls parallel flag behavior in script logic | Unknown | Computed | No | None | Dictionary |
 | `param_ens_spread` | YAML configuration parameter for param ens spread | list | [] | No | None | YAML |
 | `parameter_estimation` | YAML configuration parameter for parameter estimation | bool | False | No | None | YAML |
 | `params_vec` | check available parameters in the obseve_params list that need to be observed | list | [] | No | None | Variable |
 | `partial` | Parameter for partial in dictionary | bool | True | No | None | Dictionary |
+| `rel_vel_weight` | weight for relative velocity in inversion | float | 1.0 | No | None | YAML |
 | `restart_enabled` | YAML configuration parameter for restart enabled | bool | True | No | None | YAML |
 | `run_flag` | Controls run flag behavior in script logic | bool | True | No | None | Internal |
 | `sequential_ensemble_initialization` | YAML configuration parameter for sequential ensemble initialization | bool | False | No | None | YAML |
@@ -70,9 +85,11 @@
 | `sig_obs` | YAML configuration parameter for sig obs | Unknown | None | No | None | YAML |
 | `state_estimation` | YAML configuration parameter for state estimation | bool | False | No | None | YAML |
 | `t` | update for time t | Unknown | Computed | No | None | Dictionary |
+| `tikhonov_regularization_weight` | Tikhonov regularization weight for inversion | float | 1e-13 | No | None | YAML |
 | `total_state_param_vars` | Parameter for total state param vars in dictionary | Unknown | Unknown | No | None | Dictionary |
 | `use_ensemble_pertubations` | YAML configuration parameter for use ensemble pertubations | bool | True | No | None | YAML |
 | `use_random_fields` | YAML configuration parameter for use random fields | bool | False | No | None | YAML |
 | `vec_inputs` | Parameter for vec inputs in dictionary | Unknown | Unknown | No | None | Dictionary |
+| `vel_idx` | YAML configuration parameter for vel idx | int | 2 | No | None | YAML |
 | `verbose` | YAML configuration parameter for verbose | bool | False | No | None | YAML |
 <!-- END: ICESEE-FLAGS -->
