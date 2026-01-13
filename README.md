@@ -53,7 +53,7 @@ Explore the Wiki to find:
 
 For questions or contributions, please open an issue or pull request on the [GitHub repository](https://github.com/ICESEE-project/ICESEE) or contact me at bkyanjo3@gatech.edu
 
-
+ICESEE is distributed as free and open-source software under a BSD-style license (see LICENSE). All external dependencies, including ISSM, Icepack, and other coupled models, are governed by their own licenses, which are independent of and do not impose restrictions on the ICESEE license.
 
 
 
