@@ -818,7 +818,8 @@ def compute_km_from_tobserve(tobserve, k_start, m_obs=None):
     m_obs_i = max(0, min(m_obs_i, tobserve.size))
 
     # count how many obs times have occurred at start (remember your check uses k+1)
-    k1 = int(k_start) + 1
+    # k1 = int(k_start) + 1
+    k1 = int(k_start)
     return int(np.count_nonzero(tobserve[:m_obs_i] <= k1))
 
 def step_already_done(base_dir: str, k: int) -> bool:

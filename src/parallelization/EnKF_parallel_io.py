@@ -500,92 +500,6 @@ class EnKF_fully_parallel_IO:
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
-
-    @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
-    def generate_observation_schedule_(self, **kwargs):
-        # try:
-        t = np.array(kwargs["t"])
-        freq_obs = self.params["freq_obs"]
-        obs_start_time = self.params["obs_start_time"]
-        obs_max_time = self.params["obs_max_time"]
-
-        max_t = np.max(t)
-        obs_max_time = min(obs_max_time, max_t)
-
-        obs_t = np.arange(obs_start_time, obs_max_time + freq_obs, freq_obs)
-        obs_t = obs_t[obs_t <= obs_max_time]
-
-        obs_idx = []
-        for time in obs_t:
-            idx = np.argmin(np.abs(t - time))
-            obs_idx.append(idx)
-        obs_idx = np.array(obs_idx, dtype=int)
-
-        num_observations = len(obs_idx)
-        if len(obs_idx) != num_observations:
-            print(f"[WARNING] obs_idx length {len(obs_idx)} does not match num_observations {num_observations}")
-        # print(f"[DEBUG] obs_t: {obs_t}, obs_idx: {obs_idx}, num_observations: {num_observations}")
-        return obs_t, obs_idx, num_observations
-    
-    @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
-    # def generate_observation_schedule(self, **kwargs):
-    #     """
-    #     Build an observation schedule by snapping desired observation times to the nearest
-    #     entries in the model time grid `t`. Works for any uniform or nonuniform `t`.
-    #     Returns:
-    #         obs_t_req      : requested observation times (continuous)
-    #         obs_idx        : integer indices into `t` (strictly increasing, unique)
-    #         num_observations
-    #         obs_t_aligned  : times actually used (t[obs_idx])
-    #     """
-    #     import numpy as np
-
-    #     # --- Inputs ---
-    #     t = np.asarray(kwargs["t"], dtype=float)  # model time grid (physical units)
-    #     if t.ndim != 1 or t.size == 0:
-    #         raise ValueError("`t` must be a 1D non-empty array of times.")
-
-    #     freq_obs      = float(self.params["freq_obs"])
-    #     obs_start     = float(self.params["obs_start_time"])
-    #     obs_max_cfg   = float(self.params["obs_max_time"])
-
-    #     # --- Bound the observation window to the provided time grid ---
-    #     t_min, t_max = float(t[0]), float(t[-1])
-    #     if obs_start < t_min:
-    #         obs_start = t_min
-    #     obs_max = min(obs_max_cfg, t_max)
-
-    #     if freq_obs <= 0.0 or obs_start > obs_max:
-    #         # No observations possible
-    #         return np.array([]), np.array([], dtype=int), 0, np.array([])
-
-    #     # --- Create the requested observation times robustly (avoid float drift) ---
-    #     n_obs = int(np.floor((obs_max - obs_start) / freq_obs)) + 1
-    #     obs_t_req = obs_start + np.arange(n_obs, dtype=float) * freq_obs
-    #     # clip for safety
-    #     obs_t_req = obs_t_req[(obs_t_req >= t_min) & (obs_t_req <= obs_max)]
-
-    #     # --- Snap each requested time to the nearest index in `t` using searchsorted ---
-    #     # searchsorted gives insertion points; choose the closer neighbor
-    #     insert_pos = np.searchsorted(t, obs_t_req, side="left")
-    #     left_idx   = np.clip(insert_pos - 1, 0, t.size - 1)
-    #     right_idx  = np.clip(insert_pos,     0, t.size - 1)
-
-    #     choose_right = (np.abs(t[right_idx] - obs_t_req) < np.abs(t[left_idx] - obs_t_req))
-    #     nearest_idx  = np.where(choose_right, right_idx, left_idx).astype(int)
-
-    #     # --- Deduplicate while preserving order (handles freq_obs finer than grid) ---
-    #     # This ensures strictly increasing indices for downstream code.
-    #     uniq_mask = np.r_[True, nearest_idx[1:] != nearest_idx[:-1]]
-    #     obs_idx = nearest_idx[uniq_mask]
-
-    #     #  aligned times on the model grid
-    #     obs_t_aligned = t[obs_idx]
-
-    #     num_observations = obs_idx.size
-
-    #     # ensure unique indices
-    #     return obs_t_req, obs_idx, num_observations
     
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
     def generate_observation_schedule(self, **kwargs):
@@ -604,393 +518,394 @@ class EnKF_fully_parallel_IO:
         obs_max = min(obs_max_cfg, t_max)
 
         if freq_obs <= 0.0 or obs_start > obs_max:
-            return np.array([]), np.array([], dtype=int), 0, np.array([])
+            return np.array([]), np.array([], dtype=int), 0
 
-        # --- Build ideal observation times ---
+        # --- Build ideal observation times (requested) ---
         n_obs = int(np.floor((obs_max - obs_start) / freq_obs)) + 1
         obs_t_req = obs_start + np.arange(n_obs, dtype=float) * freq_obs
 
-        # --- Match model time points to observation times ---
-        dt_grid = np.min(np.diff(t)) if len(t) > 1 else 1.0
-        tol = 1e-6 * dt_grid
+        # --- Match model time points to requested obs times (same as partial) ---
+        dt_grid = float(np.min(np.diff(t))) if t.size > 1 else 1.0
 
-        # For each t in the model time grid, check if it’s close to any obs time
         obs_idx = []
-        for i, ti in enumerate(t):
-            if np.any(np.abs(ti - obs_t_req) < tol):
+        for tobs in obs_t_req:
+            i = int(np.argmin(np.abs(t - tobs)))
+            # accept the nearest model time if it's close enough
+            if abs(t[i] - tobs) <= 0.5 * dt_grid:
                 obs_idx.append(i)
 
-        obs_idx = np.array(obs_idx, dtype=int)
-        obs_t_aligned = t[obs_idx]
-        num_observations = len(obs_idx)
+        obs_idx = np.array(sorted(set(obs_idx)), dtype=int)
+        num_observations = int(obs_idx.size)
 
         return obs_t_req, obs_idx, num_observations
-
-    
-    # @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
-    # def _create_synthetic_observations(self, **kwargs):
-    #     synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path')
-    #     error_R_zarr_path = kwargs.get('error_R_zarr_path')
-    #     nd = self.nd
-    #     nt = self.nt
-
-    #     obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
-    #     m = m_obs
-    #     m_R = m_obs * 2 + 1
-
-    #     rank = self.mpi_comm.Get_rank()
-    #     size = self.mpi_comm.Get_size()
-
-    #     if kwargs.get('joint_estimation', False) or self.params.get('localization_flag', False):
-    #         hdim = nd // self.params["total_state_param_vars"]
-    #     else:
-    #         hdim = nd // self.params["total_state_param_vars"]
-
-    #     if rank == 0:
-    #         print("[ICESEE] Generating synthetic observations ...")
-    #         obs_file = f"{self.base_path}/synthetic_obs.h5"
-    #         # Remove existing file to avoid corruption
-    #         # if os.path.exists(obs_file):
-    #         #     print(f"[ICESEE] Removing existing {obs_file}...")
-    #         #     os.remove(obs_file)
-            
-    #         # statevec_true = zarr.open_array(store=f"{self.base_path}/statevec_true.zarr", mode='r+')
-    #         # read from HDF5 directly to avoid Zarr overhead for small nd
-    #         with h5py.File(f"{self.base_path}/true_nurged_states.h5", 'r') as f:
-    #             statevec_true = f['true_state'][:]
-    #         _, indx_map, _ = icesee_get_index(**kwargs)
-            
-    #         try:
-    #             with h5py.File(obs_file, 'a') as f:
-    #                 if 'hu_obs' in f or 'error_R' in f:
-    #                     print(f"[ICESEE] Warning: {obs_file} already contains 'hu_obs' or 'error_R'. Overwriting datasets.")
-    #                     del f['hu_obs']
-    #                     del f['error_R']
-
-    #                 if 'hu_obs' not in f:
-    #                     f.create_dataset('hu_obs', (nd, m_obs), chunks=(min(1000, nd), min(50, m_obs)), dtype='f8')
-    #                 if 'error_R' not in f:
-    #                     f.create_dataset('error_R', (nd, m_obs * 2 + 1), chunks=(min(1000, nd), min(50, m_obs * 2 + 1)), dtype='f8')
-    #                 hu_obs = f['hu_obs']
-    #                 error_R = f['error_R']
-    #                 # print(f"[ICESEE] error_R shape: {error_R.shape},  m_R: {m_R}, m: {m}, nd: {nd}, hdim: {hdim}")
-
-    #                 for i, sig in enumerate(self.params["sig_obs"]):
-    #                     start_idx = i * hdim
-    #                     end_idx = start_idx + hdim
-    #                     error_R[start_idx:end_idx, :] = np.ones((hdim, 1)) * sig
-
-    #                 km = 0
-    #                 km_temp = 0
-    #                 for step in range(nt):
-    #                     # if (km < m_obs) and (step + 1 == ind_m[km]):
-    #                     if (km < m_obs) and (step == ind_m[km]):
-    #                         # for key in kwargs['vec_inputs']:
-    #                         for ii, key in enumerate(kwargs['vec_inputs']):
-    #                             if ii < kwargs['num_state_vars']:
-    #                                 # print(f"[ICESEE] Generating obs at time step {step+1} for key {key} at obs index {km}")
-    #                                 hu_obs[indx_map[key], km] = statevec_true[indx_map[key], step + 1] + \
-    #                                                             np.random.normal(0, error_R[indx_map[key], km], len(indx_map[key]))
-    #                             else:
-    #                                 hu_obs[indx_map[key], km] = np.zeros(len(indx_map[key]))
-
-    #                             if key == 'bed' or key == 'bedrock' or key == 'bed_topography' or key == 'bedtopo' or key == 'bedtopography':
-    #                                 if step+1 == kwargs.get('bed_obs_snapshot', 0)[km_temp]:
-    #                                     hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
-    #                                     km_temp += 1
-    #                         km += 1
-    #         except Exception as e:
-    #             print(f"[ICESEE] Error in HDF5 operations: {e}")
-    #             raise
-    #     self.mpi_comm.Barrier()
-    #     return ind_m, m_obs
 
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
     def _create_synthetic_observations(self, **kwargs):
         import os
+        import re
         import h5py
         import numpy as np
+        import traceback
+        import sys
 
-        synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path')
-        error_R_zarr_path = kwargs.get('error_R_zarr_path')
         nd = self.nd
         nt = self.nt
 
         obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
-        ind_m = np.asarray(ind_m, dtype=int)
-        m = m_obs
-        m_R = m_obs * 2 + 1
+        ind_m = np.asarray(ind_m, dtype=int)  # your code treats these as step indices
+        obs_t = np.asarray(obs_t, dtype=float)
 
         rank = self.mpi_comm.Get_rank()
-        size = self.mpi_comm.Get_size()
 
-        # Grid/meta
         total_state_param_vars = self.params["total_state_param_vars"]
         hdim = nd // total_state_param_vars
 
+        # ----------------------------
+        # Bed snapshots: interpret as YEARS like partial-parallel
+        # ----------------------------
+        bed_snaps = np.asarray(kwargs.get("bed_obs_snapshot", []), dtype=float)
+        bed_snap_cols = []
+        bed_time_to_col = {}
+
+        if bed_snaps.size > 0 and obs_t.size > 0:
+            for bed_time in bed_snaps:
+                diffs = np.abs(obs_t - bed_time)
+                j = int(np.argmin(diffs))  # 0-based obs column
+                bed_snap_cols.append(j)
+                bed_time_to_col[bed_time] = j
+            bed_snap_cols = sorted(set(bed_snap_cols))
+
         if rank == 0:
-            print("[ICESEE] Generating synthetic observations ...")
-            obs_file = f"{self.base_path}/synthetic_obs.h5"
-
-            
-            with h5py.File(f"{self.base_path}/true_nurged_states.h5", 'r') as f:
-                statevec_true = f['true_state'][:]  # shape (nd, nt?) often nt+1 columns
-
-            # Build indices map once
-            _, indx_map, _ = icesee_get_index(**kwargs)
-            vec_inputs = list(kwargs['vec_inputs'])
-
-            # Optional: params + helpers
-            num_state_vars = kwargs.get('num_state_vars', self.params.get('num_state_vars'))
-            observed_params = set(kwargs.get('observed_params', []))
-            bed_aliases = {'bed', 'bedrock', 'bed_topography', 'bedtopo', 'bedtopography'}
-            key_is_bed = {k: (k in bed_aliases) for k in vec_inputs}
-            key_idx_map = {k: np.asarray(indx_map[k], dtype=int) for k in vec_inputs}
-
-            # ---- Bed snapshot & sparsity controls ----
-            bed_snaps = kwargs.get('bed_obs_snapshot', [])
-            if isinstance(bed_snaps, (list, np.ndarray)):
-                bed_snaps = list(bed_snaps)
-            else:
-                bed_snaps = []  # safe default
-
-            # Options for sparsity
-            Lx = kwargs.get('Lx', self.params.get('Lx', None))
-            bed_stride_km = kwargs.get('bed_obs_stride_km', None)   # e.g., 30 (km)
-            bed_spacing_pts = kwargs.get('bed_obs_spacing', None)   # e.g., 5 (points)
-            bed_indices_user = kwargs.get('bed_obs_indices', None)  # explicit indices (0..len(bed)-1)
-            bed_mask_user = kwargs.get('bed_obs_mask', None)        # boolean mask over bed-subvector
-
-            # Precompute a mask per bed-like key (over its local subvector order)
-            bed_mask_map = {}
-            for k in vec_inputs:
-                if not key_is_bed[k]:
-                    continue
-                idx = key_idx_map[k]            # global indices for bed subvector
-                local_len = idx.size
-                mask = np.ones(local_len, dtype=bool)  # default: observe all (original behavior)
-
-                if isinstance(bed_mask_user, (list, np.ndarray)):
-                    msk = np.asarray(bed_mask_user, dtype=bool)
-                    if msk.size == local_len:
-                        mask = msk
-                    elif msk.size > 0:
-                        rep = int(np.ceil(local_len / msk.size))
-                        mask = np.tile(msk, rep)[:local_len]
-                elif isinstance(bed_indices_user, (list, np.ndarray)):
-                    mask = np.zeros(local_len, dtype=bool)
-                    idxs = np.asarray(bed_indices_user, dtype=int)
-                    idxs = idxs[(idxs >= 0) & (idxs < local_len)]
-                    mask[idxs] = True
-                elif isinstance(bed_spacing_pts, (int, np.integer)) and bed_spacing_pts > 1:
-                    n = int(bed_spacing_pts)
-                    mask = np.zeros(local_len, dtype=bool)
-                    mask[::n] = True
-                elif (bed_stride_km is not None) and (Lx is not None):
-                    # Convert stride in km → every-nth point assuming uniform x-grid of length Lx
-                    intervals = max(hdim - 1, 1)
-                    dx_m = float(Lx) / intervals
-                    n = max(int(round((bed_stride_km) / max(dx_m, 1e-12))), 1)
-                    mask = np.zeros(local_len, dtype=bool)
-                    mask[::n] = True
-
-                bed_mask_map[k] = mask
-
-            # ---- Create / overwrite output datasets ----
             try:
-                with h5py.File(obs_file, 'a') as f:
-                    if 'hu_obs' in f or 'error_R' in f:
+                print("[ICESEE] Generating synthetic observations ...")
+                print(f"[ICESEE] observation times: {obs_t}, indices: {ind_m}, total: {m_obs}")
+                print(f"[ICESEE] bed_snaps (years): {bed_snaps}")
+                print(f"[ICESEE] bed_snap_cols (obs columns): {bed_snap_cols}")
+                if len(bed_snap_cols) > 0:
+                    print(f"[ICESEE] obs_t at bed_snap_cols: {obs_t[bed_snap_cols]}")
+
+                obs_file = f"{self.base_path}/synthetic_obs.h5"
+
+                # Load true state
+                with h5py.File(f"{self.base_path}/true_nurged_states.h5", "r") as f:
+                    statevec_true = f["true_state"][:]  # (nd, nt or nt+1)
+
+                # Build index map once
+                _, indx_map, _ = icesee_get_index(**kwargs)
+                vec_inputs = list(kwargs["vec_inputs"])
+
+                # Helpers / options
+                num_state_vars = kwargs.get("num_state_vars", self.params.get("num_state_vars"))
+                observed_params = set(kwargs.get("observed_params", []))
+
+                bed_aliases = {"bed", "bedrock", "bed_topography", "bedtopo", "bedtopography"}
+                key_is_bed = {k: (k in bed_aliases) for k in vec_inputs}
+                key_idx_map = {k: np.asarray(indx_map[k], dtype=int) for k in vec_inputs}
+
+                # ---- Bed sparsity controls (accept BOTH naming conventions safely) ----
+                Ly = kwargs.get("Ly", self.params.get("Ly", None))
+                Lx = kwargs.get("Lx", self.params.get("Lx", None))
+                model_name = kwargs.get("model_name", None)
+
+                # allow either key name:
+                bed_stride_km = kwargs.get("bed_obs_stride", None)
+                if bed_stride_km is None:
+                    bed_stride_km = kwargs.get("bed_obs_stride_km", None)
+
+                bed_spacing_pts = kwargs.get("bed_obs_spacing", None)
+                bed_indices_user = kwargs.get("bed_obs_indices", None)
+                bed_mask_user = kwargs.get("bed_obs_mask", None)
+
+                # ---- Build bed_mask_map using the SAME priority/shape handling as partial ----
+                bed_mask_map = {}
+                for k in vec_inputs:
+                    if not key_is_bed.get(k, False):
+                        continue
+
+                    idx = key_idx_map[k]
+                    local_len = idx.size
+
+                    mask = np.ones(local_len, dtype=bool)  # default observe all
+
+                    # Priority 1: explicit mask
+                    if isinstance(bed_mask_user, (list, np.ndarray)):
+                        msk = np.asarray(bed_mask_user, dtype=bool)
+                        if msk.ndim > 1 and msk.shape[0] == 1:
+                            msk = msk[0]
+                        msk = msk.ravel()
+
+                        if msk.size != local_len:
+                            if msk.ndim == 1 and msk.size > 0:
+                                rep = int(np.ceil(local_len / msk.size))
+                                msk = np.tile(msk, rep)[:local_len]
+                            else:
+                                msk = np.ones(local_len, dtype=bool)
+
+                        mask = msk
+
+                    # Priority 2: explicit indices
+                    elif isinstance(bed_indices_user, (list, np.ndarray)):
+                        mask = np.zeros(local_len, dtype=bool)
+                        idxs = np.asarray(bed_indices_user, dtype=int)
+                        idxs = idxs[(idxs >= 0) & (idxs < local_len)]
+                        mask[idxs] = True
+
+                    # Priority 3: spacing in points
+                    elif isinstance(bed_spacing_pts, (int, np.integer)) and bed_spacing_pts > 1:
+                        n = int(bed_spacing_pts)
+                        mask = np.zeros(local_len, dtype=bool)
+                        mask[::n] = True
+
+                    # Priority 4: LiDAR-like / stride in km (2D grid or ISSM mesh)
+                    elif (bed_stride_km is not None) and (Lx is not None) and (Ly is not None):
+                        if re.match(r"(?i)^issm$", str(model_name)):
+                            import h5py  # already imported, but harmless
+
+                            icesee_path = kwargs.get("icesee_path")
+                            data_path = kwargs.get("data_path")
+
+                            file_path = f"{icesee_path}/{data_path}/mesh_idxy_{0}.h5"
+                            try:
+                                with h5py.File(file_path, "r") as f:
+                                    x_param = f["/fric_x"][:]
+                                    y_param = f["/fric_y"][:]
+                            except FileNotFoundError:
+                                raise FileNotFoundError(
+                                    f"ISSM mesh file '{file_path}' not found. "
+                                    "Please generate the mesh indicies before running ICESEE."
+                                )
+
+                            y_param = np.asarray(y_param / 1000.0, dtype=float).reshape(-1)
+                            x_param = np.asarray(x_param / 1000.0, dtype=float).reshape(-1)
+
+                            y_min, y_max = np.min(y_param), np.max(y_param)
+                            x_min, x_max = np.min(x_param), np.max(x_param)
+
+                            local_len = x_param.size
+                            bed_stride_km_local = float(bed_stride_km) / 1000.0  # keep your partial conversion
+
+                            x_lines = np.arange(x_min, x_max + 1e-6, bed_stride_km_local)
+
+                            if x_lines.size > 1:
+                                dx_nom = (x_max - x_min) / (x_lines.size - 1)
+                            else:
+                                dx_nom = bed_stride_km_local
+                            band = 0.5 * dx_nom
+
+                            mask = np.zeros(local_len, dtype=bool)
+                            for x_line in x_lines:
+                                mask |= np.abs(x_param - x_line) <= band
+
+                            print(f"[ICESEE<-ISSM] bed LiDAR mask for '{k}': {mask.sum()} of {local_len} points observed")
+
+                        else:
+                            # 2D grid assumption like partial
+                            Nx = int(hdim)
+                            Ny = int(local_len // Nx) if Nx > 0 else 1
+
+                            if Nx * Ny != local_len:
+                                intervals = max(hdim - 1, 1)
+                                dx = float(Lx) / intervals
+                                n = max(int(round(float(bed_stride_km) / max(dx, 1e-12))), 1)
+                                mask = np.zeros(local_len, dtype=bool)
+                                mask[::n] = True
+                            else:
+                                intervals_y = max(Ny - 1, 1)
+                                dy = float(Ly) / intervals_y
+                                stride_y_pts = max(int(round(float(bed_stride_km) / max(dy, 1e-12))), 1)
+
+                                mask2d = np.zeros((Ny, Nx), dtype=bool)
+                                for j in range(0, Ny, stride_y_pts):
+                                    mask2d[j, :] = True  # keep all along-track points by default
+
+                                mask = mask2d.ravel(order="C")
+                                print(f"[ICESEE] bed 2D mask for key '{k}': Ny={Ny}, Nx={Nx}, stride_y_pts={stride_y_pts}")
+
+                    bed_mask_map[k] = mask
+
+                # ---- Create / overwrite output datasets ----
+                with h5py.File(obs_file, "a") as f:
+                    if "hu_obs" in f or "error_R" in f:
                         print(f"[ICESEE] Warning: {obs_file} already contains 'hu_obs' or 'error_R'. Overwriting datasets.")
-                        if 'hu_obs' in f: del f['hu_obs']
-                        if 'error_R' in f: del f['error_R']
+                        if "hu_obs" in f:
+                            del f["hu_obs"]
+                        if "error_R" in f:
+                            del f["error_R"]
 
-                    hu_obs = f.create_dataset('hu_obs', (nd, m_obs),
-                                            chunks=(min(1000, nd), min(50, m_obs)),
-                                            dtype='f8')
-                    error_R = f.create_dataset('error_R', (nd, m_obs * 2 + 1),
-                                            chunks=(min(1000, nd), min(50, m_obs * 2 + 1)),
-                                            dtype='f8')
+                    hu_obs = f.create_dataset(
+                        "hu_obs", (nd, m_obs),
+                        chunks=(min(1000, nd), min(50, m_obs)),
+                        dtype="f8"
+                    )
+                    error_R = f.create_dataset(
+                        "error_R", (nd, m_obs * 2 + 1),
+                        chunks=(min(1000, nd), min(50, m_obs * 2 + 1)),
+                        dtype="f8"
+                    )
 
-                    # Fill error_R by blocks (broadcast, no extra allocs)
+                    # Fill error_R by blocks (same idea)
                     sig_obs = np.asarray(self.params["sig_obs"]).reshape(-1)
-                    # pad/truncate for safety
                     if sig_obs.size < total_state_param_vars:
-                        sig_obs = np.pad(sig_obs, (0, total_state_param_vars - sig_obs.size), mode='edge')
+                        sig_obs = np.pad(sig_obs, (0, total_state_param_vars - sig_obs.size), mode="edge")
                     elif sig_obs.size > total_state_param_vars:
                         sig_obs = sig_obs[:total_state_param_vars]
 
                     for i, sig in enumerate(sig_obs):
                         s = i * hdim
                         e = s + hdim
-                        error_R[s:e, :] = sig  # broadcast
+                        error_R[s:e, :] = sig
 
-                    # === Main loop ===
+                    # ==== Main observation loop (columns km), aligned to partial ====
+                    obs_set = set(kwargs.get("observed_vars", [])) | set(kwargs.get("observed_params", []))
+
                     km = 0
-                    km_temp = 0
                     for step in range(nt):
-                        if (km < m_obs) and (step == ind_m[km]):  
-                            # guard to avoid OOB if nt doesn't include t0 column
+                        if km >= m_obs:
+                            break
+
+                        if step == ind_m[km]:
+                            # guard for nt vs nt+1 storage
                             tcol = step + 1 if (step + 1) < statevec_true.shape[1] else step
 
                             for ii, key in enumerate(vec_inputs):
                                 idx = key_idx_map[key]
-                                bed_flag = key_is_bed[key]
+                                bed_flag = key_is_bed.get(key, False)
 
-                                if (ii < num_state_vars or key in observed_params) and (not bed_flag):
+                                # ---- non-bed vars: normal obs at every obs time ----
+                                if (key in obs_set) and (not bed_flag):
                                     sigma = error_R[idx, km]
                                     hu_obs[idx, km] = statevec_true[idx, tcol] + \
                                                     np.random.normal(0.0, sigma, size=idx.size)
                                 else:
-                                    # keep zeros (parameters not observed at this instant)
                                     hu_obs[idx, km] = 0.0
 
-                                # bed* special snapshot (sparse)
-                                if bed_flag:
-                                    if km_temp < len(bed_snaps) and ((step + 1) == bed_snaps[km_temp]):
-                                        # only on masked subset; rest stay zero
-                                        mask = bed_mask_map.get(key, None)
-                                        if mask is None:
-                                            mask = np.ones(idx.size, dtype=bool)
-                                        idx_obs = idx[mask]
-                                        if idx_obs.size > 0:
-                                            sigma_obs = error_R[idx_obs, km]
-                                            hu_obs[idx_obs, km] = statevec_true[idx_obs, tcol] + \
-                                                                np.random.normal(0.0, sigma_obs, size=idx_obs.size)
-                                        km_temp += 1
+                                # ---- bed vars: only at bed snapshot columns, on masked subset ----
+                                if bed_flag and (km in bed_snap_cols):
+                                    mask = bed_mask_map.get(key, np.ones(idx.size, dtype=bool))
+                                    idx_obs = idx[mask]
+                                    if idx_obs.size > 0:
+                                        sigma_obs = error_R[idx_obs, km]
+                                        hu_obs[idx_obs, km] = statevec_true[idx_obs, tcol] + \
+                                                            np.random.normal(0.0, sigma_obs, size=idx_obs.size)
 
                             km += 1
 
             except Exception as e:
-                print(f"[ICESEE] Error in HDF5 operations: {e}")
+                print(f"[ICESEE] Error in full-parallel _create_synthetic_observations: {e}")
+                tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+                print(f"Traceback details:\n{tb_str}")
                 raise
 
         self.mpi_comm.Barrier()
         return ind_m, m_obs
 
-
     def H_matrix(self, **kwargs):
+        """
+        Fully-parallel version: write H directly to Zarr, but use the SAME
+        observation-index logic as the partial-parallel run (including bed masks).
+
+        H contains ONLY real observation points (and bed subsampling/masking),
+        with rows ordered exactly as `params["all_observed"]` concatenation.
+        """
         try:
-            zarr_path = kwargs.get('H_matrix_zarr_path')
-            nd = self.nd
-            m_obs = kwargs.get('m_obs')
-            m = m_obs * 2 + 1
-            obs_t, ind_m, _m_obs = self.generate_observation_schedule(**kwargs)
-            # print(f"\n[ICESEE] Creating H matrix of shape ({m}, {nd}) and m_obs={m_obs} ... computed m_obs={_m_obs}\n")
-            di = int((nd - 2) / (2 * m_obs))
+            zarr_path = kwargs.get("H_matrix_zarr_path")
+            if zarr_path is None:
+                raise ValueError("H_matrix_zarr_path is required in kwargs")
 
-            H_matrix_file = zarr.create_array(store=zarr_path, shape=(m, nd), chunks=(min(50, m), min(1000, nd)), dtype='f8', overwrite=True)
-            for i in range(1, m_obs + 1):
-                H_matrix_file[i - 1, i * di - 1] = 1
-                H_matrix_file[m_obs + i - 1, int((nd - 2) / 2) + i * di - 1] = 1
+            params = self.params
+            observed = params["all_observed"]  # e.g. ['h','u','v','smb','bed']
+            vec_inputs = kwargs.get("vec_inputs", [])
 
-            H_matrix_file[m_obs * 2, nd - 2] = 1
+            # --- Recompute index map (same as partial parallel) ---
+            vecs, indx_map, _ = icesee_get_index(**kwargs)
 
-            if self.params.get('joint_estimation', False):
-                ndim = nd // self.params["total_state_param_vars"]
-                state_variables_size = ndim * self.params["num_state_vars"]
-                H_matrix_file[:, state_variables_size:] = 0
+            nd = int(self.nd)  # state size
+
+            # --- Retrieve bed masks (must already exist) ---
+            bed_mask_map = kwargs.get("bed_mask_map", {})
+
+            bed_aliases = {"bed", "bedrock", "bed_topography", "bedtopo", "bedtopography"}
+            key_is_bed = {k: (k in bed_aliases) for k in vec_inputs}
+
+            # --- Collect observation indices, applying masks to bed ---
+            all_obs_indices = []
+            for key in observed:
+                if key not in indx_map:
+                    raise KeyError(f"Observed key '{key}' not found in indx_map")
+
+                idx = np.asarray(indx_map[key], dtype=int)
+
+                # Apply bed mask if present (keep behavior consistent with your partial-parallel code)
+                if key == "bed" and key in bed_mask_map:
+                    mask = np.asarray(bed_mask_map[key], dtype=bool)
+
+                    # tolerate mask stored as shape (1, n) like your partial version
+                    if mask.ndim > 1 and mask.shape[0] == 1:
+                        mask = mask[0]
+                    else:
+                        mask = mask.ravel()
+
+                    if mask.size != idx.size:
+                        raise ValueError(
+                            f"bed_mask_map['{key}'] length {mask.size} does not "
+                            f"match bed vector length {idx.size}"
+                        )
+
+                    idx = idx[mask]
+
+                all_obs_indices.append(idx)
+
+            # Flatten
+            obs_indices = np.concatenate(all_obs_indices).astype(int)
+
+            if obs_indices.size == 0:
+                raise ValueError("No observation indices found (obs_indices is empty).")
+
+            # --- Safety ---
+            if obs_indices.max() >= nd:
+                raise ValueError(
+                    f"H_matrix error: obs index {obs_indices.max()} >= state size {nd}"
+                )
+
+            # m = number of real observations (rows)
+            m = int(obs_indices.size)
+
+            # --- Allocate Zarr H ---
+            # Use chunking  with correct row count.
+            H_matrix_file = zarr.create_array(
+                store=zarr_path,
+                shape=(m, nd),
+                chunks=(min(50, m), min(1000, nd)),
+                dtype="f8",
+                overwrite=True,
+            )
+
+            # --- Write identity rows into Zarr in blocks (memory-safe) ---
+            block = int(kwargs.get("H_write_block_rows", 5000))
+            for r0 in range(0, m, block):
+                r1 = min(m, r0 + block)
+                rows = np.arange(r0, r1, dtype=int)
+                cols = obs_indices[r0:r1]
+            #     # Set the 1's for this block; everything else stays 0
+            #     H_matrix_file[rows, cols] = 1.0
+                for rr, cc in zip(rows, cols):
+                    H_matrix_file[rr, cc] = 1.0
+                
+
+            # --- Joint estimation: zero out parameter columns (preserve your original behavior) ---
+            if params.get("joint_estimation", False):
+                ndim = nd // params["total_state_param_vars"]
+                state_variables_size = ndim * params["num_state_vars"]
+                # if any obs accidentally landed in param part, this forces them off
+                H_matrix_file[:, state_variables_size:] = 0.0
+
         except Exception as e:
             print(f"Error in H_matrix: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
-    
-    def compute_X5_utils_batch(self, **kwargs):
-        """
-        Returns:
-        Eta   : (m, Nens)
-        Dprime: (m, Nens)   # constant across Nens (each column equal)
-        HA    : (m, Nens)
-        """
-        k = kwargs.get('k')
-        k = k + 1 if k < self.nt - 1 else k
-        km = kwargs.get('km', k)
-        nt = self.nt
-        try:
-            comm = self.mpi_comm
-            rank = comm.Get_rank()
 
-            # ---- Config / inputs
-            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
-            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
-            m = kwargs.get('m_obs') * 2 + 1
-            Nens = int(self.nens)
-            block_size = int(kwargs.get('block_size', max(16, min(64, Nens))))  # tuneable batch size
-
-            # ---- Open H once and slice local columns
-            H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')  # shape (m_total, nd_total) or (m, nd_total) as per your layout
-            H_local = H_matrix[:, self.nd_start_world:self.nd_end_world]  # shape (m, local_nd)
-            H_local = np.ascontiguousarray(H_local, dtype=np.float64)
-            m_local, local_nd = H_local.shape  # expect m_local == m
-
-            # ---- Read local ensemble mean once
-            mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-            with h5py.File(mean_file_path, 'r', driver='mpio', comm=comm) as f:
-                ens_mean_local = f['mean'][self.nd_start_world:self.nd_end_world, k ]
-            ens_mean_local = np.ascontiguousarray(ens_mean_local, dtype=np.float64)  # (local_nd,)
-
-            # ---- Synthetic observations (local slice)
-            # synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
-            # synthetic_obs_local = synthetic_obs[self.nd_start_world:self.nd_end_world, km]
-            # synthetic_obs_local = np.ascontiguousarray(synthetic_obs_local, dtype=np.float64)  # (local_nd,)
-             # *--with open synthetic obs h5file *---rememdy for now---*
-            obs_file = f"{self.base_path}/synthetic_obs.h5"
-            with h5py.File(obs_file, 'r', driver='mpio', comm=self.mpi_comm) as f:
-                synthetic_obs_local = f['hu_obs'][self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
-            # *---rememdy for now---*
-
-            # ---- Fuse d and Hmean into a single GEMM + single Allreduce
-            # Build a 2-column local matrix [y_obs, ens_mean]
-            V_local = np.empty((local_nd, 2), dtype=np.float64, order='C')
-            V_local[:, 0] = synthetic_obs_local
-            V_local[:, 1] = ens_mean_local
-
-            Y_local = H_local @ V_local                   # (m, 2)
-            Y_global = np.empty_like(Y_local, order='C')  # (m, 2)
-
-            # Single collective for both vectors
-            comm.Allreduce([Y_local, MPI.DOUBLE], [Y_global, MPI.DOUBLE], op=MPI.SUM)
-            d_global     = Y_global[:, 0]                 # (m,)
-            Hmean_global = Y_global[:, 1]                 # (m,)
-
-            # ---- Compute HA for all ensemble members in batches
-            HA_global = np.empty((m_local, Nens), dtype=np.float64, order='C')
-
-            for j0 in range(0, Nens, block_size):
-                j1 = min(j0 + block_size, Nens)
-                B = j1 - j0
-
-                # Load a contiguous local block of states: shape (local_nd, B)
-                States_local_blk = np.empty((local_nd, B), dtype=np.float64, order='C')
-                for jj, ens_idx in enumerate(range(j0, j1)):
-                    States_local_blk[:, jj] = self.read_analysis(k, ens_idx)  # must return local slice (local_nd,)
-
-                # Local GEMM then one Allreduce for this batch
-                HA_local_blk = H_local @ States_local_blk             # (m, B)
-                HA_global_blk = np.empty_like(HA_local_blk, order='C')
-                comm.Allreduce([HA_local_blk, MPI.DOUBLE], [HA_global_blk, MPI.DOUBLE], op=MPI.SUM)
-
-                HA_global[:, j0:j1] = HA_global_blk
-
-            # ---- Eta and D'
-            # Eta = HA - Hmean[:, None]
-            Eta = HA_global - Hmean_global[:, None]                   # (m, Nens)
-            # print(f"\n[Rank {self.mpi_comm.Get_rank()}] H_local norm : {np.linalg.norm(H_local)}, ens_mean_local norm: {np.linalg.norm(ens_mean_local)}, synthetic_obs_local norm: {np.linalg.norm(synthetic_obs_local)}\n")
-
-            # D' = (d - Hmean) broadcast across columns
-            d_minus_Hmean = (d_global - Hmean_global)                 # (m,)
-            # Make every column identical, no extra collectives
-            Dprime = np.broadcast_to(d_minus_Hmean[:, None], (m_local, Nens)).copy()
-
-            return Eta, Dprime, HA_global
-
-        except Exception as e:
-            print(f"Error in compute_X5_utils: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
-
-    def compute_X5_util_(self, **kwargs):
+    def compute_X5_utils_(self, **kwargs):
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
         k = kwargs.get('k')
@@ -999,7 +914,7 @@ class EnKF_fully_parallel_IO:
         try:
             H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
             synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
-            m = kwargs.get('m_obs') * 2 + 1
+            m = kwargs.get('m_obs')
             Nens = self.nens
 
             # --- Open H (read-only) once and slice local columns
@@ -1069,121 +984,21 @@ class EnKF_fully_parallel_IO:
 
             # print(f"\n[Rank {self.mpi_comm.Get_rank()}] norms H: {np.linalg.norm(H_matrix)},  ens_mean:{np.linalg.norm(np.mean(States_local, axis=1))}, d: {np.linalg.norm(d_local)} D: {np.linalg.norm(d_global.reshape(-1,1) + Eta)}, HA: {np.linalg.norm(HA)}, Eta: {np.linalg.norm(Eta)}, ensemble_vec: {np.linalg.norm(States_local)} \n")
 
-            return Dprime, Eta, HA, kwargs
+            return Dprime, Eta, Eta, kwargs
         except Exception as e:
             print(f"Error in compute_X5_utils: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-
-    def compute_X5_utils(self, km, **kwargs):
-        """
-        Parallel EnKF X5 minimal utilities:
-        d_global   = H @ y_obs
-        Hbar       = H @ ensemble_mean
-        Dprime     = d_global - Hbar
-        HAprime    = Eta (from H @ ensemble_perturbations)
-        """
-
-        import numpy as np, h5py, zarr, sys, traceback
-        from mpi4py import MPI
-
-        comm  = self.mpi_comm
-        rank  = comm.Get_rank()
-        size  = comm.Get_size()
-
-        try:
-            # ----------------------------------------------------------------------
-            # Parameters and file paths
-            # ----------------------------------------------------------------------
-            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
-            # synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
-            m                       = kwargs.get('m_obs') * 2 + 1
-            Nens                    = self.nens
-
-            i0, i1 = self.nd_start_world, self.nd_end_world
-            local_nd = i1 - i0
-
-            # Choose MPI datatype dynamically (float32 or float64)
-            mpi_type = MPI._typedict[np.dtype(np.float64).char]
-
-            # ----------------------------------------------------------------------
-            # Load local column block of H and local slices of ensemble_mean, obs
-            # ----------------------------------------------------------------------
-            H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')
-            H_local  = np.asarray(H_matrix[:, i0:i1], dtype=np.float64, order='C')  # (m, local_nd)
-
-            # Synthetic observation local slice (y)
-            # synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
-            # y_local = np.asarray(synthetic_obs[i0:i1, km], dtype=np.float64)  # (local_nd,)
-            obs_file = f"{self.base_path}/synthetic_obs.h5"
-            with h5py.File(obs_file, 'r', driver='mpio', comm=self.mpi_comm) as f:
-                y_local = np.asarray(f['hu_obs'][i0:i1, km], dtype=np.float64)  # (local_nd,)
-
-            # Ensemble mean local slice
-            mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-            with h5py.File(mean_file_path, 'r', driver='mpio', comm=comm) as f:
-                ensemble_mean_local = np.asarray(f['mean'][i0:i1, km], dtype=np.float64)  # (local_nd,)
-
-            # ----------------------------------------------------------------------
-            # Compute d = H * y_obs   (GEMV + Allreduce)
-            # ----------------------------------------------------------------------
-            d_local = H_local @ y_local                    # (m,)
-            d_global = np.empty_like(d_local)
-            comm.Allreduce([d_local, mpi_type], [d_global, mpi_type], op=MPI.SUM)
-
-            # ----------------------------------------------------------------------
-            # Compute Hbar = H * ensemble_mean   (GEMV + Allreduce)
-            # ----------------------------------------------------------------------
-            Hbar_local = H_local @ ensemble_mean_local     # (m,)
-            Hbar_global = np.empty_like(Hbar_local)
-            comm.Allreduce([Hbar_local, mpi_type], [Hbar_global, mpi_type], op=MPI.SUM)
-
-            # ----------------------------------------------------------------------
-            # Compute Eta = H * (ensemble_vec - ensemble_mean)
-            # ----------------------------------------------------------------------
-            # Each rank reads its local portion of ensemble states
-            States_local = np.empty((local_nd, Nens), dtype=np.float64, order='C')
-            for j in range(Nens):
-                States_local[:, j] = np.asarray(self.read_analysis(km, j), dtype=np.float64)
-
-            # Compute local ensemble perturbations
-            perturb_local = States_local - ensemble_mean_local[:, None]  # (local_nd, Nens)
-
-            # Project ensemble perturbations into observation space
-            Eta_local = H_local @ perturb_local                          # (m, Nens)
-            Eta = Eta_local.copy(order='C')
-            comm.Allreduce(MPI.IN_PLACE, [Eta, mpi_type], op=MPI.SUM)    # (m, Nens)
-
-            # ----------------------------------------------------------------------
-            # Compute Dprime and HAprime (final outputs)
-            # ----------------------------------------------------------------------
-            Dprime  = (d_global - Hbar_global).reshape(m, 1)             # (m,1)
-            HAprime = Eta                                                # (m,Nens)
-
-            # Optional: diagnostics
-            if rank == 0:
-                print(f"[rank {rank}] Shapes -> Dprime: {Dprime.shape}, HAprime: {HAprime.shape}")
-
-            return Dprime, Eta, HAprime, kwargs
-
-        except Exception as e:
-            print(f"[rank {rank}] Error in compute_X5_utils: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            comm.Abort(1)
-
-
-    def compute_X5_modified(self, km, **kwargs):
+    def compute_X5_modified(self, **kwargs):
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
         try:
-            m = kwargs.get('m_obs') * 2 + 1
             Nens = self.nens
 
             # Dprime, Eta, HA, kwargs = self.compute_X5_utils_(km, **kwargs)
-            Dprime, Eta, HAprime, kwargs  = self.compute_X5_utils(km, **kwargs)
+            Dprime, Eta, HAprime, kwargs  = self.compute_X5_utils_(**kwargs)
             # print(f"\n [Rank {self.mpi_comm.Get_rank()}] Dprime norm: {np.linalg.norm(Dprime)}, Eta norm: {np.linalg.norm(Eta)}, HA norm: {np.linalg.norm(HA)} \n")
             # Dprime, Eta, HA = self.compute_X5_utils_batch(**kwargs)
 
@@ -1193,8 +1008,12 @@ class EnKF_fully_parallel_IO:
             # one_N = np.ones((Nens,Nens))/Nens
             # HAprime= HA@(np.eye(Nens) - one_N) # mxNens
 
+            # get m
+            m = HAprime.shape[0]
+
             # compute HAprime + Eta
             HAprime_Eta = HAprime + Eta
+            # HAprime_Eta = Eta  # since HAprime = Eta
            
             # print(f"\n[Rank {self.mpi_comm.Get_rank()}] HAprime_Eta norm: {np.linalg.norm(HAprime_Eta)}, shape: {HAprime_Eta.shape}\n")
             # print(f"\n [Rank {self.mpi_comm.Get_rank()}] Dprime_local shape: {Dprime_local.shape} HAprime_local shape: {HAprime_local.shape} HAprime_Eta_local shape: {HAprime_Eta_local.shape}\n ")
@@ -1234,6 +1053,8 @@ class EnKF_fully_parallel_IO:
 
             # compute X2 = X1*Dprime # Nens x Nens
             X2 = np.dot(X1, Dprime)
+            # Dprime_mat = np.broadcast_to(Dprime, (m, Nens))
+            # X2 = X1 @ Dprime_mat
 
             #  compute X3 = U*X2 # m_obs x Nens
             X3 = np.dot(U, X2)
@@ -1331,7 +1152,7 @@ class EnKF_fully_parallel_IO:
                 "h", "ice_thickness", "thickness", "ice_thick", 
                 "hi", "h_ice", "h_ice_thickness", "H"
             }
-            min_thickness = 1e-3
+            min_thickness = 1
             vec_inputs = kwargs.get("vec_inputs", None)
          
             for i, input_var in enumerate(vec_inputs or []):
@@ -1342,6 +1163,7 @@ class EnKF_fully_parallel_IO:
 
             # Write back all analysis updates
             _local_analysis_time1 = MPI.Wtime()
+            # _k = k + 1 if k < self.nt - 1 else k
             for j in range(Nens):
                 self.write_analysis(k, analysis_updates[:, j], j)
             _local_analysis_time1 = MPI.Wtime() - _local_analysis_time1
@@ -1363,6 +1185,7 @@ class EnKF_fully_parallel_IO:
                                 dtype='f8'
                             )
                     comm.Barrier()
+                    # _k = k + 1 if k < self.nt - 1 else k
                     f['mean'][self.nd_start_world:self.nd_end_world, k] = analysis_mean
             kwargs["time_analysis_ensemble_mean_generation"] += (MPI.Wtime() - _time_analysis_mean)
             # print(f"\n[ICESEE] Rank {rank} completed analysis update for time step {k+1}/{nt} analysis_mean norm {np.linalg.norm(analysis_mean)}\n")
@@ -1394,5 +1217,214 @@ class EnKF_fully_parallel_IO:
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
+
+    
+    # def compute_X5_utils_batch(self, **kwargs):
+    #     """
+    #     Returns:
+    #     Eta   : (m, Nens)
+    #     Dprime: (m, Nens)   # constant across Nens (each column equal)
+    #     HA    : (m, Nens)
+    #     """
+    #     k = kwargs.get('k')
+    #     k = k + 1 if k < self.nt - 1 else k
+    #     km = kwargs.get('km', k)
+    #     nt = self.nt
+    #     try:
+    #         comm = self.mpi_comm
+    #         rank = comm.Get_rank()
+
+    #         # ---- Config / inputs
+    #         H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
+    #         synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
+    #         m = kwargs.get('m_obs')
+    #         Nens = int(self.nens)
+    #         block_size = int(kwargs.get('block_size', max(16, min(64, Nens))))  # tuneable batch size
+
+    #         # ---- Open H once and slice local columns
+    #         H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')  # shape (m_total, nd_total) or (m, nd_total) as per your layout
+    #         H_local = H_matrix[:, self.nd_start_world:self.nd_end_world]  # shape (m, local_nd)
+    #         H_local = np.ascontiguousarray(H_local, dtype=np.float64)
+    #         m_local, local_nd = H_local.shape  # expect m_local == m
+
+    #         # ---- Read local ensemble mean once
+    #         mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
+    #         with h5py.File(mean_file_path, 'r', driver='mpio', comm=comm) as f:
+    #             ens_mean_local = f['mean'][self.nd_start_world:self.nd_end_world, k ]
+    #         ens_mean_local = np.ascontiguousarray(ens_mean_local, dtype=np.float64)  # (local_nd,)
+
+    #         # ---- Synthetic observations (local slice)
+    #         # synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
+    #         # synthetic_obs_local = synthetic_obs[self.nd_start_world:self.nd_end_world, km]
+    #         # synthetic_obs_local = np.ascontiguousarray(synthetic_obs_local, dtype=np.float64)  # (local_nd,)
+    #          # *--with open synthetic obs h5file *---rememdy for now---*
+    #         obs_file = f"{self.base_path}/synthetic_obs.h5"
+    #         with h5py.File(obs_file, 'r', driver='mpio', comm=self.mpi_comm) as f:
+    #             synthetic_obs_local = f['hu_obs'][self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
+    #         # *---rememdy for now---*
+
+    #         # ---- Fuse d and Hmean into a single GEMM + single Allreduce
+    #         # Build a 2-column local matrix [y_obs, ens_mean]
+    #         V_local = np.empty((local_nd, 2), dtype=np.float64, order='C')
+    #         V_local[:, 0] = synthetic_obs_local
+    #         V_local[:, 1] = ens_mean_local
+
+    #         Y_local = H_local @ V_local                   # (m, 2)
+    #         Y_global = np.empty_like(Y_local, order='C')  # (m, 2)
+
+    #         # Single collective for both vectors
+    #         comm.Allreduce([Y_local, MPI.DOUBLE], [Y_global, MPI.DOUBLE], op=MPI.SUM)
+    #         d_global     = Y_global[:, 0]                 # (m,)
+    #         Hmean_global = Y_global[:, 1]                 # (m,)
+
+    #         # ---- Compute HA for all ensemble members in batches
+    #         HA_global = np.empty((m_local, Nens), dtype=np.float64, order='C')
+
+    #         for j0 in range(0, Nens, block_size):
+    #             j1 = min(j0 + block_size, Nens)
+    #             B = j1 - j0
+
+    #             # Load a contiguous local block of states: shape (local_nd, B)
+    #             States_local_blk = np.empty((local_nd, B), dtype=np.float64, order='C')
+    #             for jj, ens_idx in enumerate(range(j0, j1)):
+    #                 States_local_blk[:, jj] = self.read_analysis(k, ens_idx)  # must return local slice (local_nd,)
+
+    #             # Local GEMM then one Allreduce for this batch
+    #             HA_local_blk = H_local @ States_local_blk             # (m, B)
+    #             HA_global_blk = np.empty_like(HA_local_blk, order='C')
+    #             comm.Allreduce([HA_local_blk, MPI.DOUBLE], [HA_global_blk, MPI.DOUBLE], op=MPI.SUM)
+
+    #             HA_global[:, j0:j1] = HA_global_blk
+
+    #         # ---- Eta and D'
+    #         # Eta = HA - Hmean[:, None]
+    #         Eta = HA_global - Hmean_global[:, None]                   # (m, Nens)
+    #         # print(f"\n[Rank {self.mpi_comm.Get_rank()}] H_local norm : {np.linalg.norm(H_local)}, ens_mean_local norm: {np.linalg.norm(ens_mean_local)}, synthetic_obs_local norm: {np.linalg.norm(synthetic_obs_local)}\n")
+
+    #         # D' = (d - Hmean) broadcast across columns
+    #         d_minus_Hmean = (d_global - Hmean_global)                 # (m,)
+    #         # Make every column identical, no extra collectives
+    #         Dprime = np.broadcast_to(d_minus_Hmean[:, None], (m_local, Nens)).copy()
+
+    #         return Eta, Dprime, HA_global
+
+    #     except Exception as e:
+    #         print(f"Error in compute_X5_utils: {e}")
+    #         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+    #         print(f"Traceback details:\n{tb_str}")
+    #         self.mpi_comm.Abort(1)
+
+    # def compute_X5_utils(self, **kwargs):
+    #     """
+    #     Parallel EnKF X5 minimal utilities:
+    #     d_global   = H @ y_obs
+    #     Hbar       = H @ ensemble_mean
+    #     Dprime     = d_global - Hbar
+    #     HAprime    = Eta (from H @ ensemble_perturbations)
+    #     """
+
+    #     import numpy as np, h5py, zarr, sys, traceback
+    #     from mpi4py import MPI
+
+    #     comm  = self.mpi_comm
+    #     rank  = comm.Get_rank()
+    #     size  = comm.Get_size()
+    #     k     = kwargs.get('k')
+    #     k = k + 1 if k < self.nt - 1 else k
+    #     km = kwargs.get('km', k)
+
+    #     try:
+    #         # ----------------------------------------------------------------------
+    #         # Parameters and file paths
+    #         # ----------------------------------------------------------------------
+    #         H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
+    #         # synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
+    #         Nens = self.nens
+
+    #         if kwargs.get("inversion_flag", False):
+    #             # exlude friction from assimilation
+    #             friction_idx = kwargs.get("friction_idx", None)
+    #             excluded_indices = [friction_idx]
+
+    #             # entire state vector on each rank
+    #             i0, i1 = self.nd_start_world, self.nd_end_world
+    #             local_nd = i1 - i0
+
+    #             print(f"[rank {rank}] Excluding friction index {local_nd} from assimilation"); exit(0)
+
+    #         else:
+    #             i0, i1 = self.nd_start_world, self.nd_end_world
+    #             local_nd = i1 - i0
+
+    #             # Choose MPI datatype dynamically (float32 or float64)
+    #             mpi_type = MPI._typedict[np.dtype(np.float64).char]
+
+    #             # ----------------------------------------------------------------------
+    #             # Load local column block of H and local slices of ensemble_mean, obs
+    #             # ----------------------------------------------------------------------
+    #             H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')
+    #             H_local  = np.asarray(H_matrix[:, i0:i1], dtype=np.float64, order='C')  # (m, local_nd)
+
+    #             # Synthetic observation local slice (y)
+    #             # synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
+    #             # y_local = np.asarray(synthetic_obs[i0:i1, km], dtype=np.float64)  # (local_nd,)
+    #             obs_file = f"{self.base_path}/synthetic_obs.h5"
+    #             with h5py.File(obs_file, 'r', driver='mpio', comm=self.mpi_comm) as f:
+    #                 y_local = np.asarray(f['hu_obs'][i0:i1, km], dtype=np.float64)  # (local_nd,)
+
+    #             # Ensemble mean local slice
+    #             mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
+    #             with h5py.File(mean_file_path, 'r', driver='mpio', comm=comm) as f:
+    #                 # _k = k + 1 if k < self.nt - 1 else k
+    #                 ensemble_mean_local = np.asarray(f['mean'][i0:i1, k], dtype=np.float64)  # (local_nd,)
+
+    #             # ----------------------------------------------------------------------
+    #             # Compute d = H * y_obs   (GEMV + Allreduce)
+    #             # ----------------------------------------------------------------------
+    #             d_local = H_local @ y_local                    # (m,)
+    #             d_global = np.empty_like(d_local)
+    #             comm.Allreduce([d_local, mpi_type], [d_global, mpi_type], op=MPI.SUM)
+
+    #             # ----------------------------------------------------------------------
+    #             # Compute Hbar = H * ensemble_mean   (GEMV + Allreduce)
+    #             # ----------------------------------------------------------------------
+    #             Hbar_local = H_local @ ensemble_mean_local     # (m,)
+    #             Hbar_global = np.empty_like(Hbar_local)
+    #             comm.Allreduce([Hbar_local, mpi_type], [Hbar_global, mpi_type], op=MPI.SUM)
+
+    #             # ----------------------------------------------------------------------
+    #             # Compute Eta = H * (ensemble_vec - ensemble_mean)
+    #             # ----------------------------------------------------------------------
+    #             # Each rank reads its local portion of ensemble states
+    #             States_local = np.empty((local_nd, Nens), dtype=np.float64, order='C')
+    #             for j in range(Nens):
+    #                 States_local[:, j] = np.asarray(self.read_analysis(k, j), dtype=np.float64)
+
+    #             # Compute local ensemble perturbations
+    #             perturb_local = States_local - ensemble_mean_local[:, None]  # (local_nd, Nens)
+
+    #             # Project ensemble perturbations into observation space
+    #             Eta_local = H_local @ perturb_local                          # (m, Nens)
+    #             Eta = Eta_local.copy(order='C')
+    #             comm.Allreduce(MPI.IN_PLACE, [Eta, mpi_type], op=MPI.SUM)    # (m, Nens)
+
+    #             # ----------------------------------------------------------------------
+    #             # Compute Dprime and HAprime (final outputs)
+    #             # ----------------------------------------------------------------------
+    #             Dprime  = (d_global - Hbar_global)          # (m,1)
+    #             HAprime = Eta                                                # (m,Nens)
+
+    #             # Optional: diagnostics
+    #             if rank == 0:
+    #                 print(f"[rank {rank}] Shapes -> Dprime: {Dprime.shape}, HAprime: {HAprime.shape}")
+
+    #             return Dprime, Eta, HAprime, kwargs
+
+    #     except Exception as e:
+    #         print(f"[rank {rank}] Error in compute_X5_utils: {e}")
+    #         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+    #         print(f"Traceback details:\n{tb_str}")
+    #         comm.Abort(1)
+
 
     

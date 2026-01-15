@@ -42,12 +42,12 @@ enkf-parameters:
   observed_params: ['smb']  #['smb']
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state:    0  # Generate true state for synthetic observations
-  generate_nurged_state:  0  # Generate nudged state for synthetic observations
+  generate_true_state:    1  # Generate true state for synthetic observations
+  generate_nurged_state:  1  # Generate nudged state for synthetic observations
   initialize_ensemble: 1
   use_ensemble_pertubations: 1 # Use ensemble perturbations for ensemble state
   initial_spread_factor: 1.25
-  sequential_ensemble_initialization: 1  # Sequential ensemble initialization (True for sequential, False for parallel)
+  sequential_ensemble_initialization: 0  # Sequential ensemble initialization (True for sequential, False for parallel)
 
 
   # Statistical parameters (based on the number of state variables)
@@ -59,7 +59,7 @@ enkf-parameters:
   Q_rho: 0.95 
 
   seed: 1                 # seed for random number generator
-  inflation_factor: 1.15          # inflation factor
+  inflation_factor: 1.0          # inflation factor
   localization_flag: False      # localization flag: True, False
 
   # estimation flags
@@ -81,11 +81,21 @@ enkf-parameters:
   n_modeltasks: 1                     # number of model tasks (for MPI)
   commandlinerun: "True"              # command line run flag: True, False
   execution_flag: 0                  #`execution flag: 0 ->default, 1 -> sequntial, 2 -> even_distribution_of_problem size, 3 -> even_distribution_of_problem size with load balancing
-  execution_mode: 1                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
+  execution_mode: 1                 # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
   data_path: _modelrun_datasets
- 
-  # restart parameters (only suppoertd for fully parallel runs)
-  restart_enabled: 1        # Enable restart functionality
-  force_fresh_start: 1     # Force fresh start even if checkpoints exist
+  ICESEE_PERFORMANCE_TEST: False
+
+  # HDF5 file parameters for the full parallel runs
+  h5_file_compression: None    # None, "gzip" or "lzf" 
+  h5_file_compression_level: 4   # Compression level (1-9 for gzip only)
+  h5_file_chunk_size: 1000       # Chunk size for HDF5
+  serial_file_creation: True  # Create HDF5 files in serial (True) or parallel (False)
+  collective_threshold: 4
+  batch_size: 200            # Batch size for writing HDF5 files
+
+  # restart parameters (only available for fully parallel runs)
+  restart_enabled: 1         # Enable restart functionality
+  force_fresh_start: 1       # Force fresh start even if checkpoints exist
   checkpoint_every: 5           # Frequency of checkpoints (every 5 assimilation cycles)
-  base_seed: 42 
+  base_seed: 42                 # Base seed for reproducibility
+  k_start_override: 40       # Start overwrite from this assimilation cycle
