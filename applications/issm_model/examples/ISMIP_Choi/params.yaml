@@ -27,12 +27,12 @@ enkf-parameters:
   Nens: 50                      # Number of ensemble members (paper uses 50)
   freq_obs: 2 #4                 # Frequency of observations (annual, as per paper)
   obs_max_time: 30            # Maximum time for observations (30 years)
-  obs_start_time: 0            # Start time for observations (start of simulation)
+  obs_start_time: 0.2            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state: 0  # Generate true state for synthetic observations
+  generate_true_state: 0 # Generate true state for synthetic observations
   generate_nurged_state: 0   # Generate nudged state for synthetic observations
-  initialize_ensemble: 1
+  initialize_ensemble: 0
   initial_spread_factor: 1.12
   sequential_ensemble_initialization: 0
   use_ensemble_pertubations: 0
@@ -57,7 +57,7 @@ enkf-parameters:
   tikhonov_regularization_weight: 1e-13  # Tikhonov regularization weight for inversion
 
   # bed topography observations settings
-  bed_obs_snapshot: [0]        # Bedrock elevation observations at 30 years
+  bed_obs_snapshot: [0.2]        # Bedrock elevation observations at 30 years
   bed_obs_stride: 4000          # Spacing of bedrock elevation observations (30 km)
   bed_relaxation_factor: 0.03    # Relaxation factor for bedrock elevation updates (when bed is not observed) (-1< relaxation_factor <=1)
   initial_bed_bias: 0.0015        # Initial bias for bedrock elevation (15 m)
@@ -98,7 +98,7 @@ enkf-parameters:
   commandlinerun: "True"        # Command line run flag
   execution_flag: 0             # Even distribution of problem size
   model_nprocs: 2               # Number of processors for MPI (increased for efficiency)
-  execution_mode: 1                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
+  execution_mode: 2                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
   create_ensemble_dataset: True # Create dataset for ensemble runs
   data_path: _modelrun_datasets
   ICESEE_PERFORMANCE_TEST: False
@@ -109,7 +109,7 @@ enkf-parameters:
   h5_file_chunk_size: 1000       # Chunk size for HDF5
   serial_file_creation: True  # Create HDF5 files in serial (True) or parallel (False)
   collective_threshold: 4
-  batch_size: 250            # Batch size for writing HDF5 files
+  batch_size: 50            # Batch size for writing HDF5 files
 
   # restart parameters (only available for fully parallel runs)
   restart_enabled: 1         # Enable restart functionality

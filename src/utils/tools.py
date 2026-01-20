@@ -524,22 +524,9 @@ def display_timing_default(computational_time: float, wallclock_time: float) -> 
     if rank != 0:
         return
 
-    # Formatted time strings with metrics and values
-    time_entries = [
-        ("[ICESEE] Performance Metrics       (DAY:HR:MIN:SEC.ms)",),  # Bold header
-        ("Computational Time (Σ)", format_time(computational_time)),
-        ("Wall-Clock Time (max)", format_time(wallclock_time)),
-        ("True/Wrong State Time", format_time(true_wrong_time)),
-        ("Ensemble Init Time", format_time(ensemble_init_time)),
-        ("Forecast Step Time", format_time(forecast_step_time)),
-        ("Analysis Step Time", format_time(analysis_step_time)),
-        ("Assimilation Time", format_time(assimilation_time)),
-        ("Init file I/O Time", format_time(init_file_time)),
-        ("Forecast File I/O Time", format_time(forecast_file_time)),
-        ("Analysis File I/O Time", format_time(analysis_file_time)),
-        ("Total File I/O Time", format_time(total_file_time)),
-        ("Forecast Noise Time", format_time(forecast_noise_time))
-    ]
+    # Formatted time strings
+    comp_time_str = format_time(computational_time)
+    wall_time_str = format_time(wallclock_time)
     
     # Content lines (no trailing spaces after emojis)
     # title = "[ICESEE] Performance Metrics"
@@ -547,9 +534,10 @@ def display_timing_default(computational_time: float, wallclock_time: float) -> 
     comp_line = f"Computational Time (Σ): {comp_time_str} (DAY:HR:MIN:SEC.ms) ⏱️"
     wall_line = f"Wall-Clock Time (max):  {wall_time_str} (DAY:HR:MIN:SEC.ms) 🕒"
     
-    # Calculate max width based on plain text length (excluding ANSI codes)
-    max_content_width = max(len(title), len(comp_line), len(wall_line))
-    box_width = max_content_width + 12  # 2 for '║' on each side + 2 for padding
+    # Calculate max width based on the longest metric label and value
+    max_label_width = max(len(entry[0]) for entry in time_entries)
+    max_value_width = max(len(entry[1]) for entry in time_entries[1:])  # Skip header for value width
+    total_width = max_label_width + max_value_width - 14  # 2 for '║' + 2 for padding
     
     # Box drawing
     header = f"{COLORS['GRAY']}╔{'═' * total_width}╗{COLORS['RESET']}"
@@ -830,7 +818,8 @@ def compute_km_from_tobserve(tobserve, k_start, m_obs=None):
     m_obs_i = max(0, min(m_obs_i, tobserve.size))
 
     # count how many obs times have occurred at start (remember your check uses k+1)
-    k1 = int(k_start) + 1
+    # k1 = int(k_start) + 1
+    k1 = int(k_start)
     return int(np.count_nonzero(tobserve[:m_obs_i] <= k1))
 
 def step_already_done(base_dir: str, k: int) -> bool:

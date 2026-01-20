@@ -167,8 +167,9 @@ if not flag_jupyter:
         'coupled_model_datasets_dir': enkf_params.get('coupled_model_datasets', 'data'),
         'vec_inputs': enkf_params['vec_inputs'],
         'collective_threshold': int(enkf_params.get('collective_threshold', 16)), # threshold for switching to collective I/O
-        'batch_size': int(enkf_params.get('batch_size', 1)), # number of time steps to process in each batch
     })
+
+    params.update({'batch_size': min(int(enkf_params.get('batch_size', 50)), params['nt'])})  # number of time steps to process in each batch
     
     # --- incase CL args not provided ---
     if Nens == 1:
