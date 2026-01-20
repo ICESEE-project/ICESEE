@@ -1,31 +1,32 @@
-
 name: CI
 on: [push]
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.12'
-      - name: Set up virtual environment
-        run: ./setup_venv.sh
+          python-version: '3.11'
 
-      - name: Install ICESEE (venv)
+      - name: Create venv
+        shell: bash
+        run: |
+          ./setup_venv.sh
+          icesee-env/bin/python -V
+          icesee-env/bin/python -m pip -V
+
+      - name: Install ICESEE into venv and verify import
         shell: bash
         run: |
           icesee-env/bin/python -m pip install -U pip
           icesee-env/bin/python -m pip install -e .
-          icesee-env/bin/python -c "import ICESEE; import sys; print('OK', sys.executable, ICESEE)"
+          icesee-env/bin/python -c "import ICESEE; import sys; print('IMPORT OK', sys.executable)"
 
-      - name: Debug python/pip
+      - name: Run lorenz96 example (venv)
         shell: bash
         run: |
-          which python || true; python -V || true
-          which pip || true; pip -V || true
-          icesee-env/bin/python -V
-          icesee-env/bin/python -m pip -V
-      - name: Run lorenz96 (venv)
-        run: icesee-env/bin/python -m ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96
+          icesee-env/bin/python -m ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96
