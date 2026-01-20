@@ -145,8 +145,10 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
 
     # update model_kwargs with the effective model_nprocs
     model_kwargs.update({'model_nprocs': effective_model_nprocs,
-                            "total_cores": total_cores,
-                            "base_total_procs": base_total_procs,
+                         'total_cores': total_cores,
+                         'base_total_procs': base_total_procs,
+                         'model_module': model_module,
+                         'vec_inputs_old': model_kwargs.get('vec_inputs', params.get('vec_inputs', None)),
                         })
 
     #  --- Generate True and Nurged States -------------------------------------------------------------------

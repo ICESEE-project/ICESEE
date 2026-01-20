@@ -23,8 +23,8 @@ enkf-parameters:
   vec_inputs: ['x','y','z'] # state variables
 
   # Statistical parameters
-  sig_obs: [0.15, 0.15, 0.15]     # observation error standard deviation
-  sig_Q: [0.1, 0.1, 0.1]          # process noise standard deviation
+  sig_obs: [0.1, 0.1, 0.1]     # observation error standard deviation
+  sig_Q: [0.01, 0.01, 0.01]          # process noise standard deviation
   length_scale: [0.1, 0.1, 0.1]   # length scale for the covariance matrix
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
