@@ -13,28 +13,22 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Create virtual environment
+      - name: Upgrade pip
         shell: bash
         run: |
-          python -m venv icesee-env
-          icesee-env/bin/python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --upgrade pip
 
-      - name: Install dependencies
+      - name: Install pinned CI dependencies
         shell: bash
         run: |
-          icesee-env/bin/python -m pip install -r requirements.txt
-
-      - name: Install ICESEE (editable)
-        shell: bash
-        run: |
-          icesee-env/bin/python -m pip install -e .
-          icesee-env/bin/python -c "import ICESEE; print('ICESEE OK')"
+          python -m pip install -r requirements/ci.txt
+          python -c "import ICESEE; print('ICESEE import OK:', ICESEE.__file__)"
 
       - name: Run Lorenz96 example
         shell: bash
         run: |
-          icesee-env/bin/python -m ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96
+          python -m ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96
