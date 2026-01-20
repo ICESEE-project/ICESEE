@@ -1,24 +1,17 @@
 #!/bin/bash
-# setup_venv.sh
+set -euo pipefail
 
-# Create virtual environment
 python -m venv icesee-env
+PY="./icesee-env/bin/python"
 
-# Get project directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+$PY -m pip install -U pip wheel setuptools
 
-# Add project/ to sitecustomize.py
-SITE_PACKAGES=$(find icesee-env/lib -type d -name "site-packages" | head -n 1)
-mkdir -p "$SITE_PACKAGES"
-echo "import sys" > "$SITE_PACKAGES/sitecustomize.py"
-echo "sys.path.append('$SCRIPT_DIR')" >> "$SITE_PACKAGES/sitecustomize.py"
+# Install deps (if you truly need requirements.txt)
+$PY -m pip install -r requirements.txt
 
-# Install required dependencies from requirements.txt
-source icesee-env/bin/activate
-pip install -r requirements.txt
-deactivate
+# Install ICESEE into the venv (this is the key)
+$PY -m pip install -e .
 
-echo "Virtual environment 'icesee-env' created with PYTHONPATH including $SCRIPT_DIR"
-echo "Dependencies from requirements.txt installed"
-echo "Activate with: source icesee-env/bin/activate"
-echo "Then, run 'make install' to install ICESEE (recommended) or use PYTHONPATH."
+# Sanity check
+$PY -c "import ICESEE; import sys; print('ICESEE import OK from', sys.executable)"
+echo "Venv ready: source icesee-env/bin/activate"

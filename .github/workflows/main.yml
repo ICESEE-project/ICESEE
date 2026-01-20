@@ -1,32 +1,40 @@
 name: CI
-on: [push]
+
+on:
+  push:
+  pull_request:
 
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Create venv
+      - name: Create virtual environment
         shell: bash
         run: |
-          ./setup_venv.sh
-          icesee-env/bin/python -V
-          icesee-env/bin/python -m pip -V
+          python -m venv icesee-env
+          icesee-env/bin/python -m pip install --upgrade pip setuptools wheel
 
-      - name: Install ICESEE into venv and verify import
+      - name: Install dependencies
         shell: bash
         run: |
-          icesee-env/bin/python -m pip install -U pip
+          icesee-env/bin/python -m pip install -r requirements.txt
+
+      - name: Install ICESEE (editable)
+        shell: bash
+        run: |
           icesee-env/bin/python -m pip install -e .
-          icesee-env/bin/python -c "import ICESEE; import sys; print('IMPORT OK', sys.executable)"
+          icesee-env/bin/python -c "import ICESEE; print('ICESEE OK')"
 
-      - name: Run lorenz96 example (venv)
+      - name: Run Lorenz96 example
         shell: bash
         run: |
           icesee-env/bin/python -m ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96
