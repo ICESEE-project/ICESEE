@@ -18,4 +18,4 @@ jobs:
       - name: Install ICESEE
         run: make install
       - name: Run tests
-        run: ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96  
+        run: python3 -m ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96  
