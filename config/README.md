@@ -16,7 +16,7 @@
 | `Q_rho` | YAML configuration parameter for q rho | float | 1.0 | No | None | YAML |
 | `abs_vel_weight` | weight for absolute velocity in inversion | float | 1.0 | No | None | YAML |
 | `base_seed` | YAML configuration parameter for base seed | int | 42 | No | None | YAML |
-| `batch_size` | --- Ensemble Parameters --- | Unknown | Computed | No | None | Dictionary |
+| `batch_size` | number of time steps to process in each batch | Unknown | Computed | No | None | Dictionary |
 | `bed_obs_indices` | specific indices to observe {list} (bed subvector indices) | NoneType | None | No | None | YAML |
 | `bed_obs_mask` | boolean mask array for bed observations {np.array} | NoneType | None | No | None | YAML |
 | `bed_obs_snapshot` | list of time snapshots to observe bed variables | list | [] | No | None | YAML |
