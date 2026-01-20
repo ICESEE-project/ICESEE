@@ -10,11 +10,22 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
-      - name: Set up venv, install ICESEE, run lorenz96
+      - name: Set up virtual environment
+        run: ./setup_venv.sh
+
+      - name: Install ICESEE (venv)
         shell: bash
         run: |
-          ./setup_venv.sh
-          source icesee-env/bin/activate
-          make install
-          python -c "import ICESEE; print('ICESEE OK:', ICESEE)"
-          python -m ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96
+          icesee-env/bin/python -m pip install -U pip
+          icesee-env/bin/python -m pip install -e .
+          icesee-env/bin/python -c "import ICESEE; import sys; print('OK', sys.executable, ICESEE)"
+
+      - name: Debug python/pip
+        shell: bash
+        run: |
+          which python || true; python -V || true
+          which pip || true; pip -V || true
+          icesee-env/bin/python -V
+          icesee-env/bin/python -m pip -V
+      - name: Run lorenz96 (venv)
+        run: icesee-env/bin/python -m ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96
