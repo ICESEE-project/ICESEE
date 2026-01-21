@@ -227,9 +227,11 @@ def BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control'):
 
 # --- Checking the ice thickness ---
 
-def checkThickness(kwargs, h, thresh):
-    
-    h = icepack.interpolate(firedrake.max_value(thresh, h), kwargs["Q"])
+def checkThickness(kwargs):
+    Q = kwargs["Q"] 
+    h = kwargs["h0"]
+    hthresh = kwargs["hThresh"]
+    h = icepack.interpolate(firedrake.max_value(hthresh, h), Q)
 
     return h
 
@@ -299,12 +301,72 @@ def initialize_model(**kwargs):
 
 
 
+# --- Visualizing the model with a flowline profile DURING THE SIMULATION  ---
+def initial_flowline_profile(kwargs): 
+    
+    # -- arrays to save the ALL of the flowline profile outputs (including the initial state) throughout the simulation -- 
+    h_profiles=[]
+    s_profiles = []
+    
+    """ define flowline in EPSG:3031 to track the profile of PIG across a seafloor ridge """
+    start = np.array([-1587750., -200000.]) 
+    end = np.array([-1610250., -500000.]) 
+
+    num_points = 1000
+    t_values = np.linspace(0, 1, num_points)
+    profile_points = np.outer(1 - t_values, start) + np.outer(t_values, end)
+
+    """ try extracting values from the flowline and filter out points that fail """
+    valid_points = []
+    bed_values, surface_values, thickness_values = [], [], []
+
+    for p in profile_points:
+        try:
+            bed_values.append(kwargs["bed"].at(tuple(p)))
+            surface_values.append(kwargs["s"].at(tuple(p)))
+            thickness_values.append(kwargs["h"].at(tuple(p)))
+            valid_points.append(tuple(p))
+        except firedrake.PointNotInDomainError:
+            pass  # Ignore points that are outside the mesh
+
+    # Convert valid points back to NumPy array
+    valid_points = np.array(valid_points)
+    distances = np.linspace(0, np.linalg.norm(end - start), len(valid_points))
+
+    h_profiles.append(thickness_values)
+    s_profiles.append(surface_values)
+    
+    return(h_profiles, s_profiles, profile_points, distances, bed_values)
+
+
+
+
+# --- Visualizing the model with a flowline profile DURING THE SIMULATION  ---
+def flowline_profile(kwargs, h_profiles, s_profiles, profile_points): 
+    
+    # -- arrays to save the flowline profile outputs at a particular time step -- 
+    surface_values, thickness_values = [], []
+    
+    # -- sample values from the flowline points -- 
+    for p in profile_points:
+        try:
+            surface_values.append(kwargs["s"].at(tuple(p)))
+            thickness_values.append(kwargs["h"].at(tuple(p)))
+        except firedrake.PointNotInDomainError:
+            pass  # Ignore points that are outside the mesh
+
+    h_profiles.append(thickness_values)
+    s_profiles.append(surface_values)
+    
+    return(h_profiles, s_profiles)
+
+
 #########################################################################################
 
 
 
 # --- icepack model ---
-def Icepack(kwargs, solver, h, u, a, b, dt, h0):
+def Icepack(solver, h, u, a, b, dt, h0, kwargs):
     """inputs: solver - icepack solver
                 h - ice thickness
                 u - ice velocity
@@ -316,6 +378,9 @@ def Icepack(kwargs, solver, h, u, a, b, dt, h0):
         outputs: h - updated ice thickness
                  u - updated ice velocity
     """
+    #h = kwargs["h"]
+    #u = kwargs["u"]
+
     h = solver.prognostic_solve(
         dt = dt,
         thickness = h,
@@ -324,7 +389,7 @@ def Icepack(kwargs, solver, h, u, a, b, dt, h0):
         thickness_inflow = h0,
     )
 
-    h = checkThickness(h, 30, kwargs["Q"])
+    h = checkThickness(kwargs)
 
     s = icepack.compute_surface(thickness = h, bed = b)
 
@@ -353,7 +418,6 @@ def Icepack(kwargs, solver, h, u, a, b, dt, h0):
 
 
 # --- Run model for the icepack model ---
-
 def run_model(ensemble, **kwargs):
     """des: icepack model function
         inputs: ensemble - current state of the model
@@ -362,19 +426,21 @@ def run_model(ensemble, **kwargs):
     """
 
     # unpack the **kwargs
-    
     k       = kwargs.get('k')                           # step number in the time loop
+    smb     = kwargs.get('smb', None)                   # accumulation rate field
+    basal_melt_field = kwargs.get('basal_melt_field', None) # basal melt rate field
     bed     = kwargs.get('bed', None)                   # bed topography
     dt      = kwargs.get('dt', None)                    # time step size 
-    h0      = kwargs.get('h0', None)                    # initial thickness
-    s0      = kwargs.get('s0', None)                    # initial elevation 
+    nt = kwargs.get('nt', None)                         # total number of time steps
     A0      = kwargs.get('A0', None)                    # fluidity parameter
     beta0   = kwargs.get('beta0', None)                 # basal friction coefficient parameter
     Q       = kwargs.get('Q', None)                     # scalar function space
     V       = kwargs.get('V', None)                     # vector function space
+    h0      = kwargs.get('h0', None)                    # initial thickness
+    u0 = kwargs.get('u', None)                          # initial velocity 
+    s0      = kwargs.get('s0', None)                    # initial elevation 
     floating = kwargs.get('floating')
     solver  = kwargs.get('solver', None)        # flow solver 
-    smb     = kwargs.get('smb', None)                   # SMB field
     w2i     = float(kwargs.get('water_to_ice', 1.0))    # ratio of the density of water to ice
 
 
@@ -383,6 +449,9 @@ def run_model(ensemble, **kwargs):
 
     # calculate the time step using ICESEE's time-stepping index (k) and the step size (dt)
     step = k * dt
+
+    # --- steps at which to extract flowline profiles during the simulation -- 
+    flowline_profile_steps = {t/dt for t in kwargs["save_steps"]}
 
     h = ensemble[indx_map["h"]]
     s = ensemble[indx_map["s"]]
@@ -477,8 +546,16 @@ def run_model(ensemble, **kwargs):
     
     if kwargs["joint_estimation"]:
         updated_state['basal_melt_field'] = bmr_vec
-    # else:
-    #     updated_state['basal_melt'] = a.dat.data_ro
+    
+
+    # -- extract the flowline profile at particular steps -- 
+    if step == 0:
+        h_profiles, s_profiles, profile_points, distances, bed_values = initial_flowline_profile(kwargs)
+
+    
+    if step in flowline_profile_steps:
+        h_profiles, s_profiles = flowline_profile(kwargs, h_profiles, s_profiles, profile_points)
+
 
     return updated_state
 

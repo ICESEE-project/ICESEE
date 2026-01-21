@@ -61,6 +61,8 @@ kwargs.update({
     "dt": modeling_params["timesteps_per_year"],
     "num_years": modeling_params["num_years"],
     "bmr_increase_time": int(modeling_params["bmr_increase_time"]),
+    "save_steps": modeling_params["save_steps"],
+    #"hThresh": modeling_params["hThresh"]
 })
 
 h, h0, s, s0, u, bed, zF, grounded, floating, A0, beta0, smb, basal_melt_field, Q, V, forward_solver = initialize_model(**kwargs)

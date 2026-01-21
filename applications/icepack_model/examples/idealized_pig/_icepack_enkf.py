@@ -7,6 +7,7 @@
 
 import numpy as np
 import tqdm
+import h5py
 
 # --- import run_simulation function from the available examples ---
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_model import *
@@ -27,8 +28,8 @@ def forecast_step_single(ensemble=None, **kwargs):
 # --- generate true state ---
 def generate_true_state(**kwargs):
     """generate the true state of the model"""
-
-    # unpack the **kwargs
+    
+    # # unpack the **kwargs
     smb  = kwargs.get('smb', None)
     basal_melt_field = kwargs.get('basal_melt_field', None)
     bed  = kwargs.get('bed', None)
@@ -43,17 +44,24 @@ def generate_true_state(**kwargs):
     s0 = kwargs.get('s0', None)
     solver = kwargs.get('solver', None)
     statevec_true = kwargs["statevec_true"]
+    w2i     = float(kwargs.get('water_to_ice', 1.0))    # ratio of the density of water to ice
+    save_steps = kwargs.get('save_steps', None)
 
-    # call the icesee_get_index function to get the indices of the state variables
-    vecs, indx_map, dim_per_proc = icesee_get_index(statevec_true, **kwargs)
+    # # call the icesee_get_index function to get the indices of the state variables
+    vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
+
+    # ---- net accumulation used by prognostic step ------
+    a_net = icepack.interpolate((smb - basal_melt_field) * w2i, Q)
+
     
-    # --- fetch the state variables ---
+    # # --- fetch the state variables ---
     statevec_true[indx_map["h"],0] = h0.dat.data_ro
     statevec_true[indx_map["u"],0] = u0.dat.data_ro[:,0]
     statevec_true[indx_map["v"],0] = u0.dat.data_ro[:,1]
     statevec_true[indx_map["s"],0] = s0.dat.data_ro
 
-    # intialize the accumulation rate if joint estimation is enabled at the initial time step
+
+    # # intialize the accumulation rate if joint estimation is enabled at the initial time step
     if kwargs["joint_estimation"]:
         statevec_true[indx_map["basal_melt_field"],0] = basal_melt_field.dat.data_ro
 
@@ -63,14 +71,24 @@ def generate_true_state(**kwargs):
     u = u0.copy(deepcopy=True)
     s = s0.copy(deepcopy=True)
 
-    print("entering the for loop")
+    # --- extract a profile of the flowline at the initial state ---
+    h_profiles, s_profiles, profile_points, distances, bed_values = initial_flowline_profile(kwargs)
+
+    # --- steps at which to extract flowline profiles during the simulation -- 
+    flowline_profile_steps = {t/dt for t in kwargs["save_steps"]}
+
+    hs_files = f"_modelrun_datasets/hs_profiles_true"
     
-    #for k in range(kwargs['nt']):
-    for k in tqdm.tqdm(kwargs["nt"], desc = "Processing times"):
-        print(f"inside the for loop at timestep {k}")
-        print(f"[debug:] time step: {k+1}")
+    with h5py.File(hs_files, "w") as F:
+        dataset_h = F.create_dataset("h_profiles", (len(profile_points), len(save_steps)), dtype = "f8")
+        dataset_s = F.create_dataset("s_profiles", (len(profile_points), len(save_steps)), dtype = "f8")
+    
+    for k in range(kwargs['nt']):
+        
         # call the ice stream model to update the state variables
-        h, u, s = Icepack(kwargs, solver, h, u, a, b, dt, h0)
+        h, u, s = Icepack(solver, h, u, a_net, bed, dt, h0, kwargs)
+        #print("\ninside true state\n")
+        #exit(0)
 
         statevec_true[indx_map["h"],k+1] = h.dat.data_ro
         statevec_true[indx_map["u"],k+1] = u.dat.data_ro[:,0]
@@ -80,14 +98,23 @@ def generate_true_state(**kwargs):
         # update the basal melt rate if joint estimation is enabled
         if kwargs["joint_estimation"]:
             statevec_true[indx_map["basal_melt_field"],k+1] = basal_melt_field.dat.data_ro
+        
+        if k in flowline_profile_steps:
+            
+            h_profiles, s_profiles = flowline_profile(kwargs, h_profiles, s_profiles, profile_points)
+            
+            
+            with h5py.File(hs_files, "a") as F:
+                F["h_profiles"] = h_profiles
+                F["s_profiles"] = s_profiles
 
-    # update_state = {'h': statevec_true[indx_map["h"],:], 
-    #                 'u': statevec_true[indx_map["u"],:], 
-    #                 'v': statevec_true[indx_map["v"],:]}
-    # # -- for joint estimation --
-    # if kwargs["joint_estimation"]:
-    #     update_state['smb'] = statevec_true[indx_map["smb"],:]
-    # return update_state
+        updated_state = {} 
+        
+        for key in kwargs["vec_inputs"]:
+            updated_state[key] = statevec_true[indx_map[key], :]
+
+        return updated_state
+
 
 # --- initialize the ensemble members ---
 def initialize_ensemble(ens, **kwargs):
@@ -95,44 +122,33 @@ def initialize_ensemble(ens, **kwargs):
     """initialize the ensemble members"""
 
     # unpack the **kwargs
-    h0 = kwargs.get('h0', None)
-    u0 = kwargs.get('u0', None)
-    params = kwargs["params"]
-    # a  = kwargs.get('a', None)
+    smb  = kwargs.get('smb', None)
+    basal_melt_field = kwargs.get('basal_melt_field', None)
+    wrong_basal_melt_field = kwargs.get('"wrong_basal_melt_field"', None)
     bed  = kwargs.get('bed', None)
     dt = kwargs.get('dt', None)
+    nt = kwargs.get('nt', None)
     A0  = kwargs.get('A0', None)
     beta0  = kwargs.get('beta0', None)
     Q  = kwargs.get('Q', None)
     V  = kwargs.get('V', None)
+    h0 = kwargs.get('h0', None)
+    u0 = kwargs.get('u', None)
     solver = kwargs.get('solver', None)
-    wrong_basal_melt_field = kwargs.get('"wrong_basal_melt_field"', None)
-    basal_melt_field = kwargs.get('basal_melt_field')
+    
 
 
     # initialize the ensemble members
-    # hdim = vecs['h'].shape[0]
-    #hdim = h0.dat.data_ro.size
-    # h_indx = int(np.ceil(nurged_entries_percentage*hdim+1))
-
-    # # # create a bump -100 to 0
-    # h_bump = np.linspace(-h_nurge_ic,0,h_indx)
-    # h_with_bump = h_bump + h0.dat.data_ro[:h_indx]
-    # h_perturbed = np.concatenate((h_with_bump, h0.dat.data_ro[h_indx:]))
-    # statevec_ens[:hdim,ens] = h_perturbed 
-    # h_perturbed = h0.dat.data_ro
-
     basal_melt_field = basal_melt_field.dat.data_ro
     basal_melt_field_nudged = basal_melt_field + kwargs["wrong_basal_melt_field"]
-    h = h0.dat.data_ro[:]
-    bed = kwargs["bed"]
-    h = checkThickness(h, 30, kwargs["Q"])
+    
+    h = checkThickness(kwargs) 
     s = icepack.compute_surface(thickness=h, bed=bed)
 
-    initialized_state = {'h': h,
-                         'u': u.dat.data_ro[:,0], 
-                         'v': u.dat.data_ro[:,1],
-                         's': s,}
+    initialized_state = {'h': h.dat.data_ro,
+                         'u': u0.dat.data_ro[:,0], 
+                         'v': u0.dat.data_ro[:,1],
+                         's': s.dat.data_ro}
     
     # -- for joint estimation --
     if kwargs["joint_estimation"]:
