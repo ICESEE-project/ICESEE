@@ -1,8 +1,8 @@
 physical-parameters:
   # Lorenz96 Model parameters
-  sigma: 10.0            
-  beta: 8.0/3.0 
-  rho: 28.0  
+  sigma_96: 10.0            
+  beta_96: 8.0/3.0 
+  rho_96: 28.0  
 
 modeling-parameters:
   # Modeling parameters
@@ -20,16 +20,18 @@ enkf-parameters:
   obs_start_time: 0.1 
 
   num_state_vars: 3         # number of state variables 
+  num_param_vars: 0  
   vec_inputs: ['x','y','z'] # state variables
+  observed_vars: ['x','y','z']  # observed variables
 
   # Statistical parameters
-  sig_obs: [0.15, 0.15, 0.15]     # observation error standard deviation
-  sig_Q: [0.1, 0.1, 0.1]          # process noise standard deviation
-  length_scale: [0.1, 0.1, 0.1]   # length scale for the covariance matrix
+  sig_obs: [0.1, 0.1, 0.1]     # observation error standard deviation
+  sig_Q: [0.01, 0.01, 0.01]          # process noise standard deviation
+  length_scale: [2, 2, 2]   # length scale for the covariance matrix
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state:    0   # Generate true state for synthetic observations
-  generate_nurged_state:  0  # Generate nudged state for synthetic observations
+  generate_true_state:    1   # Generate true state for synthetic observations
+  generate_nurged_state:    1   # Generate nudged state for synthetic observations
   sequential_ensemble_initialization: 1
   use_ensemble_pertubations: 1
 
@@ -44,7 +46,7 @@ enkf-parameters:
 
   # enkf model parameters
   model_name: "lorenz"         # name of the model
-  filter_type: "EnKF"           # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
+  filter_type: "EnRSKF"           # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
   parallel_flag: "serial"             # parallel flag: Serial, MPI, MPI_model
   execution_mode: 0                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
   commandlinerun: "True"         # command line run flag: True, False

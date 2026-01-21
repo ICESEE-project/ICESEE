@@ -123,24 +123,58 @@ class ParallelManager:
         Returns:
         - seed (int): The synchronized seed for this process.
         """
-
+       
         rank_world = comm_world.Get_rank()
 
+        # # Generate or use base seed on rank 0
+        # if rank_world == 0:
+        #     if base_seed is not None:
+        #         if not isinstance(base_seed, int) or base_seed < 0:
+        #             raise ValueError("base_seed must be a non-negative integer")
+        #         seed = base_seed
+        #     else:
+        #         # Use a deterministic default for reproducibility
+        #         seed = 12345  # Replace with experiment-specific value if needed
+        # else:
+        #     seed = None
+            
+        # # Broadcast the seed to all ranks
+        # seed = comm_world.bcast(seed, root=0)
+        
+        # # Set the seed for NumPy's RNG
+        # # Create a rank-specific RNG using SeedSequence
+        # seed_seq = np.random.SeedSequence(seed)
+        # rng = np.random.default_rng(seed_seq.spawn(rank_world + 1)[0])
+
+        # # Set NumPy's global RNG for compatibility with generate_pseudo_random_field_1d
+        # rank_seed = rng.integers(0, 2**32)
+        # np.random.seed(rank_seed)
+
+        # return rank_seed, rng
+        import hashlib
+        # Generate or use base seed on rank 0
         if rank_world == 0:
-            # Rank 0 generates or uses the base seed
-            seed = base_seed if base_seed is not None else np.random.randint(0, 1000000)
+            if base_seed is not None:
+                if not isinstance(base_seed, int) or base_seed < 0:
+                    raise ValueError("base_seed must be a non-negative integer")
+                seed = base_seed
+            else:
+                # Fixed default seed for reproducibility
+                seed = 12345  # Change for different experiments
         else:
             seed = None
-        
-        # Broadcast the seed to all ranks
+
+        # Broadcast base seed to all ranks
         seed = comm_world.bcast(seed, root=0)
-        
-        # Set the seed for NumPy's RNG
-        np.random.seed(seed + rank_world)  # Offset by rank for unique sequences on every rank
-        
-        return seed
 
+        # Generate a rank-specific seed using a hash
+        seed_string = f"{seed}:{rank_world}".encode()
+        rank_seed = int(hashlib.sha256(seed_string).hexdigest(), 16) % (2**32)
 
+        # Set NumPy's global RNG state
+        np.random.seed(rank_seed)
+
+        return rank_seed, None
 
     def icesee_mpi_init(self, params):
         """

@@ -90,7 +90,14 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                             "rounds": rounds, "color": color,
                             "start": start, "stop": stop,
                             "subcomm_size_min": subcomm_size_min,
-                            "model_module": model_module})
+                            "model_module": model_module,
+                            'vec_inputs_old': model_kwargs.get('vec_inputs', params.get('vec_inputs', None)),})
+    
+    model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
+    all_observed = model_kwargs['observed_vars_params']
+
+    model_kwargs.update({'all_observed': all_observed}); params.update({'all_observed': all_observed})
+    model_kwargs.update({'params': params})
 
     # pack the global communicator and the subcommunicator
     model_kwargs.update({"comm_world": comm_world, "subcomm": subcomm})
@@ -404,9 +411,21 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
             time_init_ensemble_mean_computation = 0.0
         else:
             # call the ensemble_initialization function
-            model_kwargs, ensemble_vec, time_init_noise_generation, \
-            time_init_ensemble_mean_computation, time_init_file_writing, \
-            shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full = ensemble_initialization_full_parallel_run(**model_kwargs)
+            if model_kwargs.get("initialize_ensemble", True):
+                model_kwargs, ensemble_vec, time_init_noise_generation, \
+                time_init_ensemble_mean_computation, time_init_file_writing, \
+                shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full = ensemble_initialization_full_parallel_run(**model_kwargs)
+            else:
+                # If ensemble initialization is disabled, set default values
+                ensemble_vec = None
+                time_init_noise_generation = 0.0
+                time_init_ensemble_mean_computation = 0.0
+                time_init_file_writing = 0.0
+                shape_ens = (params["nd"], params["nd"])
+                ensemble_bg = np.zeros(shape_ens)
+                ensemble_vec_mean = np.zeros((params["nd"], 1))
+                ensemble_vec_full = np.zeros(shape_ens)
+
         # --- time ensemble initialization ---
         time_ensemble_initialization = MPI.Wtime() - time_ensemble_initialization
 
@@ -547,10 +566,16 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                         tobserve = model_kwargs.get("tobserve")
                         m_obs = model_kwargs.get("m_obs", params["number_obs_instants"])
                         # if (km < m_obs) and (k+1 == tobserve[km]):
-                        if (km < m_obs) and (k == tobserve[km]):
+                        # if (km < m_obs) and (k == tobserve[km]):
+                        obs_index = model_kwargs["obs_index"]
+                        if (km < params["number_obs_instants"]) and (k == obs_index[km]):
                             # -- time global analysis step ---
                             _time_analysis_step = MPI.Wtime()
                             model_kwargs.update({'km': km, 'k': k})
+
+                            inversion_flag = model_kwargs.get("inversion_flag", False)
+                            nd_old = model_kwargs.get("nd", nd)
+                            model_kwargs.update({"nd_old": nd_old})
         
                             # call the analysis update function
                             if EnKF_flag:

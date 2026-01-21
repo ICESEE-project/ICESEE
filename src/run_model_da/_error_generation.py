@@ -329,6 +329,66 @@ def generate_pseudo_random_field_2D(N, M, Lx, Ly, rh, grid_extension=2, verbose=
     
     return q
 
+def sample_periodic_exp_cov(hdim: int, sigma2: float, Lx: float, rng=None):
+    """
+    Sample x ~ N(0, C) where C_ij = sigma2 * exp(-d(i,j)/Lx),
+    d(i,j) = min(|i-j|, hdim-|i-j|) (periodic ring distance).
+
+    Uses circulant diagonalization via FFT: C = F^* diag(lam) F.
+    Returns a real sample of shape (hdim,).
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    n = int(hdim)
+    if n <= 0:
+        raise ValueError("hdim must be positive")
+    if Lx <= 0:
+        raise ValueError("Lx must be > 0")
+    if sigma2 < 0:
+        raise ValueError("sigma2 must be >= 0")
+
+    # First row of the circulant covariance: c[k] = sigma2 * exp(-min(k, n-k)/Lx)
+    k = np.arange(n, dtype=np.float64)
+    d = np.minimum(k, n - k)
+    c = sigma2 * np.exp(-d / Lx)
+
+    # Eigenvalues of the circulant matrix are FFT of the first row
+    lam = np.fft.rfft(c)  # real FFT -> length n//2 + 1, complex in general but should be real-ish
+    lam = np.real(lam)
+
+    # Numerical safety: tiny negatives can happen from roundoff
+    lam[lam < 0] = 0.0
+
+    # Sample in Fourier domain:
+    # For a real spatial signal, rfft coefficients have special structure:
+    #   - DC and Nyquist (if present) are real
+    #   - others are complex with independent N(0,1) real/imag
+    m = lam.shape[0]
+    z = np.empty(m, dtype=np.complex128)
+
+    # DC component (pure real)
+    z[0] = rng.normal()
+
+    # Nyquist component if n even (pure real)
+    if n % 2 == 0:
+        z[-1] = rng.normal()
+        mid = m - 2
+    else:
+        mid = m - 1
+
+    # Remaining positive frequencies (complex)
+    if mid > 0:
+        z[1:1+mid] = rng.normal(size=mid) + 1j * rng.normal(size=mid)
+
+    # Scale by sqrt eigenvalues; rfft/irfft normalization:
+    # numpy's irfft returns the time-domain signal with 1/n factor consistent with FFT conventions.
+    # To get covariance C, scale by sqrt(lam * n).
+    z *= np.sqrt(lam * n)
+
+    x = np.fft.irfft(z, n=n)
+    return x.astype(np.float64, copy=False)
+
 def generate_enkf_field(ii_sig, Lx, hdim, num_vars, rh=None, grid_extension=2, verbose=False):
     """
     Generate a pseudo-random field for EnKF with specified DoF.
@@ -349,64 +409,61 @@ def generate_enkf_field(ii_sig, Lx, hdim, num_vars, rh=None, grid_extension=2, v
         rh = Lx / 10  # Default decorrelation length
 
     # Handle trivial case: no spatial dimension
-    if hdim < 10:
+    if hdim < 1e2:
         if verbose:
-            print(f"[ICESEE] hdim={hdim} too small for spatial field — using Gaussian noise.")
-        # return np.random.randn(num_vars)
-        # Effective decorrelation length to set cross-variable correlation
+            print(f"[ICESEE] hdim={hdim} small — using FFT exp-cov sampling (no dense cov).")
+
         if isinstance(rh, (list, np.ndarray)):
-            rh_eff = float(np.mean(rh))
-        elif isinstance(rh, dict):
-            # If dict, average any numeric entries; fallback to default if empty
-            vals = [v for v in rh.values() if isinstance(v, (int, float))]
-            rh_eff = float(np.mean(vals)) if len(vals) > 0 else (Lx / 10.0)
+            if ii_sig is None:
+                # Separate fields for each variable
+                q_total = []
+                for i in range(num_vars):
+                    # var_rh = rh.get(f'var{i+1}', Lx / 10)
+                    var_rh = rh[i] if isinstance(rh, list) else rh
+                    q_var = sample_periodic_exp_cov(hdim, var_rh, Lx)
+                    q_total.append(q_var)
+                return np.concatenate(q_total, axis=0)
+            else:
+                # we are in the for loop for perturbation update already
+                q0 = sample_periodic_exp_cov(hdim, rh[ii_sig], Lx)
+                return q0
         else:
-            rh_eff = float(rh)
-
-        # Convert decorrelation length to an AR(1)-like correlation between adjacent variables.
-        # Larger rh/Lx -> stronger correlation (rho closer to 1).
-        r = max(rh_eff / float(Lx), 1e-8)
-        rho = np.exp(-1.0 / r)  # in (0,1)
-
-        # Toeplitz covariance: Cov[i,j] = rho^{|i-j|}, unit variance on diagonal
-        idx = np.arange(hdim)
-        cov = rho ** np.abs(idx[:, None] - idx[None, :])
-
-        if verbose:
-            print(f"[ICESEE] hdim={hdim} => MVN across variables; rho≈{rho:.3f}")
-
-        sample = np.random.multivariate_normal(mean=np.zeros(hdim), cov=cov)
-        return sample
-
-    # check if rh is a array
-    if isinstance(rh, (list, np.ndarray)):
-      
-        if ii_sig is None:
-            # Separate fields for each variable
-            q_total = []
-            for i in range(num_vars):
-                # var_rh = rh.get(f'var{i+1}', Lx / 10)
-                var_rh = rh[i] if isinstance(rh, list) else rh
-                q_var = generate_pseudo_random_field_1d(
-                    N=hdim, Lx=Lx, rh=var_rh, grid_extension=grid_extension, verbose=verbose
-                )
-                q_total.append(q_var)
-            return np.concatenate(q_total, axis=0)
-        else:
-            # we are in the for loop for perturbation update already
-            q0 = generate_pseudo_random_field_1d(
-                N=hdim, Lx=Lx, rh=rh[ii_sig], grid_extension=grid_extension, verbose=verbose
-            )
+            # Single field
+            if ii_sig is None:
+                q0 = sample_periodic_exp_cov(hdim * num_vars, rh, Lx)
+            else:
+                q0 = sample_periodic_exp_cov(hdim, rh, Lx)
             return q0
     else:
-        # Single field
-        if ii_sig is None:
-            q0 = generate_pseudo_random_field_1d(
-                N=hdim*num_vars, Lx=Lx, rh=rh, grid_extension=grid_extension, verbose=verbose
-            )
+        # check if rh is a array
+        if isinstance(rh, (list, np.ndarray)):
+        
+            if ii_sig is None:
+                # Separate fields for each variable
+                q_total = []
+                for i in range(num_vars):
+                    # var_rh = rh.get(f'var{i+1}', Lx / 10)
+                    var_rh = rh[i] if isinstance(rh, list) else rh
+                    q_var = generate_pseudo_random_field_1d(
+                        N=hdim, Lx=Lx, rh=var_rh, grid_extension=grid_extension, verbose=verbose
+                    )
+                    q_total.append(q_var)
+                return np.concatenate(q_total, axis=0)
+            else:
+                # we are in the for loop for perturbation update already
+                q0 = generate_pseudo_random_field_1d(
+                    N=hdim, Lx=Lx, rh=rh[ii_sig], grid_extension=grid_extension, verbose=verbose
+                )
+                return q0
         else:
-            q0 = generate_pseudo_random_field_1d(
-                N=hdim, Lx=Lx, rh=rh, grid_extension=grid_extension, verbose=verbose
-            )
-        # print(f"[ICESEE] Field shape: {q0.shape}")
-        return q0
+            # Single field
+            if ii_sig is None:
+                q0 = generate_pseudo_random_field_1d(
+                    N=hdim*num_vars, Lx=Lx, rh=rh, grid_extension=grid_extension, verbose=verbose
+                )
+            else:
+                q0 = generate_pseudo_random_field_1d(
+                    N=hdim, Lx=Lx, rh=rh, grid_extension=grid_extension, verbose=verbose
+                )
+            # print(f"[ICESEE] Field shape: {q0.shape}")
+            return q0

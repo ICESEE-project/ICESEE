@@ -91,7 +91,7 @@ def generate_nurged_state(**kwargs):
     u0b = kwargs.get('u0b', None)
 
     # call the icesee_get_index function to get the indices of the state variables
-    vecs, indx_map, dim_per_proc = icesee_get_index(statevec_nurged, **kwargs)
+    vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
 
     # Set the initial condition
     statevec_nurged[:, 0] = u0b
@@ -106,6 +106,7 @@ def generate_nurged_state(**kwargs):
     # updated_state = {'x' : statevec_nurged[indx_map['x'],:],
     #                  'y' : statevec_nurged[indx_map['y'],:],
     #                 'z' : statevec_nurged[indx_map['z'],:]}
+    
     return statevec_nurged
     
 # --- initialize the ensemble members ---

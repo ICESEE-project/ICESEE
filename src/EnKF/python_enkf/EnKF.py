@@ -19,6 +19,7 @@ from scipy.stats import multivariate_normal
 # sys.path.insert(0, src_dir)
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 from ICESEE.config._utility_imports import icesee_get_index
+from ICESEE.src.run_model_da._error_generation import generate_enkf_field
 
 
 # Move `worker` to global scope
@@ -68,28 +69,54 @@ class EnsembleKalmanFilter:
             ensemble: ndarray - Updated ensemble matrix.
         """
         Q_err = model_kwargs.get("Q_err")
+        L_C           = model_kwargs.get("L_C", None)
+        Lx             = model_kwargs.get("Lx", 1.0)
+        Ly             = model_kwargs.get("Ly", 1.0)
+        len_scale      = model_kwargs.get("len_scale", 1.0)
+        Q_rho          = model_kwargs.get("Q_rho", 1.0)
+        params         = model_kwargs.get("params", {})
+        alpha         = model_kwargs.get("alpha", 0.0)
+        dt             = model_kwargs.get("dt", 1.0)
+        rho           = model_kwargs.get("rho", 1.0)
+        noise         = model_kwargs.get("noise", None)
+
         
         if re.match(r"\Aserial\Z", self.parallel_flag, re.IGNORECASE):
             # Serial forecast step
             nd, Nens = ensemble.shape # Get the number of ensemble members
-            state_block_size = nd if nd == self.parameters["total_state_param_vars"]  or nd < self.parameters["total_state_param_vars"] else nd // self.parameters["total_state_param_vars"]
-            # print(f"nd: {nd}, Nens: {Nens}, state_block_size: {state_block_size}")
-            # print("[ICESEE] Running serial forecast step ...")
-            # print(ensemble[:,0])
+            if model_kwargs["joint_estimation"] or params["localization_flag"]:
+                hdim = ensemble.shape[0] // params["total_state_param_vars"]
+            else:
+                hdim = ensemble.shape[0] // params["num_state_vars"]
+            state_block_size = hdim * params["num_state_vars"]
             vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
             # Loop over the ensemble members
             for ens in range(Nens):
                 updated_state = forecast_step_single(ensemble=ensemble[:, ens], **model_kwargs)
-                # for ii,var in enumerate(model_kwargs["vec_inputs"]):
-                #     start_idx = ii * state_block_size
-                #     end_idx   = start_idx + state_block_size
-                #     ensemble[start_idx:end_idx,ens] = updated_state[var]
-                q0 = multivariate_normal.rvs(np.zeros(nd), Q_err)
+                for key,value in updated_state.items():
+                    ensemble[indx_map[key],ens] = value
 
-                # ensemble[:state_block_size,ens] = ensemble[:state_block_size,ens] + q0[:state_block_size]
-                for key in model_kwargs["vec_inputs"]:
-                    ensemble[indx_map[key],ens] = updated_state[key] + q0[:updated_state[key].size]
-             
+                # add process noise
+                noise_all = []
+                q0 = []
+                for ii, sig in enumerate(params["sig_Q"]):
+                    if ii <=params["num_state_vars"]:
+                        model_kwargs.update({"ii_sig": ii, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
+                        W = generate_enkf_field(ii,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                        noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
+                        q0.append(noise_)
+
+                        Z = np.sqrt(dt)*sig*rho*noise_
+                        noise_all.append(Z)
+                noise_ = np.concatenate(noise_all, axis=0)
+                ensemble[:state_block_size,ens] += noise_[:state_block_size]
+                noise = np.concatenate(q0, axis=0)
+                model_kwargs.update({"noise": noise})
+                del noise_all, q0, noise_, W
+                # q0 = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+
+                # for key,value in updated_state.items():
+                #     ensemble[indx_map[key],ens] = value + q0[:len(value)]
 
             return ensemble
 

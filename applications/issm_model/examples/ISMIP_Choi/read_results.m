@@ -8,21 +8,24 @@ close all; clearvars; clear all
 
 global data_file_paths nvar ensemble_vec_full ...
         label_t t nt colorbar_gap
-data_file_paths = '_modelrun_datasets';
+% data_file_paths = '_modelrun_datasets';
 % data_file_paths = '_goodgrounding';
+data_file_paths ='_modelrun_working_0';
 nvar = 6;
-colorbar_gap=0.73;
+colorbar_gap=0.78;
 
 % ---------------- user toggles ----------------
 make_plots       = 0;
-make_multi_plots = 1;   % <-- ON (restored)
+make_multi_plots = 0;   % <-- ON (restored)
 frames_plot      = 0;
+compute_rmse     = 0;
+plotgl           = 1;
 
 % ---------------- time steps ------------------
 % k_array = [0, 20,  60, 80, 89, 130, 330, 499]+1;
 % k_array= [ 0, 20,80, 120, 160, 220, 250, 320, 450]+1;
 % k_array = [0, 20, 80, 120, 160, 240, 360, 499] +1;
-k_array = [20, 40, 70,100, 120, 180, 250]+1;
+k_array = [30, 70,100, 120, 180, 250]+1;
 dt      = 0.2;
 
 % ---------------- Load essentials --------------
@@ -56,62 +59,24 @@ md_nurged = md;
 md_ens    = md;
 
 % ---------------- GL midpoint points + pointwise RMSE ----------------
-% [gl_mid_a, dist] = compute_gl_midpoints_a( ...
-%     k_array, dt, ...
-%     model_true_state, model_nurged_state, ensemble_vec_mean, ...
-%     md_true, md_nurged, md_ens, md);
-
 [gl_mid] = compute_gl_midpoints( ...
     k_array, dt, ...
     model_true_state, model_nurged_state, ensemble_vec_mean, ...
     md_true, md_nurged, md_ens, md);
-% fields_rmse = { ...
-%     'geometry.thickness', ...
-%     'geometry.surface', ...
-%     'initialization.vel', ...
-%     'geometry.bed', ...
-%     'friction.coefficient' ...
-%     'mask.ocean_levelset' ...
-% };
-% 
-% rmse_point = compute_point_rmse_at_gl_mid( ...
-%     k_array, dt, fields_rmse, gl_mid, ...
-%     model_true_state, model_nurged_state, ensemble_vec_mean, ...
-%     md_true, md_nurged, md_ens, md);
-% 
-% disp('===== RMSE at TRUE-GL midpoint over k_array =====');
-% disp(rmse_point.table);
-% 
-% disp(table(gl_mid.k_array, gl_mid.x, gl_mid.y, ...
-%     'VariableNames', {'k','x_centerGL','y_centerGL'}));
-% 
-% gl_pos = compute_gl_position_rmse_windowed( ...
-%     k_array, dt, t, ...
-%     model_true_state, model_nurged_state, ensemble_vec_mean, ...
-%     md_true, md_nurged, md_ens, md, ...
-%     gl_mid, ...
-%     'x_halfwidth', 30e3, ...   % tune to match your oval
-%     'y_halfwidth', 20e3, ...
-%     'minLen', 3e4, ...
-%     'topK', 4);
-% 
-% out = compute_rmse_timeseries_allt(dt, t, model_true_state, model_nurged_state, ensemble_vec_mean, md, nvar, ...
-%     'mask_freeze_year', 0);
-% 
-% plot_rmse_timeseries(out);
 
 %% ------ RMSE -----
-compute_rmse_timeseries(k_array, dt, t, model_true_state, model_nurged_state, ensemble_vec_mean,md_true, md_nurged, md_ens, md, 'geometry.thickness');
-
-
+if compute_rmse
+    compute_rmse_timeseries(k_array, dt, t, model_true_state, model_nurged_state, ensemble_vec_mean,md_true, md_nurged, md_ens, md, 'geometry.thickness');
+end
 
 % ---------------- GL evolution plot ------------
-plot_gl_on_bed_evolution( ...
-    k_array, dt, ...
-    model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    md_true, md_nurged, md_ens, md, ...
-    'geometry.thickness', 'Thickness', 'm', gl_mid);
-
+if plotgl
+    plot_gl_on_bed_evolution( ...
+        k_array, dt, ...
+        model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, ...
+        'geometry.thickness', 'Thickness', 'm', gl_mid);
+end
 % ---------------- multi-plots restored ----------
 if make_multi_plots
     % thickness
@@ -140,9 +105,9 @@ if make_multi_plots
 
     % friction
     plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, 'friction.coefficient', 'Friction Coefficient', '');
+        md_true, md_nurged, md_ens, md, 'friction.coefficient', 'Friction Coefficient', 'Pa m^{-1/3} yr^{-1/3}');
     plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, 'friction.coefficient', 'Friction', '');
+        md_true, md_nurged, md_ens, md, 'friction.coefficient', 'Friction', 'Pa m^{-1/3} yr^{-1/3}');
 end
 
 % ---------------- optional single triptych -------
@@ -199,7 +164,6 @@ function [md_true, md_nurged, md_ens] = setup_model_states( ...
     md_true.mask.ocean_levelset     = H + bed/di;
 
     % --- WRONG (nurged) ---
-    model_nurged_state(:, 1) = (squeeze(ensemble_vec_full(1,1,:)))';
     H  = model_nurged_state(1:hdim, k);
     S  = model_nurged_state(hdim+1:2*hdim, k);
     B  = S - H;
@@ -220,7 +184,7 @@ function [md_true, md_nurged, md_ens] = setup_model_states( ...
     md_nurged.mask.ocean_levelset   = H + bed/di;
 
     % --- ENSEMBLE MEAN ---
-    ensemble_vec_mean(:, 1) = (squeeze(ensemble_vec_full(1,1,:)))';
+    % ensemble_vec_mean(:, 1) = model_nurged_state(:, 1);
     H  = ensemble_vec_mean(1:hdim, k);
     S  = ensemble_vec_mean(hdim+1:2*hdim, k);
     B  = S - H;
@@ -284,9 +248,9 @@ function plot_gl_on_bed_evolution( ...
     units_str = iff(~isempty(units), [' (' units ')'], '');
 
     nk    = numel(k_array);
-    nrows = nk;
+    nrows = 2+nk;
 
-    figure('Position',[100 100 1000 (180 + 150*nrows)]); clf;
+    figure('Position',[400 400 1800 (180 + 150*nrows)]); clf;
 
     % ---- global color limits from TRUE background ----
     all_data = [];
@@ -310,12 +274,116 @@ function plot_gl_on_bed_evolution( ...
     minLen_ens   = 5e4;
     minArea      = 1;
 
-    keepLargestOnly_true  = false;
-    keepLargestOnly_wrong = false;
+    keepLargestOnly_true  = true;
+    keepLargestOnly_wrong = true;
+    keepLargestOnly_ens   = false;
     keepTopK_ens          = 4;   % allow 2 longest for ensemble (prevents “loss”)
     keepTopK_true         = 4;
     keepTopK_wrong        = 4;
     global t label_t nt
+    nt = 251;
+    axs = gobjects(nrows,1);   % <-- store ONLY the real panel axes
+
+    % (a) True
+    [md_true_k, ~, ~] = setup_model_states(1, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md);
+    data_true = get_nested_field(md_true_k, bg_field);
+    plotmodel(md_true_k,'data',data_true,'title',sprintf('True %s',bg_title), ...
+        'subplot',[nrows,1,1],'caxis',[cmin cmax],'colorbar','off');
+    ax = gca; axs(1) = ax;
+    ttl = ax.Title;
+    ttl.FontSize   = 10;
+    ttl.FontWeight = 'bold';   % or 'normal'
+    ttl.Interpreter = 'tex';
+    
+    % ---- km axes (ticks shown in km) ----
+    xt = get(ax,'XTick'); yt = get(ax,'YTick');
+    set(ax,'XTickLabel', arrayfun(@(v) sprintf('%g', v./1000), xt, 'UniformOutput', false));
+    set(ax,'YTickLabel', arrayfun(@(v) sprintf('%g', v./1000), yt, 'UniformOutput', false));
+    % xlabel(ax,'x (km)','FontWeight','bold');
+    ylabel(ax,'y (km)','FontWeight','bold','FontSize',16);
+    
+    % ---- panel letter inside upper-left ----
+    % panel = sprintf('(%c)', 'a'+(idx-1));
+    panel_idx = 2;   % change as needed
+    panel = sprintf('(%c_{%d})','a', panel_idx);
+    text(ax, 0.02, 0.95, panel, 'Units','normalized', ...
+        'FontWeight','bold', 'FontSize', 16, ...
+        'HorizontalAlignment','left', 'VerticalAlignment','top', ...
+        'Color','k');
+
+    % (b) No assimilation - True
+    [md_true_1, md_nurged_1, md_ens_1] = setup_model_states(1, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md);
+    % diff_no = get_nested_field(md_ens_1, field) - get_nested_field(md_true_1, field);
+    ens_field = get_nested_field(md_nurged_1, bg_field);
+    % ens_field = get_nested_field(md_ens_1, bg_field);
+    true_field = get_nested_field(md_true_1, bg_field);
+   
+    diff_no = ens_field - true_field;
+    % diff_no = relative_error(ens_field, true_field);
+    % diff_no = signed_log_relerr(true_field, true_field);
+    maxAbs_no = max(abs(diff_no(:)));
+    % maxAbs_no=1;
+  
+    % maxAbs_no = prctile(abs(diff_no(:)), 99);
+    plotmodel(md_ens_1,'data',diff_no,'title',sprintf('no assimilation'), ...
+        'subplot',[nrows,1,2],'caxis',[-maxAbs_no maxAbs_no],'colorbar','off');
+
+    ax = gca; axs(2) = ax;
+    ttl = ax.Title;
+    ttl.FontSize   = 10;
+    ttl.FontWeight = 'bold';   % or 'normal'
+    ttl.Interpreter = 'tex';
+    
+    % ---- km axes (ticks shown in km) ----
+    xt = get(ax,'XTick'); yt = get(ax,'YTick');
+    set(ax,'XTickLabel', arrayfun(@(v) sprintf('%g', v./1000), xt, 'UniformOutput', false));
+    set(ax,'YTickLabel', arrayfun(@(v) sprintf('%g', v./1000), yt, 'UniformOutput', false));
+    % xlabel(ax,'x (km)','FontWeight','bold');
+    ylabel(ax,'y (km)','FontWeight','bold','FontSize',16);
+    
+    % ---- panel letter inside upper-left ----
+    % panel = sprintf('(%c)', 'a'+(idx-1));
+    panel = sprintf('(%c_{%d})','b', panel_idx);
+    text(ax, 0.02, 0.95, panel, 'Units','normalized', ...
+        'FontWeight','bold', 'FontSize', 16, ...
+        'HorizontalAlignment','left', 'VerticalAlignment','top', ...
+        'Color','k');
+    % prevent plotmodel objects appearing in legend
+    set(ax.Children, 'HandleVisibility','off');
+
+    % grid for contouring
+    x = md_true_1.mesh.x(:);
+    y = md_true_1.mesh.y(:);
+    xg = linspace(min(x), max(x), Nx);
+    yg = linspace(min(y), max(y), Ny);
+    [Xg, Yg] = meshgrid(xg, yg);
+
+    phi_true  = md_true_1.mask.ocean_levelset(:);
+    phi_wrong = md_nurged_1.mask.ocean_levelset(:);
+    phi_ens   = md_ens_1.mask.ocean_levelset(:);
+
+    % linear + nearest extrap => NO NaN holes that break contour
+    F1 = scatteredInterpolant(x, y, phi_true,  'linear','nearest');
+    F2 = scatteredInterpolant(x, y, phi_wrong, 'linear','nearest');
+    % pos = find(x<=670);
+    F3 = scatteredInterpolant(x, y, phi_ens,   'linear','nearest');
+
+    Phi_true  = F1(Xg, Yg);
+    Phi_wrong = F2(Xg, Yg);
+    Phi_ens   = F3(Xg, Yg);
+
+    hold(ax,'on');
+    plot_gl_contour_filtered(Xg, Yg, Phi_true,  'k','-',  3.0, minLen_true,  minArea, keepLargestOnly_true,  keepTopK_true);
+    plot_gl_contour_filtered(Xg, Yg, Phi_wrong, 'm','-', 3.0, minLen_wrong, minArea, keepLargestOnly_wrong,  keepTopK_wrong);
+    plot_gl_contour_filtered(Xg, Yg, Phi_ens,   'c',':',  3.0, minLen_ens,   minArea, keepLargestOnly_ens,  keepTopK_ens);
+
+    overlay_gl_window_points(gca, md_true_1, md_nurged_1, md_ens_1, ...
+    [gl_mid.x(1), gl_mid.y(1)], ...
+    'x_halfwidth',30e3, 'y_halfwidth',20e3);
+    hold(ax,'off');
+
 
     for idx = 1:nk
         k = k_array(idx);
@@ -324,33 +392,48 @@ function plot_gl_on_bed_evolution( ...
             model_true_state, model_nurged_state, ensemble_vec_mean, ...
             md_true, md_nurged, md_ens, md);
 
-        bg = get_nested_field(md_true_k, bg_field);
+        bg_true = get_nested_field(md_true_k, bg_field);
+        bg_ens  = get_nested_field(md_ens_k, bg_field);
+        % diff_k = relative_error(bg_ens, bg_true);
+        diff_k = bg_ens - bg_true;
+        % diff_k = signed_log_relerr(bg_ens, bg_true);
+        maxAbs = max(abs(diff_k(:)));
+        % maxAbs = maxAbs_no;
+        % maxAbs = ();
 
-        plotmodel(md_true_k, 'data', bg, ...
-            'title', sprintf('\\bf(%c) %s + GLs (t = %s years)', ...
-                'a'+(idx-1), bg_title, fmt_years(label_t)), ...
-            'subplot', [nrows, 1, idx], ...
-            'caxis', [cmin cmax], ...
+        plotmodel(md_ens_k, 'data', diff_k, ...
+            'title', sprintf('after %s years of assimilation', fmt_years(label_t)), ...
+            'subplot', [nrows, 1, idx+2], ...
+            'caxis', [-maxAbs maxAbs], ...
             'colorbar', 'off');
-
-        % ---- plot GL midpoint marker (TRUE GL) ----
-        % if ~isempty(gl_mid) && isfield(gl_mid,'x') && numel(gl_mid.x) >= idx
-        %     plot(gca, gl_mid.x(idx), gl_mid.y(idx), 'kp', ...
-        %         'MarkerFaceColor','y','MarkerSize',10,'LineWidth',1.5, ...
-        %         'HandleVisibility','off');
-        % end
-
+        
         ax = gca;
+        ttl = ax.Title;
+        ttl.FontSize   = 10;
+        ttl.FontWeight = 'bold';   % or 'normal'
+        ttl.Interpreter = 'tex';
+        
+        % ---- km axes (ticks shown in km) ----
+        % axs(idx) = ax;
+        axs(idx+2) = ax; 
+        xt = get(ax,'XTick'); yt = get(ax,'YTick');
+        set(ax,'XTickLabel', arrayfun(@(v) sprintf('%g', v./1000), xt, 'UniformOutput', false));
+        set(ax,'YTickLabel', arrayfun(@(v) sprintf('%g', v./1000), yt, 'UniformOutput', false));
+        % xlabel(ax,'x (km)','FontWeight','bold');
+        ylabel(ax,'y (km)','FontWeight','bold','FontSize',16);
+        
+        % ---- panel letter inside upper-left ----
+        % panel = sprintf('(%c)', 'a'+(idx-1));
+        % panel_idx = 2;   % change as needed
+        panel = sprintf('(%c_{%d})','c'+(idx-1), panel_idx);
+        text(ax, 0.02, 0.95, panel, 'Units','normalized', ...
+            'FontWeight','bold', 'FontSize', 16, ...
+            'HorizontalAlignment','left', 'VerticalAlignment','top', ...
+            'Color','k');
 
+     
         % prevent plotmodel objects appearing in legend
         set(ax.Children, 'HandleVisibility','off');
-
-        % grid for contouring
-        x = md_true_k.mesh.x(:);
-        y = md_true_k.mesh.y(:);
-        xg = linspace(min(x), max(x), Nx);
-        yg = linspace(min(y), max(y), Ny);
-        [Xg, Yg] = meshgrid(xg, yg);
 
         phi_true  = md_true_k.mask.ocean_levelset(:);
         phi_wrong = md_nurged_k.mask.ocean_levelset(:);
@@ -371,9 +454,9 @@ function plot_gl_on_bed_evolution( ...
         Phi_ens   = F3(Xg, Yg);
 
         hold(ax,'on');
-        plot_gl_contour_filtered(Xg, Yg, Phi_true,  'k','-',  2.0, minLen_true,  minArea, keepLargestOnly_true,  keepTopK_true);
-        plot_gl_contour_filtered(Xg, Yg, Phi_wrong, 'r','-', 2.0, minLen_wrong, minArea, keepLargestOnly_wrong, keepTopK_wrong);
-        plot_gl_contour_filtered(Xg, Yg, Phi_ens,   'c','-.',  2.0, minLen_ens,   minArea, false,               keepTopK_ens);
+        plot_gl_contour_filtered(Xg, Yg, Phi_true,  'k','-',  3.0, minLen_true,  minArea, keepLargestOnly_true,  keepTopK_true);
+        plot_gl_contour_filtered(Xg, Yg, Phi_wrong, 'm','-', 3.0, minLen_wrong, minArea, keepLargestOnly_wrong,  keepTopK_wrong);
+        plot_gl_contour_filtered(Xg, Yg, Phi_ens,   'c',':',  3.0, minLen_ens,   minArea, keepLargestOnly_ens,  keepTopK_ens);
 
         overlay_gl_window_points(gca, md_true_k, md_nurged_k, md_ens_k, ...
         [gl_mid.x(idx), gl_mid.y(idx)], ...
@@ -381,76 +464,169 @@ function plot_gl_on_bed_evolution( ...
         hold(ax,'off');
     end
 
-    % ---- Layout: adaptive spacing ----
-    axs = flipud(findall(gcf,'Type','axes'));
-    gap = 0.02; top = 0.95; bottom = 0.08;
-    avail = top - bottom - (nrows-1)*gap;
-    height = avail / nrows;
+    xlabel(ax,'x (km)','FontWeight','bold','FontSize',18);
 
+    % ---- Layout: adaptive spacing ----
+    % axs = flipud(findall(gcf,'Type','axes'));
+    % gap = 0.02; top = 0.95; bottom = 0.08;
+    % avail = top - bottom - (nrows-1)*gap;
+    % height = avail / nrows;
+    % 
+    % if height < 0.05
+    %     fig = gcf;
+    %     scale_factor = max(1, ceil(0.05 / height));
+    %     fig.Position(4) = fig.Position(4) * scale_factor;
+    %     height = 0.05;
+    % end
+    % 
+    % for i = 1:nrows
+    %     pos = [0.10, bottom+(nrows-i)*(height+gap), 0.70, height];
+    %     set(axs(i), 'Position', pos, ...
+    %         'FontWeight','bold','LineWidth',1.2,'Box','on', ...
+    %         'TickDir','out','Layer','top','FontSize',11, ...
+    %         'TickLength',[0.005 0.005]);
+    %     ylabel(axs(i),'y (km)','FontWeight','bold');
+    %     if i < nrows
+    %         set(axs(i),'XTickLabel',[]);
+    %     else
+    %         xlabel(axs(i),'x (km)','FontWeight','bold');
+    %     end
+    % end
+
+    % ---- Layout: adaptive spacing (ONLY panel axes) ----
+    % gap = 0.03; top = 0.95; bottom = 0.08;
+    gap = 0.03; top = 0.96; bottom = 0.1;
+    avail  = top - bottom - (nrows-1)*gap;
+    height = avail / nrows;
+    
     if height < 0.05
         fig = gcf;
         scale_factor = max(1, ceil(0.05 / height));
         fig.Position(4) = fig.Position(4) * scale_factor;
         height = 0.05;
     end
-
+    titlePad = 0.025; 
+    
     for i = 1:nrows
-        pos = [0.10, bottom+(nrows-i)*(height+gap), 0.70, height];
-        set(axs(i), 'Position', pos, ...
-            'FontWeight','bold','LineWidth',1.2,'Box','on', ...
-            'TickDir','out','Layer','top','FontSize',11, ...
-            'TickLength',[0.005 0.005]);
-        ylabel(axs(i),'y (m)','FontWeight','bold');
+        ax = axs(i);
+    
+        % i=1 should be the TOP panel (subplot does this already)
+        % pos = [0.10, bottom+(nrows-i)*(height+gap), 0.70, height];
+        pos = [0.10, bottom+(nrows-i)*(height+gap), 0.9, height];
+        set(ax, 'Position', pos, ...
+        'FontWeight','bold', ...
+        'FontSize',15, ...
+        'Box','on', ...
+        'LineWidth',2.0, ...
+        'TickDir','out', ...
+        'TickLength',[0.004 0.004], ...
+        'XGrid','off', ...
+        'YGrid','off', ...
+        'YMinorGrid','off', ...
+        'XTickMode','manual', ...
+        'YTickMode','manual');
+        ttl = ax.Title;
+        ttl.FontSize   = 15;
+        ttl.FontWeight = 'bold';   % or 'normal'
+        ttl.Interpreter = 'tex';
+        % ---- FORCE tick locations (meters) ----
+        % yt_km = 0:20:80;              % desired ticks in km
+        % yt_m  = yt_km * 1000;         % convert to meters
+        % 
+        % set(ax, ...
+        %     'YTick', yt_m, ...
+        %     'YTickLabel', arrayfun(@num2str, yt_km, 'UniformOutput', false), ...
+        %     'YTickMode','manual');
+        yl = ax.YLim / 1000;  % km
+        step = 40;            % km
+        yt_km = ceil(yl(1)/step)*step : step : floor(yl(2)/step)*step;
+        set(ax,'YTick',yt_km*1000,'YTickLabel',string(yt_km),'YTickMode','manual');
+
+        % same idea for x if needed
+        xt = get(ax,'XLim');
+        xt_km = floor(xt(1)/1000/100)*100 : 100 : ceil(xt(2)/1000/100)*100;
+        set(ax, ...
+            'XTick', xt_km*1000, ...
+            'XTickLabel', arrayfun(@num2str, xt_km, 'UniformOutput', false), ...
+            'XTickMode','manual');
+    
+        ylabel(ax,'y (km)','FontWeight','bold','FontSize',16);
+    
         if i < nrows
-            set(axs(i),'XTickLabel',[]);
+            set(ax,'XTickLabel',[]);
         else
-            xlabel(axs(i),'x (m)','FontWeight','bold');
+            xlabel(ax,'x (km)','FontWeight','bold','FontSize',16);
+            ax.XLabel.Units = 'normalized';
+            ax.XLabel.Position(2) = -0.33;
         end
+
     end
 
-    % % ---- Shared colorbar ----
-    colorbar_gap0=0.76;
-    for i = 1:nrows, colormap(axs(i), parula); end
-    cb = colorbar(axs(end), 'Position',[colorbar_gap0 0.25 0.025 0.45]);
-    ylabel(cb, [bg_title units_str], 'FontSize',12,'FontWeight','bold');
 
-    % ---- Shared colorbar (adaptive) ----
-    % for i = 1:nrows
-    %     colormap(axs(i), parula);
-    % end
-    % 
-    % % get top and bottom axes positions
-    % pos_top    = axs(1).Position;        % top subplot
-    % pos_bottom = axs(end).Position;      % bottom subplot
-    % 
-    % % geometry parameters
-    % gap   = 0.01;     % horizontal gap between axes and colorbar
-    % cb_w  = 0.025;    % colorbar width
-    % 
-    % cb_x = pos_top(1) + pos_top(3) + gap;
-    % cb_y = pos_bottom(2);
-    % cb_h = (pos_top(2) + pos_top(4)) - pos_bottom(2);
-    % 
-    % cb = colorbar(axs(end), 'Position', [cb_x cb_y cb_w cb_h]);
-    % 
-    % ylabel(cb, [bg_title units_str], ...
-    % 'FontSize',12,'FontWeight','bold');
+    % % ---- Shared colorbar ----
+    % colorbar_gap0=0.8;
+    % for i = 1:nrows, colormap(axs(i), parula); end
+    % cb = colorbar(axs(end), 'Position',[colorbar_gap0 0.25 0.025 0.45]);
+    % ylabel(cb, [bg_title units_str], 'FontSize',12,'FontWeight','bold');
+    colorbar_gap0=0.785;
+    cb1 = colorbar(axs(1), 'Position',[colorbar_gap0 0.75 0.015 0.16]);
+    ylabel(cb1,[bg_title units_str],'FontSize',15,'FontWeight','bold');
+    colormap(axs(1), parula);
+
+    for i = 2:nrows, colormap(axs(i), redblue(256)); end
+    cb = colorbar(axs(end), 'Position',[colorbar_gap0 0.25 0.015 0.45]);
+    % ylabel(cb,'Relative Error','FontSize',15,'FontWeight','bold');
+    ylabel(cb,['\Delta Thickness' units_str],'FontSize',15,'FontWeight','bold');
+   
 
     % ---- Clean legend (proxy only) ----
     ax0 = axs(1);
     lg = legend(ax0);
     if ~isempty(lg) && isvalid(lg), delete(lg); end
 
+    % hold(ax0,'on');
+    % p1 = plot(ax0, NaN, NaN, 'k-',  'LineWidth', 2.0);
+    % p2 = plot(ax0, NaN, NaN, 'r-', 'LineWidth', 2.0);
+    % p3 = plot(ax0, NaN, NaN, 'c-.',  'LineWidth', 2.0);
+    % lgd = legend(ax0, [p1 p2 p3], ...
+    %     {'True GL','No assimilation GL','Assimilated GL'}, ...
+    %     'Location','northwest','FontSize',10,'Box','on');
+    % lgd.AutoUpdate = 'on';
+    % % legend(ax0,'manual');
+    % hold(ax0,'off');
     hold(ax0,'on');
-    p1 = plot(ax0, NaN, NaN, 'k-',  'LineWidth', 2.0);
-    p2 = plot(ax0, NaN, NaN, 'r-', 'LineWidth', 2.0);
-    p3 = plot(ax0, NaN, NaN, 'c-.',  'LineWidth', 2.0);
+
+    p1 = plot(ax0, NaN, NaN, 'k-',  'LineWidth', 3.0);
+    p2 = plot(ax0, NaN, NaN, 'm-',  'LineWidth', 3.0);
+    p3 = plot(ax0, NaN, NaN, 'c-.', 'LineWidth', 3.0);
+    
     lgd = legend(ax0, [p1 p2 p3], ...
         {'True GL','No assimilation GL','Assimilated GL'}, ...
-        'Location','northwest','FontSize',10,'Box','on');
-    lgd.AutoUpdate = 'on';
-    % legend(ax0,'manual');
+        'Orientation','horizontal', ...
+        'FontSize',14, ...
+        'Box','off');
+    
     hold(ax0,'off');
+    
+    % --- Force legend OUTSIDE the axes ---
+    lgd.Units = 'normalized';
+    lgd.Location = 'none';      % disable MATLAB auto-placement
+    
+    axPos = ax0.Position;       % axes position [x y w h]
+    
+    % place legend just outside top-right
+    % lgd.Position = [ ...
+    %     axPos(1) + axPos(3) - 0.185, ...   % to the right of axes
+    %     axPos(2) + axPos(4) - lgd.Position(4), ... % aligned to top
+    %     lgd.Position(3), ...
+        % lgd.Position(4)];
+
+    lgd.Position = [ ...
+        0.42, ...   % left (centered)
+        0.015, ...  % vertical position BELOW xlabel
+        0.60, ...   % width
+        0.04  ...   % height
+    ];
 
     set(gcf,'Color','w');
 
@@ -547,14 +723,17 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
     md_true, md_nurged, md_ens, md, field, field_title, units)
 
     global t label_t nt colorbar_gap
-
+    % lightGray = [0.85 0.85 0.85];
+    % lightGray = [0.93 0.69 0.13];
+    lightGray = 'm';
     if nargin < 12, units = ''; end
     units_str = iff(~isempty(units), [' (' units ')'], '');
 
     nk    = length(k_array);
     nrows = 2 + nk;
 
-    figure('Position',[100 100 1000 150 + 150*nrows]); clf;
+    figure('Position',[400 400 1800 (180 + 150*nrows)]); clf;
+    axs = gobjects(nrows,1);   % <-- store ONLY the real panel axes
 
     % global limits for absolute field (panel a)
     all_data = [];
@@ -576,29 +755,76 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
     [md_true_k, ~, ~] = setup_model_states(1, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md);
     data_true = get_nested_field(md_true_k, field);
-    plotmodel(md_true_k,'data',data_true,'title',sprintf('\\bf(a) True %s',field_title), ...
+    plotmodel(md_true_k,'data',data_true,'title',sprintf('True %s',field_title), ...
         'subplot',[nrows,1,1],'caxis',[cmin cmax],'colorbar','off');
+    
+    ax = gca; axs(1) = ax;
+    ttl = ax.Title;
+    ttl.FontSize   = 10;
+    ttl.FontWeight = 'bold';   % or 'normal'
+    ttl.Interpreter = 'tex';
+    
+    % ---- km axes (ticks shown in km) ----
+    xt = get(ax,'XTick'); yt = get(ax,'YTick');
+    set(ax,'XTickLabel', arrayfun(@(v) sprintf('%g', v./1000), xt, 'UniformOutput', false));
+    set(ax,'YTickLabel', arrayfun(@(v) sprintf('%g', v./1000), yt, 'UniformOutput', false));
+    % xlabel(ax,'x (km)','FontWeight','bold');
+    ylabel(ax,'y (km)','FontWeight','bold','FontSize',16);
+    
+    % ---- panel letter inside upper-left ----
+    % panel = sprintf('(%c)', 'a'+(idx-1));
+    panel_idx = 1;   % change as needed
+    panel = sprintf('(%c_{%d})','a', panel_idx);
+    text(ax, 0.02, 0.95, panel, 'Units','normalized', ...
+        'FontWeight','bold', 'FontSize', 16, ...
+        'HorizontalAlignment','left', 'VerticalAlignment','top', ...
+        'Color',lightGray);
 
     % (b) No assimilation - True
-    [md_true_1, ~, md_ens_1] = setup_model_states(1, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    [md_true_1, md_nurged_1, md_ens_1] = setup_model_states(1, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md);
     % diff_no = get_nested_field(md_ens_1, field) - get_nested_field(md_true_1, field);
-    ens_field = get_nested_field(md_ens_1, field);
+    ens_field = get_nested_field(md_nurged_1, field);
+    % ens_field = get_nested_field(md_ens_1, field);
     true_field = get_nested_field(md_true_1, field);
     % if contains(field,'geometry.bed')
         % diff_no = relative_error(ens_field, true_field);
         diff_no = signed_log_relerr(ens_field, true_field);
         % diff_no = relerr_percent_clipped(ens_field, true_field);
     % else
-    %     diff_no = ens_field - true_field;
+        % diff_no = ens_field - true_field;
     % end
     maxAbs_no = max(abs(diff_no(:)));
   
     % maxAbs_no = prctile(abs(diff_no(:)), 99);
-    plotmodel(md_ens_1,'data',diff_no,'title',sprintf('\\bf(b) No assimilation − True'), ...
+    plotmodel(md_ens_1,'data',diff_no,'title',sprintf('No assimilation'), ...
         'subplot',[nrows,1,2],'caxis',[-maxAbs_no maxAbs_no],'colorbar','off');
 
+    ax = gca; axs(2) = ax;
+    ttl = ax.Title;
+    ttl.FontSize   = 10;
+    ttl.FontWeight = 'bold';   % or 'normal'
+    ttl.Interpreter = 'tex';
+    
+    % ---- km axes (ticks shown in km) ----
+    xt = get(ax,'XTick'); yt = get(ax,'YTick');
+    set(ax,'XTickLabel', arrayfun(@(v) sprintf('%g', v./1000), xt, 'UniformOutput', false));
+    set(ax,'YTickLabel', arrayfun(@(v) sprintf('%g', v./1000), yt, 'UniformOutput', false));
+    % xlabel(ax,'x (km)','FontWeight','bold');
+    ylabel(ax,'y (km)','FontWeight','bold','FontSize',16);
+    
+    % ---- panel letter inside upper-left ----
+    % panel = sprintf('(%c)', 'a'+(idx-1));
+    panel = sprintf('(%c_{%d})','b', panel_idx);
+    text(ax, 0.02, 0.95, panel, 'Units','normalized', ...
+        'FontWeight','bold', 'FontSize', 16, ...
+        'HorizontalAlignment','left', 'VerticalAlignment','top', ...
+        'Color',lightGray);
+    % prevent plotmodel objects appearing in legend
+    set(ax.Children, 'HandleVisibility','off');
+
     % (c..): Assim - True
+    nt=251;
     for idx = 1:nk
         k = k_array(idx);
         label_t = iff(k == nt-1, t(nt), t(k));
@@ -611,22 +837,50 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
             diff_k = signed_log_relerr(ens_field, true_field);
             % diff_k = relerr_percent_clipped(ens_field, true_field);
         % else
-        %     diff_k = ens_field - true_field;
+            % diff_k = ens_field - true_field;
         % end
         % diff_k = get_nested_field(md_ens_k, field) - get_nested_field(md_true_k, field);
 
         maxAbs = max(abs(diff_k(:)));
       
         % maxAbs = prctile(abs(diff_k(:)), 99);
-        label  = sprintf('\\bf(%c)', 'b'+idx);
+        % label  = sprintf('\\bf(%c)', 'b'+idx);
         plotmodel(md_ens_k,'data',diff_k, ...
-            'title',sprintf('\\bf%s Assimilated − True (after %s years)', label, fmt_years(label_t)), ...
+            'title',sprintf('after %s years of assimilation', fmt_years(label_t)), ...
             'subplot',[nrows,1,idx+2],'caxis',[-maxAbs maxAbs],'colorbar','off');
+
+        ax = gca;
+        ttl = ax.Title;
+        ttl.FontSize   = 10;
+        ttl.FontWeight = 'bold';   % or 'normal'
+        ttl.Interpreter = 'tex';
+        
+        % ---- km axes (ticks shown in km) ----
+        % axs(idx) = ax;
+        axs(idx+2) = ax; 
+        xt = get(ax,'XTick'); yt = get(ax,'YTick');
+        set(ax,'XTickLabel', arrayfun(@(v) sprintf('%g', v./1000), xt, 'UniformOutput', false));
+        set(ax,'YTickLabel', arrayfun(@(v) sprintf('%g', v./1000), yt, 'UniformOutput', false));
+        % xlabel(ax,'x (km)','FontWeight','bold');
+        ylabel(ax,'y (km)','FontWeight','bold','FontSize',16);
+        
+        % ---- panel letter inside upper-left ----
+        % panel = sprintf('(%c)', 'a'+(idx-1));
+        % panel_idx = 2;   % change as needed
+        panel = sprintf('(%c_{%d})','c'+(idx-1), panel_idx);
+        text(ax, 0.02, 0.95, panel, 'Units','normalized', ...
+            'FontWeight','bold', 'FontSize', 16, ...
+            'HorizontalAlignment','left', 'VerticalAlignment','top', ...
+            'Color',lightGray);
+
+     
+        % prevent plotmodel objects appearing in legend
+        set(ax.Children, 'HandleVisibility','off');
     end
 
     % layout 
     axs = flipud(findall(gcf,'Type','axes'));
-    gap = 0.02; top = 0.95; bottom = 0.08;
+    gap = 0.03; top = 0.96; bottom = 0.08;
     avail = top-bottom - (nrows-1)*gap;
     height = avail/nrows;
 
@@ -636,24 +890,79 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
         height = 0.05;
     end
 
+    % for i = 1:nrows
+    %     pos = [0.10, bottom+(nrows-i)*(height+gap), 0.70, height];
+    %     set(axs(i),'Position',pos,'FontWeight','bold','LineWidth',1.2,'Box','on', ...
+    %         'TickDir','out','Layer','top','FontSize',11,'TickLength',[0.005 0.005]);
+    %     ylabel(axs(i),'y (km)','FontWeight','bold');
+    %     if i < nrows, set(axs(i),'XTickLabel',[]);
+    %     else, xlabel(axs(i),'x (km)','FontWeight','bold'); end
+    % end
+
     for i = 1:nrows
-        pos = [0.10, bottom+(nrows-i)*(height+gap), 0.70, height];
-        set(axs(i),'Position',pos,'FontWeight','bold','LineWidth',1.2,'Box','on', ...
-            'TickDir','out','Layer','top','FontSize',11,'TickLength',[0.005 0.005]);
-        ylabel(axs(i),'y (km)','FontWeight','bold');
-        if i < nrows, set(axs(i),'XTickLabel',[]);
-        else, xlabel(axs(i),'x (km)','FontWeight','bold'); end
+        ax = axs(i);
+    
+        % i=1 should be the TOP panel (subplot does this already)
+        % pos = [0.10, bottom+(nrows-i)*(height+gap), 0.70, height];
+        pos = [0.10, bottom+(nrows-i)*(height+gap), 0.9, height];
+        set(ax, 'Position', pos, ...
+        'FontWeight','bold', ...
+        'FontSize',15, ...
+        'Box','on', ...
+        'LineWidth',2.0, ...
+        'TickDir','out', ...
+        'TickLength',[0.004 0.004], ...
+        'XGrid','off', ...
+        'YGrid','off', ...
+        'YMinorGrid','off', ...
+        'XTickMode','manual', ...
+        'YTickMode','manual');
+        ttl = ax.Title;
+        ttl.FontSize   = 15;
+        ttl.FontWeight = 'bold';   % or 'normal'
+        ttl.Interpreter = 'tex';
+        % ---- FORCE tick locations (meters) ----
+        % yt_km = 0:20:80;              % desired ticks in km
+        % yt_m  = yt_km * 1000;         % convert to meters
+        % 
+        % set(ax, ...
+        %     'YTick', yt_m, ...
+        %     'YTickLabel', arrayfun(@num2str, yt_km, 'UniformOutput', false), ...
+        %     'YTickMode','manual');
+        yl = ax.YLim / 1000;  % km
+        step = 40;            % km
+        yt_km = ceil(yl(1)/step)*step : step : floor(yl(2)/step)*step;
+        set(ax,'YTick',yt_km*1000,'YTickLabel',string(yt_km),'YTickMode','manual');
+
+        % same idea for x if needed
+        xt = get(ax,'XLim');
+        xt_km = floor(xt(1)/1000/100)*100 : 100 : ceil(xt(2)/1000/100)*100;
+        set(ax, ...
+            'XTick', xt_km*1000, ...
+            'XTickLabel', arrayfun(@num2str, xt_km, 'UniformOutput', false), ...
+            'XTickMode','manual');
+    
+        ylabel(ax,'y (km)','FontWeight','bold','FontSize',16);
+    
+        if i < nrows
+            set(ax,'XTickLabel',[]);
+        else
+            xlabel(ax,'x (km)','FontWeight','bold','FontSize',16);
+            ax.XLabel.Units = 'normalized';
+            ax.XLabel.Position(2) = -0.33;
+        end
+
     end
 
-    cb1 = colorbar(axs(1), 'Position',[colorbar_gap 0.68 0.025 0.16]);
-    ylabel(cb1,[field_title units_str],'FontSize',12,'FontWeight','bold');
+    cb1 = colorbar(axs(1), 'Position',[colorbar_gap 0.68 0.015 0.16]);
+    ylabel(cb1,[field_title units_str],'FontSize',15,'FontWeight','bold');
     colormap(axs(1), parula);
 
     for i = 2:nrows, colormap(axs(i), redblue(256)); end
-    cb2 = colorbar(axs(end), 'Position',[colorbar_gap 0.25 0.025 0.40]);
+    cb2 = colorbar(axs(end), 'Position',[colorbar_gap 0.25 0.015 0.40]);
     % ylabel(cb2,'Difference','FontSize',12,'FontWeight','bold');
     % if contains(field,'geometry.bed')
-        ylabel(cb2,'Relative Error','FontSize',12,'FontWeight','bold');
+        ylabel(cb2,'Relative Error','FontSize',15,'FontWeight','bold');
     % else
     %     ylabel(cb2,['Difference' units_str],'FontSize',12,'FontWeight','bold');
     % end
@@ -669,15 +978,19 @@ function plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, e
     md_true, md_nurged, md_ens, md, field, field_title, units)
     
     global t nt label_t colorbar_gap
+    % lightGray = [0.85 0.85 0.85];
+    % lightGray = [0.93 0.69 0.13];
+    lightGray='m';
 
-    if nargin < 12, field_title = field; end
-    if nargin < 13, units = ''; end
+    % if nargin < 12, field_title = field; end
+    % if nargin < 13, units = ''; end
     units_str = iff(~isempty(units), [' (' units ')'], '');
 
     nk    = length(k_array);
     nrows = 2 + nk;
 
-    figure('Position',[100 100 1000 150 + 150*nrows]); clf;
+    figure('Position',[400 400 1800 (180 + 150*nrows)]); clf;
+    axs = gobjects(nrows,1);   % <-- store ONLY the real panel axes
 
     % global color limits across (true+ens) at requested steps
     all_data = [];
@@ -702,16 +1015,61 @@ function plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, e
     k1 = 1;
     label_t = iff(k1 == nt-1, t(nt), t(k1));
     plotmodel(md_true_last,'data',data_true, ...
-        'title',sprintf('\\bf(a) True %s (after %s years)', field_title, fmt_years(label_t)), ...
+        'title',sprintf('True %s ', field_title), ...
         'subplot',[nrows,1,1],'caxis',[cmin cmax],'colorbar','off');
+
+    ax = gca; axs(1) = ax;
+    ttl = ax.Title;
+    ttl.FontSize   = 10;
+    ttl.FontWeight = 'bold';   % or 'normal'
+    ttl.Interpreter = 'tex';
+    
+    % ---- km axes (ticks shown in km) ----
+    xt = get(ax,'XTick'); yt = get(ax,'YTick');
+    set(ax,'XTickLabel', arrayfun(@(v) sprintf('%g', v./1000), xt, 'UniformOutput', false));
+    set(ax,'YTickLabel', arrayfun(@(v) sprintf('%g', v./1000), yt, 'UniformOutput', false));
+    % xlabel(ax,'x (km)','FontWeight','bold');
+    ylabel(ax,'y (km)','FontWeight','bold','FontSize',16);
+    
+    % ---- panel letter inside upper-left ----
+    % panel = sprintf('(%c)', 'a'+(idx-1));
+    panel_idx = 2;   % change as needed
+    panel = sprintf('(%c_{%d})','a', panel_idx);
+    text(ax, 0.02, 0.95, panel, 'Units','normalized', ...
+        'FontWeight','bold', 'FontSize', 16, ...
+        'HorizontalAlignment','left', 'VerticalAlignment','top', ...
+        'Color',lightGray);
 
     % (b) No assimilation (k=1) ensemble
     [~, ~, md_ens_1] = setup_model_states(1, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md);
     data_ens = get_nested_field(md_ens_1, field);
     plotmodel(md_ens_1,'data',data_ens, ...
-        'title',sprintf('\\bf(b) No assimilation %s', field_title), ...
+        'title',sprintf(' No assimilation %s', field_title), ...
         'subplot',[nrows,1,2],'caxis',[cmin cmax],'colorbar','off');
+
+    ax = gca; axs(2) = ax;
+    ttl = ax.Title;
+    ttl.FontSize   = 10;
+    ttl.FontWeight = 'bold';   % or 'normal'
+    ttl.Interpreter = 'tex';
+    
+    % ---- km axes (ticks shown in km) ----
+    xt = get(ax,'XTick'); yt = get(ax,'YTick');
+    set(ax,'XTickLabel', arrayfun(@(v) sprintf('%g', v./1000), xt, 'UniformOutput', false));
+    set(ax,'YTickLabel', arrayfun(@(v) sprintf('%g', v./1000), yt, 'UniformOutput', false));
+    % xlabel(ax,'x (km)','FontWeight','bold');
+    ylabel(ax,'y (km)','FontWeight','bold','FontSize',16);
+    
+    % ---- panel letter inside upper-left ----
+    % panel = sprintf('(%c)', 'a'+(idx-1));
+    panel = sprintf('(%c_{%d})','b', panel_idx);
+    text(ax, 0.02, 0.95, panel, 'Units','normalized', ...
+        'FontWeight','bold', 'FontSize', 16, ...
+        'HorizontalAlignment','left', 'VerticalAlignment','top', ...
+        'Color',lightGray);
+    % prevent plotmodel objects appearing in legend
+    set(ax.Children, 'HandleVisibility','off');
 
     % (c..) Assim snapshots
     for idx = 1:nk
@@ -720,15 +1078,43 @@ function plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, e
         [~, ~, md_ens_k] = setup_model_states(k, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
             md_true, md_nurged, md_ens, md);
         data_ens = get_nested_field(md_ens_k, field);
-        label = sprintf('\\bf(%c)', 'b'+idx);
+        % label = sprintf('\\bf(%c)', 'b'+idx);
         plotmodel(md_ens_k,'data',data_ens, ...
-            'title',sprintf('\\bf%s Assimilated %s (after %s years)', label, field_title, fmt_years(label_t)), ...
+            'title',sprintf('after %s years of assimilation', fmt_years(label_t)), ...
             'subplot',[nrows,1,idx+2],'caxis',[cmin cmax],'colorbar','off');
+        ax = gca;
+        ttl = ax.Title;
+        ttl.FontSize   = 10;
+        ttl.FontWeight = 'bold';   % or 'normal'
+        ttl.Interpreter = 'tex';
+        
+        % ---- km axes (ticks shown in km) ----
+        % axs(idx) = ax;
+        axs(idx+2) = ax; 
+        xt = get(ax,'XTick'); yt = get(ax,'YTick');
+        set(ax,'XTickLabel', arrayfun(@(v) sprintf('%g', v./1000), xt, 'UniformOutput', false));
+        set(ax,'YTickLabel', arrayfun(@(v) sprintf('%g', v./1000), yt, 'UniformOutput', false));
+        % xlabel(ax,'x (km)','FontWeight','bold');
+        ylabel(ax,'y (km)','FontWeight','bold','FontSize',16);
+        
+        % ---- panel letter inside upper-left ----
+        % panel = sprintf('(%c)', 'a'+(idx-1));
+        % panel_idx = 2;   % change as needed
+        panel = sprintf('(%c_{%d})','c'+(idx-1), panel_idx);
+        text(ax, 0.02, 0.95, panel, 'Units','normalized', ...
+            'FontWeight','bold', 'FontSize', 16, ...
+            'HorizontalAlignment','left', 'VerticalAlignment','top', ...
+            'Color',lightGray);
+
+     
+        % prevent plotmodel objects appearing in legend
+        set(ax.Children, 'HandleVisibility','off');
     end
 
     % layout (your adaptive spacing)
     axs = flipud(findall(gcf,'Type','axes'));
-    gap = 0.02; top = 0.95; bottom = 0.08;
+    % gap = 0.02; top = 0.95; bottom = 0.08;
+    gap = 0.03; top = 0.96; bottom = 0.08;
     avail = top-bottom - (nrows-1)*gap;
     height = avail/nrows;
 
@@ -738,40 +1124,75 @@ function plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, e
         height = 0.05;
     end
 
+    % for i = 1:nrows
+    %     pos = [0.10, bottom+(nrows-i)*(height+gap), 0.70, height];
+    %     set(axs(i),'Position',pos,'FontWeight','bold','LineWidth',1.2,'Box','on', ...
+    %         'TickDir','out','Layer','top','FontSize',11,'TickLength',[0.005 0.005]);
+    %     ylabel(axs(i),'y (km)','FontWeight','bold');
+    %     if i < nrows, set(axs(i),'XTickLabel',[]);
+    %     else, xlabel(axs(i),'x (km)','FontWeight','bold'); end
+    % end
+
     for i = 1:nrows
-        pos = [0.10, bottom+(nrows-i)*(height+gap), 0.70, height];
-        set(axs(i),'Position',pos,'FontWeight','bold','LineWidth',1.2,'Box','on', ...
-            'TickDir','out','Layer','top','FontSize',11,'TickLength',[0.005 0.005]);
-        ylabel(axs(i),'y (km)','FontWeight','bold');
-        if i < nrows, set(axs(i),'XTickLabel',[]);
-        else, xlabel(axs(i),'x (km)','FontWeight','bold'); end
+        ax = axs(i);
+    
+        % i=1 should be the TOP panel (subplot does this already)
+        % pos = [0.10, bottom+(nrows-i)*(height+gap), 0.70, height];
+        pos = [0.10, bottom+(nrows-i)*(height+gap), 0.9, height];
+        set(ax, 'Position', pos, ...
+        'FontWeight','bold', ...
+        'FontSize',15, ...
+        'Box','on', ...
+        'LineWidth',2.0, ...
+        'TickDir','out', ...
+        'TickLength',[0.004 0.004], ...
+        'XGrid','off', ...
+        'YGrid','off', ...
+        'YMinorGrid','off', ...
+        'XTickMode','manual', ...
+        'YTickMode','manual');
+        ttl = ax.Title;
+        ttl.FontSize   = 15;
+        ttl.FontWeight = 'bold';   % or 'normal'
+        ttl.Interpreter = 'tex';
+        % ---- FORCE tick locations (meters) ----
+        % yt_km = 0:20:80;              % desired ticks in km
+        % yt_m  = yt_km * 1000;         % convert to meters
+        % 
+        % set(ax, ...
+        %     'YTick', yt_m, ...
+        %     'YTickLabel', arrayfun(@num2str, yt_km, 'UniformOutput', false), ...
+        %     'YTickMode','manual');
+        yl = ax.YLim / 1000;  % km
+        step = 40;            % km
+        yt_km = ceil(yl(1)/step)*step : step : floor(yl(2)/step)*step;
+        set(ax,'YTick',yt_km*1000,'YTickLabel',string(yt_km),'YTickMode','manual');
+
+        % same idea for x if needed
+        xt = get(ax,'XLim');
+        xt_km = floor(xt(1)/1000/100)*100 : 100 : ceil(xt(2)/1000/100)*100;
+        set(ax, ...
+            'XTick', xt_km*1000, ...
+            'XTickLabel', arrayfun(@num2str, xt_km, 'UniformOutput', false), ...
+            'XTickMode','manual');
+    
+        ylabel(ax,'y (km)','FontWeight','bold','FontSize',16);
+    
+        if i < nrows
+            set(ax,'XTickLabel',[]);
+        else
+            xlabel(ax,'x (km)','FontWeight','bold','FontSize',16);
+            ax.XLabel.Units = 'normalized';
+            ax.XLabel.Position(2) = -0.33;
+        end
+
     end
 
     for i = 1:nrows, colormap(axs(i), parula); end
-    cb = colorbar(axs(end), 'Position',[colorbar_gap 0.25 0.025 0.45]);
-    ylabel(cb,[field_title units_str],'FontSize',12,'FontWeight','bold');
+    cb = colorbar(axs(end), 'Position',[colorbar_gap 0.25 0.015 0.45]);
+    ylabel(cb,[field_title units_str],'FontSize',15,'FontWeight','bold');
 
     set(gcf,'Color','w');
-
-    % ---- Adaptive shared colorbar ----
-    % for i = 1:nrows
-    %     colormap(axs(i), parula);
-    % end
-    % 
-    % pos_top    = axs(1).Position;
-    % pos_bottom = axs(end).Position;
-    % 
-    % gapx = 0.01;
-    % cb_w = 0.022;
-    % 
-    % cb_x = pos_top(1) + pos_top(3) + gapx;
-    % cb_y = pos_bottom(2);
-    % cb_h = (pos_top(2) + pos_top(4)) - pos_bottom(2);
-    % 
-    % cb = colorbar(axs(end), 'Position', [cb_x cb_y cb_w cb_h]);
-    % ylabel(cb, [field_title units_str], 'FontSize',12,'FontWeight','bold');
-    % 
-    % set(gcf,'Color','w');
 
     % ---- Save figure ----
     fname_base = sprintf('evol_%s', regexprep(field,'\.','_'));
@@ -1286,275 +1707,72 @@ function out = compute_rmse_timeseries_allt(dt, t, model_true_state, model_nurge
     out.mask_grounded = mask_grounded;
 end
 
-function r = rmse_masked(a, b, mask)
+function r = rmse_masked(a, b, mask_na, mask_true)
+    % b is true
     a = a(:); b = b(:);
-    mask = logical(mask(:));
-    good = mask & isfinite(a) & isfinite(b);
+    mask_na = logical(mask_na(:));
+    mask_true = logical(mask_true(:));
+    % good_na = mask_na & isfinite(a) & isfinite(b);
+    % good_true = mask_true & isfinite(a) & isfinite(b);
+    % good = mask_na & isfinite(a) & isfinite(b);
+    good = mask_na & isfinite(a) & isfinite(b);
     if ~any(good)
         r = NaN;
         return;
     end
+    % if ~any(good_true)
+    %     r = NaN;
+    %     return;
+    % end
+    % d = a(good_na) - b(good_true);
     d = a(good) - b(good);
     r = sqrt(mean(d.^2));
 end
 
-function out = compute_rmse_timeseries_(k_array, dt, t, model_true_state, model_nurged_state, ensemble_vec_mean, md_true, md_nurged, md_ens, md, field)
-    % nk = numel(k_array);
-    % 
-    % rmse_no = nan(nk,1);
-    % rmse_as = nan(nk,1);
 
-    nt = size(model_true_state, 2);
-    nt = 330;
-    kvec = 1:nt-1;
+function r = rmse_w(a, b)
+    % b is true
+    a = a(:); b = b(:);
+    d = a - b;
+    r = sqrt(mean(d.^2));
+end
 
-    nk = nt;
-    gl_mid.k_array = k_array(:);
-    gl_mid.x_true = nan(nk,1); gl_mid.y_true = nan(nk,1);
-    gl_mid.x_nurged = nan(nk,1); gl_mid.y_nurged = nan(nk,1);
-    gl_mid.x_ens = nan(nk,1); gl_mid.y_ens = nan(nk,1);
+function r = rmse_masked_pair(a, b, mask_a, mask_b, domain)
+%RMSE_MASKED_PAIR RMSE between a and b on a chosen mask domain.
+% domain: 'a' | 'b' | 'intersection'
 
-    dist.no = nan(nk,1); dist.as = nan(nk,1);
-
-    % gl_mid.k_to_idx = containers.Map('KeyType','double','ValueType','double');
-
-    % contour grid resolution (match your GL plot)
-    Nx = 420; Ny = 70;
-
-    rmse_h_no = nan(nt,1); rmse_h_as = nan(nt,1);
-    rmse_vel_no = nan(nt,1); rmse_vel_as = nan(nt,1);
-    rmse_c_no = nan(nt,1); rmse_c_as = nan(nt,1);
-    rmse_gl_no = nan(nt,1); rmse_gl_as = nan(nt,1);
-
-%     t_obs_end = 21;                 % years
-%     k_end = find(t >= t_obs_end, 1, 'first');
-
-    k_last = 106;  % last saved analysis (t=21)
-
-    [md_true_last, md_nurged_last, md_ens_last] = setup_model_states(k_last, dt, ...
-        model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md);
-
-    % grounded criterion consistent with your definition phi = H + bed/di:
-    mask_grounded_last = (md_true_last.mask.ocean_levelset > 0);
-
-    % ice-present (since you don’t update ice_levelset reliably):
-    mask_ice_last = (md_true_last.geometry.thickness > 0);
-
-    mask_eval = mask_grounded_last & mask_ice_last;
-    pos_eval = find(mask_eval);
-
-    % gl_mid = compute_gl_midpoints( ...
-    % k_array, dt, ...
-    % model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    % md_true, md_nurged, md_ens, md);
-
-
-    % for idx = 1:nk
-    %     k = k_array(idx);
-     for k = kvec
-
-        [md_true_k, md_nurged_k, md_ens_k] = setup_model_states(k, dt, ...
-            model_true_state, model_nurged_state, ensemble_vec_mean, ...
-            md_true, md_nurged, md_ens, md);
-
-        % for kf=1:2
-        % thickness ---------------------------------------- 
-        data_true = get_nested_field(md_true_k, 'geometry.thickness');
-        data_nurged = get_nested_field(md_nurged_k, 'geometry.thickness');
-        data_ens = get_nested_field(md_ens_k, 'geometry.thickness');
-
-        % compute only at grounded ice regions only
-       % grounded if ocean_levelset > 0 (consistent with your grounded_mask_from_state)
-        g_true   = (md_true_k.mask.ocean_levelset   > 0);
-        g_nurged = (md_nurged_k.mask.ocean_levelset > 0);
-        g_ens    = (md_ens_k.mask.ocean_levelset    > 0);
-
-        % ice-present mask: thickness > 0 (more reliable than ice_levelset here)
-        ice_true   = (md_true_k.geometry.thickness   > 0);
-        ice_nurged = (md_nurged_k.geometry.thickness > 0);
-        ice_ens    = (md_ens_k.geometry.thickness    > 0);
-
-        % data_nurged = data_nurged(pos); data_true = data_true(pos);
-        % data_ens = data_ens(pos);
-        % 
-        % % RMSE
-        e_no = data_nurged - data_true;
-        e_as = data_ens    - data_true;
-
-        rmse_h_no(k) = sqrt(mean(e_no.^2, 'omitnan'));
-        rmse_h_as(k) = sqrt(mean(e_as.^2, 'omitnan'));
-        % posH = find(g_true & ice_true);  % reference mask (true grounded ice)
-        % H_true   = md_true_k.geometry.thickness(posH);
-        % H_nurged = md_nurged_k.geometry.thickness(posH);
-        % H_ens    = md_ens_k.geometry.thickness(posH);
-        % 
-        % rmse_h_no(k) = sqrt(mean((H_nurged - H_true).^2, 'omitnan'));
-        % rmse_h_as(k) = sqrt(mean((H_ens   - H_true).^2, 'omitnan'));
-
-        % velocity ---------------------------------------- 
-        gf_true   = (md_true_k.mask.ocean_levelset   < 0);
-        gf_nurged = (md_nurged_k.mask.ocean_levelset < 0);
-        gf_ens    = (md_ens_k.mask.ocean_levelset    < 0);
-
-        % RMSE
-        posv = find(gf_true & ice_true);
-        v_true   = md_true_k.initialization.vel(posv);
-        v_nurged = md_nurged_k.initialization.vel(posv);
-        v_ens    = md_ens_k.initialization.vel(posv);
-        e_no = v_nurged - v_true;
-        e_as = v_ens    - v_true;
-
-        rmse_vel_no(k) = sqrt(mean(e_no.^2, 'omitnan'));
-        rmse_vel_as(k) = sqrt(mean(e_as.^2, 'omitnan'));
-
-        % v_true   = md_true_k.initialization.vel;
-        % v_nurged = md_nurged_k.initialization.vel;
-        % v_ens    = md_ens_k.initialization.vel;
-        % 
-        % pos_no = find(gf_true & gf_nurged & ice_true & ice_nurged);
-        % pos_as = find(gf_true & gf_ens    & ice_true & ice_ens);
-        % 
-        % rmse_vel_no(k) = sqrt(mean((v_nurged(pos_no) - v_true(pos_no)).^2, 'omitnan'));
-        % rmse_vel_as(k) = sqrt(mean((v_ens(pos_as)    - v_true(pos_as)).^2, 'omitnan'));
-
-        % fricition coefficient ---------------------------------------- 
-        C_true   = md_true_k.friction.coefficient;
-        C_nurged = md_nurged_k.friction.coefficient;
-        C_ens    = md_ens_k.friction.coefficient;
-
-        pos_no = find(g_true & g_nurged & ice_true & ice_nurged);
-        pos_as = find(g_true & g_ens    & ice_true & ice_ens);
-        % pos_no = find(g_true & ice_true);
-        % pos_as = find(g_true   & ice_true );
-
-        rmse_c_no(k) = sqrt(mean((C_nurged(pos_no) - C_true(pos_no)).^2, 'omitnan'));
-        % rmse_c_no(k) = sqrt(mean((C_nurged(pos_eval) - C_true(pos_eval)).^2, 'omitnan'));
-        % rmse_c_as(k) = sqrt(mean((C_ens(pos_eval) - C_true(pos_eval)).^2, 'omitnan'));
-        % if k > k_last
-            % rmse_c_as(k) = sqrt(mean((C_ens(pos_eval) - C_true(pos_eval)).^2, 'omitnan'));
-        % else
-            rmse_c_as(k) = sqrt(mean((C_ens(pos_as)    - C_true(pos_as)).^2, 'omitnan'));
-        % end
-
-        % Grounding line position ---------------------------------------- 
-        x = md_true_k.mesh.x(:);
-        y = md_true_k.mesh.y(:);
-        phi_true = md_true_k.mask.ocean_levelset(:);
-        phi_nurged = md_nurged_k.mask.ocean_levelset(:);
-        phi_ens = md_ens_k.mask.ocean_levelset(:);
-
-        xg = linspace(min(x), max(x), Nx);
-        yg = linspace(min(y), max(y), Ny);
-        [Xg, Yg] = meshgrid(xg, yg);
-
-        F_true = scatteredInterpolant(x, y, phi_true, 'linear', 'nearest');
-        F_nurged = scatteredInterpolant(x, y, phi_nurged, 'linear', 'nearest');
-        F_ens = scatteredInterpolant(x, y, phi_ens, 'linear', 'nearest');
-        Phi_t = F_true(Xg, Yg);
-        Phi_n = F_nurged(Xg, Yg);
-        Phi_e = F_ens(Xg, Yg);
-
-        y_center = 0.5*(min(y) + max(y));  % channel centerline
-        [xct, yct] = gl_centerline_point_from_levelset_grid(Xg, Yg, Phi_t, y_center);
-        [xcn, ycn] = gl_centerline_point_from_levelset_grid(Xg, Yg, Phi_n, y_center);
-        [xce, yce] = gl_centerline_point_from_levelset_grid(Xg, Yg, Phi_e, y_center);
-        idx=k;
-        gl_mid.x_true(idx) = xct; gl_mid.y_true(idx) = yct;
-        gl_mid.x_nurged(idx) = xcn; gl_mid.y_nurged(idx) = ycn;
-        gl_mid.x_ens(idx) = xce; gl_mid.y_ens(idx) = yce;
-
-        % distance
-        dist.no(idx) = abs(xct-xcn);
-        dist.as(idx) = abs(xct - xce);
-
+    if nargin < 5 || isempty(domain)
+        domain = 'c';
     end
 
-    % out.rmse_no = rmse_no;
-    % out.rmse_as = rmse_as;
-    out.k = kvec(:);
-    out.time = t(1:nt);
+    a = a(:); b = b(:);
+    mask_a = logical(mask_a(:));
+    mask_b = logical(mask_b(:));
 
-    figure('Position',[200 200 1100 900]); clf;
-    % Thickness
-    subplot(4,1,1);
-    plot(out.time, rmse_h_no, 'k-', 'LineWidth',1.5); hold on
-    plot(out.time, rmse_h_as, 'b-', 'LineWidth',1.5); hold off
-    grid on
-    % xlabel('Time (years)','FontWeight','bold')
-    ylabel('RMSE','FontWeight','bold')
-    title(sprintf('\\bfThickness'), 'Interpreter','tex')
-    legend({'No assimilation','Assimilated'}, 'Location','best')
+    switch lower(domain)
+        case 'a'
+            % mask_size = size(mask_a);
+            good = mask_a & isfinite(a) & isfinite(b);
+            % good = mask_a;
+        case 'b'
+            good = mask_b & isfinite(a) & isfinite(b);
+            % good = mask_b;
+        case 'c'
+            % good = (mask_a & mask_b) & isfinite(a) & isfinite(b);
+            good = mask_a & mask_b;
+        otherwise
+            error('domain must be ''a'', ''b'', or ''c''.');
+    end
 
-    % Velocity
-    subplot(4,1,2);
-    plot(out.time, rmse_vel_no, 'k-', 'LineWidth',1.5); hold on
-    plot(out.time, rmse_vel_as, 'b-', 'LineWidth',1.5); hold off
-    grid on
-    % xlabel('Time (years)','FontWeight','bold')
-    ylabel('RMSE','FontWeight','bold')
-    title(sprintf('\\bfVelocity'), 'Interpreter','tex')
-    legend({'No assimilation','Assimilated'}, 'Location','best')
+    if ~any(good)
+        r = NaN;
+        return;
+    end
 
-    % Friction
-    subplot(4,1,3);
-    plot(out.time, rmse_c_no, 'k-', 'LineWidth',1.5); hold on
-    plot(out.time, rmse_c_as, 'b-', 'LineWidth',1.5); hold off
-    grid on
-    % xlabel('Time (years)','FontWeight','bold')
-    ylabel('RMSE','FontWeight','bold')
-    title(sprintf('\\bfFriction Coefficient'), 'Interpreter','tex')
-    legend({'No assimilation','Assimilated'}, 'Location','best')
-
-    subplot(4,1,4);
-    plot(out.time, dist.no, 'k-', 'LineWidth',1.5); hold on
-    plot(out.time, dist.as, 'b-', 'LineWidth',1.5); hold off
-    grid on; xlabel('Time (years)','FontWeight','bold');
-    ylabel('|Δx| (m)','FontWeight','bold');
-    title('\bfAbsolute distance between GL “star” positions (centerline)','Interpreter','tex');
-    legend({'No assimilation','Assimilated'}, 'Location','best');
-
-   % set(findall(gcf,'Type','axes'), 'FontWeight','bold');
-   set(findall(gcf,'Type','axes'), ...
-    'FontWeight','bold', ...
-    'LineWidth',1.2, ...
-    'TickDir','out');
+    d = a(good) - b(good);
+    r = sqrt(mean(d.^2));
 end
-% 
 
-function plot_rmse_timeseries(out)
-    figure('Position',[100 100 1100 700]); clf;
-
-    % Thickness
-    subplot(2,2,1);
-    plot(out.time_years, out.rmse_h_no, 'k-', 'LineWidth',1.5); hold on
-    plot(out.time_years, out.rmse_h_as, 'b-', 'LineWidth',1.5);
-    grid on; title('Thickness RMSE');
-    xlabel('Time (years)'); ylabel('RMSE(h) (m)');
-    legend('No-assim','Assim','Location','best');
-
-    % Velocity
-    subplot(2,2,2);
-    plot(out.time_years, out.rmse_u_no, 'k-', 'LineWidth',1.5); hold on
-    plot(out.time_years, out.rmse_u_as, 'b-', 'LineWidth',1.5);
-    grid on; title('Velocity RMSE');
-    xlabel('Time (years)'); ylabel('RMSE(|u|)');
-    legend('No-assim','Assim','Location','best');
-
-    % Friction
-    subplot(2,2,3);
-    plot(out.time_years, out.rmse_c_no, 'k-', 'LineWidth',1.5); hold on
-    plot(out.time_years, out.rmse_c_as, 'b-', 'LineWidth',1.5);
-    grid on; title('Friction RMSE (grounded-only)');
-    xlabel('Time (years)'); ylabel('RMSE(C)');
-    legend('No-assim','Assim','Location','best');
-
-    % Reserved
-    subplot(2,2,4);
-    axis off;
-    text(0.5,0.5,'(Reserved) GL-center RMSE','HorizontalAlignment','center','FontWeight','bold');
-end
-% 
 
 function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_nurged_state, ensemble_vec_mean, md_true, md_nurged, md_ens, md, field)
 % compute_rmse_timeseries
@@ -1568,8 +1786,6 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
 % - Uses TRUE mask as the reference domain each time step (matches “RMSE at the stars” idea).
 % - Uses the same centerline GL point you use for plotting (via levelset=0 crossing).
 % - `field` kept for API compatibility (not used here, since you plot 4 panels anyway).
-
-    %#ok<NASGU> % field is intentionally unused, keep signature compatible
 
     % -------------------------------
     % Time / step indexing
@@ -1598,6 +1814,16 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     rmse_h_no   = nan(nk,1);  rmse_h_as   = nan(nk,1);
     rmse_vel_no = nan(nk,1);  rmse_vel_as = nan(nk,1);
     rmse_c_no   = nan(nk,1);  rmse_c_as   = nan(nk,1);
+
+    % grounded ice only exluding grounding line (x<=300km)
+    rmse_h_no_g   = nan(nk,1);  rmse_h_as_g   = nan(nk,1);
+    rmse_vel_no_g = nan(nk,1);  rmse_vel_as_g = nan(nk,1);
+    rmse_c_no_g   = nan(nk,1);  rmse_c_as_g   = nan(nk,1);
+
+    % whole domain
+    rmse_h_no_w   = nan(nk,1);  rmse_h_as_w   = nan(nk,1);
+    rmse_vel_no_w = nan(nk,1);  rmse_vel_as_w = nan(nk,1);
+    rmse_c_no_w   = nan(nk,1);  rmse_c_as_w   = nan(nk,1);
 
     gl_mid.k         = kvec(:);
     gl_mid.x_true    = nan(nk,1); gl_mid.y_true    = nan(nk,1);
@@ -1628,6 +1854,46 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
 
     y_center = 0.5*(min(y) + max(y));  % channel centerline
 
+    % freeze the reference mask:
+    % pick the index corresponding to year 24
+    % k_obs_end = find(abs(t - 24.0) == min(abs(t - 24.0)), 1);
+     k_end =k_array(end);
+
+     [md_true_end, md_nurged_end, md_ens_end] = setup_model_states(k_end, dt, ...
+            model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md);
+
+    x = md_true_end.mesh.x;
+    pos_g = find(x<=300e3);
+    
+    % --- Per-state masks (TRUE / NURGED / ENS) ---
+    H_true = md_true_end.geometry.thickness(:);
+    H_n    = md_nurged_end.geometry.thickness(:);
+    H_e    = md_ens_end.geometry.thickness(:);
+    
+    %
+    g_true = (md_true_end.mask.ocean_levelset(:)   > 0);
+    g_n    = (md_nurged_end.mask.ocean_levelset(:) > 0);
+    g_e    = (md_ens_end.mask.ocean_levelset(:)    > 0);
+
+    % 
+    ice_true = (H_true > 0);
+    ice_n    = (H_n    > 0);
+    ice_e    = (H_e    > 0);
+    
+    % grounded without GL
+    g_trueg = (md_true_end.mask.ocean_levelset(pos_g)   > 0);
+    g_ng    = (md_nurged_end.mask.ocean_levelset(pos_g) > 0);
+    g_eg    = (md_ens_end.mask.ocean_levelset(pos_g)    > 0);
+
+    H_trueg = md_true_end.geometry.thickness(pos_g);
+    H_ng    = md_nurged_end.geometry.thickness(pos_g);
+    H_eg    = md_ens_end.geometry.thickness(pos_g);
+    
+    ice_trueg = (H_trueg > 0);
+    ice_ng    = (H_ng    > 0);
+    ice_eg    = (H_eg    > 0);
+        
     % -------------------------------
     % Main loop
     % -------------------------------
@@ -1639,49 +1905,85 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
             md_true, md_nurged, md_ens, md);
 
         % --- Per-state masks (TRUE / NURGED / ENS) ---
-        H_true = md_true_k.geometry.thickness(:);
-        H_n    = md_nurged_k.geometry.thickness(:);
-        H_e    = md_ens_k.geometry.thickness(:);
-        
-        g_true = (md_true_k.mask.ocean_levelset(:)   > 0);
-        g_n    = (md_nurged_k.mask.ocean_levelset(:) > 0);
-        g_e    = (md_ens_k.mask.ocean_levelset(:)    > 0);
-        
-        f_true = (md_true_k.mask.ocean_levelset(:)   < 0);
-        f_n    = (md_nurged_k.mask.ocean_levelset(:) < 0);
-        f_e    = (md_ens_k.mask.ocean_levelset(:)    < 0);
-        
-        ice_true = (H_true > 0);
-        ice_n    = (H_n    > 0);
-        ice_e    = (H_e    > 0);
+        % H_true = md_true_k.geometry.thickness(:);
+        % H_n    = md_nurged_k.geometry.thickness(:);
+        % H_e    = md_ens_k.geometry.thickness(:);
+        % % 
+        % g_true = (md_true_k.mask.ocean_levelset(:)   > 0);
+        % g_n    = (md_nurged_k.mask.ocean_levelset(:) > 0);
+        % g_e    = (md_ens_k.mask.ocean_levelset(:)    > 0);
+        % 
+        % f_true = (md_true_k.mask.ocean_levelset(:)   < 0);
+        % f_n    = (md_nurged_k.mask.ocean_levelset(:) < 0);
+        % f_e    = (md_ens_k.mask.ocean_levelset(:)    < 0);
+        % % 
+        % ice_true = (H_true > 0);
+        % ice_n    = (H_n    > 0);
+        % ice_e    = (H_e    > 0);
         
         % --- Evaluation domains (INTERSECTION) ---
         % Thickness + friction: grounded ice intersection
-        mask_grounded_no = g_true & g_n & ice_true & ice_n;   % true ∩ nurged
-        mask_grounded_as = g_true & g_e & ice_true & ice_e;   % true ∩ ens
-        
-        % Velocity: floating ice intersection
-        mask_floating_no = f_true & f_n & ice_true & ice_n;
-        mask_floating_as = f_true & f_e & ice_true & ice_e;
+        % mask_grounded_no = g_true & g_n & ice_true & ice_n;   % true ∩ nurged
+        % mask_grounded_as = g_true & g_e & ice_true & ice_e;   % true ∩ ens
+        mask_grounded_no = g_n & ice_n; 
+        mask_grounded_as = g_e & ice_e;
+        mask_grounded_true = g_true & ice_true;
+
+        mask_grounded_no_c = g_n & ice_n; 
+        mask_grounded_as_c = g_e & ice_e;
+        mask_grounded_true_c = g_true & ice_true;
+
+        % mask grounded exluding GL
+        mask_grounded_nog = g_ng & ice_ng; 
+        mask_grounded_asg = g_eg & ice_eg;
+        mask_grounded_trueg = g_trueg & ice_trueg;
+
+        % % Velocity: floating ice intersection
+        % mask_floating_no = f_true & f_n & ice_true & ice_n;
+        % mask_floating_as = f_true & f_e & ice_true & ice_e;
 
         % ============================================================
         % (1) Thickness RMSE on TRUE grounded ice
         % ============================================================
+        H_true = md_true_k.geometry.thickness(:);
         H_nurged = md_nurged_k.geometry.thickness(:);
         H_ens    = md_ens_k.geometry.thickness(:);
 
-        rmse_h_no(ii) = rmse_masked(H_nurged, H_true, mask_grounded_no);
-        rmse_h_as(ii) = rmse_masked(H_ens,    H_true, mask_grounded_as);
+        % rmse_h_no(ii) = rmse_masked(H_nurged, H_true, mask_grounded_no, mask_grounded_true);
+        % rmse_h_as(ii) = rmse_masked(H_ens,    H_true, mask_grounded_as, mask_grounded_true);
+        rmse_h_no(ii) = rmse_masked_pair(H_nurged, H_true, mask_grounded_no, mask_grounded_true,'b');
+        rmse_h_as(ii) = rmse_masked_pair(H_ens,    H_true, mask_grounded_as, mask_grounded_true,'b');
+        
+        % H_nurgedg = md_nurged_k.geometry.thickness(pos_g); H_ensg    = md_ens_k.geometry.thickness(pos_g); 
+        % H_trueg = md_true_k.geometry.thickness(pos_g);
+        rmse_h_no_g(ii) = rmse_masked_pair(H_nurged(pos_g), H_true(pos_g), mask_grounded_no(pos_g), mask_grounded_true(pos_g),'b');
+        rmse_h_as_g(ii) = rmse_masked_pair(H_ens(pos_g),    H_true(pos_g), mask_grounded_as(pos_g), mask_grounded_true(pos_g),'b');
+
+        rmse_h_no_w(ii) = rmse_w(H_nurged, H_true);
+        rmse_h_as_w(ii) = rmse_w(H_ens,    H_true);
 
         % ============================================================
         % (2) Velocity RMSE on TRUE floating ice
         % ============================================================
-        v_true   = md_true_k.initialization.vel(:);
-        v_nurged = md_nurged_k.initialization.vel(:);
-        v_ens    = md_ens_k.initialization.vel(:);
+        V_true   = md_true_k.initialization.vel(:);
+        V_nurged = md_nurged_k.initialization.vel(:);
+        V_ens    = md_ens_k.initialization.vel(:);
         
-        rmse_vel_no(ii) = rmse_masked(v_nurged, v_true, mask_floating_no);
-        rmse_vel_as(ii) = rmse_masked(v_ens,    v_true, mask_floating_as);
+        % rmse_vel_no(ii) = rmse_masked(v_nurged, v_true, mask_floating_no);
+        % rmse_vel_as(ii) = rmse_masked(v_ens,    v_true, mask_floating_as);
+        % rmse_vel_no(ii) = rmse_masked(v_nurged, v_true, mask_grounded_no, mask_grounded_true);
+        % rmse_vel_as(ii) = rmse_masked(v_ens,    v_true, mask_grounded_as, mask_grounded_true);
+        rmse_vel_no(ii) = rmse_masked_pair(V_nurged, V_true, mask_grounded_no, mask_grounded_true,'b');
+        rmse_vel_as(ii) = rmse_masked_pair(V_ens,    V_true, mask_grounded_as, mask_grounded_true,'b');
+        
+        % v_nurgedg = md_nurged_k.initialization.vel(pos_g); v_ensg    = md_ens_k.initialization.vel(pos_g);
+        % V_trueg   = md_true_k.initialization.vel(pos_g);
+        rmse_vel_no_g(ii) = rmse_masked_pair(V_nurged(pos_g), V_true(pos_g), mask_grounded_no(pos_g), mask_grounded_true(pos_g),'b');
+        rmse_vel_as_g(ii) = rmse_masked_pair(V_ens(pos_g),    V_true(pos_g), mask_grounded_as(pos_g), mask_grounded_true(pos_g),'b');
+
+        rmse_vel_no_w(ii) = rmse_w(V_nurged, V_true);
+        rmse_vel_as_w(ii) = rmse_w(V_ens,    V_true);
+
 
         % ============================================================
         % (3) Friction coefficient RMSE on TRUE grounded ice
@@ -1690,8 +1992,18 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
         C_nurged = md_nurged_k.friction.coefficient(:);
         C_ens    = md_ens_k.friction.coefficient(:);
 
-        rmse_c_no(ii) = rmse_masked(C_nurged, C_true, mask_grounded_no);
-        rmse_c_as(ii) = rmse_masked(C_ens,    C_true, mask_grounded_as);
+        % rmse_c_no(ii) = rmse_masked(C_nurged, C_true, mask_grounded_no, mask_grounded_true);
+        % rmse_c_as(ii) = rmse_masked(C_ens,    C_true, mask_grounded_as, mask_grounded_true);
+        rmse_c_no(ii) = rmse_masked_pair(C_nurged, C_true,  mask_grounded_no_c, mask_grounded_true_c,'b');
+        rmse_c_as(ii) = rmse_masked_pair(C_ens,    C_true, mask_grounded_as_c, mask_grounded_true_c,'b');
+        
+        % C_nurgedg = md_nurged_k.friction.coefficient(pos_g); C_ensg    = md_ens_k.friction.coefficient(pos_g);
+        % C_trueg   = md_true_k.friction.coefficient(pos_g);
+        rmse_c_no_g(ii) = rmse_masked_pair(C_nurged(pos_g), C_true(pos_g),  mask_grounded_no(pos_g), mask_grounded_true(pos_g),'b');
+        rmse_c_as_g(ii) = rmse_masked_pair(C_ens(pos_g),    C_true(pos_g), mask_grounded_as(pos_g), mask_grounded_true(pos_g),'b');
+
+        rmse_c_no_w(ii) = rmse_w(C_nurged, C_true);
+        rmse_c_as_w(ii) = rmse_w(C_ens,    C_true);
 
         % ============================================================
         % (4) Grounding line centerline “star distance”
@@ -1747,57 +2059,172 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     out.k          = kvec(:);
     out.time       = time_vec(:);
 
-    out.rmse_h_no   = rmse_h_no;
-    out.rmse_h_as   = rmse_h_as;
-    out.rmse_vel_no = rmse_vel_no;
-    out.rmse_vel_as = rmse_vel_as;
-    out.rmse_c_no   = rmse_c_no;
-    out.rmse_c_as   = rmse_c_as;
+    out.rmse_h_no   = rmse_h_no; out.rmse_h_as   = rmse_h_as;
+    out.rmse_h_no_g   = rmse_h_no_g; out.rmse_h_as_g   = rmse_h_as_g;
+    out.rmse_h_no_w   = rmse_h_no_w; out.rmse_h_as_w   = rmse_h_as_w;
+
+
+    out.rmse_vel_no = rmse_vel_no; out.rmse_vel_as = rmse_vel_as;
+    out.rmse_vel_no_g = rmse_vel_no_g; out.rmse_vel_as_g = rmse_vel_as_g;
+    out.rmse_vel_no_w = rmse_vel_no_w; out.rmse_vel_as_w = rmse_vel_as_w;
+
+    out.rmse_c_no   = rmse_c_no; out.rmse_c_as   = rmse_c_as;
+    out.rmse_c_no_g   = rmse_c_no_g; out.rmse_c_as_g   = rmse_c_as_g;
+    out.rmse_c_no_w   = rmse_c_no_w; out.rmse_c_as_w   = rmse_c_as_w;
 
     out.gl_mid      = gl_mid;
     out.dist_no     = dist_no;
     out.dist_as     = dist_as;
 
     % -------------------------------
-    % Plot (matches your 4-panel figure)
-    % -------------------------------
     figure('Position',[200 200 1100 900]); clf;
-
-    subplot(4,1,1);
-    plot(out.time, out.rmse_h_no, 'r-', 'LineWidth',1.5); hold on
-    plot(out.time, out.rmse_h_as, 'b-', 'LineWidth',1.5); hold off
-    grid on; ylabel('RMSE','FontWeight','bold');
-    title('\bfThickness (grounded ice)','Interpreter','tex');
-    legend({'No assimilation','Assimilated'}, 'Location','best');
-
-    subplot(4,1,2);
-    plot(out.time, out.rmse_vel_no, 'r-', 'LineWidth',1.5); hold on
-    plot(out.time, out.rmse_vel_as, 'b-', 'LineWidth',1.5); hold off
-    grid on; ylabel('RMSE','FontWeight','bold');
-    title('\bfVelocity (floating ice)','Interpreter','tex');
-    legend({'No assimilation','Assimilated'}, 'Location','best');
-
-    subplot(4,1,3);
-    plot(out.time, out.rmse_c_no, 'r-', 'LineWidth',1.5); hold on
-    plot(out.time, out.rmse_c_as, 'b-', 'LineWidth',1.5); hold off
-    grid on; ylabel('RMSE','FontWeight','bold');
-    title('\bfFriction coefficient (grounded ice)','Interpreter','tex');
-    legend({'No assimilation','Assimilated'}, 'Location','best');
-
-    ax4 = subplot(4,1,4);
-    plot(out.time, out.dist_no, 'r-', 'LineWidth',1.5); hold on
-    plot(out.time, out.dist_as, 'b-', 'LineWidth',1.5); hold off
-    grid on; xlabel('Time (years)','FontWeight','bold');
-    ylabel('|Δx| (m)','FontWeight','bold');
-    title('\bfAbsolute distance between GL “star” positions (centerline)','Interpreter','tex');
-    legend({'No assimilation','Assimilated'}, 'Location','best');
-    ylim(ax4, [-1e4,6e4]);
-
-   set(findall(gcf,'Type','axes'), 'FontWeight','bold');
-   % set(findall(gcf,'Type','axes'), ...
-   %  'FontWeight','bold', ...
-   %  'LineWidth',1.2, ...
-   %  'TickDir','out');
+    
+    fs_axis   = 15;
+    fs_label  = 17;
+    fs_title  = 16;
+    fs_legend = 14;
+    
+    % Assimilation times: year 2 to 24 every 2 years
+    assim_times = 2:2:24;
+    
+    orange = [0.85 0.325 0.098];
+    
+    % ---- Create tiledlayout with extra padding for legend space ----
+    tl = tiledlayout(4,1, 'TileSpacing','compact', 'Padding','loose');
+    
+    % ---------------- (a) Thickness ----------------
+    ax1 = nexttile(tl,1);
+    h1 = plot(out.time, out.rmse_h_no,   'r-', 'LineWidth',2.5); hold on
+    h2 = plot(out.time, out.rmse_h_as,   'r:', 'LineWidth',2.5); 
+    h3 = plot(out.time, out.rmse_h_no_g, 'b-', 'LineWidth',2.5); 
+    h4 = plot(out.time, out.rmse_h_as_g, 'b:', 'LineWidth',2.5); 
+    h5 = plot(out.time, out.rmse_h_no_w, 'c-', 'LineWidth',2.5); 
+    h6 = plot(out.time, out.rmse_h_as_w, 'c:', 'LineWidth',2.5); hold off
+    
+    ylabel('RMSE (m)','FontWeight','bold','FontSize',fs_label);
+    title('Thickness','FontWeight','bold','FontSize',fs_title);
+    ylim([-0.5,410]); xlim([-1.5,50])
+    
+    text(ax1,0.01,0.93,'(a)','Units','normalized', ...
+        'FontWeight','bold','FontSize',fs_title, ...
+        'HorizontalAlignment','left','VerticalAlignment','top');
+    
+    % ---------------- (b) Velocity ----------------
+    ax2 = nexttile(tl,2);
+    plot(out.time, out.rmse_vel_no, 'r-', 'LineWidth',2.5); hold on
+    plot(out.time, out.rmse_vel_as, 'r:', 'LineWidth',2.5);
+    plot(out.time, out.rmse_vel_no_g, 'b-', 'LineWidth',2.5); 
+    plot(out.time, out.rmse_vel_as_g, 'b:', 'LineWidth',2.5); 
+    plot(out.time, out.rmse_vel_no_w, 'c-', 'LineWidth',2.5); 
+    plot(out.time, out.rmse_vel_as_w, 'c:', 'LineWidth',2.5); hold off
+    
+    ylabel('RMSE (m/yr)','FontWeight','bold','FontSize',fs_label);
+    title('Velocity','FontWeight','bold','FontSize',fs_title);
+    ylim([-20,750]); xlim([-1.5,50])
+    
+    text(ax2,0.01,0.93,'(b)','Units','normalized', ...
+        'FontWeight','bold','FontSize',fs_title, ...
+        'HorizontalAlignment','left','VerticalAlignment','top');
+    
+    % ---------------- (c) Friction ----------------
+    ax3 = nexttile(tl,3);
+    plot(out.time, out.rmse_c_no, 'r-', 'LineWidth',2.5); hold on
+    plot(out.time, out.rmse_c_as, 'r:', 'LineWidth',2.5); 
+    plot(out.time, out.rmse_c_no_g, 'b-', 'LineWidth',2.5); 
+    plot(out.time, out.rmse_c_as_g, 'b:', 'LineWidth',2.5); 
+    % plot(out.time, out.rmse_c_no_w, 'g-', 'LineWidth',2.5); 
+    % plot(out.time, out.rmse_c_as_w, 'm-', 'LineWidth',2.5); hold off
+    
+    
+    ylabel('RMSE (Pa m^{-1/3} yr^{-1/3})','FontWeight','bold','FontSize',fs_label);
+    title('Friction coefficient','FontWeight','bold','FontSize',fs_title);
+    ylim([200,900]); xlim([-1.5,50])
+    
+    text(ax3,0.01,0.93,'(c)','Units','normalized', ...
+        'FontWeight','bold','FontSize',fs_title, ...
+        'HorizontalAlignment','left','VerticalAlignment','top');
+    
+    % ---------------- (d) GL distance ----------------
+    ax4 = nexttile(tl,4);
+    plot(out.time, out.dist_no./1000, 'r-', 'LineWidth',2.5); hold on
+    plot(out.time, out.dist_as./1000, 'b-', 'LineWidth',2.5); hold off
+    
+    % xlabel('Time (years)','FontWeight','bold','FontSize',fs_label);
+    ylabel('|Δx| (km)','FontWeight','bold','FontSize',fs_label);
+    title('Absolute distance between GL positions along the centerline', ...
+          'FontWeight','bold','FontSize',fs_title);
+    ylim([-1e4/1000,4e4/1000]); xlim([-1.5,50])
+    
+    text(ax4,0.01,0.93,'(d)','Units','normalized', ...
+        'FontWeight','bold','FontSize',fs_title, ...
+        'HorizontalAlignment','left','VerticalAlignment','top');
+    
+    % ---------------- Global axes style ----------------
+    axs = [ax1 ax2 ax3 ax4];
+    set(axs, ...
+        'FontWeight','bold', ...
+        'FontSize',fs_axis, ...
+        'Box','on', ...
+        'LineWidth',2.0, ...
+        'TickDir','out', ...
+        'TickLength',[0.004 0.004], ...
+        'XGrid','off', ...
+        'YGrid','on', ...
+        'YMinorGrid','off');
+    
+    % ---------------- Vertical assimilation lines (thin dotted) -------------
+    for ax = axs
+        hold(ax,'on')
+        for t = assim_times
+            xl = xline(ax, t, ':', ...
+                'Color',[0.1 0.1 0.1], ...
+                'LineWidth',1.8);
+            xl.HandleVisibility = 'off';
+            xl.Annotation.LegendInformation.IconDisplayStyle = 'off';
+        end
+        hold(ax,'off')
+    end
+    
+    % ---------------- Shared legend (reserve space + place it) --------------
+    % Create legend from the thickness handles only (6 entries)
+    lgd = legend(ax1, [h1 h2 h3 h4 h5 h6], ...
+        {'No assimilation (grounded)', ...
+         'Assimilated (grounded)', ...
+         'No assimilation (grounded excluding GL)', ...
+         'Assimilated (grounded excluding GL)', ...
+         'No assimilation (whole domain)', ...
+         'Assimilated (whole domain)'}, ...
+        'FontSize',fs_legend, ...
+        'Box','off', ...
+        'Orientation','horizontal', ...
+        'NumColumns', 3);     % <-- 6 items -> 3 columns => 2 rows
+    
+    lgd.ItemTokenSize = [16 8];
+    lgd.Units = 'normalized';
+    
+    % --- Reserve a bottom strip for the legend by shrinking tile area ---
+    tl.Units = 'normalized';
+    tlPos = tl.OuterPosition;            % [x y w h] normalized
+    legendStrip = 0.003;                  % <-- bigger strip for 2 rows
+    tl.OuterPosition = [tlPos(1) tlPos(2)+legendStrip tlPos(3) tlPos(4)-legendStrip];
+    
+    % Make sure layout is finalized before positioning legend
+    drawnow;
+    
+    % --- Place legend centered inside the reserved bottom strip ---
+    lgdPos = lgd.Position;               % [x y w h]
+    lgdPos(1) = 0.5 - lgdPos(3)/2;       % center horizontally
+    lgdPos(2) = 0.02;                    % inside bottom margin (raised a bit)
+    lgd.Position = lgdPos;
+    
+    % % Optional safety: if legend is too wide, shrink a little
+    % if lgd.Position(1) < 0.01
+    %     lgd.Position(1) = 0.01;
+    % end
+    % if lgd.Position(1) + lgd.Position(3) > 0.99
+    %     lgd.Position(1) = 0.99 - lgd.Position(3);
+    % end
+    xlabel(tl,'Time (years)','FontWeight','bold','FontSize',fs_label);
 
     % ---- Save figure (300 dpi) ----
     % Use folder relative to THIS script (not MATLAB's current folder)
@@ -1992,8 +2419,8 @@ function overlay_gl_window_points(ax, md_true_k, md_nurged_k, md_ens_k, gl_mid_k
     % end
 
     % center marker
-    plot(ax, xc, yc, 'wo', 'MarkerFaceColor','w', ...
-        'MarkerSize',6,'LineWidth',1.5,'HandleVisibility','on');
+    plot(ax, xc, yc, 'go', 'MarkerFaceColor','g', ...
+        'MarkerSize',8,'LineWidth',1.5,'HandleVisibility','on');
 
     hold(ax,'off')
 end

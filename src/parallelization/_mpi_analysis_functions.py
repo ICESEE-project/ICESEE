@@ -93,62 +93,17 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
         # print(f"[DEBUG] _eta before transpose: {np.array(_eta).shape} total_state_param_vars: {params['total_state_param_vars']} hdim: {hdim}\n")
         _eta= np.array(_eta).T  # Convert to shape (nd, Nens)
 
-        if model_kwargs.get("inversion_flag", False):
-            _eta_invert = np.empty((ensemble_vec.shape[0], Nens))
-            for ii, key in enumerate(model_kwargs['vec_inputs']):
-                if ii not in model_kwargs['excluded_indices']:
-                    start = ii * hdim
-                    end = start + hdim
-                    _eta_invert[start:end, :] = _eta[start:end, :]
-            _eta = copy.deepcopy(_eta_invert)
-
         _eta -= np.mean(_eta, axis=1).reshape(-1, 1)  # Ensure mean is zero
         Eta = np.dot(H, _eta)  # mxNens, ensemble perturbations
         # o--->
-
-    # ----parallelize this step
-    # Eta = np.zeros((d.shape[0], Nens)) # mxNens, ensemble pertubations
-    
-    # D   = np.zeros((d.shape[0], Nens)) # mxNens #virtual observations
-    # # HA  = np.zeros_like(D)
-    # for ens in range(Nens):
-        
-    #     D[:,ens] = d + Eta[:,ens]
-    #     # HA[:,ens] = np.dot(H, ensemble_vec[:,ens])
-    # # ---------------------------------------
-
-    # # print(f"\n[Rank {comm_world.Get_rank()}] norms H: {np.linalg.norm(H)}, ens_mean: {np.linalg.norm(np.mean(ensemble_vec, axis=1))}, d: {np.linalg.norm(d)} D: {np.linalg.norm(D)}, HA: {np.linalg.norm(HA)}, Eta: {np.linalg.norm(Eta)} ensemble_vec: {np.linalg.norm(ensemble_vec)}\n")
-
-    # # --- compute the innovations D` = D-HA
-    # # Dprime = D - HA # mxNens
-    
-    # # # --- compute HAbar
-    # # HAbar = np.mean(HA, axis=1) # mx1
-    # # # --- compute HAprime
-    # # # HAprime = HA - HAbar.reshape(-1,1) # mxNens (requires H to be linear)
-    
-    # # # Aprime = ensemble_vec@(np.eye(Nens) - one_N) # mxNens
-    # # one_N = np.ones((Nens,Nens))/Nens
-    # # HAprime= HA@(np.eye(Nens) - one_N) # mxNens
 
     HAbar = np.dot(H, ensemble_mean)
     Dprime = d.reshape(-1, 1) - HAbar  # mxNens
     HAprime = copy.deepcopy(Eta)  # mxNens (requires H to be linear)
 
-    # *---->>>>---------------
-    # HA = H @ ensemble_vec        # (m, nens)
-    # H_mean = H @ ensemble_mean   # (m, 1)
-    # Eta = HA - H_mean
-    # HAprime = copy.deepcopy(Eta)
-    # D = d.reshape(-1, 1) + Eta
-    # HAbar = np.mean(HA, axis=1, keepdims=True)
-    # HAprime_eta = HA - HAbar
-    # Dprime = D - HA
-    # *-------->>>---------------
-
     # get the min(m,Nens)
-    m_obs = d.shape[0]
-    nrmin = min(m_obs, Nens)
+    m = d.shape[0]
+    nrmin = min(m, Nens)
 
     # --- compute HA' + eta
     HAprime_eta = HAprime + Eta
@@ -176,8 +131,8 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
             break  # Exit the loop
     
     # compute X1 = sig*UT #Nens x m_obs
-    X1 = np.empty((nrmin, m_obs))
-    for j in range(m_obs):
+    X1 = np.empty((nrmin, m))
+    for j in range(m):
         for i in range(nrmin):
             X1[i,j] =sig[i]*U[j,i]
     
@@ -316,29 +271,14 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,time_analysis_me
 
         # --- scatter ensemble_vec to all processors ---
         scatter_ensemble = BM.scatter(ensemble_vec, comm_world)
-        # -* instead of using scattter from root, if the ensemble vec doesn't fit in memory then
-        # with h5py.File("icesee_ensemble_data.h5", 'r', driver='mpio', comm=comm_world) as f:
-        #     scatter_ensemble = f['ensemble']
-        #     total_rows = scatter_ensemble.shape[0]
-
-        #     # calculate rows per rank
-        #     rows_per_rank = total_rows // comm_world.Get_size()
-        #     # remainder = total_rows % comm_world.Get_size()
-        #     start_row = rank_world * rows_per_rank 
-        #     end_row = start_row + rows_per_rank if rank_world != comm_world.Get_size()-1 else total_rows
-
-        #     # Each rank reads its chunk from the dataset
-        #     scatter_ensemble = scatter_ensemble[start_row:end_row, :, k]
+    
         # do the ensemble analysis update: A_j = Fj*X5 
         analysis_vec = np.dot(scatter_ensemble, X5)
 
         # ndim = analysis_vec.shape[0] // params["total_state_param_vars"]
         ndim = model_kwargs.get("nd", params["nd"])//len(model_kwargs.get("all_observed",[]))
         state_block_size = ndim*params["num_state_vars"]
-        # analysis_vec[state_block_size:,:] /= 10
-        # analysis_vec[state_block_size:,:] *= (smb_scale)  # Scale SMB after analysis
-        # params['inflation_factor'] = 1.1
-        # analysis_vec = UtilsFunctions(params,  analysis_vec).inflate_ensemble(in_place=True)
+        
         # ---> multiplicative inflation
         time_analysis_mean_generation1  = MPI.Wtime() 
         mean_params = np.mean(analysis_vec[state_block_size:,:], axis=1)
@@ -354,64 +294,6 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,time_analysis_me
         analysis_vec[state_block_size:,:] = mean_params.reshape(-1,1) + inflated_pertubations
         # only inflate bed topography if it is directly observed
         observed_params = model_kwargs.get("observed_params", [])
-
-        # mean_vars = np.mean(analysis_vec[:ndim,:], axis=1)
-        # #  compute parturbations
-        # pertubations_vars = analysis_vec[:ndim,:] - mean_vars.reshape(-1,1)
-        # # apply the inflation factor
-        # inflated_pertubations_vars = pertubations_vars * params['inflation_factor']
-
-        # # update the analysis vector
-        # analysis_vec[:ndim,:] = mean_vars.reshape(-1,1) + inflated_pertubations_vars
-
-
-        # check for negative thicknes and set to 1e-3 if vec_input contains h
-        # for i, var in enumerate(model_kwargs.get("vec_inputs",[])):
-        # # for i, var in enumerate(model_kwargs.get("all_observed",[])):
-        #     if var == "h" or var == "thickness" or var == "ice_thickness" or var == "Thickness":
-        #         start = i * ndim
-        #         end = start + ndim
-        #         analysis_vec[start:end, :] = np.maximum(analysis_vec[start:end, :], 1e-2)
-
-        # dynamical model for parameters: from https://doi.org/10.1002/qj.3257
-        # obs_index = model_kwargs.get("obs_index")
-        # # #  check if k equals to the first observation index
-        # # print(f"[ICESEE] Rank: {rank_world} km: {km} obs_index: {obs_index}")
-        # if  (k+1 == obs_index[0]):
-        # #     print(f"[ICESEE] [Debug] Rank: {rank_world} k: {km} obs_index: {obs_index}")
-        #     params_analysis_0 = analysis_vec[state_block_size:, :]
-        
-        # # size of parameters
-        # param_size = analysis_vec.shape[0] - state_block_size
-        # alpha = np.ones(param_size)*2.0
-        # beta_param = alpha
-        # def compute_f_params(alpha, beta_param):
-        #     mean_x = alpha/(alpha+beta_param)
-        #     a = 1.0
-        #     b = -a*mean_x
-        #     return a,b
-        
-        # def update_theta(alpha, beta_param):
-        #     # theta_f_t = np.zeros_like(theta_prev)
-        #     f_x_ti = np.zeros((param_size,analysis_vec.shape[1]))
-        #     for i in range(analysis_vec.shape[1]):
-        #         a,b = compute_f_params(alpha[i], beta_param[i])
-        #         x_ti = beta.rvs(alpha[i], beta_param[i])
-                
-        #         f_x_ti[:,i] = a*x_ti + b
-
-        #         # theta_f_t[:,i] = theta_prev[:,i] + f_x_ti
-        #     # return theta_f_t
-        #     return f_x_ti
-        
-        # analysis_vec[state_block_size:,:] = params_analysis_0 +  update_theta(alpha, beta_param) 
-
-        # # X = beta.rvs(alpha, beta_param,param_size)
-        # # linear_bijective_function = lambda x,a: 2*a*(x - 0.5) #zero mean  
-        # # analysis_vec[state_block_size:,:] = params_analysis_0 + linear_bijective_function(X,a=0.1)
-        
-        # params_analysis_0 = analysis_vec[state_block_size:, :]
-        
 
         # gather from all processors
         # ensemble_vec = BM.allgather(analysis_vec, comm_world)
