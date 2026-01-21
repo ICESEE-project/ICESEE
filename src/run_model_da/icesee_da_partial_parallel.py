@@ -386,6 +386,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         model_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
         # noise = generate_enkf_field(**model_kwargs)
         noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+        model_kwargs.update({"noise": noise})
 
     for k in range(model_kwargs.get("nt",params["nt"])):
 
@@ -417,7 +418,9 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                                 "time_forecast_file_writing": time_forecast_file_writing,
                                 "time_analysis_file_writing": time_analysis_file_writing,
                                 "time_forecast_ensemble_mean_generation": time_forecast_ensemble_mean_generation,
-                                "state_block_size": state_block_size, "noise": noise, "rng": None, "rank_seed": None,})
+                                "state_block_size": state_block_size, "rng": None, "rank_seed": None,
+                                "noise": noise, #always restart from the initial noise
+                                }) 
             
             if not params.get("default_run", False):
                 model_kwargs.update({"ensemble_vec": ensemble_vec,

@@ -1,34 +1,43 @@
 name: CI
-
-on:
-  push:
-  pull_request:
+on: [push, pull_request]
 
 jobs:
   test:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Upgrade pip
+      - name: Debug repo layout (must show ICESEE/)
         shell: bash
         run: |
-          python -m pip install --upgrade pip
+          pwd
+          ls -la
+          ls -la ICESEE || true
+          ls -la ICESEE/__init__.py || true
 
-      - name: Install pinned CI dependencies
+      - name: Install pinned deps (CI lock)
         shell: bash
         run: |
-          python -m pip install -r requirements/ci.txt
-          python -c "import ICESEE; print('ICESEE import OK:', ICESEE.__file__)"
+          python3 -m pip install -U pip
+          python3 -m pip install -r requirements/ci.txt
 
-      - name: Run Lorenz96 example
+      - name: Install ICESEE (editable)
         shell: bash
         run: |
-          python -m ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96
+          python3 -m pip install -U pip
+          python3 -m pip install -e ".[dev,mpi,viz]"
+
+      - name: Test import with PYTHONPATH set
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python3 --version
+          python3 -c "import sys; print('\n'.join(sys.path))"
+          python3 -c "import ICESEE; print('ICESEE imported successfully →', ICESEE.__file__)"
+          # Now your example should work too
+          python3 -m ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96

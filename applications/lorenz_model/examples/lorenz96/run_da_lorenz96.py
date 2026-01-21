@@ -34,8 +34,8 @@ kwargs.update({ "nt": params["nt"],
                 "dt": float(modeling_params["dt"]), "seed":float(enkf_params["seed"]),
                 "t":np.linspace(0, int(float(modeling_params["num_years"])), params["nt"] + 1), 
                 "u0True": np.array([1,1,1]), "u0b": np.array([2.0,3.0,4.0]), 
-                "sigma":float(physical_params["sigma"]), "beta":eval(physical_params["beta"]),
-                "rho":float(physical_params["rho"]),
+                "sigma_96":float(physical_params["sigma_96"]), "beta_96":eval(physical_params["beta_96"]),
+                "rho_96":float(physical_params["rho_96"]),
 })
 
 

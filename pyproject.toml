@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ICESEE"
-version = "0.1.8"
+version = "0.1.9"
 description = "A state-of-the-art data assimilation software package for coupling seemlessly with ice sheet models."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -68,3 +68,10 @@ ICESEE = [
   "**/*.yml",
   "**/*.json",
 ]
+
+# ---- To update the dev/ci requirements file ----
+# important comands to regenerate the requirements/ci.txt file
+# rm -f requirements/ci.txt
+# python -m pip install -U pip pip-tools
+# pip-compile pyproject.toml --extra dev --extra mpi --extra viz -o requirements/ci.txt
+# --- To update the main requirements file ----
