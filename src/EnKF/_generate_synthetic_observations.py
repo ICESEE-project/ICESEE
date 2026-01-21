@@ -42,14 +42,15 @@ def generate_synthetic_observations(**model_kwargs):
 
                 # observe or don't observe parameters.
                 vecs, indx_map,_ = icesee_get_index(hu_obs, **model_kwargs)
-                # check if model_kwargs['observe_params'] is empty
-                if len(model_kwargs['observed_params']) == 0:
-                    for key in model_kwargs['params_vec']:
+                all_observed =  model_kwargs['all_observed']
+                # check if  model_kwargs['all_observed'] is empty
+                if len( model_kwargs['all_observed']) == 0:
+                    for key in model_kwargs['vec_inputs']:
                         hu_obs[indx_map[key],:] = 0.0
                         error_R[:,indx_map[key]] = 0.0
                 else: 
-                    for key in model_kwargs['params_vec']:
-                        if key not in model_kwargs['observed_params']:
+                    for key in model_kwargs['vec_inputs']:
+                        if key not in model_kwargs['all_observed']:
                             hu_obs[indx_map[key],:] = 0.0
                             error_R[:,indx_map[key]] = 0.0
 

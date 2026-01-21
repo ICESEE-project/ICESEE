@@ -108,14 +108,14 @@ def generate_true_state(**kwargs):
             statevec_true[indx_map['bed'], k-1] = f[key_bed][0]
             statevec_true[indx_map['coefficient'], k-1] = f[key_coefficient][0]
 
-    # updated_state = {}
-    # for key in vec_inputs:
-    #     updated_state[key] = statevec_true[indx_map[key],:]
+    updated_state = {}
+    for key in vec_inputs:
+        updated_state[key] = statevec_true[indx_map[key],:]
 
     #  --- change directory back to the original directory ---
     os.chdir(icesee_path)
     
-    # return updated_state
+    return updated_state
 
 
 def generate_nurged_state(**kwargs):
@@ -279,8 +279,7 @@ def generate_nurged_state(**kwargs):
     #  --- change directory back to the original directory ---
     os.chdir(icesee_path)
     
-    # return updated_state
-    # return statevec_nurged
+    return statevec_nurged
 
         
 #  --- initialize ensemble members ---

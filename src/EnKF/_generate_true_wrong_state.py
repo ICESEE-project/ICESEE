@@ -55,71 +55,38 @@ def generate_true_wrong_state(**model_kwargs):
 
         chunk_size = (hdim, 1)  # row-wise chunks, 1 time slice per chunk
         # chunk_size = (nd,1)
+        nd   = int(model_kwargs.get("nd", params["nd"]))
+        ntp1 = int(model_kwargs.get("nt", params["nt"]) + 1)
 
-        if model_kwargs.get("generate_true_state", True):
-            print("[ICESEE] Generating true state (partial parallel) ...")
-            # dim_list = np.tile(model_kwargs.get("nd", params["nd"]),size_world) # all processors have the same dimension
-            model_kwargs.update({"global_shape": model_kwargs.get("nd", params["nd"]), "dim_list": dim_list})
-            # statevec_true = np.zeros([model_kwargs.get("nd", params["nd"]), model_kwargs.get("nt",params["nt"]) + 1])
+        with h5py.File(_true_nurged, "w") as f:
+            d_true   = None
+            d_nurged = None
 
-            # (Optional) remove old store if shape/chunks might have changed
-            store_path = f"{icesee_path}/{data_path}/statevec_true.zarr"
-            if os.path.exists(store_path):
-                shutil.rmtree(store_path)
+            if model_kwargs.get("generate_true_state", True):
+                print("[ICESEE] Generating true state (Serial mode) ...")
+                d_true = f.create_dataset(
+                    "true_state",
+                    shape=(nd, ntp1),
+                    dtype="f8",
+                    chunks=chunk_size,
+                )
+                model_kwargs.update({"statevec_true": d_true})
+                updated_state = model_module.generate_true_state(**model_kwargs)
+                vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                for key, value in updated_state.items():
+                    d_true[indx_map[key], :] = value
 
-            statevec_true = zarr.zeros(
-                shape=(nd, nt),
-                chunks=chunk_size,   # row-wise chunks, 1 time slice per chunk
-                dtype="f8", 
-                store=store_path,
-            )
+            if model_kwargs.get("generate_nurged_state", True):
+                print("[ICESEE] Generating nurged state (Serial mode) ...")
+                d_nurged = f.create_dataset(
+                    "nurged_state",
+                    shape=(nd, ntp1),
+                    dtype="f8",
+                    chunks=chunk_size,
+                )
+                model_kwargs.update({"statevec_nurged": d_nurged})
+                d_nurged = model_module.generate_nurged_state(**model_kwargs)
 
-            model_kwargs.update({"statevec_true": statevec_true})
-            # updated_true_state = model_module.generate_true_state(**model_kwargs)
-            # print("RSS after zarr init:", rss_gb())
-            model_module.generate_true_state(**model_kwargs)
-            # print("RSS after generate_true_state:", rss_gb())
-
-        if model_kwargs.get("generate_nurged_state",True):
-            print("[ICESEE] Generating nurged state ...")
-            store_path = f"{icesee_path}/{data_path}/statevec_nurged.zarr"
-            if os.path.exists(store_path):
-                shutil.rmtree(store_path)
-
-            statevec_nurged = zarr.zeros(
-                shape=(nd, nt),
-                chunks=chunk_size,   # row-wise chunks, 1 time slice per chunk
-                dtype="f8", 
-                store=store_path,
-            )
-            model_kwargs.update({"statevec_nurged": statevec_nurged})
-            # print("RSS after zarr init nurged:", rss_gb())
-            model_module.generate_nurged_state(**model_kwargs)
-            # print("RSS after generate_nurged_state:", rss_gb())
-            
-        # Write data to file
-        if model_kwargs.get("generate_true_state",True) or model_kwargs.get("generate_nurged_state",True):
-            with h5py.File(_true_nurged, "w") as f:
-                # print("RSS after opening h5:", rss_gb())
-                if model_kwargs.get("generate_true_state"):
-                    dtrue = f.create_dataset("true_state", shape=(nd, nt), dtype="f8", chunks=chunk_size)
-                    # write in time slices (small memory)
-                    for j in range(nt):
-                        dtrue[:, j] = statevec_true[:, j]
-
-                if model_kwargs.get("generate_nurged_state"):
-                    dn = f.create_dataset("nurged_state", shape=(nd, nt), dtype="f8", chunks=chunk_size)
-                    for j in range(nt):
-                        dn[:, j] = statevec_nurged[:, j]
-                # print("RSS after writing datasets:", rss_gb())
-
-        # -- write both the true and nurged states to file --
-        data_shape = (model_kwargs.get("nd", params["nd"]), model_kwargs.get("nt",params["nt"]) + 1)
-        
-        model_kwargs.update({"dim_list": dim_list})
-        gc.collect()
-
-        # update model_nprocs back to the original value before proceeding to the # next step
-        # model_kwargs.update({'model_nprocs': model_nprocs})
+            model_kwargs.update({"dim_list": dim_list})
 
     return model_kwargs
