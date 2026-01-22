@@ -1,28 +1,54 @@
-parameters:
-  A: 4e-26
-  year: 31536000  # seconds in a year
-  n: 3
-  C: 3e6
-  rho_i: 900
-  rho_w: 1000
-  g: 9.8
-  accum: 0.65
-  facemelt: 5
+physical-parameters:
+  # Lorenz96 Model parameters
+  sigma_96: 10.0            
+  beta_96: 8.0/3.0 
+  rho_96: 28.0  
 
-  # Grid parameters
-  NT: 1
-  TF: 31536000  # 1 year in seconds
-  N1: 40
-  N2: 10
-  sigGZ: 0.97
-  transient: 0
-  tcurrent: 1
+modeling-parameters:
+  # Modeling parameters
+  dt: 0.01                 
+  num_years: 10         # number of years to run the model
+  timesteps_per_year: 2   # number of timesteps per year
 
-  # Bed parameters
-  xsill: 50000  # in meters
-  sillamp: 500
-  sillsmooth: 1e-5
+  example_name: "lorenz96"  # example name
 
-  # EnKF parameters
-  inflation: 1.0
-  assim: false
+enkf-parameters:
+  # Ensemble Kalman Filter parameters
+  Nens: 30                   # number of ensemble members
+  freq_obs: 0.2               # frequency of observations
+  obs_max_time: 2             # maximum time for observations
+  obs_start_time: 0.1 
+
+  num_state_vars: 3         # number of state variables 
+  num_param_vars: 0  
+  vec_inputs: ['x','y','z'] # state variables
+  observed_vars: ['x','y','z']  # observed variables
+
+  # Statistical parameters
+  sig_obs: [0.1, 0.1, 0.1]     # observation error standard deviation
+  sig_Q: [0.01, 0.01, 0.01]          # process noise standard deviation
+  length_scale: [2, 2, 2]   # length scale for the covariance matrix
+
+  generate_synthetic_obs: 1  # Generate synthetic observations for testing
+  generate_true_state:    1   # Generate true state for synthetic observations
+  generate_nurged_state:  1   # Generate nudged state for synthetic observations
+  sequential_ensemble_initialization: 1
+  use_ensemble_pertubations: 1
+
+  # estimation flags
+  joint_estimation: "False"  # joint estimation flag: True, False
+  state_estimation: "True"   # state estimation flag: True, False
+  parameter_estimation: "False" # parameter estimation flag: True, False
+
+  seed: 1                 # seed for random number generator
+  inflation_factor: 1.0          # inflation factor
+  localization_flag: 0      # localization flag: True, False
+
+  # enkf model parameters
+  model_name: "lorenz"         # name of the model
+  filter_type: "EnKF"           # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
+  parallel_flag: "serial"             # parallel flag: Serial, MPI, MPI_model
+  execution_mode: 0                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
+  commandlinerun: "True"         # command line run flag: True, False
+  data_path: _modelrun_datasets
+ 
