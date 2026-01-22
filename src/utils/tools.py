@@ -46,6 +46,9 @@ def _infer_dataset_name(h5path: str, prefer="states") -> str:
             f"Found: {keys}. Pass dset_name explicitly."
         )
 
+def h5py_has_mpi():
+    return bool(getattr(h5py.get_config(), "mpi", False))
+
 # ---------- Option A: VDS (no data copy) ----------
 def build_vds(input_dir: str,
               dset_name: str | None = None,
@@ -907,3 +910,57 @@ def env_flag(name: str, default: bool = False) -> bool:
         return False
     # fallback: any non-empty string means True
     return True
+
+
+def load_bed_masks_from_h5(f):
+    """
+    Supports BOTH:
+      - new format: /bed_masks/static/* and /bed_masks/cols/*
+      - old format: /bed_mask_map (legacy)
+
+    Returns:
+      bed_mask_map_static: dict[str, np.ndarray(bool)]  shape (n_bed,)
+      bed_mask_map_cols:   dict[str, np.ndarray(bool)]  shape (n_bed, m_obs)
+      bed_snap_cols:       list[int]
+      obs_model_to_col:    dict[int,int]
+    """
+    bed_mask_map_static = {}
+    bed_mask_map_cols = {}
+    bed_snap_cols = []
+    obs_model_to_col = {}
+
+    # ---------- NEW FORMAT ----------
+    if "bed_masks" in f:
+        # static masks
+        if "static" in f["bed_masks"]:
+            for k in f["bed_masks/static"].keys():
+                bed_mask_map_static[k] = f["bed_masks/static"][k][:].astype(bool)
+
+        # column/time-dependent masks
+        if "cols" in f["bed_masks"]:
+            for k in f["bed_masks/cols"].keys():
+                bed_mask_map_cols[k] = f["bed_masks/cols"][k][:].astype(bool)
+
+        if "bed_snap_cols" in f:
+            bed_snap_cols = f["bed_snap_cols"][:].astype(int).tolist()
+
+        # mapping model step -> obs column
+        if "obs_model_to_col_keys" in f and "obs_model_to_col_vals" in f:
+            keys = f["obs_model_to_col_keys"][:].astype(int)
+            vals = f["obs_model_to_col_vals"][:].astype(int)
+            obs_model_to_col = {int(k): int(v) for k, v in zip(keys, vals)}
+
+        return bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col
+
+    # ---------- LEGACY FORMAT ----------
+    if "bed_mask_map" in f:
+        legacy = f["bed_mask_map"][:]
+        # We can only interpret legacy as "static" (no per-km gating available)
+        # If legacy stored (m_obs,) or something else, this is inherently ambiguous.
+        bed_mask_map_static["bed"] = np.asarray(legacy, dtype=bool)
+        # no cols gating
+        bed_mask_map_cols = {}
+        bed_snap_cols = []
+        obs_model_to_col = {}
+
+    return bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col

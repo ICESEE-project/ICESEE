@@ -89,7 +89,6 @@ def generate_true_state(**kwargs):
 
     # get the data extracted from the matlab output file
     input_filename = f'{icesee_path}/{data_path}/ensemble_true_state_{ens_id}.h5'
-    # with h5py.File(input_filename, 'r', driver='mpio', comm=comm) as f:
     with h5py.File(input_filename, 'r') as f:
         # -- fetch state variables
         for k in range(1, kwargs.get('nt') + 1):
@@ -239,7 +238,8 @@ def generate_nurged_state(**kwargs):
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
-    with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
+    # with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
+    with h5py.File(friction_bed_filename, 'w') as f:
         # -- write the friction field
         f.create_dataset('coefficient', data=friction_field)
         # -- write the bed field
@@ -255,7 +255,8 @@ def generate_nurged_state(**kwargs):
 
     # -- fetch the nurged state vector
     nurged_filename = f'{icesee_path}/{data_path}/ensemble_nurged_state_{ens_id}.h5'
-    with h5py.File(nurged_filename, 'r', driver='mpio', comm=comm) as f:
+    # with h5py.File(nurged_filename, 'r', driver='mpio', comm=comm) as f:
+    with h5py.File(nurged_filename, 'r') as f:
         # -- fetch state variables
         for k in range(1, kwargs.get('nt') + 1):
             # key_thickness=f'Thickness_{k}'
@@ -276,10 +277,14 @@ def generate_nurged_state(**kwargs):
             # statevec_nurged[indx_map['bed'], k-1] = f['bed'][0]
             # statevec_nurged[indx_map['coefficient'], k-1] = f['coefficient'][0]
 
+    updated_state = {}
+    for key in vec_inputs:
+        updated_state[key] = statevec_nurged[indx_map[key], :]    
+
     #  --- change directory back to the original directory ---
     os.chdir(icesee_path)
     
-    return statevec_nurged
+    return updated_state
 
         
 #  --- initialize ensemble members ---
@@ -406,7 +411,8 @@ def initialize_ensemble(ens, **kwargs):
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
-    with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
+    # with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
+    with h5py.File(friction_bed_filename, 'w') as f:
         # -- write the friction field
         f.create_dataset('coefficient', data=friction_field)
         # -- write the bed field
@@ -431,7 +437,8 @@ def initialize_ensemble(ens, **kwargs):
     #  -- Read data from the ISSM side to be accessed by ICESEE on the python side
     output_filename = f'{icesee_path}/{data_path}/ensemble_out_{ens_id}.h5'
     updated_state = {}
-    with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+    # with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+    with h5py.File(output_filename, 'r') as f:
         # for key in vec_inputs:
         #     updated_state[key] = f[key][0]
         updated_state['Thickness'] = f['Thickness'][:].reshape(-1, order='F')

@@ -66,7 +66,8 @@ def initialize_model(**kwargs):
         print("[ICESEE ERROR] File does not exist: {output_filename}")
         return None
     # --get the size of the state vector from the output file
-    with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+    # with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+    with h5py.File(output_filename, 'r') as f:
         var = f[vec_inputs[0]]
         nd = var[0].shape[0]
         # for key in vec_inputs:
@@ -175,7 +176,8 @@ def run_model(ensemble, **kwargs):
         coefficient = coefficient_int
 
     # Write ensemble data to HDF5 file to be accessed by ISSM on the Matlab side
-    with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
+    # with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
+    with h5py.File(input_filename, 'w') as f:
         for key in vec_inputs:
             f.create_dataset(key, data=ensemble[indx_map[key]])
         # f.create_dataset('Thickness', data=ensemble[indx_map['Thickness']])
@@ -203,7 +205,8 @@ def run_model(ensemble, **kwargs):
         return None
     
     updated_state = {}
-    with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+    # with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+    with h5py.File(output_filename, 'r') as f:
         updated_state['Thickness'] = f['Thickness'][:].reshape(-1, order='F')
         # updated_state['Base'] = f['Base'][0]
         updated_state['Surface'] = f['Surface'][:].reshape(-1, order='F')
@@ -345,7 +348,8 @@ def run_model_inverse(ensemble, **kwargs):
         return None
     
     updated_state = {}
-    with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+    # with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+    with h5py.File(output_filename, 'r') as f:
         updated_state['Thickness'] = f['Thickness'][:].reshape(-1, order='F')
         # updated_state['Base'] = f['Base'][0]
         updated_state['Surface'] = f['Surface'][:].reshape(-1, order='F')

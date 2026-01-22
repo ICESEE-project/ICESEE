@@ -8,17 +8,17 @@ close all; clearvars; clear all
 
 global data_file_paths nvar ensemble_vec_full ...
         label_t t nt colorbar_gap
-% data_file_paths = '_modelrun_datasets';
+data_file_paths = '_modelrun_datasets';
 % data_file_paths = '_goodgrounding';
-data_file_paths ='_modelrun_working_0';
+% data_file_paths ='_modelrun_working_0';
 nvar = 6;
 colorbar_gap=0.78;
 
 % ---------------- user toggles ----------------
 make_plots       = 0;
-make_multi_plots = 0;   % <-- ON (restored)
+make_multi_plots = 1;   % <-- ON (restored)
 frames_plot      = 0;
-compute_rmse     = 0;
+compute_rmse     = 1;
 plotgl           = 1;
 
 % ---------------- time steps ------------------

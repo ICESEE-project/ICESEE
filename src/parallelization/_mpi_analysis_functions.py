@@ -27,13 +27,13 @@ from ICESEE.src.utils.tools import icesee_get_index, get_grid_dimensions
 
 # ============================ EnKF functions ============================ 
 # def EnKF_X5(Cov_obs, Nens, D, HA, Eta, d): 
-def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
+def EnKF_X5(km,ensemble_vec, Cov_obs, Nens, hu_obs, model_kwargs,UtilsFunctions):
     """
     Function to compute the X5 matrix for the EnKF
         - ensemble_vec: ensemble matrix of size (ndxNens)
         - Cov_obs: observation covariance matrix
         - Nens: ensemble size
-        - d: observation vector
+        - hu_obs: observations vector
     """
     params = model_kwargs.get("params")
     comm_world = model_kwargs.get("comm_world")
@@ -43,7 +43,12 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
 
     # np.random.seed(rank_seed)
 
-    H = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).JObs_fun(ensemble_vec.shape[0]) # mxNens, observation operator
+    # H = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).JObs_fun(ensemble_vec.shape[0]) # mxNens, observation operator
+    U = UtilsFunctions(params=params, model_kwargs=model_kwargs, ensemble=ensemble_vec)
+
+    H = U.JObs_fun(ensemble_vec.shape[0])          # build once
+    k_obs = model_kwargs.get("km")
+    d = U.Obs_fun(hu_obs[:, k_obs], H=H, km=km)       # reuse
 
     # -- get ensemble pertubations
     use_ensemble_pertubations = model_kwargs.get("use_ensemble_pertubations", True)
@@ -66,31 +71,28 @@ def EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions):
         noise = model_kwargs.get("noise", None)  # Noise vector, should be provided
         
         # ensure mean of noise is zero
+        # ensure mean of noise is zero
+        if model_kwargs.get("inversion_flag", False):
+            # exclude friction index from params['sig_obs']
+            friction_idx = int(model_kwargs.get("friction_idx", -1))  # int always
+            sig_obs_filtered = [
+                params["sig_obs"][i]
+                for i in range(len(params["sig_obs"]))
+                if i != friction_idx
+            ]
+
         _eta = []
         for ens in range(Nens):
             noise_all = []
-            q0 = []
-            for ii, sig in enumerate(params["sig_obs"]):
-                model_kwargs.update({"ii_sig": ii, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
-                # W = generate_enkf_field(**model_kwargs)
-                W = generate_enkf_field(ii,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
-                noise_ = sig*W
-                # noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
-                # q0.append(noise_)
+            for ii, sig in enumerate(sig_obs_filtered if model_kwargs.get("inversion_flag", False) else params["sig_obs"]):
+                model_kwargs.update({"ii_sig": ii, "hdim": hdim, "num_vars": params["total_state_param_vars"]})
 
-                # Z = np.sqrt(dt)*sig*rho*noise_
-                # Z = np.sqrt(dt)*noise_
-                Z = noise_
-                noise_all.append(Z)
-                
-            noise_ = np.concatenate(noise_all, axis=0)  # Concatenate noise for all parameters
-            # q0.append(noise)
-            # noise = np.concatenate(q0, axis=0)  #update noise
+                W = generate_enkf_field(ii, np.sqrt(Lx * Ly), hdim, params["total_state_param_vars"],
+                                    rh=len_scale, verbose=False)
+                noise_all.append(sig * W)
+
+            noise_ = np.concatenate(noise_all, axis=0)
             _eta.append(noise_)
-        # q0 = np.array(q0).T  # Convert to shape (nd, Nens)
-        # q0 = q0 - np.mean(q0, axis=1).reshape(-1, 1)  # Ensure mean is zero
-        # Eta = np.dot(H, q0)  # mxNens, ensemble perturbations
-        # print(f"[DEBUG] _eta before transpose: {np.array(_eta).shape} total_state_param_vars: {params['total_state_param_vars']} hdim: {hdim}\n")
         _eta= np.array(_eta).T  # Convert to shape (nd, Nens)
 
         _eta -= np.mean(_eta, axis=1).reshape(-1, 1)  # Ensure mean is zero
