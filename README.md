@@ -24,6 +24,8 @@ To get started with ICESEE:
 - [Build ICESEE as a package](https://github.com/ICESEE-project/ICESEE/wiki/3.-Build-ICESEE-as-a-package)  
 - [Developmental notes](https://github.com/ICESEE-project/ICESEE/wiki/4.-Development-Notes)
 
+For cloud runs, see [ICESEE-GHUB](https://github.com/ICESEE-project/ICESEE-GHUB)
+
 ---
 
 ## Supported Models
