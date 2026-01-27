@@ -103,11 +103,11 @@ def generate_nurged_state(**kwargs):
         statevec_nurged[indx_map['y'], k + 1] = state['y']
         statevec_nurged[indx_map['z'], k + 1] = state['z']
 
-    # updated_state = {'x' : statevec_nurged[indx_map['x'],:],
-    #                  'y' : statevec_nurged[indx_map['y'],:],
-    #                 'z' : statevec_nurged[indx_map['z'],:]}
+    updated_state = {'x' : statevec_nurged[indx_map['x'],:],
+                     'y' : statevec_nurged[indx_map['y'],:],
+                    'z' : statevec_nurged[indx_map['z'],:]}
     
-    return statevec_nurged
+    return updated_state
     
 # --- initialize the ensemble members ---
 def initialize_ensemble(ens, **kwargs):

@@ -26,7 +26,8 @@ from ICESEE.src.utils import tools, utils                                     # 
 from ICESEE.src.utils.utils import UtilsFunctions
 from ICESEE.src.EnKF.python_enkf.EnKF import EnsembleKalmanFilter as EnKF     # Ensemble Kalman Filter
 from ICESEE.applications.supported_models import SupportedModels              # supported models for data assimilation routine
-from ICESEE.src.utils.tools import icesee_get_index, display_timing_default,display_timing_verbose, save_all_data
+from ICESEE.src.utils.tools import icesee_get_index, display_timing_default,display_timing_verbose, save_all_data, \
+                                   load_bed_masks_from_h5
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
                               generate_pseudo_random_field_1d, \
@@ -490,7 +491,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                                     _hu_obs  = f['hu_obs'][:]
                                     error_R = f['R'][:]
                                     # Cov_obs = np.cov(error_R)
-                                    bed_mask_map = f['bed_mask_map'][:]
+                                    bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col = load_bed_masks_from_h5(f)
                                     Cov_obs = np.zeros(error_R.shape)
 
                                 # scale all vectors to new dimesnions
@@ -504,7 +505,13 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                                         hu_obs[start:end, :] = _hu_obs[indx_map[key], :]
                                 # hu_obs = _hu_obs[:nd_new,:]
                                 
-                                model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
+                                # model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
+                                model_kwargs.update({
+                                        "bed_mask_map_static": bed_mask_map_static,
+                                        "bed_mask_map_cols": bed_mask_map_cols,
+                                        "bed_snap_cols": bed_snap_cols,
+                                        "obs_model_to_col": obs_model_to_col,
+                                    })
 
                                 # form vec_inputs without vx, vy, friction
                                 model_kwargs['vec_inputs_new'] = [key for ii, key in enumerate(model_kwargs['vec_inputs']) if ii not in excluded_indices]
@@ -521,13 +528,23 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                                 model_kwargs=model_kwargs
                                 bed_mask_map = None
                                 excluded_indices = None
+                                bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col = None, None, None, None
+
 
                             excluded_indices = comm_world.bcast(excluded_indices, root=0)
                             model_kwargs.update({'excluded_indices': excluded_indices})
                             hu_obs = comm_world.bcast(hu_obs, root=0)
                             # model_kwargs = comm_world.bcast(model_kwargs, root=0)
-                            bed_mask_map = comm_world.bcast(bed_mask_map, root=0)
-                            model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
+                            bed_mask_map_static = comm_world.bcast(bed_mask_map_static, root=0)
+                            bed_mask_map_cols = comm_world.bcast(bed_mask_map_cols, root=0)
+                            bed_snap_cols = comm_world.bcast(bed_snap_cols, root=0)
+                            obs_model_to_col = comm_world.bcast(obs_model_to_col, root=0)
+                            model_kwargs.update({
+                                        "bed_mask_map_static": bed_mask_map_static,
+                                        "bed_mask_map_cols": bed_mask_map_cols,
+                                        "bed_snap_cols": bed_snap_cols,
+                                        "obs_model_to_col": obs_model_to_col,
+                                    })
                             nd_new = comm_world.bcast(nd_new, root=0)
                             model_kwargs.update({'nd': nd_new}); params.update({'nd': nd_new})
                             vec_inputs = comm_world.bcast(vec_inputs, root=0)
@@ -540,9 +557,23 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                             with h5py.File(_synthetic_obs, 'r') as f:
                                 hu_obs = f['hu_obs'][:]
                                 error_R = f['R'][:]
-                                bed_mask_map = f['bed_mask_map'][:]
+                                # bed_mask_map = f['bed_mask_map'][:]
+                                bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col = load_bed_masks_from_h5(f)
                                 # Cov_obs = np.cov(error_R)
-                                Cov_obs = np.zeros(error_R.shape)
+                                # error_R should be stored as sigma with same shape as hu_obs
+                                # mask = (~np.isnan(hu_obs[:, km])) & (~np.isnan(error_R[:, km]))
+                                mask = ~np.isnan(hu_obs[:, km])
+
+                                # sigma_k = error_R[mask, km]
+                                # Cov_obs = np.diag(sigma_k**2)
+
+                                # model_kwargs.update({"obs_mask_full": mask})
+                                model_kwargs.update({
+                                                "bed_mask_map_static": bed_mask_map_static,
+                                                "bed_mask_map_cols": bed_mask_map_cols,
+                                                "bed_snap_cols": bed_snap_cols,
+                                                "obs_model_to_col": obs_model_to_col,
+                                            })
                             
                         model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
                         all_observed = model_kwargs['observed_vars_params']
@@ -556,9 +587,10 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                             ndim = ensemble_vec.shape[0]//params["total_state_param_vars"]  
                             state_block_size = ndim*params["num_state_vars"]
 
-                            model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
+                            # model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
 
-                            d = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).Obs_fun(hu_obs[:,km])
+                            # U = UtilsFunctions(params=params, model_kwargs=model_kwargs, ensemble=ensemble_vec)
+                            # d = U.Obs_fun(hu_obs[:, km], km=km)
                             model_kwargs.update({"error_R": error_R}) # store the error covariance matrix
                             #  -------------
 
@@ -570,7 +602,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
 
                             if EnKF_flag:
                                 # compute the X5 matrix
-                                X5,analysis_vec_ij = EnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions)
+                                X5,analysis_vec_ij = EnKF_X5(k,ensemble_vec, Nens, hu_obs, model_kwargs,UtilsFunctions)
                                 # X5 = EnKF_X5(Cov_obs, Nens, D, HA, Eta, d)
                                 y_i = np.sum(X5, axis=1)
                                 # ensemble_vec_mean[:,k+1] = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
@@ -580,7 +612,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
 
                             elif DEnKF_flag:
                                 # compute the X5 matrix
-                                X5,X5prime = DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, d, model_kwargs,UtilsFunctions)
+                                X5,X5prime = DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, model_kwargs,UtilsFunctions)
                                 # y_i = np.sum(X5, axis=1)
                                 # ens_mean = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
                                 # H = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).JObs_fun(ensemble_vec.shape[0])
@@ -620,11 +652,18 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                         vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
                         with h5py.File(_synthetic_obs, 'r') as f:
                             hu_obs = f['hu_obs'][:]
-                            bed_mask_map = f['bed_mask_map'][:]
+                            # bed_mask_map = f['bed_mask_map'][:]
+                            bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col = load_bed_masks_from_h5(f)
 
                         # print(f[:]); exit(0)
 
-                        model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
+                        # model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
+                        model_kwargs.update({
+                                        "bed_mask_map_static": bed_mask_map_static,
+                                        "bed_mask_map_cols": bed_mask_map_cols,
+                                        "bed_snap_cols": bed_snap_cols,
+                                        "obs_model_to_col": obs_model_to_col,
+                                    })
 
                         # # Construct global observation indices for the reduced vector
                         # obs_indices = np.concatenate([indx_map[key] for key in model_kwargs['all_observed']])

@@ -273,6 +273,8 @@ if not flag_jupyter:
         'abs_vel_weight': float(enkf_params.get('abs_vel_weight', 1.0)), # weight for absolute velocity in inversion
         'rel_vel_weight': float(enkf_params.get('rel_vel_weight', 1.0)), # weight for relative velocity in inversion
         'tikhonov_regularization_weight': float(enkf_params.get('tikhonov_regularization_weight', 1e-13)), # Tikhonov regularization weight for inversion
+        'var_nd': enkf_params.get('var_nd', None), # variable state dimension for each state variable in vec_inputs. Used when state variables have different dimensions
+        'scalar_inputs': enkf_params.get('scalar_inputs', []), # list of scalar input variables
     }
 
 

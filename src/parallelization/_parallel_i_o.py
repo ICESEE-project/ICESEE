@@ -323,6 +323,7 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                         dt = model_kwargs.get("dt", params['dt'])
                             # if timestep*dt == bed_snaps:
                         t = timestep * dt
+                        do_bed_snap = False
                         for bed_snap in model_kwargs.get("bed_obs_snapshot", []):
                             if np.isclose(t, bed_snap, rtol=0, atol=1e-12):
                                 do_bed_snap = True
@@ -360,12 +361,6 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                             recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
                             # recvbuf[pos_bed, :] = bed_prior[pos_bed]
 
-                    # if vec.lower() in ["thickness","ice_thickness","h","Thickness"]:
-                    #     thickness_idx = indx_map[vec]
-                    # if vec.lower() in ["surface","ice_surface","s","Surface"]:
-                    #     surface_idx = indx_map[vec]
-                    # if vec.lower() in ["bed","bedrock","base","bedtopography"]:
-                    #     bed_idx = indx_map[vec]
                     
                 # check for negative thickness
                 # ISSM *------
@@ -513,7 +508,8 @@ def parallel_write_data_from_root_2D(full_ensemble=None, comm=None, data_name=No
     output_file = os.path.join("_modelrun_datasets", output_file)
 
     # Open file in parallel mode
-    with h5py.File(output_file, 'w', driver='mpio', comm=comm) as f:
+    # with h5py.File(output_file, 'w', driver='mpio', comm=comm) as f:
+    with h5py.File(output_file, 'w') as f:
         # Create dataset with total dimensions
         dset = f.create_dataset(data_name, (nd, Nens), dtype=dtype)
         
@@ -564,7 +560,8 @@ def parallel_write_vector_from_root(full_ensemble=None, comm=None, data_shape=No
     output_file = os.path.join("_modelrun_datasets", output_file)
 
     # Open file in parallel mode
-    with h5py.File(output_file, 'w', driver='mpio', comm=comm) as f:
+    # with h5py.File(output_file, 'w', driver='mpio', comm=comm) as f:
+    with h5py.File(output_file, 'w') as f:
         # Create dataset with total dimensions
         #  data_shape should be a tuple
         dset = f.create_dataset(data_name, data_shape, dtype=dtype)
@@ -687,8 +684,8 @@ def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, model_kwargs
 
                 # Create and write ensemble mean
                 ens_mean = f.create_dataset('ensemble_mean', (nd, model_kwargs.get('nt', params['nt']) + 1), dtype=dtype)
-                ens_mean[:, 0] = ensemble_mean
-                # ens_mean[:, 0] = full_ensemble[:, 0]
+                # ens_mean[:, 0] = ensemble_mean
+                ens_mean[:, 0] = full_ensemble[:, 0]
 
                 if model_kwargs.get("DEnKF_flag", False):
                     ensemble_mean = np.mean(dset[:, :, 0], axis=1)

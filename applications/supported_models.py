@@ -42,7 +42,7 @@ class SupportedModels:
         "flowline": {
             "module": "flowline_model.flowline_utils._flowline_enkf",
             "description": "Flowline model",
-            "status": "development",
+            "status": "supported",
         },
     }
 
