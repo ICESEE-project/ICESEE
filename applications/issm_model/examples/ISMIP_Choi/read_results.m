@@ -63,25 +63,8 @@ hdim = nd / nvar;
 
 wbed = w(4*hdim + 1 : 5*hdim, 1);
 
-obs_idx = find(wbed > 0);
-
+obs_idx = find(~isnan(wbed));   % <-- observations are the non-NaNs
 bed_obs_xy = [md_true.mesh.x(obs_idx), md_true.mesh.y(obs_idx)];
-
-% obs_index might be 0-based if written from Python
-ind_obs = double(ind_m(:));
-if min(ind_obs) == 0
-    ind_obs = ind_obs + 1;
-end
-
-% bed block in the state vector: (4*hdim+1 : 5*hdim)
-is_bed_obs = (ind_obs >= 4*hdim + 1) & (ind_obs <= 5*hdim);
-bed_state_idx = ind_obs(is_bed_obs);
-
-% map state-vector indices -> node indices (1..hdim)
-bed_nodes = unique(bed_state_idx - 4*hdim);
-
-% node -> XY from the ISSM mesh
-bed_obs_xy = [md.mesh.x(bed_nodes), md.mesh.y(bed_nodes)];  % meters
 
 % ---------------- GL midpoint points + pointwise RMSE ----------------
 [gl_mid] = compute_gl_midpoints( ...
@@ -123,8 +106,8 @@ if make_multi_plots
     %     md_true, md_nurged, md_ens, md, 'initialization.vel', 'Velocity', 'm/s');
 
     % bed
-    plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, 'geometry.bed', 'Bed Elevation', 'm');
+    % plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    %     md_true, md_nurged, md_ens, md, 'geometry.bed', 'Bed Elevation', 'm');
     plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md, 'geometry.bed', 'Bed', 'm');
 
@@ -784,12 +767,25 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
         'subplot',[nrows,1,1],'caxis',[cmin cmax],'colorbar','off');
     
     ax = gca; axs(1) = ax;
-    bed_obs_xy
-    % --- Overlay bed observation locations on panel (a) only ---
+    % --- Overlay bed observation locations on panel (a1) only ---
     if strcmp(field,'geometry.bed') && exist('bed_obs_xy','var') && ~isempty(bed_obs_xy)
-        % overlay_obs_circles(ax, bed_obs_xy, ...
-            % 'MarkerSize', 4, 'LineWidth', 0.7, 'Color', [1 1 1]*0.97, 'Alpha', 0.35);
-            plot(ax, bed_obs_xy(:,1), bed_obs_xy(:,2), 'wo', 'LineWidth', 1.2, 'MarkerSize', 8);
+    
+        hold(ax,'on');
+    
+        hObs = scatter(ax, bed_obs_xy(:,1), bed_obs_xy(:,2), 16, ...   % 22 = marker size
+            'o', ...
+            'MarkerFaceColor','none', ...
+            'MarkerEdgeColor',[1 1 1]*0.98, ...
+            'LineWidth',0.9);
+    
+        % transparency (scatter supports this in modern MATLAB)
+        if isprop(hObs,'MarkerEdgeAlpha'), hObs.MarkerEdgeAlpha = 0.35; end
+        if isprop(hObs,'MarkerFaceAlpha'), hObs.MarkerFaceAlpha = 0; end
+    
+        set(hObs,'HandleVisibility','off');  % don’t pollute legend
+        hold(ax,'off');
+    
+        try uistack(hObs,'top'); catch, end
     end
 
     ttl = ax.Title;
@@ -2727,41 +2723,4 @@ function stats = gl_dx_misplacement_stats(Ptrue, Pmodel)
     stats.bias_dx = mean(dx);
     stats.med_dx  = median(dx);
     stats.n       = numel(dx);
-end
-
-function overlay_obs_circles(ax, xy, varargin)
-% Overlay observation locations as light circles on an existing axes.
-% xy: Nx2 [x y] in meters
-
-    if isempty(xy), return; end
-
-    p = inputParser;
-    p.addParameter('MarkerSize', 4, @(v)isnumeric(v)&&isscalar(v));
-    p.addParameter('LineWidth', 0.6, @(v)isnumeric(v)&&isscalar(v));
-    p.addParameter('Color', [1 1 1]*0.95, @(v)isnumeric(v)&&numel(v)==3);
-    p.addParameter('Alpha', 0.35, @(v)isnumeric(v)&&isscalar(v));
-    p.parse(varargin{:});
-    opt = p.Results;
-
-    hold(ax,'on');
-
-    % Prefer scatter if MarkerEdgeAlpha exists (newer MATLAB)
-    try
-        h = scatter(ax, xy(:,1), xy(:,2), opt.MarkerSize^2, ...
-            'o', 'MarkerEdgeColor', opt.Color, 'MarkerFaceColor','none', ...
-            'LineWidth', opt.LineWidth);
-        h.HandleVisibility = 'off';
-        % alpha (if supported)
-        if isprop(h,'MarkerEdgeAlpha')
-            h.MarkerEdgeAlpha = opt.Alpha;
-        end
-    catch
-        % Fallback: plain plot (no alpha)
-        h = plot(ax, xy(:,1), xy(:,2), 'o', ...
-            'MarkerSize', opt.MarkerSize, 'LineWidth', opt.LineWidth, ...
-            'Color', opt.Color, 'MarkerFaceColor','none');
-        set(h,'HandleVisibility','off');
-    end
-
-    hold(ax,'off');
 end
