@@ -89,6 +89,7 @@
 | `rel_vel_weight` | weight for relative velocity in inversion | float | 1.0 | No | None | YAML |
 | `restart_enabled` | YAML configuration parameter for restart enabled | bool | True | No | None | YAML |
 | `run_flag` | Controls run flag behavior in script logic | bool | True | No | None | Internal |
+| `scalar_inputs` | list of scalar input variables | list | [] | No | None | YAML |
 | `sequential_ensemble_initialization` | YAML configuration parameter for sequential ensemble initialization | bool | False | No | None | YAML |
 | `sequential_run` | Parameter for sequential run in dictionary | bool | True | No | None | Dictionary |
 | `serial_file_creation` | --- Ensemble Parameters --- | Unknown | Computed | No | None | Dictionary |
@@ -101,6 +102,7 @@
 | `total_state_param_vars` | Parameter for total state param vars in dictionary | Unknown | Unknown | No | None | Dictionary |
 | `use_ensemble_pertubations` | YAML configuration parameter for use ensemble pertubations | bool | True | No | None | YAML |
 | `use_random_fields` | --- Ensemble Parameters --- | Unknown | Computed | No | None | Dictionary |
+| `var_nd` | variable state dimension for each state variable in vec_inputs. Used when state variables have different dimensions | NoneType | None | No | None | YAML |
 | `vec_inputs` | Parameter for vec inputs in dictionary | Unknown | Unknown | No | None | Dictionary |
 | `vel_idx` | YAML configuration parameter for vel idx | int | 2 | No | None | YAML |
 | `verbose` | YAML configuration parameter for verbose | bool | False | No | None | YAML |
