@@ -1,172 +1,169 @@
-# =============================================================================
-# Implicit 1D flowline model (Jax version)
+# ==============================================================================
+# @des: This file contains run functions for flowline data assimilation.
+#       - contains different options of the EnKF data assimilation schemes.
+# @date: 2026-01-26
 # @author: Brian Kyanjo
-# @date: 2024-09-24
-# @description: This script includes the flowline model using JAX, 
-#               - Jacobian computation using JAX
-#               - Implicit solver using JAX
-# =============================================================================
+# ==============================================================================
 
-# Import libraries ====
-import jax
+import sys
+import os
+import h5py
 import numpy as np
-from jax import jacfwd
-import jax.numpy as jnp
-import matplotlib.pyplot as plt
-from scipy.optimize import root
-from scipy.stats import norm, multivariate_normal
 
-jax.config.update("jax_enable_x64", True) # Set the precision in JAX to use float64
+# --- import run_simulation function from the flowline model ---
+from ICESEE.applications.flowline_model.examples.flowline_1d._flowline_model import *
+from ICESEE.config._utility_imports import icesee_get_index
 
-# Implicit flowline model function (Jax version) --------------------------------------------------------------
-def flowline(varin, varin_old, params, grid, bedfun):
-    # Unpack grid
-    NX          = params["NX"]
-    N1          = params["N1"]
-    dt          = params["dt"] / params["tscale"]
-    ds          = grid["dsigma"]
-    sigma       = grid["sigma"]
-    sigma_elem  = grid["sigma_elem"]
-
-    # Unpack parameters
-    tcurrent    = params["tcurrent"]
-    xscale      = params["xscale"]
-    hscale      = params["hscale"]
-    lambd       = params["lambda"]
-    m           = params["m"]
-    n           = params["n"]
-    a           = params["accum"] / params["ascale"]
-    eps         = params["eps"]
-    transient   = params["transient"]
-
-    # put a guard on mdot, it could be a scalar or an array
-    if isinstance(params["facemelt"], (int, float)):
-        mdot = params["facemelt"] / params["uscale"]
-    else:
-        mdot   = params["facemelt"][tcurrent]/params["uscale"]
-
-    # Unpack variables
-    h = varin[0:NX]
-    u = varin[NX:2*NX]
-    xg = varin[2*NX]
-
-    h_old = varin_old[0:NX]
-    xg_old = varin_old[2*NX]
-
-
-    # Calculate bed 
-    hf  = -bedfun(xg * xscale) / (hscale * (1 - lambd))
-    hfm = -bedfun(xg * sigma_elem[-1] * xscale) / (hscale * (1 - lambd))
-    b   = -bedfun(xg * sigma * xscale) / hscale
-
-    # Initialize the residual vector
-    F = jnp.zeros(2 * NX + 1, dtype=jnp.float64)
-
-    # Calculate thickness functions        
-    F = F.at[0].set(transient * (h[0] - h_old[0]) / dt + (2 * h[0] * u[0]) / (ds[0] * xg)  - a)
-    
-    F = F.at[1].set(
-        transient * (h[1] - h_old[1]) / dt
-        - transient * sigma_elem[1] * (xg - xg_old) * (h[2] - h[0]) / (2 * dt * ds[1] * xg)
-        + (h[1] * (u[1] + u[0])) / (2 * xg * ds[1]) - a
-    )
-
-    F = F.at[2:NX-1].set(
-        transient * (h[2:NX-1] - h_old[2:NX-1]) / dt
-        - transient * sigma_elem[2:NX-1] * (xg - xg_old) * (h[3:NX] - h[1:NX-2]) / (2 * dt * ds[2:NX-1] * xg)
-        + (h[2:NX-1] * (u[2:NX-1] + u[1:NX-2]) - h[1:NX-2] * (u[1:NX-2] + u[0:NX-3])) / (2 * xg * ds[2:NX-1]) - a
-    )
-
-    F = F.at[N1-1].set(
-        (1 + 0.5 * (1 + (ds[N1-1] / ds[N1-2]))) * h[N1-1]
-        - 0.5 * (1 + (ds[N1-1] / ds[N1-2])) * h[N1-2]
-        - h[N1]
-    )
-
-    F = F.at[NX-1].set(
-    transient * (h[NX-1] - h_old[NX-1]) / dt
-    - transient * sigma[NX-1] * (xg - xg_old) * (h[NX-1] - h[NX-2]) / (dt * ds[NX-2] * xg)
-    + (h[NX-1] * (u[NX-1] + mdot * hf / h[NX-1] + u[NX-2]) - h[NX-2] * (u[NX-2] + u[NX-3])) / (2 * xg * ds[NX-2])
-    - a
-    )
-    
-    # Calculate velocity functions
-    F = F.at[NX].set(
-        ((4 * eps / (xg * ds[0]) ** ((1 / n) + 1)) * (h[1] * (u[1] - u[0]) * abs(u[1] - u[0]) ** ((1 / n) - 1)
-            - h[0] * (2 * u[0]) * abs(2 * u[0]) ** ((1 / n) - 1)))
-        - u[0] * abs(u[0]) ** (m - 1)
-        - 0.5 * (h[0] + h[1]) * (h[1] - b[1] - h[0] + b[0]) / (xg * ds[0])
-    )
-
-    F = F.at[NX+1:2*NX-1].set(
-        (4 * eps / (xg * ds[1:NX-1]) ** ((1 / n) + 1))
-        * (h[2:NX] * (u[2:NX] - u[1:NX-1]) * abs(u[2:NX] - u[1:NX-1]) ** ((1 / n) - 1)
-           - h[1:NX-1] * (u[1:NX-1] - u[0:NX-2]) * abs(u[1:NX-1] - u[0:NX-2]) ** ((1 / n) - 1))
-        - u[1:NX-1] * abs(u[1:NX-1]) ** (m - 1)
-        - 0.5 * (h[1:NX-1] + h[2:NX]) * (h[2:NX] - b[2:NX] - h[1:NX-1] + b[1:NX-1]) / (xg * ds[1:NX-1])
-    )
-
-    F = F.at[NX+N1-1].set((u[N1] - u[N1-1]) / ds[N1-1] - (u[N1-1] - u[N1-2]) / ds[N1-2])
-    F = F.at[2*NX-1].set(
-        (1 / (xg * ds[NX-2]) ** (1 / n)) * (abs(u[NX-1] - u[NX-2]) ** ((1 / n) - 1)) * (u[NX-1] - u[NX-2])
-        - lambd * hf / (8 * eps)
-    )
-
-    # Calculate grounding line functions
-    F = F.at[2*NX].set(3 * h[NX-1] - h[NX-2] - 2 * hf)
-
-    return F
-
-# Calculate the Jacobian of the flowline model function --------------------------------------------------------------
-def Jac_calc(huxg_old, params, grid, bedfun, flowlinefun):
-    """
-    Use automatic differentiation to calculate Jacobian for nonlinear solver.
+# --- Forecast step for the flowline model ---
+def forecast_step_single(ensemble=None, **kwargs):
+    """inputs: run_simulation - function that runs the model
+                ensemble - current state of the model
+                dt - time step
+                *args - additional arguments for the model
+         outputs: uai - updated state of the model after one time step
     """
 
-    def f(varin):
-        # Initialize F as an array of zeros with size 2*NX + 1
-        # F = jnp.zeros(2 * params["NX"] + 1, dtype=jnp.float64)
-        # Call the flowline function with current arguments
-        return flowlinefun(varin, huxg_old, params, grid, bedfun)
-        # print(F)
-        # return F
+    #  call the run_model fun to push the state forward in time
+    return run_model(ensemble, **kwargs)
 
-    # Create a function that calculates the Jacobian using JAX
-    def Jf(varin):
-        # Jacobian of f with respect to varin
-        return jax.jacfwd(f)(varin)
+# --- generate true state ---
+def generate_true_state(**kwargs):
+    """generate the true state of the model"""
 
-    return Jf
+    # Unpack the parameters
+    params = kwargs["params"]
+    statevec_true = kwargs["statevec_true"]
 
-# Function that runs the flowline model function --------------------------------------------------------------
-def flowline_run(varin, params, grid, bedfun, flowlinefun):
-    nt = params["NT"]
-    huxg_old = varin
-    huxg_all = np.zeros((huxg_old.shape[0], nt))
+    nd, nt = statevec_true.shape
 
-    for i in range(nt):
-        if not params["assim"]:
-            params["tcurrent"] = i + 1  # Adjusting for 1-based indexing in Julia
-        
-        # Jacobian calculation
-        Jf = Jac_calc(huxg_old, params, grid, bedfun, flowlinefun)
-        
-        # Solve the system of nonlinear equations
-        solve_result = root(
-            lambda varin: flowlinefun(varin, huxg_old, params, grid, bedfun), 
-            huxg_old, 
-            jac=Jf, 
-            method='hybr',  # Hybr is a commonly used solver like nlsolve
-            options={'maxiter': 100}
-        )
-        
-        # Update the old solution
-        huxg_old = solve_result.x
-        
-        # Store the result for this time step
-        huxg_all[:, i] = huxg_old
-
-        if not params["assim"]:
-            print(f"Step {i + 1}\n")
+    # call the icesee_get_index function to get the indices of the state variables
+    vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
     
-    return huxg_all
+    # Set the initial condition
+    huxg_out0 = initialize_model(**kwargs)
+    
+    kwargs['facemelt'] = np.linspace(5, 85, kwargs["NT"]+1)/float(kwargs['year'])  # Varying terminus melt over time
+    fm_dist = np.random.normal(0,20.0)
+    fm_truth = kwargs["facemelt"]
+    kwargs['transient'] = 1
+
+    # print("[DEBUG] Initial huxg_out0:", huxg_out0, statevec_true[:, 0].shape )  # Debug print statement 
+    statevec_true[:, 0] = huxg_out0
+
+    NX = kwargs['NX']
+
+    # Run the model forward in time
+    for k in range(nt-1):
+        kwargs["tcurrent"] = k+1
+        huxg_out0 = run_model(statevec_true[:, k], **kwargs)
+        for key, value in huxg_out0.items():
+            statevec_true[indx_map[key], k + 1] = value
+            print(f"[DEBUG] Time step {k+1}, updating {key} at indices {indx_map[key]}")  # Debug print statement
+            
+    exit(0)
+    updated_state = {}
+    for key in kwargs['vec_inputs']:
+        updated_state[key] = statevec_true[indx_map[key],:]
+    return updated_state
+
+def generate_nurged_state(**kwargs):
+    """generate the nurged state of the model"""
+
+    # Unpack the parameters
+    params = kwargs["params"]
+    statevec_nurged = kwargs["statevec_nurged"]
+
+    nd,nt = statevec_nurged.shape
+    # Set the initial condition
+    huxg_out0 = initialize_model(**kwargs)
+
+    statevec_nurged[:, 0] = huxg_out0
+    kwargs['facemelt'] = np.linspace(5, 45, kwargs["NT"]+1)/float(kwargs['year'])  # Varying terminus melt over time
+    fm_dist = np.random.normal(0,20.0)
+    fm_truth = kwargs["facemelt"]
+    kwargs['transient'] = 1
+    NX = kwargs['NX']
+
+    # call the icesee_get_index function to get the indices of the state variables
+    vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
+
+    # Run the model forward in time
+    for k in range(nt-1):
+        huxg_out0 = run_model(huxg_out0, **kwargs)
+        for ii, key in enumerate(kwargs['vec_inputs']):
+            statevec_nurged[indx_map[key], k + 1] = huxg_out0[indx_map[key]] 
+
+    updated_state = {}
+    for key in kwargs['vec_inputs']:
+        updated_state[key] = statevec_nurged[indx_map[key],:]
+    return updated_state
+    
+# --- initialize the ensemble members ---
+def initialize_ensemble(ens, **kwargs):
+    """initialize the ensemble members"""
+    # Unpack the parameters
+    params = kwargs["params"]
+    statevec_ens    = kwargs["statevec_ens"]
+    
+    nd, N = statevec_ens.shape
+    hdim = nd // params["num_state_vars"]
+
+    vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
+
+    # Set the initial condition
+    huxg_out0 = initialize_model(**kwargs)
+    kwargs['facemelt'] = np.linspace(5, 85, kwargs["NT"]+1)/float(kwargs['year'])  # Varying terminus melt over time
+    fm_dist = np.random.normal(0,20.0)
+    fm_truth = kwargs["facemelt"]
+    kwargs['transient'] = 1
+    NX = kwargs['NX']
+
+    initailized_state = np.concatenate((huxg_out0, [kwargs['facemelt'][0]/ kwargs['uscale']]))
+    initailized_state={}
+    for ii, key in enumerate(kwargs['vec_inputs']):
+        initailized_state[key] = huxg_out0[indx_map[key]]
+
+    return initailized_state
+
+# the user should able to override the default observation operator and its jacobian
+def H(m,n):
+
+    H = np.zeros((m*2+1,n))
+
+    # calculate the distance between measurements
+    di = int((n-2)/(2*m))
+    for i in range(m):
+        H[i, i*di] = 1
+        H[m+i, int((n-2)/2) + i*di] = 1
+
+    H[2*m, n-2] = 1
+    return H
+
+def Obs_fun(virtual_obs=None):
+    m,n = virtual_obs.shape
+    z =  H(m,n) @ virtual_obs
+    return z
+
+def JObs_fun(nd=None):
+    obs_file = '_modelrun_datasets/synthetic_obs.h5'
+    with h5py.File(obs_file, 'r') as f:
+       obs = f['hu_obs'][:]
+       m,nd = obs.shape
+    return H(m,nd)
+
+def Cov_Obs_fun(sig_obs=None,nd=None):
+    R_cov = np.eye(nd) * (sig_obs ** 2)
+    return R_cov
+
+def localization_function(**kwargs):
+    grid = kwargs['grid']
+    statevec_sig = np.concatenate((grid['sigma_elem'], grid['sigma'], np.array([1, 1])))
+    taper = np.ones((statevec_sig.shape[0], statevec_sig.shape[0]))
+    taper[-1, -3] = 2  
+    taper[-3, -1] = 2  
+    taper[-1, -1] = 10  
+    taper[-2, -1] = 10  
+    taper[-1, -2] = 10 
+
+    return taper
+

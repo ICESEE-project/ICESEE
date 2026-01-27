@@ -131,6 +131,7 @@ os.chdir(icesee_cwd)
 
 # --- run the model ---
 kwargs.update({'params': params, 
+               'nd': params.get('nd'),
                'server': server})
 
 try:

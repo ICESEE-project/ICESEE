@@ -330,49 +330,129 @@ def save_all_data(enkf_params=None, nofilter=None, **kwargs):
 
 # ---- function to get the index of the variables in the vector dynamically
 def icesee_get_index(vec=None, **kwargs):
-    try:
-        vec_inputs = kwargs.get("vec_inputs", None)
-        params = kwargs.get("params", None)
-        nd = kwargs.get("nd", params.get("nd", None))
-        # print(f"[ICESEE-debug] vec_inputs: {vec_inputs}, nd: {nd}, params: {params}\n")
-        if params["default_run"]:
-            comm = kwargs.get("subcomm", None)
-        else:
-            comm = kwargs.get("comm_world", None)
-        
-        # len_vec = params["total_state_param_vars"]
-        len_vec = len(vec_inputs)
-        dim_list_param = np.array(kwargs.get('dim_list', None)) // len(kwargs.get('vec_inputs_old', None))
-        dim_list_param = dim_list_param[:len_vec]
-        hdim = nd // len_vec
-        # print(f"[ICESEE-debug] len_vec: {len_vec}, dim_list_param: {dim_list_param}, hdim: {hdim}\n")
+    """
+    If var_nd is provided: variables in vec_inputs may have different global sizes.
+    In this branch we DO NOT use dim_list, because dim_list is typically packed under
+    equal-size assumptions elsewhere in the codebase.
 
-        if comm is None:
-            rank = 0
-            dim = dim_list_param[rank]
-            offsets = [0]
+    We compute a deterministic block distribution per variable across ranks:
+      - each variable is split (almost) evenly across nranks
+      - rank-local ownership is contiguous within each variable
+    """
+    try:
+        var_nd = kwargs.get('var_nd', None)
+
+        if var_nd is not None:
+            vec_inputs = kwargs.get("vec_inputs", None)
+            params = kwargs.get("params", None)
+            if vec_inputs is None or params is None:
+                raise ValueError("vec_inputs and params must be provided")
+
+            # communicator selection
+            if params["default_run"]:
+                comm = kwargs.get("subcomm", None)
+            else:
+                comm = kwargs.get("comm_world", None)
+
+            # rank/size
+            if comm is None or params.get("even_distribution", False):
+                rank = 0
+                nranks = 1
+            else:
+                rank = comm.Get_rank()
+                nranks = comm.Get_size()
+
+            # var_nd: dict or list aligned with vec_inputs
+            if isinstance(var_nd, dict):
+                nd_vars = np.array([int(var_nd[v]) for v in vec_inputs], dtype=int)
+            else:
+                nd_vars = np.asarray(var_nd, dtype=int)
+                if nd_vars.shape[0] != len(vec_inputs):
+                    raise ValueError("var_nd must be dict keyed by vec_inputs or list aligned with vec_inputs")
+
+            if np.any(nd_vars < 0):
+                raise ValueError("var_nd contains negative sizes")
+
+            # base offsets in concatenated global vector
+            base_offsets = np.cumsum(np.insert(nd_vars, 0, 0))[:-1]
+
+            def block_decomp(n, p, r):
+                """
+                Split n items into p contiguous blocks.
+                Returns (start, count) for rank r.
+                """
+                q, rem = divmod(n, p)
+                # first 'rem' ranks get q+1
+                if r < rem:
+                    count = q + 1
+                    start = r * (q + 1)
+                else:
+                    count = q
+                    start = rem * (q + 1) + (r - rem) * q
+                return start, count
+
+            index_map = {}
+            local_size_total = 0
+
+            for i, var in enumerate(vec_inputs):
+                n = int(nd_vars[i])
+                start_in_var, local_n = block_decomp(n, nranks, rank)
+
+                g0 = int(base_offsets[i] + start_in_var)
+                g1 = g0 + int(local_n)
+
+                index_map[var] = np.arange(g0, g1, dtype=int) if local_n > 0 else np.array([], dtype=int)
+                local_size_total += int(local_n)
+
+            # Keep return signature compatible:
+            # third return is "local size on this rank" (for this new branch, sum of locals)
+            return None, index_map, local_size_total
+
+        # ============================
+        # Case 2: original equal-size logic (unchanged)
+        # ============================
         else:
-            if params["even_distribution"]:
+            vec_inputs = kwargs.get("vec_inputs", None)
+            nd = kwargs.get("nd")
+            # print(f"[ICESEE-debug] vec_inputs: {vec_inputs}, nd: {nd}, kwargs: {kwargs}\n")
+            if kwargs["default_run"]:
+                comm = kwargs.get("subcomm", None)
+            else:
+                comm = kwargs.get("comm_world", None)
+            
+            # len_vec = kwargs["total_state_param_vars"]
+            len_vec = len(vec_inputs)
+            dim_list_param = np.array(kwargs.get('dim_list', None)) // len(kwargs.get('vec_inputs_old', None))
+            dim_list_param = dim_list_param[:len_vec]
+            hdim = nd // len_vec
+            # print(f"[ICESEE-debug] len_vec: {len_vec}, dim_list_param: {dim_list_param}, hdim: {hdim}\n")
+
+            if comm is None:
                 rank = 0
                 dim = dim_list_param[rank]
                 offsets = [0]
             else:
-                rank = comm.Get_rank()
-                dim = dim_list_param[rank]
-                offsets = np.cumsum(np.insert(dim_list_param, 0, 0))
+                if kwargs["even_distribution"]:
+                    rank = 0
+                    dim = dim_list_param[rank]
+                    offsets = [0]
+                else:
+                    rank = comm.Get_rank()
+                    dim = dim_list_param[rank]
+                    offsets = np.cumsum(np.insert(dim_list_param, 0, 0))
 
-        start_idx = offsets[rank]
-        index_map = {}
-        var_start = 0
+            start_idx = offsets[rank]
+            index_map = {}
+            var_start = 0
 
-        for var in vec_inputs:
-            start = var_start + start_idx
-            end = start + dim
-            index_map[var] = np.arange(start, end)
-            var_start += hdim
+            for var in vec_inputs:
+                start = var_start + start_idx
+                end = start + dim
+                index_map[var] = np.arange(start, end)
+                var_start += hdim
 
-        local_size_per_rank = kwargs.get('dim_list', None)
-        return None, index_map, local_size_per_rank[rank]
+            local_size_per_rank = kwargs.get('dim_list', None)
+            return None, index_map, local_size_per_rank[rank]
     except Exception as e:
         print(f"Error occurred in icesee_get_index: {e}")
         tb_str = "".join(traceback.format_exception(*sys.exc_info()))

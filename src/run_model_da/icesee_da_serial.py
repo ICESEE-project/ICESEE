@@ -382,18 +382,21 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
             # --- localization ---
             if params["localization_flag"]:
                 if not adaptive_localization:
-                    # call the gahpari-cohn localization function
-                    loc_matrix_spatial = gaspari_cohn(r_matrix)
+                    if hasattr(model_module, "localization_function") and callable(model_module.localization_function):
+                        loc_matrix = model_module.localization_function(**model_kwargs)
+                    else:
+                        # call the gahpari-cohn localization function
+                        loc_matrix_spatial = gaspari_cohn(r_matrix)
 
-                    # expand to full state space
-                    loc_matrix = np.empty_like(Cov_model)
-                    for var_i in range(params["total_state_param_vars"]):
-                        for var_j in range(params["total_state_param_vars"]):
-                            start_i, start_j = var_i * hdim, var_j * hdim
-                            loc_matrix[start_i:start_i+hdim, start_j:start_j+hdim] = loc_matrix_spatial
-                    
-                    # apply the localization matrix
-                    # Cov_model = loc_matrix * Cov_model
+                        # expand to full state space
+                        loc_matrix = np.empty_like(Cov_model)
+                        for var_i in range(params["total_state_param_vars"]):
+                            for var_j in range(params["total_state_param_vars"]):
+                                start_i, start_j = var_i * hdim, var_j * hdim
+                                loc_matrix[start_i:start_i+hdim, start_j:start_j+hdim] = loc_matrix_spatial
+                        
+                        # apply the localization matrix
+                        # Cov_model = loc_matrix * Cov_model
                     
                 Cov_model = loc_matrix * Cov_model
 
