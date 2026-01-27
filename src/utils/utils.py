@@ -54,7 +54,7 @@ class UtilsFunctions:
         return m.get(int(k_model), None)
 
     # ------------------------------ H -----------------------------------
-    def H_matrix(self, n_model, km=None):
+    def H_matrix(self, n_model, km=None,obs_mask_full=None):
         """
         Dense observation operator H.
 
@@ -118,7 +118,15 @@ class UtilsFunctions:
                         idx = idx[mask]
                     # else: include all bed points
 
-            all_obs_indices.append(idx)
+            # NEW: apply missing-data mask (NaN-driven)
+            if obs_mask_full is not None:
+                obs_mask_full = np.asarray(obs_mask_full, dtype=bool).ravel()
+                idx = idx[obs_mask_full[idx]]
+
+            if idx.size > 0:
+                all_obs_indices.append(idx)   
+
+            # all_obs_indices.append(idx)
 
         if len(all_obs_indices) == 0:
             return np.zeros((0, n_model), dtype=float)
@@ -138,28 +146,36 @@ class UtilsFunctions:
         return H
 
     def Obs_fun(self, virtual_obs, H=None, km=None):
-        """
-        Observation operator applied to virtual_obs.
-        If km is not None, uses km-consistent H.
-        """
         n = 1 if np.isscalar(virtual_obs) else virtual_obs.shape[0]
-
         if H is None:
-            H = self.H_matrix(n, km=km)
-
+            hu_obs = self.model_kwargs.get("hu_obs_loaded", None)
+            #  read hu_obs from file
+            # _synthetic_obs = self.model_kwargs.get("synthetic_obs_file", None)
+            # with h5py.File(_synthetic_obs, 'r') as f:
+            #     hu_obs  = f['hu_obs'][:]
+            obs_mask_full = None
+            if (hu_obs is not None) and (km is not None):
+                obs_mask_full = ~np.isnan(hu_obs[:, int(km)])
+            H = self.H_matrix(n, km=km, obs_mask_full=obs_mask_full)
         return H @ virtual_obs
 
     def JObs_fun(self, n_model):
-        """
-        Jacobian of observation operator (here, H itself).
-
-        Critical: uses km consistent with current model time index self.model_kwargs["k"].
-        """
         k_model = self.model_kwargs.get("k", None)
         km = None
         if k_model is not None:
             km = self._get_obs_col_from_model_step(k_model)
-        return self.H_matrix(n_model, km=km)
+
+        hu_obs = self.model_kwargs.get("hu_obs_loaded", None)
+        #  read hu_obs from file
+        # _synthetic_obs = self.model_kwargs.get("synthetic_obs_file", None)
+        # with h5py.File(_synthetic_obs, 'r') as f:
+        #     hu_obs  = f['hu_obs'][:]
+
+        obs_mask_full = None
+        if (hu_obs is not None) and (km is not None):
+            obs_mask_full = ~np.isnan(hu_obs[:, int(km)])
+
+        return self.H_matrix(n_model, km=km, obs_mask_full=obs_mask_full)
 
     # -------------------------- observation schedule --------------------------
     def generate_observation_schedule(self, **kwargs):
@@ -255,18 +271,20 @@ class UtilsFunctions:
 
         # preallocate obs in *state* size (so you can keep your old hu_obs layout)
         nd_full = statevec_true.shape[0]
-        hu_obs = np.zeros((nd_full, m_obs), dtype=float)
+        # hu_obs = np.zeros((nd_full, m_obs), dtype=float)
+        hu_obs = np.full((nd_full, m_obs), np.nan, dtype=float)  # use NaN for unobserved
 
         # error_R: keep your block-structure logic
         total_state_param_vars = params["total_state_param_vars"]
         hdim = nd_full // total_state_param_vars
 
-        error_R = np.zeros((nd_full, m_obs), dtype=float)
+        # error_R = np.zeros((nd_full, m_obs), dtype=float)
+        error_R = np.full((nd_full, m_obs), np.nan, dtype=float)  # use NaN for unobserved
         sig_obs = params["sig_obs"]
-        for i, sig in enumerate(sig_obs):
-            a = i * hdim
-            b = a + hdim
-            error_R[a:b, :] = float(sig)
+        # for i, sig in enumerate(sig_obs):
+        #     a = i * hdim
+        #     b = a + hdim
+        #     error_R[a:b, :] = float(sig)
 
         bed_aliases = {'bed', 'bedrock', 'bed_topography', 'bedtopo', 'bedtopography'}
         key_is_bed = {k: (str(k).lower() in bed_aliases) for k in vec_inputs}
@@ -353,6 +371,13 @@ class UtilsFunctions:
 
         # ---------------- build observations per obs column ----------------
         obs_set = set(kwargs.get("observed_vars", []) + kwargs.get("observed_params", []))
+        for ii, key in enumerate(vec_inputs):
+            if key not in obs_set:
+                continue
+            if key_is_bed.get(key, False):
+                continue  # bed handled later due to snapshots/masks
+
+            error_R[indx_map[key], :] = float(sig_obs[ii])
 
         # locate thickness key once (needed for grounded-only bed obs)
         thickness_candidates = ["h", "thickness", "ice_thickness"]
@@ -366,21 +391,26 @@ class UtilsFunctions:
 
         for km, k_model in enumerate(ind_m):
             # Non-bed observations
-            for key in vec_inputs:
+            for ii, key in enumerate(vec_inputs):
                 if key not in indx_map:
                     continue
                 idx = np.asarray(indx_map[key], dtype=int)
+
+                # make error_R
+                # if (key in obs_set) and (not key_is_bed.get(key, False)):
+                #     sigma = float(sig_obs[vec_inputs.index(key)])
+                #     error_R[idx, km] = sigma
 
                 if (key in obs_set) and (not key_is_bed.get(key, False)):
                     sigma = error_R[idx, km]
                     hu_obs[idx, km] = statevec_true[idx, k_model] + np.random.normal(0.0, sigma, size=idx.size)
                 else:
-                    # keep 0 for unobserved
+                    #  leave NaN for unobserved entries
                     pass
 
             # Bed observations only at snapshot columns
             if km in bed_snap_cols:
-                for key in vec_inputs:
+                for ii, key in enumerate(vec_inputs):
                     if not key_is_bed.get(key, False):
                         continue
                     if key not in indx_map:
@@ -416,9 +446,11 @@ class UtilsFunctions:
 
                     idx_obs = bed_idx[final_mask]
                     if idx_obs.size > 0:
-                        sigma_obs = error_R[idx_obs, km]
+                        # sigma_obs = error_R[idx_obs, km]
+                        sigma_bed = float(sig_obs[ii])
+                        error_R[idx_obs, km] = sigma_bed
                         hu_obs[idx_obs, km] = statevec_true[idx_obs, k_model] + np.random.normal(
-                            0.0, sigma_obs, size=idx_obs.size
+                            0.0, sigma_bed, size=idx_obs.size
                         )
 
         # ---------------- publish masks + mapping so H_matrix can match ----------------

@@ -26,6 +26,8 @@ dependencies = [
   "pyyaml",
   "numcodecs",
   "gstools",
+  "jax",
+  "jaxlib",
 ]
 
 [project.optional-dependencies]

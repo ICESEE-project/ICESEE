@@ -560,7 +560,14 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                                 # bed_mask_map = f['bed_mask_map'][:]
                                 bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col = load_bed_masks_from_h5(f)
                                 # Cov_obs = np.cov(error_R)
-                                Cov_obs = np.zeros(error_R.shape)
+                                # error_R should be stored as sigma with same shape as hu_obs
+                                # mask = (~np.isnan(hu_obs[:, km])) & (~np.isnan(error_R[:, km]))
+                                mask = ~np.isnan(hu_obs[:, km])
+
+                                # sigma_k = error_R[mask, km]
+                                # Cov_obs = np.diag(sigma_k**2)
+
+                                # model_kwargs.update({"obs_mask_full": mask})
                                 model_kwargs.update({
                                                 "bed_mask_map_static": bed_mask_map_static,
                                                 "bed_mask_map_cols": bed_mask_map_cols,
@@ -595,7 +602,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
 
                             if EnKF_flag:
                                 # compute the X5 matrix
-                                X5,analysis_vec_ij = EnKF_X5(k,ensemble_vec, Cov_obs, Nens, hu_obs, model_kwargs,UtilsFunctions)
+                                X5,analysis_vec_ij = EnKF_X5(k,ensemble_vec, Nens, hu_obs, model_kwargs,UtilsFunctions)
                                 # X5 = EnKF_X5(Cov_obs, Nens, D, HA, Eta, d)
                                 y_i = np.sum(X5, axis=1)
                                 # ensemble_vec_mean[:,k+1] = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()

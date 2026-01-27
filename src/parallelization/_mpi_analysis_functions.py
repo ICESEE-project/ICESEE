@@ -27,7 +27,7 @@ from ICESEE.src.utils.tools import icesee_get_index, get_grid_dimensions
 
 # ============================ EnKF functions ============================ 
 # def EnKF_X5(Cov_obs, Nens, D, HA, Eta, d): 
-def EnKF_X5(km,ensemble_vec, Cov_obs, Nens, hu_obs, model_kwargs,UtilsFunctions):
+def EnKF_X5(km,ensemble_vec, Nens, hu_obs, model_kwargs,UtilsFunctions):
     """
     Function to compute the X5 matrix for the EnKF
         - ensemble_vec: ensemble matrix of size (ndxNens)
@@ -40,6 +40,8 @@ def EnKF_X5(km,ensemble_vec, Cov_obs, Nens, hu_obs, model_kwargs,UtilsFunctions)
     generate_enkf_field = model_kwargs.get("generate_enkf_field", False)
     rng = model_kwargs.get("rng", np.random.default_rng())
     rank_seed = model_kwargs.get("rank_seed", 0)
+    Cov_obs = None
+    model_kwargs["hu_obs_loaded"] = hu_obs
 
     # np.random.seed(rank_seed)
 
@@ -48,8 +50,13 @@ def EnKF_X5(km,ensemble_vec, Cov_obs, Nens, hu_obs, model_kwargs,UtilsFunctions)
 
     H = U.JObs_fun(ensemble_vec.shape[0])          # build once
     k_obs = model_kwargs.get("km")
-    d = U.Obs_fun(hu_obs[:, k_obs], H=H, km=km)       # reuse
-
+    # d = U.Obs_fun(hu_obs[:, k_obs], H=H, km=km)       # reuse
+    y_full = hu_obs[:, k_obs].copy()
+    y_full[np.isnan(y_full)] = 0.0
+    # d = U.Obs_fun(hu_obs[:, k_obs], H=H, km=k_obs)       # reuse
+    d = U.Obs_fun(y_full, H=H, km=k_obs)       # reuse
+    if comm_world.Get_rank() == 0:
+        print(f"[ICESEE] Rank: {comm_world.Get_rank()} EnKF_X5 at time step km: {km} any NaN in H: {np.isnan(H).any()} d: {np.isnan(d).any()}")
     # -- get ensemble pertubations
     use_ensemble_pertubations = model_kwargs.get("use_ensemble_pertubations", True)
     ensemble_mean = np.mean(ensemble_vec, axis=1).reshape(-1,1)

@@ -59,9 +59,9 @@ def initialize_model(**kwargs):
     b_in, b_out = (float(kwargs["b_in"])), (float(kwargs["b_out"]))
     s_in, s_out = (float(kwargs["s_in"])), (float(kwargs["s_out"]))
 
-    b = firedrake.interpolate(b_in - (b_in - b_out) * x / Lx, Q)
-    s0 = firedrake.interpolate(s_in - (s_in - s_out) * x / Lx, Q)
-    h0 = firedrake.interpolate(s0 - b, Q)
+    b = firedrake.Function(Q).interpolate(b_in - (b_in - b_out) * x / Lx)
+    s0 = firedrake.Function(Q).interpolate(s_in - (s_in - s_out) * x / Lx)
+    h0 = firedrake.Function(Q).interpolate(s0 - b)
 
     # --- Driving Stress ---
     h_in = s_in - b_in
@@ -72,7 +72,7 @@ def initialize_model(**kwargs):
     # --- Initial Velocity ---
     u_in, u_out = float(kwargs["u_in"]), float(kwargs["u_out"])
     velocity_x = u_in + (u_out - u_in) * (x / Lx) ** 2
-    u0 = firedrake.interpolate(firedrake.as_vector((velocity_x, 0)), V)
+    u0 = firedrake.Function(V).interpolate(firedrake.as_vector((velocity_x, 0)))
 
     # --- Friction Coefficient ---
     PETSc.Sys.Print("Importing icepack ...")
@@ -80,7 +80,7 @@ def initialize_model(**kwargs):
     A = icepack.rate_factor(T)
 
     expr = (0.95 - 0.05 * x / Lx) * tau_D / u_in**(1 / m)
-    C = firedrake.interpolate(expr, Q)
+    C = firedrake.Function(Q).interpolate(expr)
 
     p_W = rho_W * g * firedrake.max_value(0, h0 - s0)
     p_I = rho_I * g * h0
@@ -116,17 +116,17 @@ def initialize_model(**kwargs):
     )
 
     expr = -1e3 * C * phi * sqrt(inner(u0, u0)) ** (1 / m - 1) * u0
-    tau_b = firedrake.interpolate(expr, V)
+    tau_b = firedrake.Function(V).interpolate(expr)
 
     # --- Accumulation ---
     a_in = firedrake.Constant(float(kwargs["a_in"]))
     da   = firedrake.Constant(float(kwargs["da"]))
-    a    = firedrake.interpolate(a_in + da * x / Lx, Q)
+    a    = firedrake.Function(Q).interpolate(a_in + da * x / Lx)
 
     # nurged accumulation
     a_in_p  = firedrake.Constant(float(kwargs["a_in_p"]))
     da_p    = firedrake.Constant(float(kwargs["da_p"]))
-    a_p     = firedrake.interpolate(a_in_p + da_p * x / Lx, Q)
+    a_p     = firedrake.Function(Q).interpolate(a_in_p + da_p * x / Lx)
 
     # --- Update h and u ---
     h = h0.copy(deepcopy=True)

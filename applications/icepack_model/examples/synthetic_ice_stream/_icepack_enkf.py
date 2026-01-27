@@ -209,7 +209,7 @@ def generate_nurged_state(**kwargs):
         daa = da_p
         a_in = firedrake.Constant(aa)
         da_  = firedrake.Constant(daa)
-        a    = firedrake.interpolate(a_in + da_ * x / Lx, Q)
+        a    = firedrake.Function(Q).interpolate(a_in + da_ * x / Lx)
         statevec_nurged[indx_map["smb"],0] = a.dat.data_ro
 
     # if velocity is nurged, then run to get a solution to be used as am initial guess for velocity.
@@ -278,7 +278,7 @@ def generate_nurged_state(**kwargs):
             # daa = da_p
             a_in = firedrake.Constant(aa)
             da_  = firedrake.Constant(daa)
-            a    = firedrake.interpolate(a_in + da_ * x / Lx, Q)
+            a    = firedrake.Function(Q).interpolate(a_in + da_ * x / Lx)
             statevec_nurged[indx_map["smb"],k+1] = a.dat.data_ro
 
     updated_state = {'h': statevec_nurged[indx_map["h"],:], 
