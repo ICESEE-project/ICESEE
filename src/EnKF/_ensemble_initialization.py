@@ -46,20 +46,21 @@ def ensemble_initialization(**model_kwargs):
     time_init_file_writing     = 0.0
     time_init_ensemble_mean_computation = 0.0
 
+    nd = model_kwargs.get("nd", params["nd"])
+    Nens = model_kwargs.get("Nens", params["Nens"])
+
     if rank_world == 0:
         print("[ICESEE] Initializing the ensemble ...")
         model_kwargs.update({'ens_id': rank_world})
 
-        model_kwargs.update({"statevec_ens":np.zeros([params["nd"], params["Nens"]])})
+        model_kwargs.update({"statevec_ens":np.zeros([nd, Nens])})
         
         # get the ensemble matrix   
         vecs, indx_map, dim_per_proc = icesee_get_index(model_kwargs["statevec_ens"], **model_kwargs)
         ensemble_vec = np.zeros_like(model_kwargs["statevec_ens"])
 
-        if model_kwargs["joint_estimation"] or params["localization_flag"]:
-                hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
-        else:
-            hdim = ensemble_vec.shape[0] // params["num_state_vars"]
+        hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
+        
         state_block_size = hdim * params["num_state_vars"]
 
         # # --- get the process noise ---
@@ -83,7 +84,17 @@ def ensemble_initialization(**model_kwargs):
             # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=True)
             model_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
             # noise = generate_enkf_field(**model_kwargs)
-            noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+
+            if (len(model_kwargs.get("scalar_inputs", [])) > 0) or (model_kwargs.get("var_nd", None) is not None):
+                noise_1 = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                ndim = 1 if len(model_kwargs.get("scalar_inputs", [])) > 0 else (model_kwargs["var_nd"][model_kwargs["scalar_inputs"][0]])
+                noise_2 = generate_enkf_field(None, np.sqrt(Lx*Ly), ndim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                # concatenate noise_1 and noise_2 
+                noise = np.concatenate((noise_1, noise_2))[:-1]
+
+            else:
+                noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+            
             time_init_noise_generation += time.time() - _time_init_noise_generation
             # print(f"\nensemble_vec[:,{ens}]: {ensemble_vec[:,ens]} noise: {noise}, hdim: {hdim} Lx: {Lx}, Ly: {Ly}, len_scale: {len_scale}, total_params: {params['total_state_param_vars']}\n")
             ensemble_vec[:,ens] += noise

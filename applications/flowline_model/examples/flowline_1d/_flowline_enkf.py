@@ -58,9 +58,7 @@ def generate_true_state(**kwargs):
         huxg_out0 = run_model(statevec_true[:, k], **kwargs)
         for key, value in huxg_out0.items():
             statevec_true[indx_map[key], k + 1] = value
-            print(f"[DEBUG] Time step {k+1}, updating {key} at indices {indx_map[key]}")  # Debug print statement
-            
-    exit(0)
+  
     updated_state = {}
     for key in kwargs['vec_inputs']:
         updated_state[key] = statevec_true[indx_map[key],:]
@@ -89,9 +87,10 @@ def generate_nurged_state(**kwargs):
 
     # Run the model forward in time
     for k in range(nt-1):
-        huxg_out0 = run_model(huxg_out0, **kwargs)
-        for ii, key in enumerate(kwargs['vec_inputs']):
-            statevec_nurged[indx_map[key], k + 1] = huxg_out0[indx_map[key]] 
+        kwargs["tcurrent"] = k+1
+        huxg_out0 = run_model(statevec_nurged[:, k], **kwargs)
+        for key, value in huxg_out0.items():
+            statevec_nurged[indx_map[key], k + 1] = value
 
     updated_state = {}
     for key in kwargs['vec_inputs']:
@@ -118,10 +117,11 @@ def initialize_ensemble(ens, **kwargs):
     kwargs['transient'] = 1
     NX = kwargs['NX']
 
-    initailized_state = np.concatenate((huxg_out0, [kwargs['facemelt'][0]/ kwargs['uscale']]))
+    initail_state = np.concatenate((huxg_out0[:-1], [kwargs['facemelt'][0]/ kwargs['uscale']]))
     initailized_state={}
+    # print(f"[ICESEE] Rank: {ens} Initial state size: {initail_state.shape}, ensemble shape: {statevec_ens[:,ens].shape} huxg_out0 shape: {huxg_out0.shape}")
     for ii, key in enumerate(kwargs['vec_inputs']):
-        initailized_state[key] = huxg_out0[indx_map[key]]
+        initailized_state[key] = initail_state[indx_map[key]]
 
     return initailized_state
 
@@ -140,7 +140,10 @@ def H(m,n):
     return H
 
 def Obs_fun(virtual_obs=None):
-    m,n = virtual_obs.shape
+    obs_file = '_modelrun_datasets/synthetic_obs.h5'
+    with h5py.File(obs_file, 'r') as f:
+       obs = f['hu_obs'][:]
+       n,m = obs.shape
     z =  H(m,n) @ virtual_obs
     return z
 
@@ -148,11 +151,11 @@ def JObs_fun(nd=None):
     obs_file = '_modelrun_datasets/synthetic_obs.h5'
     with h5py.File(obs_file, 'r') as f:
        obs = f['hu_obs'][:]
-       m,nd = obs.shape
+       nd,m = obs.shape
     return H(m,nd)
 
-def Cov_Obs_fun(sig_obs=None,nd=None):
-    R_cov = np.eye(nd) * (sig_obs ** 2)
+def Cov_Obs_fun(sig_obs=None,nd=None, kwargs=None):
+    R_cov = (sig_obs**2) * np.eye(2 * kwargs["m_obs"] + 1)
     return R_cov
 
 def localization_function(**kwargs):

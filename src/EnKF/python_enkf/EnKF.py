@@ -101,15 +101,24 @@ class EnsembleKalmanFilter:
                 q0 = []
                 for ii, sig in enumerate(params["sig_Q"]):
                     if ii <=params["num_state_vars"]:
-                        model_kwargs.update({"ii_sig": ii, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
-                        W = generate_enkf_field(ii,np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
-                        noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
-                        q0.append(noise_)
+                        for jj, key in enumerate(model_kwargs['vec_inputs']):
+                            if ii == jj:
+                                model_kwargs.update({"ii_sig": ii, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
+                                W = generate_enkf_field(ii,np.sqrt(Lx*Ly), len(indx_map[key]), params["total_state_param_vars"], rh=len_scale, verbose=False)
+                                noise_ = alpha*noise[indx_map[key]] + np.sqrt(1 - alpha**2)*W
+                                q0.append(noise_)
 
-                        Z = np.sqrt(dt)*sig*rho*noise_
-                        noise_all.append(Z)
+                                Z = np.sqrt(dt)*sig*rho*noise_
+                                noise_all.append(Z)
+                            
                 noise_ = np.concatenate(noise_all, axis=0)
-                ensemble[:state_block_size,ens] += noise_[:state_block_size]
+
+                # only update the state variables with noise
+                for ii, key in enumerate(model_kwargs['vec_inputs']):
+                    if ii < params["num_state_vars"]:
+                        ensemble[indx_map[key],ens] += noise_[indx_map[key]]
+
+                # ensemble[:state_block_size,ens] += noise_[:state_block_size]
                 noise = np.concatenate(q0, axis=0)
                 model_kwargs.update({"noise": noise})
                 del noise_all, q0, noise_, W

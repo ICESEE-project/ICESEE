@@ -134,6 +134,6 @@ def JObs_fun(nd=None):
     H_jac = np.eye(nd)
     return H_jac
 
-def Cov_Obs_fun(sig_obs=None,nd=None):
+def Cov_Obs_fun(sig_obs=None,nd=None, kwargs=None):
     R_cov = np.eye(nd) * (sig_obs ** 2)
     return R_cov

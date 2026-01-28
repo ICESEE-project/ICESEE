@@ -33,11 +33,11 @@ enkf-parameters:
   obs_max_time: 2             # maximum time for observations
   obs_start_time: 0.1 
 
-  num_state_vars: 2         # number of state variables 
-  num_param_vars: 1  
+  num_state_vars: 3         # number of state variables 
+  num_param_vars: 0 
   vec_inputs: ['h','u','xg'] # state variables
-  observed_vars: ['h','u'] # observed variables
-  observed_params: ['xg']   # observed parameters
+  observed_vars: ['h','u','xg'] # observed variables
+  # observed_params: ['xg']   # observed parameters
   scalar_inputs: ['xg']        # scalar inputs
 
   # Statistical parameters
@@ -46,8 +46,9 @@ enkf-parameters:
   length_scale: [2, 2, 2]   # length scale for the covariance matrix
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state:    1   # Generate true state for synthetic observations
-  generate_nurged_state:  1   # Generate nudged state for synthetic observations
+  generate_true_state:    0   # Generate true state for synthetic observations
+  generate_nurged_state:  0   # Generate nudged state for synthetic observations
+  initialize_ensemble: 0
   sequential_ensemble_initialization: 1
   use_ensemble_pertubations: 1
 
