@@ -61,6 +61,7 @@
 | `length_scale` | YAML configuration parameter for length scale | list | [] | No | None | YAML |
 | `local_analysis` | YAML configuration parameter for local analysis | bool | False | No | None | YAML |
 | `localization_flag` | --- Ensemble Parameters --- | Unknown | Computed | No | None | Dictionary |
+| `m_obs` | Parameter for m obs in dictionary | Unknown | Computed(num_observations) | No | None | Dictionary |
 | `mode` | Parameter for mode in dictionary | Unknown | Computed(execution_mode) | No | None | Dictionary |
 | `model_name` | --- Ensemble Parameters --- | Unknown | Computed | No | None | Dictionary |
 | `model_nprocs` | Parameter for model nprocs in dictionary | Unknown | Computed | No | None | Dictionary |
