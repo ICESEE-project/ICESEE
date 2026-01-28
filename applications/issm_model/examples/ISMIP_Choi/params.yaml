@@ -59,7 +59,7 @@ enkf-parameters:
   # bed topography observations settings
   bed_obs_snapshot: [2]        # Bedrock elevation observations at 30 years
   bed_obs_stride: 4000          # Spacing of bedrock elevation observations (30 km)
-  bed_relaxation_factor: 0.02    # Relaxation factor for bedrock elevation updates (when bed is not observed) (-1< relaxation_factor <=1)
+  bed_relaxation_factor: 0.05    # Relaxation factor for bedrock elevation updates (when bed is not observed) (-1< relaxation_factor <=1)
   initial_bed_bias: 0.0015        # Initial bias for bedrock elevation (15 m)
 
   # Statistical parameters

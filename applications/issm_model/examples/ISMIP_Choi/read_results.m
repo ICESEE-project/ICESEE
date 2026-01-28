@@ -8,9 +8,9 @@ close all; clearvars; clear all
 
 global data_file_paths nvar ensemble_vec_full ...
         label_t t nt colorbar_gap bed_obs_xy
-data_file_paths = '_modelrun_datasets';
+% data_file_paths = '_modelrun_datasets';
 % data_file_paths = '_goodgrounding';
-% data_file_paths ='_modelrun_working_0';
+data_file_paths ='_modelrun_working_0';
 nvar = 6;
 colorbar_gap=0.78;
 
@@ -18,8 +18,8 @@ colorbar_gap=0.78;
 make_plots       = 0;
 make_multi_plots = 1;   % <-- ON (restored)
 frames_plot      = 0;
-compute_rmse     = 0;
-plotgl           = 0;
+compute_rmse     = 1;
+plotgl           = 1;
 
 % ---------------- time steps ------------------
 % k_array = [0, 20,  60, 80, 89, 130, 330, 499]+1;
@@ -88,34 +88,34 @@ end
 % ---------------- multi-plots restored ----------
 if make_multi_plots
     % thickness
-    % plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    %     md_true, md_nurged, md_ens, md, 'geometry.thickness', 'Thickness', 'm');
-    % plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    %     md_true, md_nurged, md_ens, md, 'geometry.thickness', 'Thickness', 'm');
-    % 
-    % % surface
-    % plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    %     md_true, md_nurged, md_ens, md, 'geometry.surface', 'Surface', 'm');
-    % plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    %     md_true, md_nurged, md_ens, md, 'geometry.surface', 'Surface', 'm');
-    % 
-    % % velocity
-    % plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    %     md_true, md_nurged, md_ens, md, 'initialization.vel', 'Velocity', 'm/s');
-    % plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    %     md_true, md_nurged, md_ens, md, 'initialization.vel', 'Velocity', 'm/s');
+    plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, 'geometry.thickness', 'Thickness', 'm');
+    plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, 'geometry.thickness', 'Thickness', 'm');
+
+    % surface
+    plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, 'geometry.surface', 'Surface', 'm');
+    plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, 'geometry.surface', 'Surface', 'm');
+
+    % velocity
+    plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, 'initialization.vel', 'Velocity', 'm/s');
+    plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, 'initialization.vel', 'Velocity', 'm/s');
 
     % bed
-    % plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    %     md_true, md_nurged, md_ens, md, 'geometry.bed', 'Bed Elevation', 'm');
+    plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, 'geometry.bed', 'Bed Elevation', 'm');
     plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md, 'geometry.bed', 'Bed', 'm');
 
-    % % friction
-    % plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-    %     md_true, md_nurged, md_ens, md, 'friction.coefficient', 'Friction Coefficient', 'Pa m^{-1/3} yr^{-1/3}');
-    % plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        % md_true, md_nurged, md_ens, md, 'friction.coefficient', 'Friction', 'Pa m^{-1/3} yr^{-1/3}');
+    % friction
+    plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, 'friction.coefficient', 'Friction Coefficient', 'Pa m^{-1/3} yr^{-1/3}');
+    plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+        md_true, md_nurged, md_ens, md, 'friction.coefficient', 'Friction', 'Pa m^{-1/3} yr^{-1/3}');
 end
 
 % ---------------- optional single triptych -------
@@ -283,7 +283,7 @@ function plot_gl_on_bed_evolution( ...
     minArea      = 1;
 
     keepLargestOnly_true  = true;
-    keepLargestOnly_wrong = true;
+    keepLargestOnly_wrong = false;
     keepLargestOnly_ens   = false;
     keepTopK_ens          = 4;   % allow 2 longest for ensemble (prevents “loss”)
     keepTopK_true         = 4;
@@ -733,7 +733,8 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
     global t label_t nt colorbar_gap bed_obs_xy
     % lightGray = [0.85 0.85 0.85];
     % lightGray = [0.93 0.69 0.13];
-    lightGray = 'm';
+    % lightGray = 'm';
+    lightGray = 'k';
     if nargin < 12, units = ''; end
     units_str = iff(~isempty(units), [' (' units ')'], '');
 

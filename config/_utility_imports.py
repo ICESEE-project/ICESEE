@@ -329,6 +329,7 @@ if not flag_jupyter:
         obs_t, obs_idx, num_observations = UtilsFunctions(params).generate_observation_schedule(**kwargs)
         kwargs['obs_index'] = obs_idx
         params['number_obs_instants'] = num_observations
+        kwargs['m_obs'] = num_observations
 
     kwargs['parallel_flag']       = enkf_params.get('parallel_flag', 'serial')
     kwargs['commandlinerun']      = enkf_params.get('commandlinerun', False)
