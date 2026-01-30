@@ -501,6 +501,12 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
                 ensemble_vec, Cov_model = analysis.EnTKF_Analysis(ensemble_vec)
             else:
                 raise ValueError("Filter type not supported")
+            
+            # model updates after analysis if any
+            if hasattr(model_module, "post_analysis_update") and callable(model_module.post_analysis_update):
+                model_kwargs, ensemble_vec = model_module.post_analysis_update(ensemble_vec, **model_kwargs)
+            else:
+                pass # no post analysis updates present
 
             # save the ensemble mean after analysis
             with h5py.File(input_file, "a") as f:

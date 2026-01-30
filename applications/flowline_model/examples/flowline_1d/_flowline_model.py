@@ -189,6 +189,7 @@ def run_model(ensemble, **kwargs):
     """
 
     varin = ensemble.copy()
+    last_entry = varin[-1]
     
     # Jacobian calculation
     Jf = Jac_calc(ensemble, **kwargs)
@@ -205,9 +206,8 @@ def run_model(ensemble, **kwargs):
     # Update the old solution
     ensemble = solve_result.x
     vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
-    # updated_state = {'h' : ensemble[indx_map['h']],
-    #                  'u' : ensemble[indx_map['u']],
-    #                 'xg' : ensemble[indx_map['xg']]}
+    # update with last entry
+    ensemble[-1] = last_entry
     updated_state = {}
     for key in kwargs['vec_inputs']:
         updated_state[key] = ensemble[indx_map[key]]
