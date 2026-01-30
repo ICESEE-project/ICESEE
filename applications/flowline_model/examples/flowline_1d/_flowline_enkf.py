@@ -170,3 +170,10 @@ def localization_function(**kwargs):
 
     return taper
 
+def post_analysis_update(ensemble=None, **kwargs):
+    """update the model state after the analysis step"""
+
+    k = kwargs['k']
+
+    kwargs['facemelt'][k+1:] = ensemble[-1] * kwargs['uscale'] * np.ones_like(kwargs['facemelt'][k+1:])
+    return kwargs, ensemble

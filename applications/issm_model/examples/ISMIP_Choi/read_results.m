@@ -8,24 +8,24 @@ close all; clearvars; clear all
 
 global data_file_paths nvar ensemble_vec_full ...
         label_t t nt colorbar_gap bed_obs_xy
-% data_file_paths = '_modelrun_datasets';
+data_file_paths = '_modelrun_datasets';
 % data_file_paths = '_goodgrounding';
-data_file_paths ='_modelrun_working_0';
+% data_file_paths ='_modelrun_working_0';
 nvar = 6;
 colorbar_gap=0.78;
 
 % ---------------- user toggles ----------------
 make_plots       = 0;
-make_multi_plots = 1;   % <-- ON (restored)
+make_multi_plots = 0;   % <-- ON (restored)
 frames_plot      = 0;
 compute_rmse     = 1;
-plotgl           = 1;
+plotgl           = 0;
 
 % ---------------- time steps ------------------
 % k_array = [0, 20,  60, 80, 89, 130, 330, 499]+1;
 % k_array= [ 0, 20,80, 120, 160, 220, 250, 320, 450]+1;
 % k_array = [0, 20, 80, 120, 160, 240, 360, 499] +1;
-k_array = [30, 70,100, 120, 180, 250]+1;
+k_array = [30, 70,100, 120, 180, 249]+1;
 dt      = 0.2;
 
 % ---------------- Load essentials --------------
@@ -278,7 +278,7 @@ function plot_gl_on_bed_evolution( ...
 
     % ---- filtering knobs ----
     minLen_true  = 3e4;
-    minLen_wrong = 3e4;
+    minLen_wrong = 5e4;
     minLen_ens   = 5e4;
     minArea      = 1;
 
@@ -2108,7 +2108,7 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     out.dist_as     = dist_as;
 
     % -------------------------------
-    figure('Position',[200 200 1100 900]); clf;
+    figure('Position',[200 200 1800 900]); clf;
     
     fs_axis   = 15;
     fs_label  = 17;
@@ -2125,16 +2125,28 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     
     % ---------------- (a) Thickness ----------------
     ax1 = nexttile(tl,1);
-    h1 = plot(out.time, out.rmse_h_no,   'r-', 'LineWidth',2.5); hold on
-    h2 = plot(out.time, out.rmse_h_as,   'r:', 'LineWidth',2.5); 
-    h3 = plot(out.time, out.rmse_h_no_g, 'b-', 'LineWidth',2.5); 
-    h4 = plot(out.time, out.rmse_h_as_g, 'b:', 'LineWidth',2.5); 
-    h5 = plot(out.time, out.rmse_h_no_w, 'c-', 'LineWidth',2.5); 
-    h6 = plot(out.time, out.rmse_h_as_w, 'c:', 'LineWidth',2.5); hold off
+    % h1 = plot(out.time, out.rmse_h_no,   'r-', 'LineWidth',2.5); hold on
+    % h2 = plot(out.time, out.rmse_h_as,   'r:', 'LineWidth',2.5); 
+    % h3 = plot(out.time, out.rmse_h_no_g, 'b-', 'LineWidth',2.5); 
+    % h4 = plot(out.time, out.rmse_h_as_g, 'b:', 'LineWidth',2.5); 
+    % h5 = plot(out.time, out.rmse_h_no_w, 'c-', 'LineWidth',2.5); 
+    % h6 = plot(out.time, out.rmse_h_as_w, 'c:', 'LineWidth',2.5); hold off
+
+    % try semilogy
+    h1 = semilogy(out.time, rmse_h_no,   'r-', 'LineWidth',2.5); hold on
+    h2 = semilogy(out.time, rmse_h_as,   'r:', 'LineWidth',2.5);
+    h3 = semilogy(out.time, rmse_h_no_g, 'b-', 'LineWidth',2.5);
+    h4 = semilogy(out.time, rmse_h_as_g, 'b:', 'LineWidth',2.5);
+    h5 = semilogy(out.time, rmse_h_no_w, 'c-', 'LineWidth',2.5);
+    h6 = semilogy(out.time, rmse_h_as_w, 'c:', 'LineWidth',2.5); hold off
     
     ylabel('RMSE (m)','FontWeight','bold','FontSize',fs_label);
     title('Thickness','FontWeight','bold','FontSize',fs_title);
-    ylim([-0.5,410]); xlim([-1.5,50])
+    % ylim([-0.5,410]); xlim([-1.5,50])
+    ylim([9 430]); xlim([-1.5,50]);
+    yticks([10 30 80 200 420]);
+    yticklabels({'10','30', '80', '200', '420'});
+    set(gca,'YMinorTick','off');
     
     text(ax1,0.01,0.93,'(a)','Units','normalized', ...
         'FontWeight','bold','FontSize',fs_title, ...
@@ -2142,16 +2154,26 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     
     % ---------------- (b) Velocity ----------------
     ax2 = nexttile(tl,2);
-    plot(out.time, out.rmse_vel_no, 'r-', 'LineWidth',2.5); hold on
-    plot(out.time, out.rmse_vel_as, 'r:', 'LineWidth',2.5);
-    plot(out.time, out.rmse_vel_no_g, 'b-', 'LineWidth',2.5); 
-    plot(out.time, out.rmse_vel_as_g, 'b:', 'LineWidth',2.5); 
-    plot(out.time, out.rmse_vel_no_w, 'c-', 'LineWidth',2.5); 
-    plot(out.time, out.rmse_vel_as_w, 'c:', 'LineWidth',2.5); hold off
+    % plot(out.time, out.rmse_vel_no, 'r-', 'LineWidth',2.5); hold on
+    % plot(out.time, out.rmse_vel_as, 'r:', 'LineWidth',2.5);
+    % plot(out.time, out.rmse_vel_no_g, 'b-', 'LineWidth',2.5); 
+    % plot(out.time, out.rmse_vel_as_g, 'b:', 'LineWidth',2.5); 
+    % plot(out.time, out.rmse_vel_no_w, 'c-', 'LineWidth',2.5); 
+    % plot(out.time, out.rmse_vel_as_w, 'c:', 'LineWidth',2.5); hold off
+    semilogy(out.time, rmse_vel_no,   'r-', 'LineWidth',2.5); hold on
+    semilogy(out.time, rmse_vel_as,   'r:', 'LineWidth',2.5);
+    semilogy(out.time, rmse_vel_no_g, 'b-', 'LineWidth',2.5);
+    semilogy(out.time, rmse_vel_as_g, 'b:', 'LineWidth',2.5);
+    semilogy(out.time, rmse_vel_no_w, 'c-', 'LineWidth',2.5);
+    semilogy(out.time, rmse_vel_as_w, 'c:', 'LineWidth',2.5); hold off
     
     ylabel('RMSE (m/yr)','FontWeight','bold','FontSize',fs_label);
     title('Velocity','FontWeight','bold','FontSize',fs_title);
-    ylim([-20,950]); xlim([-1.5,50])
+    % ylim([-20,950]); xlim([-1.5,50])
+    ylim([5 960]); xlim([-1.5,50]);
+    yticks([10 30 100 300 800])
+    yticklabels({'10','30','100','300','800'})
+    set(gca,'YMinorTick','off');
     
     text(ax2,0.01,0.93,'(b)','Units','normalized', ...
         'FontWeight','bold','FontSize',fs_title, ...
@@ -2162,9 +2184,11 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     plot(out.time, out.rmse_c_no, 'r-', 'LineWidth',2.5); hold on
     plot(out.time, out.rmse_c_as, 'r:', 'LineWidth',2.5); 
     plot(out.time, out.rmse_c_no_g, 'b-', 'LineWidth',2.5); 
-    plot(out.time, out.rmse_c_as_g, 'b:', 'LineWidth',2.5); 
-    % plot(out.time, out.rmse_c_no_w, 'g-', 'LineWidth',2.5); 
-    % plot(out.time, out.rmse_c_as_w, 'm-', 'LineWidth',2.5); hold off
+    plot(out.time, out.rmse_c_as_g, 'b:', 'LineWidth',2.5); hold off
+    % semilogy(out.time, rmse_c_no,   'r-', 'LineWidth',2.5); hold on
+    % semilogy(out.time, rmse_c_as,   'r:', 'LineWidth',2.5);
+    % semilogy(out.time, rmse_c_no_g, 'b-', 'LineWidth',2.5);
+    % semilogy(out.time, rmse_c_as_g, 'b:', 'LineWidth',2.5); hold off
     
     
     ylabel('RMSE (Pa m^{-1/3} yr^{-1/3})','FontWeight','bold','FontSize',fs_label);
@@ -2179,12 +2203,17 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     ax4 = nexttile(tl,4);
     plot(out.time, out.dist_no./1000, 'r-', 'LineWidth',2.5); hold on
     plot(out.time, out.dist_as./1000, 'r:', 'LineWidth',2.5); hold off
+    % semilogy(out.time, out.dist_no./1000, 'r-', 'LineWidth',2.5); hold on
+    % semilogy(out.time, out.dist_as./1000, 'r:', 'LineWidth',2.5); hold off
     
     % xlabel('Time (years)','FontWeight','bold','FontSize',fs_label);
     ylabel('|Δx| (km)','FontWeight','bold','FontSize',fs_label);
     title('Absolute distance between GL positions along the centerline', ...
           'FontWeight','bold','FontSize',fs_title);
     ylim([-1e4/1000,4e4/1000]); xlim([-1.5,50])
+    yticks([0 1e4/1000 2e4/1000  3e4/1000 4e4/1000])
+    yticklabels({'0','10','20','30','40'})
+    set(gca,'YMinorTick','off');
     
     text(ax4,0.01,0.93,'(d)','Units','normalized', ...
         'FontWeight','bold','FontSize',fs_title, ...
