@@ -13,6 +13,9 @@ import socket
 import numpy as np
 import scipy.io as sio
 
+# --- Set up paths ---
+os.chdir(Path(__file__).resolve().parent)
+
 # --- ICESEE imports ---
 # from ICESEE.config._utility_imports import *
 from ICESEE.config._utility_imports import params, kwargs, modeling_params, enkf_params, physical_params,UtilsFunctions
