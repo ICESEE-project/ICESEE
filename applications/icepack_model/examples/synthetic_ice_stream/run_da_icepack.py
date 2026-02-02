@@ -9,6 +9,9 @@ import sys
 import os
 import numpy as np
 
+# --- Set up paths ---
+os.chdir(Path(__file__).resolve().parent)
+
 # --- Configuration ---
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["PETSC_CONFIGURE_OPTIONS"] = "--download-mpich-device=ch3:sock"
