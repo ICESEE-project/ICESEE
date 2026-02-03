@@ -1044,3 +1044,39 @@ def load_bed_masks_from_h5(f):
         obs_model_to_col = {}
 
     return bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col
+
+
+
+def icesee_savefig(fig, name="results.png", dpi=300, show=True):
+    """
+    ICESEE-OnLINE helper:
+    Always save plots into ./figures/ so the GUI can display them.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        Figure object to save.
+    name : str
+        Output filename inside figures/.
+    dpi : int
+        Resolution.
+    show : bool
+        Whether to call plt.show() after saving.
+    """
+
+    from pathlib import Path
+    import matplotlib.pyplot as plt
+    # Ensure figures folder exists
+    Path("figures").mkdir(exist_ok=True)
+
+    # Full output path
+    out_path = Path("figures") / name
+
+    # Save figure
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+
+    print(f"[ICESEE] Figure saved: {out_path}")
+
+    # Optionally display inline
+    if show:
+        plt.show()
