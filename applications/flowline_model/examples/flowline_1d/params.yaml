@@ -45,12 +45,12 @@ enkf-parameters:
   sig_Q: [0.01, 0.01, 0.01]          # process noise standard deviation
   length_scale: [2, 2, 2]   # length scale for the covariance matrix
 
-  generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state:    0   # Generate true state for synthetic observations
-  generate_nurged_state:  0   # Generate nudged state for synthetic observations
-  initialize_ensemble: 0
-  sequential_ensemble_initialization: 1
-  use_ensemble_pertubations: 1
+  generate_synthetic_obs: "True"  # Generate synthetic observations for testing
+  generate_true_state:    "True"   # Generate true state for synthetic observations
+  generate_nurged_state:  "True"   # Generate nudged state for synthetic observations
+  initialize_ensemble: "True"
+  sequential_ensemble_initialization: "False"
+  use_ensemble_pertubations: "True"
 
   # estimation flags
   joint_estimation: "False"  # joint estimation flag: True, False
@@ -59,7 +59,7 @@ enkf-parameters:
 
   seed: 1                 # seed for random number generator
   inflation_factor: 1.0          # inflation factor
-  localization_flag: 0      # localization flag: True, False
+  localization_flag: "False"      # localization flag: True, False
 
   # enkf model parameters
   model_name: "flowline"         # name of the model

@@ -29,13 +29,13 @@ enkf-parameters:
   obs_max_time: 24            # Maximum time for observations (30 years)
   obs_start_time: 2            # Start time for observations (start of simulation)
 
-  generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state: 0 # Generate true state for synthetic observations
-  generate_nurged_state: 1   # Generate nudged state for synthetic observations
-  initialize_ensemble: 1
+  generate_synthetic_obs: "False"  # Generate synthetic observations for testing
+  generate_true_state: "False" # Generate true state for synthetic observations
+  generate_nurged_state: "False"   # Generate nudged state for synthetic observations
+  initialize_ensemble: "False"
   initial_spread_factor: 1.12
-  sequential_ensemble_initialization: 0
-  use_ensemble_pertubations: 1
+  sequential_ensemble_initialization: "False"
+  use_ensemble_pertubations: "True"
 
   # num_state_vars: 4             # State variables: ice thickness (H), velocities (u, v)
   num_state_vars: 4             # State variables: ice thickness (H), surface elevation (S)
