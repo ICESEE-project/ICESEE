@@ -492,13 +492,13 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
 
             # Compute the analysis ensemble
             if EnKF_flag:
-                ensemble_vec, Cov_model = analysis.EnKF_Analysis(ensemble_vec)
+                ensemble_vec = analysis.EnKF_Analysis(ensemble_vec)
             elif DEnKF_flag:
-                ensemble_vec, Cov_model = analysis.DEnKF_Analysis(ensemble_vec)
+                ensemble_vec = analysis.DEnKF_Analysis(ensemble_vec)
             elif EnRSKF_flag:
-                ensemble_vec, Cov_model = analysis.EnRSKF_Analysis(ensemble_vec)
+                ensemble_vec = analysis.EnRSKF_Analysis(ensemble_vec)
             elif EnTKF_flag:
-                ensemble_vec, Cov_model = analysis.EnTKF_Analysis(ensemble_vec)
+                ensemble_vec = analysis.EnTKF_Analysis(ensemble_vec)
             else:
                 raise ValueError("Filter type not supported")
             
