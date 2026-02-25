@@ -39,10 +39,10 @@ except ImportError:
 def generate_bed_kriging(
     icesee_path: str = "./",
     data_path: str = "_modelrun_datasets",
-    Ne: int = 60,
-    stride_km: float = 10.0,
+    Ne: int = 100,
+    stride_km: float = 4,
     snap_idx: int = 0,
-    sigma_noise: float = 15.0,
+    sigma_noise: float = 5.0,
     sill_bed: float = 5000.0,
     range_bed: float = 30000.0,
     nugget_bed: float = 100.0,
@@ -248,13 +248,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--Ne",
         type=int,
-        default=60,
+        default=100,
         help="Number of ensemble realizations to generate (default: 60)",
     )
     parser.add_argument(
         "--stride-km",
         type=float,
-        default=7.0,
+        default=4,
         help="Radar track spacing in km (default: 7.0)",
     )
     parser.add_argument(
@@ -266,7 +266,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sigma-noise",
         type=float,
-        default=10.0,
+        default=5.0,
         help="Standard deviation of radar measurement noise in meters (default: 10.0)",
     )
     parser.add_argument(
