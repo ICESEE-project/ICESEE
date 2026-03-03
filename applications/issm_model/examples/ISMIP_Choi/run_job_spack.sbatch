@@ -22,7 +22,7 @@ export PATH="$MPI_DIR/bin:$PATH"
 export LD_LIBRARY_PATH="$MPI_DIR/lib:$LD_LIBRARY_PATH"
 
 # --- Test Matrix ------------------------------------------------------
-np = 8
+np=8
 NENS=40
 MODEL_NPROCS=2
 
