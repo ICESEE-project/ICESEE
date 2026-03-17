@@ -23,6 +23,19 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
         devpath;
     end
 
+    if iscell(kwargs.vec_inputs)
+        vec_inputs = kwargs.vec_inputs;
+    elseif isstring(kwargs.vec_inputs)
+        vec_inputs = cellstr(kwargs.vec_inputs(:));
+    elseif ischar(kwargs.vec_inputs)
+        vec_inputs = cellstr(kwargs.vec_inputs);
+    else
+        error('Unsupported type for kwargs.vec_inputs');
+    end
+
+    vec_inputs = reshape(vec_inputs, 1, []);
+    vec_inputs = cellfun(@strtrim, vec_inputs, 'UniformOutput', false);
+
     folder = sprintf('./Models/ens_id_%d', ens_id);
     if ~exist(folder, 'dir')
         mkdir(folder);

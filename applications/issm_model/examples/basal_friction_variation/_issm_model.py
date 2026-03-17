@@ -114,7 +114,6 @@ def ISSM_model(**kwargs):
         server.reset_terminal()
         sys.exit(1)
 
-
 # ---- Run model for ISSM ----
 def run_model(ensemble, **kwargs):
     """
@@ -164,17 +163,6 @@ def run_model(ensemble, **kwargs):
     vecs, indx_map, _ = icesee_get_index(ensemble, **kwargs)
     k = kwargs.get('k', 0) 
 
-    #  --- Joint Estimations ---
-    if kwargs["joint_estimation"]:
-        bed = ensemble[indx_map['bed']]
-        coefficient = ensemble[indx_map['coefficient']]
-    else: 
-        if k == 0:
-            bed_int = ensemble[indx_map['bed']]
-            coefficient_int = ensemble[indx_map['coefficient']]
-        bed = bed_int
-        coefficient = coefficient_int
-
     # Write ensemble data to HDF5 file to be accessed by ISSM on the Matlab side
     # with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
     with h5py.File(input_filename, 'w') as f:
@@ -196,23 +184,31 @@ def run_model(ensemble, **kwargs):
         return None
     
     updated_state = {}
+    # diagnostics = {}
     # with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
     with h5py.File(output_filename, 'r') as f:
-        updated_state['Thickness'] = f['Thickness'][:].reshape(-1, order='F')
-        # updated_state['Base'] = f['Base'][0]
-        updated_state['Surface'] = f['Surface'][:].reshape(-1, order='F')
-        updated_state['Vx'] = f['Vx'][:].reshape(-1, order='F')
-        updated_state['Vy'] = f['Vy'][:].reshape(-1, order='F')
-        
-        # --Joint Estimations--
-        if kwargs["joint_estimation"]:
-            updated_state['bed'] = f['bed'][:].reshape(-1, order='F')
-            updated_state['coefficient'] = f['coefficient'][:].reshape(-1, order='F')
+        for key in kwargs.get('vec_inputs'):
+            if key in kwargs.get('joint_estimated_params') and not kwargs.get('joint_estimation'):
+                continue # skip the joint estimated parameters if we are not doing joint estimation
+            if key in f:
+                updated_state[key] = f[key][:].reshape(-1, order='F')
+            else:
+                print(f"[ICESEE run_model Warning] Key '{key}' not found in output file: {output_filename}")
 
-        else:
-            bed_int = bed
-            coefficient_int = coefficient
-            
+        # for key in kwargs.get('scalar_inputs', []):
+        #     if key in f:
+        #         diagnostics[key] = float(f[key][:].reshape(-1, order='F')[0])
+        # updated_state['_diagnostics'] = diagnostics
+
+    # copy scalars from matlab .h5 file to python side
+    # enkf_scalar_file = f'{icesee_path}/{data_path}/ensemble_out_scalar_{ens_id}.h5'
+    # with h5py.File(enkf_scalar_file, 'a') as f:
+    #     for key in kwargs.get('scalar_inputs', []):
+    #         if key in f:
+    #             f[key][k] = float(scalar_values[key])
+    #         else:
+    #             print(f"[ICESEE Warning] Scalar '{key}' missing from scalar_values at step {k}")
+
     os.chdir(icesee_path)
 
     return updated_state
@@ -272,17 +268,6 @@ def run_model_inverse(ensemble, **kwargs):
     time = kwargs.get('t')
     kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
 
-    #  --- Joint Estimations ---
-    if kwargs["joint_estimation"]:
-        bed = ensemble[indx_map['bed']]
-        coefficient = ensemble[indx_map['coefficient']]
-    else:
-        if k == 0:
-            bed_int = ensemble[indx_map['bed']]
-            coefficient_int = ensemble[indx_map['coefficient']]
-        bed = bed_int
-        coefficient = coefficient_int
-
     # Write ensemble data to HDF5 file to be accessed by ISSM on the Matlab side
     with h5py.File(input_filename, 'w') as f:
         for key in vec_inputs:
@@ -306,19 +291,21 @@ def run_model_inverse(ensemble, **kwargs):
         return None
     
     updated_state = {}
+    # diagnostics = {}
     # with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
     with h5py.File(output_filename, 'r') as f:
-        updated_state['Thickness'] = f['Thickness'][:].reshape(-1, order='F')
-        # updated_state['Base'] = f['Base'][0]
-        updated_state['Surface'] = f['Surface'][:].reshape(-1, order='F')
-        updated_state['Vx'] = f['Vx'][:].reshape(-1, order='F')
-        updated_state['Vy'] = f['Vy'][:].reshape(-1, order='F')
-        
-        # --Joint Estimations--
-        if kwargs["joint_estimation"]:
-            updated_state['bed'] = f['bed'][:].reshape(-1, order='F')
-            updated_state['coefficient'] = f['coefficient'][:].reshape(-1, order='F')
-            
+        for key in kwargs.get('vec_inputs'):
+            if key in kwargs.get('joint_estimated_params') and not kwargs.get('joint_estimation'):
+                continue # skip the joint estimated parameters if we are not doing joint estimation
+            if key in f:
+                updated_state[key] = f[key][:].reshape(-1, order='F')
+            else:
+                print(f"[ICESEE run_model Warning] Key '{key}' not found in output file: {output_filename}")
+
+        # for key in kwargs.get('scalar_inputs', []):
+        #     if key in f:
+        #         diagnostics[key] = float(f[key][:].reshape(-1, order='F')[0])
+        # updated_state['_diagnostics'] = diagnostics
     os.chdir(icesee_path)
 
     return updated_state

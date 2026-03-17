@@ -24,7 +24,7 @@ from ICESEE.src.run_model_da.run_models_da import icesee_model_data_assimilation
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 
 #  model-specific imports
-from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_model import initialize_model
+from _issm_model import *
 from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import add_issm_dir_to_sys_path, MatlabServer, setup_example_directory
 from ICESEE.applications.issm_model.issm_utils.matlab2python.server_utils import run_icesee_with_server, setup_server_shutdown
 
@@ -89,6 +89,8 @@ model_kwargs = {
                 'tikhonov_regularization_weight': float(enkf_params.get('tikhonov_regularization_weight', 1e-13)),
                 'b_nurge': float(enkf_params.get('b_nurge', 0)),
                 's_nurge': float(enkf_params.get('s_nurge', 0)),
+                'vec_inputs': enkf_params.get('vec_inputs'), # State vector inputs (ice surface and velocities)
+                'scalar_inputs': enkf_params.get('scalar_inputs', []),
 }
 
 # observation schedule
@@ -129,14 +131,16 @@ kwargs.update({'server': server, 'Nens': params.get('Nens'), 'icesee_comm': ices
 variable_size = initialize_model(**kwargs)
 
 params.update({'nd': variable_size*params.get('total_state_param_vars')})
+var_nd = {var: (1 if var in kwargs['scalar_inputs'] else variable_size) for var in kwargs['vec_inputs']}
 
 # --- change directory back to the original directory ---
 os.chdir(icesee_cwd)
 
 # --- run the model ---
-kwargs.update({'params': params, 
+kwargs.update({'params': params, 'var_nd': var_nd,
                'nd': params.get('nd'),
                'server': server})
+            
 
 try:
     icesee_model_data_assimilation(**kwargs)

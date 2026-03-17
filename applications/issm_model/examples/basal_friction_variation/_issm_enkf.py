@@ -5,14 +5,14 @@
 # @author: Brian Kyanjo
 # ==============================================================================
 
-import os
+import os, re
 import numpy as np
 import h5py
 # import netCDF4
 import gstools as gs
 
 # --- import utility functions ---
-from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_model import *
+from _issm_model import *
 from ICESEE.config._utility_imports import icesee_get_index
 # from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import setup_ensemble_intial_data, MatlabServer
 
@@ -92,24 +92,21 @@ def generate_true_state(**kwargs):
     with h5py.File(input_filename, 'r') as f:
         # -- fetch state variables
         for k in range(1, kwargs.get('nt') + 1):
-            key_Thickness=f'Thickness_{k}'
-            # key_base = f'Base_{k}'
-            key_surface = f'Surface_{k}'
-            key_u  = f'Vx_{k}'
-            key_v  = f'Vy_{k}'
-            key_bed = f'bed_{k}'
-            key_coefficient = f'coefficient_{k}'
-            statevec_true[indx_map['Thickness'], k-1] = f[key_Thickness][0]
-            # statevec_true[indx_map['Base'], k-1] = f[key_base][0]
-            statevec_true[indx_map['Surface'], k-1] = f[key_surface][0]
-            statevec_true[indx_map['Vx'], k-1] = f[key_u][0]
-            statevec_true[indx_map['Vy'], k-1] = f[key_v][0]
-            statevec_true[indx_map['bed'], k-1] = f[key_bed][0]
-            statevec_true[indx_map['coefficient'], k-1] = f[key_coefficient][0]
+            for key in kwargs.get('vec_inputs'):
+                key_name = f'{key}_{k}'
+                statevec_true[indx_map[key], k-1] = f[key_name][0]
+            
+            # for key in kwargs.get('scalar_inputs', []):
+            #     if key in f:
+            #         statevec_true[indx_map[key], k-1] = f[key][:].reshape(-1, order='F')[0]
 
     updated_state = {}
     for key in vec_inputs:
         updated_state[key] = statevec_true[indx_map[key],:]
+    
+    # scalar_inputs = kwargs.get('scalar_inputs', [])
+    # file_path = f'{icesee_path}/{data_path}/ensemble_true_state_scalar_{ens_id}.h5'
+    # times, scalars = read_scalar_timeseries(file_path, scalar_inputs)
 
     #  --- change directory back to the original directory ---
     os.chdir(icesee_path)
@@ -191,26 +188,26 @@ def generate_nurged_state(**kwargs):
     # friction_field = np.asarray(srf((x_scaled, y_scaled)))  # (fdim,)
     friction_field = np.asarray(srf((x_param, y_param)))  # (fdim,)
 
-    # --bed
-    sill_bed = kwargs.get('sill_bed')
-    range_bed = kwargs.get('range_bed')
-    nugget_bed = kwargs.get('nugget_bed')
+    # # --bed
+    # sill_bed = kwargs.get('sill_bed')
+    # range_bed = kwargs.get('range_bed')
+    # nugget_bed = kwargs.get('nugget_bed')
 
-    bed_kriging_file = f'{icesee_path}/bed_kriging_results.h5'
-    with h5py.File(bed_kriging_file, 'r') as f:
-        bed_field = f['bed_ens'][...]
+    # bed_kriging_file = f'{icesee_path}/bed_kriging_results.h5'
+    # with h5py.File(bed_kriging_file, 'r') as f:
+    #     bed_field = f['bed_ens'][...]
 
-    # bed_field = np.mean(bed_field, axis=0)
-    bed_field = bed_field[0, :]
+    # # bed_field = np.mean(bed_field, axis=0)
+    # bed_field = bed_field[0, :]
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
     # with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
     with h5py.File(friction_bed_filename, 'w') as f:
         # -- write the friction field
-        f.create_dataset('coefficient', data=friction_field)
+        f.create_dataset('FrictionCoefficient', data=friction_field)
         # -- write the bed field
-        f.create_dataset('bed', data=bed_field)
+        # f.create_dataset('Bed', data=bed_field)
 
     # -- call the run_model function to generate the nurged state
     try:
@@ -226,23 +223,9 @@ def generate_nurged_state(**kwargs):
     with h5py.File(nurged_filename, 'r') as f:
         # -- fetch state variables
         for k in range(1, kwargs.get('nt') + 1):
-            # key_thickness=f'Thickness_{k}'
-            key_Thickness=f'Thickness_{k}'
-            # key_base = f'Base_{k}'
-            key_surface = f'Surface_{k}'
-            key_u = f'Vx_{k}'
-            key_v = f'Vy_{k}'
-            key_bed = f'bed_{k}'
-            key_coefficient = f'coefficient_{k}'
-            statevec_nurged[indx_map['Thickness'], k-1] = f[key_Thickness][0]
-            # statevec_nurged[indx_map['Base'], k-1] = f[key_base][0]
-            statevec_nurged[indx_map['Surface'], k-1] = f[key_surface][0]
-            statevec_nurged[indx_map['Vx'], k-1] = f[key_u][0]
-            statevec_nurged[indx_map['Vy'], k-1] = f[key_v][0]
-            statevec_nurged[indx_map['bed'], k-1] = f[key_bed][0]
-            statevec_nurged[indx_map['coefficient'], k-1] = f[key_coefficient][0]
-            # statevec_nurged[indx_map['bed'], k-1] = f['bed'][0]
-            # statevec_nurged[indx_map['coefficient'], k-1] = f['coefficient'][0]
+            for key in kwargs.get('vec_inputs'):
+                key_name = f'{key}_{k}'
+                statevec_nurged[indx_map[key], k-1] = f[key_name][0]
 
     updated_state = {}
     for key in vec_inputs:
@@ -325,20 +308,25 @@ def initialize_ensemble(ens, **kwargs):
     friction_field = np.asarray(srf((x_param, y_param)))  # (fdim,)
 
 
-    bed_kriging_file = f'{icesee_path}/bed_kriging_results.h5'
-    with h5py.File(bed_kriging_file, 'r') as f:
-        bed_field = f['bed_ens'][ens, :]
+    # bed_kriging_file = f'{icesee_path}/bed_kriging_results.h5'
+    # with h5py.File(bed_kriging_file, 'r') as f:
+    #     bed_field = f['bed_ens'][ens, :]
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
     # with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
     with h5py.File(friction_bed_filename, 'w') as f:
         # -- write the friction field
-        f.create_dataset('coefficient', data=friction_field)
+        f.create_dataset('FrictionCoefficient', data=friction_field)
         # -- write the bed field
-        f.create_dataset('bed', data=bed_field)
+        # f.create_dataset('Bed', data=bed_field)
     #*-----------------------
 
+    enkf_scalar_file = f'{icesee_path}/{data_path}/ensemble_out_scalar_{ens_id}.h5'
+    with h5py.File(enkf_scalar_file, 'w') as f:
+        for key in kwargs.get('scalar_inputs', []):
+            f.create_dataset(key, shape=(kwargs.get('nt'),), dtype=np.float64)
+            f[key][:] = np.nan
 
     try:
         # -- call the run_model function to initialize the ensemble members
@@ -353,18 +341,15 @@ def initialize_ensemble(ens, **kwargs):
     updated_state = {}
     # with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
     with h5py.File(output_filename, 'r') as f:
-        # for key in vec_inputs:
-        #     updated_state[key] = f[key][0]
-        updated_state['Thickness'] = f['Thickness'][:].reshape(-1, order='F')
-        # updated_state['Base'] = f['Base'][0]
-        updated_state['Surface'] = f['Surface'][:].reshape(-1, order='F')
-        updated_state['Vx'] = f['Vx'][:].reshape(-1, order='F')
-        updated_state['Vy'] = f['Vy'][:].reshape(-1, order='F')
-        if kwargs.get('joint_estimation', False):
-            updated_state['bed'] = f['bed'][:].reshape(-1, order='F')
-            updated_state['coefficient'] = f['coefficient'][:].reshape(-1, order='F')
+        for key in kwargs.get('vec_inputs'):
+            if key in kwargs.get('joint_estimated_params') and not kwargs.get('joint_estimation'):
+                continue # skip the joint estimated parameters if we are not doing joint estimation
+            if key in f:
+                updated_state[key] = f[key][:].reshape(-1, order='F')
+            else:
+                print(f"[ICESEE initialize ensemble Warning] Key '{key}' not found in output file: {output_filename}")
 
     os.chdir(icesee_path)
     
     return updated_state
-        
+
