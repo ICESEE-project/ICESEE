@@ -1,0 +1,148 @@
+% ISSM MATLAB script converted from Python
+disp(' creating thickness');
+
+% Define constants
+Lx = 640000;
+Ly = 80000;
+xbar = 300000;
+%fc = 4000;
+%wc = 24000;
+%dc = 500;
+
+fc = 3000;
+wc = 23000;
+dc = 400;
+
+% Calculate bed elevation (bx)
+bx = zeros(md.mesh.numberofvertices, 1);
+pos = find(md.mesh.x <= 350000);
+bx(pos) = 150 - 3 * md.mesh.x(pos) / 1000;
+pos = find(md.mesh.x > 350000 & md.mesh.x <= 450000);
+bx(pos) = -900 + 5 * (md.mesh.x(pos) / 1000 - 350);
+pos = find(md.mesh.x > 450000);
+bx(pos) = -400 - 3 * (md.mesh.x(pos) / 1000 - 450);
+
+% Calculate y-component of bed elevation (by)
+by = dc ./ (1 + exp(-2/fc * (md.mesh.y - Ly/2 - wc))) + ...
+     dc ./ (1 + exp(2/fc * (md.mesh.y - Ly/2 + wc)));
+
+% Calculate by at y=0
+by0 = dc / (1 + exp(-2/fc * (0 - Ly/2 - wc))) + ...
+      dc / (1 + exp(2/fc * (0 - Ly/2 + wc)));
+
+
+% Set geometry fields
+md.geometry.bed = max(bx + by, -720);
+%md.geometry.surface =  max(bx + by0+ 100, 10);
+md.geometry.surface = max(bx + by0 + 300, 20);
+md.geometry.base = max(md.geometry.bed, -280);
+md.geometry.thickness = md.geometry.surface - md.geometry.base;
+
+%figure;
+ %plotmodel(md, 'data', md.geometry.thickness, 'title', 'Ice Thickness_t=0');
+%figure;
+ %plotmodel(md, 'data', md.geometry.bed, 'title', 'Ice bed_t=0');
+ %figure;
+ %plotmodel(md, 'data', md.geometry.surface, 'title', 'Ice surface_t=0');
+
+disp('      creating drag');
+
+% Calculate friction coefficient
+%Cx = 0.02 + 0.01 * sin(5 * 2 * pi * (md.mesh.x - 640000) / 640000) .* ...
+     sin(30 * 2 * pi * md.mesh.x / 600000);
+Cx = 0.02 + 0.005 * sin((1/40) * 2 * pi * (md.mesh.x - 640000) / 640000) .* ...
+     sin(10 * 2*pi * md.mesh.x / 600000);
+Cy = sin(pi * (md.mesh.y - 80000) / 80000) + 2;
+md.friction.coefficient = sqrt((Cx .* Cy) * 10^6 * (md.constants.yts)^(1/3));
+%md.friction.coefficient = sqrt((Cx .* Cy) * 10^6 * (md.constants.yts)^(1/3));
+
+% Set friction exponents
+md.friction.p = 3 * ones(md.mesh.numberofelements, 1);
+md.friction.q = zeros(md.mesh.numberofelements, 1);
+
+disp('      creating flow law parameter');
+
+% Set rheology parameters
+md.materials.rheology_B = 1 / ((6.338e-25)^(1/3)) * ones(md.mesh.numberofvertices, 1);
+md.materials.rheology_n = 3 * ones(md.mesh.numberofelements, 1);
+md.materials.rheology_law = 'None';
+
+disp('      boundary conditions for diagnostic model');
+
+% Initialize levelsets
+md.mask.ice_levelset = NaN * ones(md.mesh.numberofvertices, 1);
+md.mask.ocean_levelset = NaN * ones(md.mesh.numberofvertices, 1);
+
+% Apply ice shelf boundary conditions
+md = SetIceShelfBC(md, 'Front.exp');
+
+% Set levelsets
+md.mask.ice_levelset(:) = -1;
+md.mask.ocean_levelset(:) = -1;
+pos = find(md.mesh.x < 640000.1 & md.mesh.x > 639999.9);
+md.mask.ice_levelset(pos) = 0;
+
+% Initialize velocity constraints
+md.stressbalance.spcvx = NaN * ones(size(md.mesh.x));
+md.stressbalance.spcvy = NaN * ones(size(md.mesh.y));
+
+% Apply boundary conditions for y-velocity
+pos = find((md.mesh.y < 80000.1 & md.mesh.y > 79999.9) | ...
+           (md.mesh.y < 0.1 & md.mesh.y > -0.1));
+md.stressbalance.spcvy(pos) = 0;
+
+% Apply boundary conditions for x-velocity and y-velocity at x=0
+pos2 = find(md.mesh.x < 0.1 & md.mesh.x > -0.1);
+md.stressbalance.spcvx(pos2) = 50;
+md.stressbalance.spcvy(pos2) = 0;
+
+disp('      forcing conditions');
+
+% Set surface mass balance
+md.smb.mass_balance = 0.3 * ones(md.mesh.numberofvertices, 1);
+% Define region boundaries
+x_min = 450000;
+x_max = 640000;
+y_min = 0;
+y_max = 80000;
+
+% Find indices of nodes within the region
+indices = find(md.mesh.x >= x_min & md.mesh.x <= x_max & ...
+               md.mesh.y >= y_min & md.mesh.y <= y_max);
+% Set negative SMB (-1 m/yr) for nodes in the region
+negative_smb = -1; % Negative SMB in m/yr (adjust as needed)
+md.smb.mass_balance(indices) = negative_smb;
+
+% Set geothermal flux
+md.basalforcings.geothermalflux = 0.5 * ones(md.mesh.numberofvertices, 1);
+
+% Set thermal boundary conditions
+md.thermal.spctemperature = NaN * ones(md.mesh.numberofvertices, 1);
+md.groundingline.migration = 'SubelementMigration';
+
+% Set material properties
+md.materials.rho_ice = 918;
+md.materials.rho_water = 1028;
+md.constants.g = 9.81;
+
+% Set transient model parameters
+md.transient.isthermal = 0;
+md.transient.isgroundingline = 1;
+md.stressbalance.isnewton = 0;
+md.transient.ismovingfront=1;
+
+
+% Initialization
+%md.initialization.vx = ones(md.mesh.numberofvertices, 1);
+%md.initialization.vy = ones(md.mesh.numberofvertices, 1);
+%md.initialization.vz = ones(md.mesh.numberofvertices, 1);
+%md.initialization.vel = sqrt(2) * ones(md.mesh.numberofvertices, 1);
+%md.initialization.pressure = md.constants.g * md.materials.rho_ice * md.geometry.thickness;
+%md.initialization.temperature = 273 * ones(md.mesh.numberofvertices, 1);
+
+md.initialization.vx = zeros(md.mesh.numberofvertices, 1);
+md.initialization.vy = zeros(md.mesh.numberofvertices, 1);
+md.initialization.vz = zeros(md.mesh.numberofvertices, 1);
+md.initialization.vel = zeros(md.mesh.numberofvertices, 1);
+md.initialization.pressure = zeros(md.mesh.numberofvertices, 1);
+md.initialization.temperature = 273 * ones(md.mesh.numberofvertices, 1);
