@@ -106,8 +106,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % change_times = [6.0, 12.0, 18.0, 22.0];
         % amps         = [0.25, 0.50, 0.75, 0.35];
         % sigma        = 20e3;   % 20 km
-        change_times = [2.0];   % years
-        amps         = [0.50];
+        change_times = [12];   % years
+        amps         = [0.40];
         sigma        = 20e3;   % 20 km
 
         % Background friction coefficient
@@ -190,11 +190,14 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % ------------------------------------------------------------------
         scalar_inputs = {'IceVolume', 'IceVolumeAboveFloatation'};
 
+        IceVolume = nan(N,1);
+        IceVolumeAboveFloatation = nan(N,1);
+
         data = cell(N * length(vec_inputs), 3);
-        data_scalar = cell(N * length(scalar_inputs), 3);
+        % data_scalar = cell(N * length(scalar_inputs), 3);
 
         idx = 1;
-        idxs = 1;
+        % idxs = 1;
 
         for k = 1:N
             sol = transient_results{k};
@@ -209,25 +212,25 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                 idx = idx + 1;
             end
 
-            % scalar diagnostics at each time step
-            for j = 1:length(scalar_inputs)
-                key = scalar_inputs{j};
-
-                data_scalar{idxs, 1} = sprintf('%s_%d', key, k);
-                data_scalar{idxs, 2} = sol;
-                data_scalar{idxs, 3} = key;
-                idxs = idxs + 1;
-            end
+            IceVolume(k) = sol.IceVolume;
+            IceVolumeAboveFloatation(k) = sol.IceVolumeAboveFloatation;
         end
 
         data = data(1:idx-1, :);
-        data_scalar = data_scalar(1:idxs-1, :);
+        % data_scalar = data_scalar(1:idxs-1, :);
 
         filename = fullfile(icesee_path, data_path, sprintf('ensemble_true_state_%d.h5', ens_id));
         writeToHDF5(filename, data);
 
         filename = fullfile(icesee_path, data_path, sprintf('ensemble_true_state_scalar_%d.h5', ens_id));
-        writeToHDF5(filename, data_scalar);
+        if exist(filename, 'file')
+            delete(filename);
+        end
+        h5create(filename, '/IceVolume', [N 1]);
+        h5create(filename, '/IceVolumeAboveFloatation', [N 1]);
+
+        h5write(filename, '/IceVolume', IceVolume);
+        h5write(filename, '/IceVolumeAboveFloatation', IceVolumeAboveFloatation);
 
     elseif strcmp(data_fname, 'nurged_state.mat')
 
@@ -235,8 +238,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         if ~exist(folder, 'dir')
             mkdir(folder);
         end
+        
             
         filename = fullfile(folder, reference_data);
+        % filename = fullfile(folder, 'true_state.mat');
         md = loadmodel(filename);
 
         md = setflowequation(md,'SSA','all');
@@ -296,14 +301,21 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.geometry.base(pos) = md.geometry.bed(pos);
         md.geometry.surface = md.geometry.base + md.geometry.thickness;
 
-        md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
-        md.transient.ismovingfront=0;
-        % 
-        md.initialization.pressure       = zeros(md.mesh.numberofvertices, 1);
-        md.masstransport.spcthickness    = NaN * ones(md.mesh.numberofvertices, 1);
-        md.basalforcings=linearbasalforcings();
-        md.basalforcings.deepwater_melting_rate=deepwater_melting_rate;
-        md.basalforcings.groundedice_melting_rate=zeros(md.mesh.numberofvertices,1);
+        % md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
+        % md.transient.ismovingfront=0;
+        % % 
+        % md.initialization.pressure       = zeros(md.mesh.numberofvertices, 1);
+        % md.masstransport.spcthickness    = NaN * ones(md.mesh.numberofvertices, 1);
+        % md.basalforcings=linearbasalforcings();
+        % md.basalforcings.deepwater_melting_rate=deepwater_melting_rate;
+        % md.basalforcings.groundedice_melting_rate=zeros(md.mesh.numberofvertices,1);
+
+        md.smb.mass_balance = smb * ones(md.mesh.numberofvertices,1);
+        md.transient.ismovingfront = 0;
+
+        md.basalforcings = linearbasalforcings();
+        md.basalforcings.deepwater_melting_rate = deepwater_melting_rate;
+        md.basalforcings.groundedice_melting_rate = zeros(md.mesh.numberofvertices,1);
 
        % --time stepping
        md.timestepping = timestepping();
@@ -339,6 +351,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
         scalar_inputs = {'IceVolume', 'IceVolumeAboveFloatation'};
 
+        IceVolume = nan(N,1);
+        IceVolumeAboveFloatation = nan(N,1);
+
         data = cell(N * length(vec_inputs), 3);
         data_scalar = cell(N * length(scalar_inputs), 3);
 
@@ -356,24 +371,28 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                 idx = idx + 1;
             end
 
-            for j = 1:length(scalar_inputs)
-                key = scalar_inputs{j};
-                data_scalar{idxs, 1} = sprintf('%s_%d', key, k);
-                data_scalar{idxs, 2} = sol;
-                data_scalar{idxs, 3} = key;
-                idxs = idxs + 1;
-            end
+            IceVolume(k) = sol.IceVolume;
+            IceVolumeAboveFloatation(k) = sol.IceVolumeAboveFloatation;
         end
 
         data = data(1:idx-1, :);
         data_scalar = data_scalar(1:idxs-1, :);
 
         writeToHDF5(fullfile(icesee_path, data_path, sprintf('ensemble_nurged_state_%d.h5', ens_id)), data);
-        writeToHDF5(fullfile(icesee_path, data_path, sprintf('ensemble_nurged_state_scalar_%d.h5', ens_id)), data_scalar);
+        
+        filename = fullfile(icesee_path, data_path, sprintf('ensemble_nurged_state_scalar_%d.h5', ens_id));
+        if exist(filename, 'file')
+            delete(filename);
+        end
+        h5create(filename, '/IceVolume', [N 1]);
+        h5create(filename, '/IceVolumeAboveFloatation', [N 1]);
+
+        h5write(filename, '/IceVolume', IceVolume);
+        h5write(filename, '/IceVolumeAboveFloatation', IceVolumeAboveFloatation);
 
     elseif strcmp(data_fname, 'initialize_ensemble.mat')
         % Special case for ensemble initialization
-        if k+1 == 0 || isempty(k)
+        if k == 0 || isempty(k)
             % Initial run: load boundary conditions
             % filename = fullfile(folder, reference_data);
             folder = sprintf('./Models/ens_id_%d', ens_id_init);
@@ -386,6 +405,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % rng(ens_id + 1000); % Offset seed to avoid overlap with other uses
 
             filename = fullfile(folder, reference_data);
+            % filename = fullfile(folder, 'true_state.mat');
             % filename = fullfile(icesee_path, 'data', wrong_reference_data);
             md = loadmodel(filename);
             md = setflowequation(md,'SSA','all');
@@ -413,23 +433,23 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % md.geometry.base = (base_ref + bed_err) - b_perturb*randn(md.mesh.numberofvertices, 1);
             % md.geometry.surface = (md.geometry.surface + bed_err) - s_perturb*randn(md.mesh.numberofvertices, 1);
 
-            md.initialization.pressure       = zeros(md.mesh.numberofvertices, 1);
-            md.masstransport.spcthickness    = NaN * ones(md.mesh.numberofvertices, 1);
-            md.transient.ismovingfront=0;
+            % md.initialization.pressure       = zeros(md.mesh.numberofvertices, 1);
+            % md.masstransport.spcthickness    = NaN * ones(md.mesh.numberofvertices, 1);
+            % md.transient.ismovingfront=0;
 
-            md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
-            md.basalforcings=linearbasalforcings();
-            md.basalforcings.deepwater_melting_rate=deepwater_melting_rate;
-            md.basalforcings.groundedice_melting_rate=zeros(md.mesh.numberofvertices,1);
+            % md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
+            % md.basalforcings=linearbasalforcings();
+            % md.basalforcings.deepwater_melting_rate=deepwater_melting_rate;
+            % md.basalforcings.groundedice_melting_rate=zeros(md.mesh.numberofvertices,1);
 
-            md.geometry.thickness = md.geometry.surface - md.geometry.base;
+            % md.geometry.thickness = md.geometry.surface - md.geometry.base;
 
-            % Ensure minimum ice thickness of 1 m
-            pos = find(md.geometry.thickness < 1);
-            md.geometry.thickness(pos) = 1;
-            % md.geometry.thickness(pos) = max(1, min(thickness_ref));
-            md.geometry.surface = md.geometry.base + md.geometry.thickness;
-            % md.geometry.surface = md.geometry.surface + s_perturb*ones(md.mesh.numberofvertices,1);
+            % % Ensure minimum ice thickness of 1 m
+            % pos = find(md.geometry.thickness < 1);
+            % md.geometry.thickness(pos) = 1;
+            % % md.geometry.thickness(pos) = max(1, min(thickness_ref));
+            % md.geometry.surface = md.geometry.base + md.geometry.thickness;
+            % % md.geometry.surface = md.geometry.surface + s_perturb*ones(md.mesh.numberofvertices,1);
 
             disp('      -- ice shelf base based on hydrostatic equilibrium');
             di = md.materials.rho_ice / md.materials.rho_water;
@@ -452,8 +472,15 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.geometry.base(pos) = md.geometry.bed(pos);
             md.geometry.surface = md.geometry.base + md.geometry.thickness;
 
-            % pos = find(md.mask.ocean_levelset < 0);
-            % md.geometry.thickness(pos)=1/(1-di)*md.geometry.surface(pos);
+            pos = find(md.mask.ocean_levelset < 0);
+            md.geometry.thickness(pos)=1/(1-di)*md.geometry.surface(pos);
+
+            md.smb.mass_balance = smb * ones(md.mesh.numberofvertices,1);
+            md.transient.ismovingfront = 0;
+
+            md.basalforcings = linearbasalforcings();
+            md.basalforcings.deepwater_melting_rate = deepwater_melting_rate;
+            md.basalforcings.groundedice_melting_rate = zeros(md.mesh.numberofvertices,1);
 
 
             % --time stepping
@@ -543,27 +570,28 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % filename = fullfile(folder, 'initialize_ensemble.mat');
             md = loadmodel(filename);
             
-            md.inversion.iscontrol            = 0;
-            md.transient.ismovingfront        = 0;
-            md.transient.isthermal            = 0;
-            md.transient.isstressbalance      = 1;
-            md.transient.ismasstransport      = 1;
-            md.transient.isgroundingline      = 1;
+            % md.inversion.iscontrol            = 0;
+            % md.transient.ismovingfront        = 0;
+            % md.transient.isthermal            = 0;
+            % md.transient.isstressbalance      = 1;
+            % md.transient.ismasstransport      = 1;
+            % md.transient.isgroundingline      = 1;
 
-            md.groundingline.migration                = 'SubelementMigration';
-            md.groundingline.friction_interpolation   = 'SubelementFriction1';
-            md.groundingline.melt_interpolation       = 'NoMeltOnPartiallyFloating';
+            % md.groundingline.migration                = 'SubelementMigration';
+            % md.groundingline.friction_interpolation   = 'SubelementFriction1';
+            % md.groundingline.melt_interpolation       = 'NoMeltOnPartiallyFloating';
 
-            md.initialization.pressure       = zeros(md.mesh.numberofvertices, 1);
-            md.masstransport.spcthickness    = NaN * ones(md.mesh.numberofvertices, 1);
+            % md.initialization.pressure       = zeros(md.mesh.numberofvertices, 1);
+            % md.masstransport.spcthickness    = NaN * ones(md.mesh.numberofvertices, 1);
 
             md.verbose.solution              = 1;
 
-            mask_all = zeros(md.mesh.numberofvertices,1);
-            md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
-            md.basalforcings=linearbasalforcings();
-            md.basalforcings.deepwater_melting_rate=deepwater_melting_rate;
-            md.basalforcings.groundedice_melting_rate=zeros(md.mesh.numberofvertices,1);
+            md.smb.mass_balance = smb * ones(md.mesh.numberofvertices,1);
+            md.transient.ismovingfront = 0;
+
+            md.basalforcings = linearbasalforcings();
+            md.basalforcings.deepwater_melting_rate = deepwater_melting_rate;
+            md.basalforcings.groundedice_melting_rate = zeros(md.mesh.numberofvertices,1);
 
 
              % Load ensemble input from HDF5
@@ -902,13 +930,20 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         result_2 = md.friction;
         % result_2 = md.results.TransientSolution(end);
 
-        data = cell(length(vec_inputs), 3);
-        for j = 1:length(vec_inputs)
-            key = vec_inputs{j};
-            data{j, 1} = key;
-            data{j, 2} = result_0;
-            data{j, 3} = key;
-        end
+        % data = cell(length(vec_inputs), 3);
+        % for j = 1:length(vec_inputs)
+        %     key = vec_inputs{j};
+        %     data{j, 1} = key;
+        %     data{j, 2} = result_0;
+        %     data{j, 3} = key;
+        % end
+        data = {'Thickness', result_1, 'thickness';
+        % 'Base', result_1, 'base';
+        'Surface', result_1, 'surface';
+        'Vx', result_0, 'vx';
+        'Vy', result_0, 'vy';
+        'Bed', result_1, 'bed';
+        'FrictionCoefficient', result_2, 'coefficient'};
 
         
         writeToHDF5(filename, data);

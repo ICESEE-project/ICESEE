@@ -18,7 +18,7 @@ modeling-parameters:
   reference_data: "ISMIP.reference_simulation_0.mat" # Reference data for transient steady state: only used if use_reference_data is True
   steps: 55                 # Increased steps for finer time integration
   verbose: True              # Enable verbosity for debugging
-  deepwater_melting_rate: 150          # Basal melt rate (150 m/yr)
+  deepwater_melting_rate: 200          # Basal melt rate (150 m/yr)
   smb: -0.3             # Surface mass balance (negative for melt, -0.3 m/yr)
 
 
@@ -26,12 +26,13 @@ enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 60                      # Number of ensemble members (paper uses 50)
   freq_obs: 2 #4                 # Frequency of observations (annual, as per paper)
-  obs_max_time: 24            # Maximum time for observations (30 years)
+  obs_max_time: 36            # Maximum time for observations (30 years)
   obs_start_time: 2            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state: 0 # Generate true state for synthetic observations
   generate_nurged_state: 0  # Generate nudged state for synthetic observations
+  generate_true_wrong_state_only: 0  # Generate only true and wrong states for synthetic observations
   initialize_ensemble: 1
   initial_spread_factor: 1.12
   sequential_ensemble_initialization: 0
@@ -76,8 +77,8 @@ enkf-parameters:
   inflation_factor: 1.0       # Inflation factor (optimal range 1.10–1.18 from paper)
 
   # Estimation flags
-  joint_estimation: True       # Enable joint state and parameter estimation
-  parameter_estimation: True    # Enable parameter estimation
+  joint_estimation: 1       # Enable joint state and parameter estimation
+  parameter_estimation: 1    # Enable parameter estimation
   joint_estimated_params: ['Bed', 'FrictionCoefficient']  # parameters to be jointly estimated
   # joint_estimated_params: ['bed']  # parameters to be jointly estimated
 

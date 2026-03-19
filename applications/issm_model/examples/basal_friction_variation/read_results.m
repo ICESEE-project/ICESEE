@@ -21,7 +21,7 @@ make_plots       = 0;
 make_multi_plots = 1;   % <-- ON (restored)
 frames_plot      = 0;
 compute_rmse     = 0;
-plotgl           = 0;
+plotgl           = 1;
 
 % ---------------- time steps ------------------
 % k_array = [0, 20,  60, 80, 89, 130, 330, 499]+1;
