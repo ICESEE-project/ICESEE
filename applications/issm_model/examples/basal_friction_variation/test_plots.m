@@ -1,4 +1,4 @@
-% close all; clearvars; clear all
+close all; clearvars; clear all
 
 global data_file_paths nvar ensemble_vec_full ...
         label_t t nt colorbar_gap bed_obs_xy t_change ...
@@ -6,10 +6,11 @@ global data_file_paths nvar ensemble_vec_full ...
 
 nvar = 6;
 colorbar_gap = 0.92;
-t_change = 180+1;
-yr_jump  = 16;
+t_change = 800+1;
+yr_jump  = 4;
 
-k_array = [30, 70,100, 120, 180, 249]+1;
+% k_array = [30, 70,100, 120, 180, 249]+1;
+k_array = [20, 80, 120, 240, 480, 560, 700] +1;
 dt      = 0.2;
 t_jump = (yr_jump+1)/dt;
 
@@ -23,7 +24,7 @@ tm_m     = h5read(file_path,'/obs_max_time');
 run_mode = h5read(file_path,'/run_mode'); 
 
 % --------- true / wrong (nurged)
-data_file_paths = '_modelrun_datasets';
+data_file_paths = '_modelrun_datasets_0';
 file_path          = fullfile(data_file_paths, 'true_nurged_states.h5');
 model_true_state   = h5read(file_path,'/true_state')';
 model_nurged_state = h5read(file_path,'/nurged_state')';
@@ -70,9 +71,9 @@ end
 plot_true_friction_snapshots(k_array, model_true_state, md_true, md, '');
 plot_true_friction_anomaly_snapshots(k_array, model_true_state, md_true, md, '');
 
-scalar_means_file_true = fullfile('_modelrun_datasets','ensemble_true_state_scalar_0.h5');
-scalar_means_file_nurged = fullfile('_modelrun_datasets','ensemble_nurged_state_scalar_0.h5');
-scalar_means_file_ens = fullfile('_modelrun_datasets','ensemble_scalar_output.h5');
+scalar_means_file_true = fullfile(data_file_paths,'ensemble_true_state_scalar_0.h5');
+scalar_means_file_nurged = fullfile(data_file_paths,'ensemble_nurged_state_scalar_0.h5');
+scalar_means_file_ens = fullfile(data_file_paths,'ensemble_scalar_output.h5');
 % scalar_means_file_ens = fullfile('_modelrun_datasets','ensemble_out_scalar_10.h5');
 
 plot_gl_on_bed_evolution( ...
@@ -443,7 +444,8 @@ function plot_gl_on_bed_evolution( ...
     end
 
     nrows = 5;
-    figure('Position',[150 150 1800 1100]); clf;
+    % figure('Position',[150 150 1800 1100]); clf;
+    figure('Position',[100 100 1100 800]); clf;
     axs = gobjects(nrows,1);
 
     % ------------------------------------------------------------
@@ -611,7 +613,7 @@ function plot_gl_on_bed_evolution( ...
     maxAbs_global = max(maxAbs_global, safe_absmax(diff_assim));
 
     plotmodel(md_ens_a, 'data', diff_assim, ...
-        'title', sprintf('after %.1f years of assimilation', t_change_plot), ...
+        'title', sprintf('assimilated basal friction after %.1f years', t_change_plot), ...
         'subplot', [nrows,1,4], ...
         'caxis', [-maxAbs_global maxAbs_global], ...
         'colorbar', 'off');
@@ -629,6 +631,31 @@ function plot_gl_on_bed_evolution( ...
         keepTopK_true, keepTopK_wrong, keepTopK_ens, ...
         [gl_mid.x(1), gl_mid.y(1)]);
 
+
+    % ------------------------------------------------------------
+    % Legend for GL overlays
+    % ------------------------------------------------------------
+    ax0 = axs(1);
+    lg = legend(ax0);
+    if ~isempty(lg) && isvalid(lg), delete(lg); end
+
+    hold(ax0,'on');
+    p1 = plot(ax0, NaN, NaN, 'k-',  'LineWidth', 3.0);
+    p2 = plot(ax0, NaN, NaN, 'm--',  'LineWidth', 3.0);
+    p3 = plot(ax0, NaN, NaN, 'c:', 'LineWidth', 3.0);
+
+    lgd = legend(ax0, [p1 p2 p3], ...
+        {'Perturbed GL','Unperturbed GL','Assimilated GL'}, ...
+        'Orientation','horizontal', ...
+        'FontSize',14, ...
+        'Box','off');
+    hold(ax0,'off');
+
+    lgd.Units = 'normalized';
+    lgd.Location = 'none';
+    lgd.Position = [0.52, 0.205, 0.60, 0.04];
+
+
     % ============================================================
     % (e) Delta IVAF time series
     % ============================================================
@@ -644,19 +671,19 @@ function plot_gl_on_bed_evolution( ...
     end
 
     if ~isempty(ivaf_nurged)
-        plot(ax, t_nurged, ivaf_nurged - ivaf_nurged(1), 'm-', 'LineWidth', 2.5);
+        plot(ax, t_nurged, ivaf_nurged - ivaf_nurged(1), 'm--', 'LineWidth', 2.5);
         has_any = true;
     end
 
     if ~isempty(ivaf_ens)
-        plot(ax, t_ens, ivaf_ens - ivaf_ens(1), 'c-', 'LineWidth', 2.5);
+        plot(ax, t_ens, ivaf_ens - ivaf_ens(1), 'c:', 'LineWidth', 2.5);
         has_any = true;
     end
 
     if exist('t','var') && ~isempty(t) && t_jump <= numel(t)
-        xline(ax, t(t_jump), 'k--', 'LineWidth', 2.0);
+        xline(ax, t(t_jump), 'g:', 'LineWidth', 3.0);
     else
-        xline(ax, t_jump, 'k--', 'LineWidth', 2.0);
+        xline(ax, t_jump, 'g:', 'LineWidth', 3.0);
     end
 
     if has_any
@@ -668,11 +695,12 @@ function plot_gl_on_bed_evolution( ...
         legend(ax, {'Perturbed','Unperturbed','Assimilated'}, ...
             'Location','best', 'FontSize',12);
 
-        text(ax, 0.02, 0.95, sprintf('(%c_{%d})','e',panel_idx), ...
+        text(ax, 0.02, 0.90, sprintf('(%c_{%d})','e',panel_idx), ...
             'Units','normalized', 'FontWeight','bold', 'FontSize',16, ...
             'HorizontalAlignment','left', 'VerticalAlignment','top', 'Color','k');
         
-        ylim([-3e12, 1e12]); xlim([-1.5,52]);
+        ylim([-9e12, 1e12]); 
+        xlim([-1.5,160]);
     else
         text(ax, 0.5, 0.5, 'IVAF time series not available', ...
             'Units','normalized', 'HorizontalAlignment','center', ...
@@ -733,7 +761,7 @@ function plot_gl_on_bed_evolution( ...
 
     % time-series panel
     ax = axs(5);
-    pos = [0.10, bottom-0.055, 0.80, height];
+    pos = [0.10, bottom-0.049, 0.80, height];
     set(ax, 'Position', pos, ...
         'FontWeight','bold', 'FontSize',15, 'Box','on', ...
         'LineWidth',2.0, 'TickDir','out', 'TickLength',[0.004 0.004], ...
@@ -742,9 +770,9 @@ function plot_gl_on_bed_evolution( ...
     % ------------------------------------------------------------
     % Colorbars
     % ------------------------------------------------------------
-    colorbar_gap0 = 0.91;
+    colorbar_gap0 = 0.92;
 
-    cb1 = colorbar(axs(1), 'Position',[colorbar_gap0 0.75 0.015 0.16]);
+    cb1 = colorbar(axs(1), 'Position',[colorbar_gap0 0.75 0.015 0.2]);
     ylabel(cb1,[bg_title units_str],'FontSize',15,'FontWeight','bold');
     colormap(axs(1), parula);
 
@@ -755,29 +783,6 @@ function plot_gl_on_bed_evolution( ...
 
     cb2 = colorbar(axs(4), 'Position',[colorbar_gap0 0.25 0.015 0.45]);
     ylabel(cb2, ['\Delta ' bg_title units_str], 'FontSize',15, 'FontWeight','bold');
-
-    % ------------------------------------------------------------
-    % Legend for GL overlays
-    % ------------------------------------------------------------
-    ax0 = axs(1);
-    lg = legend(ax0);
-    if ~isempty(lg) && isvalid(lg), delete(lg); end
-
-    hold(ax0,'on');
-    p1 = plot(ax0, NaN, NaN, 'k-',  'LineWidth', 3.0);
-    p2 = plot(ax0, NaN, NaN, 'm-',  'LineWidth', 3.0);
-    p3 = plot(ax0, NaN, NaN, 'c-.', 'LineWidth', 3.0);
-
-    lgd = legend(ax0, [p1 p2 p3], ...
-        {'True GL','No assimilation GL','Assimilated GL'}, ...
-        'Orientation','horizontal', ...
-        'FontSize',14, ...
-        'Box','off');
-    hold(ax0,'off');
-
-    lgd.Units = 'normalized';
-    lgd.Location = 'none';
-    lgd.Position = [0.525, 0.015, 0.60, 0.04];
 
     set(gcf,'Color','w');
 
@@ -875,7 +880,7 @@ function overlay_gl_panel(ax, md_true_k, md_nurged_k, md_ens_k, ...
 
     hold(ax,'on');
     plot_gl_contour_filtered(Xg, Yg, Phi_true,  'k','-', 3.0, minLen_true,  minArea, keepLargestOnly_true,  keepTopK_true);
-    plot_gl_contour_filtered(Xg, Yg, Phi_wrong, 'm','--', 3.0, minLen_wrong, minArea, keepLargestOnly_wrong, keepTopK_wrong);
+    plot_gl_contour_filtered(Xg, Yg, Phi_wrong, 'm','-.', 3.0, minLen_wrong, minArea, keepLargestOnly_wrong, keepTopK_wrong);
     plot_gl_contour_filtered(Xg, Yg, Phi_ens,   'c',':', 3.0, minLen_ens,   minArea, keepLargestOnly_ens,   keepTopK_ens);
 
     % overlay_gl_window_points(ax, md_true_k, md_nurged_k, md_ens_k, gl_xy, ...
