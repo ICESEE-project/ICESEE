@@ -40,8 +40,8 @@ mkdir -p examples execution
 
 The following host directories are bound to the container:
 
-- `examples/` → `/opt/ISSM/execution`: Contains example data and scripts.
-- `execution/` → `/opt/execution`: Stores model outputs.
+- `examples/` → `/opt/ISSM/examples`: Contains example data and scripts.
+- `execution/` → `/opt/ISSM/execution`: Stores model outputs.
 
 ## Running the ISSM Script
 
@@ -49,7 +49,7 @@ Execute the `run_da_issm.py` script with:
 
 ```bash
 srun -n 4 apptainer exec \
-  -B examples:/opt/ISSM/execution,execution:/opt/execution \
+  -B examples:/opt/ISSM/examples,execution:/opt/ISSM/execution \
   issm_matlab.sif python run_da_issm.py --Nens=2 --model_nprocs=2
 ```
 
