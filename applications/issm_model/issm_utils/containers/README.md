@@ -57,7 +57,7 @@ srun -n 4 apptainer exec \
 
 - `srun -n 4`: Launches 4 MPI tasks via Slurm.
 - `apptainer exec`: Runs a command inside the container.
-- `-B examples:/opt/ISSM/execution,execution:/opt/execution`: Binds host directories to container paths.
+- `-B examples:/opt/ISSM/examples,execution:/opt/ISSM/execution`: Binds host directories to container paths.
 - `issm_matlab.sif`: The Apptainer image.
 - `python run_da_issm.py`: The Python script to run.
 - `--Nens=2`: Sets 2 ensemble members for data assimilation.
