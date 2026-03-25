@@ -1,0 +1,100 @@
+physical-parameters:
+  # Domain parameters
+  Lx: 640e3      # (m) Domain length along ice flow (640 km from paper)
+  Ly: 80e3       # (m) Domain width across ice flow (80 km from paper)
+  nx: 222        # Number of elements in x-direction (approximates 27,000 elements with varying resolution)
+  ny: 56         # Number of elements in y-direction (adjusted for 500 m to 10 km resolution)
+
+modeling-parameters:
+  # Model parameters
+  num_years: 100          # Number of years to run the model (30-year assimilation period from paper)
+  tinitial: 0.0           # Initial time
+  timesteps_per_year: 0.2 # Number of timesteps per year (monthly for stability in SSA)
+
+  example_name: "ISMIP_Choi"  # Must have added this to the ISSM directory
+  ParamFile: "Mismip2.par" # Parameter file for ISSM-DART setup
+  use_reference_data: True  # Use reference data for transient steady state
+  reference_data_dir: "data" # Directory for reference data
+  reference_data: "ISMIP.reference_simulation2.mat" # Reference data for transient steady state: only used if use_reference_data is True
+  steps: 6                 # Increased steps for finer time integration
+  verbose: True              # Enable verbosity for debugging
+  deepwater_melting_rate: 150          # Basal melt rate (150 m/yr)
+  smb: -1.5              # Surface mass balance (negative for melt, -0.3 m/yr)
+
+
+enkf-parameters:
+  # Ensemble Kalman Filter parameters
+  Nens: 50                      # Number of ensemble members (paper uses 50)
+  freq_obs: 2 #4                 # Frequency of observations (annual, as per paper)
+  obs_max_time: 80          # Maximum time for observations (30 years)
+  obs_start_time: 2            # Start time for observations (start of simulation)
+
+  generate_synthetic_obs: 1  # Generate synthetic observations for testing
+  generate_true_state:    1  # Generate true state for synthetic observations
+  generate_nurged_state:    1   # Generate nudged state for synthetic observations
+  initialize_ensemble: 1
+  initial_spread_factor: 1.20
+  sequential_ensemble_initialization: 0
+  use_ensemble_pertubations: 1
+
+  num_state_vars: 4             # State variables: ice thickness (H), velocities (u, v)
+  num_param_vars: 2             # Parameter variables: friction coefficient (C), bed topography (B)
+  vec_inputs: ['Thickness', 'Surface','Vx','Vy','bed','coefficient'] # State vector inputs (ice surface and velocities)
+  observed_vars: ['Surface', 'Vx', 'Vy']  # Observed variables (ice thickness, velocities, bed topography)
+  observed_params: ['bed']   # Parameters to estimate (friction coefficient, bed topography)
+
+  # bed topography observations settings
+  bed_obs_snapshot: [8, 24, 40, 64]        # Bedrock elevation observations at 30 years
+  bed_obs_stride: 7000          # Spacing of bedrock elevation observations (30 km)
+
+  # Statistical parameters
+  sig_obs: [0, 5, 9, 8, 4, 0]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
+  sig_Q: [0.4, 0.4, 0.2, 0.1, 0.08, 0.6]          # Process noise std dev (adjusted for H, Vx, Vy)
+  # length_scale: [300,220,180,150,320]               # Length scale for covariance (5 km for friction, per paper)
+  # length_scale: [48,38,33,23,48,49] 
+  length_scale: [26,35,28,23,48,49] 
+
+  seed: 42                       # Seed for random number generator
+  inflation_factor: 1.12        # Inflation factor (optimal range 1.10–1.18 from paper)
+
+  # Estimation flags
+  joint_estimation: True       # Enable joint state and parameter estimation
+  parameter_estimation: True    # Enable parameter estimation
+  joint_estimated_params: ['bed','coefficient']  # parameters to be jointly estimated
+
+  # Nudged parameters
+  sill_friction: 90000      # Sill friction coefficient (90000 Pa s/m from paper)
+  range_friction: 5000      # Range friction coefficient (5000 Pa s/m from paper)
+  mean_friction: 2000       # Mean friction coefficient (2500 Pa s/m from paper)
+  nugget_friction: 0        # Nugget effect for friction (0 Pa s/m from paper)
+  sill_bed: 4000            # Sill bedrock elevation (4000 m from paper)
+  range_bed: 50000          # Range bedrock elevation (50000 m from paper)
+  nugget_bed: 200           # Nugget effect for bedrock elevation (200 m from paper)
+ 
+  # EnKF model parameters
+  model_name: "issm"            # Model name
+  filter_type: "EnKF"           # Filter type: EnKF (Ensemble Kalman Filter)
+  parallel_flag: "MPI_model"    # Parallel flag
+  n_modeltasks: 4               # Number of model tasks (increased for larger domain)
+  commandlinerun: "True"        # Command line run flag
+  execution_flag: 0             # Even distribution of problem size
+  model_nprocs: 2               # Number of processors for MPI (increased for efficiency)
+  execution_mode: 1                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
+  create_ensemble_dataset: True # Create dataset for ensemble runs
+  data_path: _modelrun_datasets
+  ICESEE_PERFORMANCE_TEST: False
+
+  # HDF5 file parameters for the full parallel runs
+  h5_file_compression: None    # None, "gzip" or "lzf" 
+  h5_file_compression_level: 4   # Compression level (1-9 for gzip only)
+  h5_file_chunk_size: 1000       # Chunk size for HDF5
+  serial_file_creation: True  # Create HDF5 files in serial (True) or parallel (False)
+  collective_threshold: 4
+  batch_size: 250            # Batch size for writing HDF5 files
+
+  # restart parameters (only available for fully parallel runs)
+  restart_enabled: 1         # Enable restart functionality
+  force_fresh_start: 1       # Force fresh start even if checkpoints exist
+  checkpoint_every: 5           # Frequency of checkpoints (every 5 assimilation cycles)
+  base_seed: 42                 # Base seed for reproducibility
+  k_start_override: 40       # Start overwrite from this assimilation cycle
