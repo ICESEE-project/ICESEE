@@ -2,14 +2,15 @@ close all; clearvars; clear all
 
 global data_file_paths nvar ensemble_vec_full ...
         label_t t nt colorbar_gap bed_obs_xy t_change ...
-        t_jump
+        t_jump k_len
 
 nvar = 6;
 colorbar_gap = 0.92;
 t_change =1000;
 yr_jump  = 2;
 
-k_array = [30, 70,100, 120, 180, 249]+1;
+k_array = [30, 70,100, 120, 180, (t_change-1)]+1;
+k_len = length(k_array);
 % k_array = [20, 80, 120, 240, 480, 560, 700] +1;
 dt      = 0.2;
 t_jump = (yr_jump+1)/dt;
@@ -54,12 +55,11 @@ wbed = w(4*hdim + 1 : 5*hdim, 1);
 obs_idx = find(~isnan(wbed));   % <-- observations are the non-NaNs
 bed_obs_xy = [md_true.mesh.x(obs_idx), md_true.mesh.y(obs_idx)];
 
-% ---------------- GL midpoint points + pointwise RMSE ----------------
+% ---------------- GL midpoint points  ----------------
 [gl_mid] = compute_gl_midpoints( ...
     k_array, dt, ...
     model_true_state, model_nurged_state, ensemble_vec_mean, ...
     md_true, md_nurged, md_ens, md);
-
 
 % Example requested times
 times_to_plot = [1.0, 6.2, 12.2, 18.2, 22.2, 30.0];
@@ -432,7 +432,7 @@ function plot_gl_on_bed_evolution( ...
     bg_field, bg_title, units, gl_mid, ...
     scalar_means_file_true, scalar_means_file_nurged, scalar_means_file_ens)
 
-    global colorbar_gap t label_t nt t_change t_jump
+    global colorbar_gap t label_t nt t_change t_jump k_len
 
     if nargin < 10 || isempty(bg_field), bg_field = 'initialization.vel'; end
     if nargin < 11 || isempty(bg_title), bg_title = 'Background'; end
@@ -444,7 +444,8 @@ function plot_gl_on_bed_evolution( ...
         units_str = '';
     end
 
-    nrows = 5;
+    % nrows = 5;
+    nrows = 6;
     % figure('Position',[150 150 1800 1100]); clf;
     figure('Position',[100 100 1100 800]); clf;
     axs = gobjects(nrows,1);
@@ -554,7 +555,7 @@ function plot_gl_on_bed_evolution( ...
     end
 
     plotmodel(md_nurged_1, 'data', diff_no, ...
-        'title', sprintf('unperturbed basal friction after %.1f years', t_change_plot), ...
+        'title', sprintf('unperturbed basal friction after %.0f years', round(t_change_plot)), ...
         'subplot', [nrows,1,2], ...
         'caxis', [-maxAbs_global maxAbs_global], ...
         'colorbar', 'off');
@@ -570,7 +571,7 @@ function plot_gl_on_bed_evolution( ...
         minLen_true, minLen_wrong, minLen_ens, minArea, ...
         keepLargestOnly_true, keepLargestOnly_wrong, keepLargestOnly_ens, ...
         keepTopK_true, keepTopK_wrong, keepTopK_ens, ...
-        [gl_mid.x(1), gl_mid.y(1)]);
+        [gl_mid.x(k_len), gl_mid.y(k_len)]);
 
     % ============================================================
     % (c) Perturbed truth
@@ -584,7 +585,7 @@ function plot_gl_on_bed_evolution( ...
     maxAbs_global = max(maxAbs_global, safe_absmax(diff_true));
 
     plotmodel(md_true_change, 'data', diff_true, ...
-        'title', sprintf('perturbed %s after %.1f years', lower(bg_title), t_change_plot), ...
+        'title', sprintf('perturbed %s after %.0f years', lower(bg_title), round(t_change_plot)), ...
         'subplot', [nrows,1,3], ...
         'caxis', [-maxAbs_global maxAbs_global], ...
         'colorbar', 'off');
@@ -600,7 +601,7 @@ function plot_gl_on_bed_evolution( ...
         minLen_true, minLen_wrong, minLen_ens, minArea, ...
         keepLargestOnly_true, keepLargestOnly_wrong, keepLargestOnly_ens, ...
         keepTopK_true, keepTopK_wrong, keepTopK_ens, ...
-        [gl_mid.x(1), gl_mid.y(1)]);
+        [gl_mid.x(k_len), gl_mid.y(k_len)]);
 
     % ============================================================
     % (d) Assimilated
@@ -620,7 +621,7 @@ function plot_gl_on_bed_evolution( ...
     maxAbs_global = max(maxAbs_global, safe_absmax(diff_assim));
 
     plotmodel(md_ens_a, 'data', diff_assim, ...
-        'title', sprintf('assimilated basal friction after %.1f years', t_change_plot), ...
+        'title', sprintf('assimilated basal friction after %.0f years', round(t_change_plot)), ...
         'subplot', [nrows,1,4], ...
         'caxis', [-maxAbs_global maxAbs_global], ...
         'colorbar', 'off');
@@ -636,7 +637,15 @@ function plot_gl_on_bed_evolution( ...
         minLen_true, minLen_wrong, minLen_ens, minArea, ...
         keepLargestOnly_true, keepLargestOnly_wrong, keepLargestOnly_ens, ...
         keepTopK_true, keepTopK_wrong, keepTopK_ens, ...
-        [gl_mid.x(1), gl_mid.y(1)]);
+        [gl_mid.x(k_len), gl_mid.y(k_len)]);
+
+    % --->%
+    % pos = (y==40e3&& for all x);
+    % plot(x, diff_assim(pos)); hold on
+    % plot(x, diff_true(pos))
+
+
+    % <-----%
 
 
     % ------------------------------------------------------------
@@ -660,13 +669,15 @@ function plot_gl_on_bed_evolution( ...
 
     lgd.Units = 'normalized';
     lgd.Location = 'none';
-    lgd.Position = [0.52, 0.205, 0.60, 0.04];
+    % lgd.Position = [0.52, 0.205, 0.60, 0.04];
+    lgd.Position = [0.279999999999999 -0.15 0.6 0.950000000000001];
 
 
     % ============================================================
     % (e) Delta IVAF time series
     % ============================================================
-    ax = subplot(nrows,1,5);
+    % ax = subplot(nrows,1,5);
+    ax = subplot(nrows,1,[5,6]) % bottom panel spans two rows
     axs(5) = ax;
     hold(ax,'on');
 
@@ -678,13 +689,35 @@ function plot_gl_on_bed_evolution( ...
     end
 
     if ~isempty(ivaf_nurged)
-        plot(ax, t_true, ivaf_nurged - ivaf_nurged(1), 'm--', 'LineWidth', 2.5);
+        plot(ax, t_true, ivaf_nurged - ivaf_nurged(1), 'm-.', 'LineWidth', 2.5);
         has_any = true;
     end
 
     if ~isempty(ivaf_ens)
         plot(ax, t_true, ivaf_ens - ivaf_ens(1), 'c:', 'LineWidth', 2.5);
         has_any = true;
+
+        % ivaf_nurged_atlast=abs(ivaf_nurged(end))
+        % ivaf_ens_atlast=abs(ivaf_ens(end))
+        ivaf_diff_unperturbed_perturbed_200   = abs(ivaf_true(t_change)) - abs(ivaf_nurged(t_change));
+        ivaf_diff_perturbed_assimilated_200   = abs(ivaf_true(t_change)) - abs(ivaf_ens(t_change));
+        ivaf_diff_unperturbed_assimilated_200 = abs(ivaf_ens(t_change))  - abs(ivaf_nurged(t_change));
+        fprintf('\n=== IVAF Differences at t = %.0f yr ===\n', t_true(t_change));
+
+        fprintf('Unperturbed - Perturbed   : %+ .3e m^3 (%.2f%%)\n', ...
+            ivaf_diff_unperturbed_perturbed_200, ...
+            100 * ivaf_diff_unperturbed_perturbed_200 / abs(ivaf_true(t_change)));
+        
+        fprintf('Perturbed   - Assimilated : %+ .3e m^3 (%.2f%%)\n', ...
+            ivaf_diff_perturbed_assimilated_200, ...
+            100 * ivaf_diff_perturbed_assimilated_200 / abs(ivaf_true(t_change)));
+        
+        fprintf('Unperturbed - Assimilated : %+ .3e m^3 (%.2f%%)\n', ...
+            ivaf_diff_unperturbed_assimilated_200, ...
+            100 * ivaf_diff_unperturbed_assimilated_200 / abs(ivaf_true(t_change)));
+        
+        fprintf('=======================================\n');
+
     end
 
     if exist('t','var') && ~isempty(t) && t_jump <= numel(t)
@@ -694,9 +727,9 @@ function plot_gl_on_bed_evolution( ...
     end
 
     if has_any
-        ylabel(ax, '\Delta IVAF', 'FontWeight','bold','FontSize',16);
-        xlabel(ax, 'time (yr)', 'FontWeight','bold','FontSize',16);
-        title(ax, '\Delta Ice Volume Above Floatation (IVAF)', 'FontWeight','bold');
+        ylabel(ax, '\Delta IVAF', 'FontWeight','bold','FontSize',15);
+        xlabel(ax, 'time (yr)', 'FontWeight','bold','FontSize',15);
+        title(ax, '\Delta Ice Volume Above Floatation (IVAF)', 'FontWeight','bold', 'FontSize',15);
         grid(ax,'on');
 
         legend(ax, {'Perturbed','Unperturbed','Assimilated'}, ...
@@ -706,8 +739,8 @@ function plot_gl_on_bed_evolution( ...
             'Units','normalized', 'FontWeight','bold', 'FontSize',16, ...
             'HorizontalAlignment','left', 'VerticalAlignment','top', 'Color','k');
         
-        ylim([-12e12, 1e12]); 
-        xlim([-1.5,200]);
+        ylim([-9.5e12, 0.6e12]); 
+        xlim([-1.5,201]);
         % ylim([-12e12, 1e12]); 
         % xlim([-1.5,160]);
     else
@@ -769,8 +802,16 @@ function plot_gl_on_bed_evolution( ...
     end
 
     % time-series panel
+    % ax = axs(5);
+    % pos = [0.10, bottom-0.049, 0.80, height];
+    % set(ax, 'Position', pos, ...
+    %     'FontWeight','bold', 'FontSize',15, 'Box','on', ...
+    %     'LineWidth',2.0, 'TickDir','out', 'TickLength',[0.004 0.004], ...
+    %     'XGrid','on', 'YGrid','on');
+
+    % time-series panel (make it taller)
     ax = axs(5);
-    pos = [0.10, bottom-0.049, 0.80, height];
+    pos = [0.14, 0.07, 0.72, 0.21];   % [left bottom width height]
     set(ax, 'Position', pos, ...
         'FontWeight','bold', 'FontSize',15, 'Box','on', ...
         'LineWidth',2.0, 'TickDir','out', 'TickLength',[0.004 0.004], ...
@@ -779,10 +820,10 @@ function plot_gl_on_bed_evolution( ...
     % ------------------------------------------------------------
     % Colorbars
     % ------------------------------------------------------------
-    colorbar_gap0 = 0.92;
+    colorbar_gap0 = 0.87;
 
-    cb1 = colorbar(axs(1), 'Position',[colorbar_gap0 0.75 0.015 0.2]);
-    ylabel(cb1,[bg_title units_str],'FontSize',15,'FontWeight','bold');
+    cb1 = colorbar(axs(1), 'Position',[colorbar_gap0 0.78 0.012 0.17]);
+    ylabel(cb1,[bg_title units_str],'FontSize',14,'FontWeight','bold');
     colormap(axs(1), parula);
 
     for i = 2:4
@@ -790,9 +831,9 @@ function plot_gl_on_bed_evolution( ...
         caxis(axs(i), [-maxAbs_global maxAbs_global]);
     end
 
-    cb2 = colorbar(axs(4), 'Position',[colorbar_gap0 0.25 0.015 0.45]);
+    cb2 = colorbar(axs(4), 'Position',[colorbar_gap0 0.38 0.012 0.38]);
     % ylabel(cb2, ['\Delta ' bg_title units_str], 'FontSize',15, 'FontWeight','bold');
-    ylabel(cb2, ['\Delta ' bg_title ' / Initial Friction'], 'FontSize', 15, 'FontWeight', 'bold');
+    ylabel(cb2, ['\Delta ' bg_title ' / Initial Friction'], 'FontSize', 14, 'FontWeight', 'bold');
 
     set(gcf,'Color','w');
 
@@ -807,6 +848,104 @@ function plot_gl_on_bed_evolution( ...
 
     fname = fullfile(outdir, sprintf('GL_%s.png', regexprep(bg_field,'\.','_')));
     exportgraphics(gcf, fname, 'Resolution', 300);
+
+    % ============================================================
+    %  friction perturbation along centerline y = 40 km
+    % ============================================================
+    y0 = 40e3;
+
+    % define full x-range
+    x_line = linspace(min(x), max(x), 500);
+    y_line = y0 * ones(size(x_line));
+
+    % interpolate
+    diff_true_line  = griddata(x, y, diff_true,  x_line, y_line, 'linear');
+    diff_assim_line = griddata(x, y, diff_assim, x_line, y_line, 'linear');
+
+    % handle NaNs
+    diff_true_line  = fillmissing(diff_true_line,  'nearest');
+    diff_assim_line = fillmissing(diff_assim_line, 'nearest');
+
+    % plot
+    figure('Position',[150 150 900 450]); clf;
+    plot(x_line/1e3, diff_true_line,  'k-', 'LineWidth', 2.5); hold on;
+    plot(x_line/1e3, diff_assim_line, 'c--', 'LineWidth', 2.5);
+
+    xlabel('x (km)', 'FontWeight','bold', 'FontSize',14);
+    ylabel('\Delta friction / initial friction', 'FontWeight','bold', 'FontSize',14);
+    title(sprintf('Friction perturbation along centerline y = %.0f km at t = %.0f yr', ...
+        y0/1e3, round(t_change_plot)), ...
+        'FontWeight','bold', 'FontSize',15);
+
+    legend({'Perturbed truth','Assimilated'}, 'Location','best', 'FontSize',12);
+    grid on; box on;
+
+    xlim([min(x) max(x)]/1e3);
+    set(gca, 'FontWeight','bold', 'FontSize',15, 'LineWidth',1.5);
+
+    % optional: save the line figure too
+    fname_line = fullfile(outdir, sprintf('GL_%s_centerline_y40km.png', regexprep(bg_field,'\.','_')));
+    exportgraphics(gcf, fname_line, 'Resolution', 300);
+
+       
+    % % define full x-range
+    % x_line = linspace(min(x), max(x), 500);
+    % y_line = y0 * ones(size(x_line));
+    % 
+    % % grounded masks
+    % grounded_true  = md_true_change.mask.ocean_levelset >= 0;
+    % grounded_assim = md_ens_a.mask.ocean_levelset      >= 0;
+    % 
+    % % build smooth interpolants from grounded nodes only
+    % F_true = scatteredInterpolant( ...
+    %     x(grounded_true), ...
+    %     y(grounded_true), ...
+    %     diff_true(grounded_true), ...
+    %     'natural', 'none');
+    % 
+    % F_assim = scatteredInterpolant( ...
+    %     x(grounded_assim), ...
+    %     y(grounded_assim), ...
+    %     diff_assim(grounded_assim), ...
+    %     'natural', 'none');
+    % 
+    % % evaluate along centerline
+    % diff_true_line  = F_true(x_line, y_line);
+    % diff_assim_line = F_assim(x_line, y_line);
+    % 
+    % % exact imposed Gaussian along the centerline (optional diagnostic)
+    % % only exact if y0 here matches the perturbation center used in truth
+    % x0_gauss = ((0.5 * (min(x) + max(x)))./2.0);
+    % y0_gauss = 0.5 * (min(y) + max(y));
+    % sigma_gauss = 15e3;
+    % gauss_exact = exp(-((x_line - x0_gauss).^2 + (y_line - y0_gauss).^2) ./ (2*sigma_gauss^2));
+    % 
+    % % plot
+    % figure('Position',[150 150 900 450]); clf;
+    % plot(x_line/1e3, diff_true_line,  'k-',  'LineWidth', 2.5); hold on;
+    % plot(x_line/1e3, diff_assim_line, 'c--', 'LineWidth', 2.5);
+    % % plot(x_line/1e3, gauss_exact, 'r:', 'LineWidth', 2.0);   % optional
+    % 
+    % xlabel('x (km)', 'FontWeight','bold', 'FontSize',14);
+    % ylabel('\Delta friction / initial friction', 'FontWeight','bold', 'FontSize',14);
+    % title(sprintf('Grounded friction perturbation along centerline y = %.0f km at t = %.0f yr', ...
+    %     y0/1e3, round(t_change_plot)), ...
+    %     'FontWeight','bold', 'FontSize',15);
+    % 
+    % legend({'Perturbed truth','Assimilated'}, 'Location','best', 'FontSize',12);
+    % % legend({'Perturbed truth','Assimilated','Exact Gaussian'}, 'Location','best', 'FontSize',12);
+    % 
+    % grid on;
+    % box on;
+    % xlim([min(x) max(x)]/1e3);
+    % set(gca, 'FontWeight','bold', 'FontSize',15, 'LineWidth',1.5);
+    % 
+    % % optional: save the line figure too
+    % fname_line = fullfile(outdir, sprintf('GL_%s_centerline_y40km_grounded.png', ...
+    %     regexprep(bg_field,'\.','_')));
+    % exportgraphics(gcf, fname_line, 'Resolution', 300);
+
+   
 end
 
 % ============================================================
@@ -893,8 +1032,8 @@ function overlay_gl_panel(ax, md_true_k, md_nurged_k, md_ens_k, ...
     plot_gl_contour_filtered(Xg, Yg, Phi_wrong, 'm','-.', 3.0, minLen_wrong, minArea, keepLargestOnly_wrong, keepTopK_wrong);
     plot_gl_contour_filtered(Xg, Yg, Phi_ens,   'c',':', 3.0, minLen_ens,   minArea, keepLargestOnly_ens,   keepTopK_ens);
 
-    % overlay_gl_window_points(ax, md_true_k, md_nurged_k, md_ens_k, gl_xy, ...
-    %     'x_halfwidth',30e3, 'y_halfwidth',20e3);
+    overlay_gl_window_points(ax, md_true_k, md_nurged_k, md_ens_k, gl_xy, ...
+        'x_halfwidth',30e3, 'y_halfwidth',20e3);
     hold(ax,'off');
 end
 
@@ -1204,8 +1343,11 @@ function overlay_gl_window_points(ax, md_true_k, md_nurged_k, md_ens_k, gl_mid_k
     hold(ax,'on')
 
     % center marker
-    plot(ax, xc, yc, 'go', 'MarkerFaceColor','g', ...
-        'MarkerSize',8,'LineWidth',1.5,'HandleVisibility','on');
+    % plot(ax, xc, yc, 'go', 'MarkerFaceColor','g', ...
+    %     'MarkerSize',8,'LineWidth',1.5,'HandleVisibility','on');
+
+    plot(ax, xc, yc,  'Marker', 'o','Color', '#664222', 'MarkerFaceColor','#664222'  , ...
+        'MarkerSize',10,'LineWidth',1.5,'HandleVisibility','on');
 
     hold(ax,'off')
 end
@@ -1278,10 +1420,3 @@ function P = extract_gl_points_in_window(md_k, Nx, Ny, minLen, topK, win)
     end
 end
 
-function s = fmt_years(t)
-    if abs(t - round(t)) < 1e-10
-        s = sprintf('\\bf%d', round(t));   % integer, no decimal
-    else
-        s = sprintf('\\bf%.1f', t);        % one decimal
-    end
-end
