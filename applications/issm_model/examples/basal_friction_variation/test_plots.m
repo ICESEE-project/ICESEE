@@ -6,11 +6,11 @@ global data_file_paths nvar ensemble_vec_full ...
 
 nvar = 6;
 colorbar_gap = 0.92;
-t_change = 800+1;
-yr_jump  = 4;
+t_change =1000;
+yr_jump  = 2;
 
-% k_array = [30, 70,100, 120, 180, 249]+1;
-k_array = [20, 80, 120, 240, 480, 560, 700] +1;
+k_array = [30, 70,100, 120, 180, 249]+1;
+% k_array = [20, 80, 120, 240, 480, 560, 700] +1;
 dt      = 0.2;
 t_jump = (yr_jump+1)/dt;
 
@@ -24,7 +24,8 @@ tm_m     = h5read(file_path,'/obs_max_time');
 run_mode = h5read(file_path,'/run_mode'); 
 
 % --------- true / wrong (nurged)
-data_file_paths = '_modelrun_datasets_0';
+% data_file_paths = '_modelrun_datasets_0';
+data_file_paths = '_modelrun_datasets';
 file_path          = fullfile(data_file_paths, 'true_nurged_states.h5');
 model_true_state   = h5read(file_path,'/true_state')';
 model_nurged_state = h5read(file_path,'/nurged_state')';
@@ -544,7 +545,7 @@ function plot_gl_on_bed_evolution( ...
         md_true, md_nurged, md_ens, md);
 
     nurged_field = get_nested_field(md_nurged_1, bg_field);
-    diff_no = nurged_field - data_true;
+    diff_no = (nurged_field - data_true)./data_true;
     maxAbs_global = safe_absmax(diff_no);
 
     t_change_plot = t_change;
@@ -579,7 +580,7 @@ function plot_gl_on_bed_evolution( ...
         md_true, md_nurged, md_ens, md);
 
     true_field_change = get_nested_field(md_true_change, bg_field);
-    diff_true = true_field_change - data_true;
+    diff_true = (true_field_change - data_true)./data_true;
     maxAbs_global = max(maxAbs_global, safe_absmax(diff_true));
 
     plotmodel(md_true_change, 'data', diff_true, ...
@@ -607,9 +608,15 @@ function plot_gl_on_bed_evolution( ...
     [md_true_a, md_nurged_a, md_ens_a] = setup_model_states(t_change, dt, ...
         model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md);
-
+    
     assim_field = get_nested_field(md_ens_a, bg_field);
-    diff_assim = assim_field - data_true;
+    
+    % zero out friction on floating ice in assimilated state
+    floating = md_ens_a.mask.ocean_levelset < 0;
+    % assim_field(floating) = 0;
+    assim_field(floating) = data_true(floating);
+    
+    diff_assim = (assim_field - data_true)./data_true;
     maxAbs_global = max(maxAbs_global, safe_absmax(diff_assim));
 
     plotmodel(md_ens_a, 'data', diff_assim, ...
@@ -671,12 +678,12 @@ function plot_gl_on_bed_evolution( ...
     end
 
     if ~isempty(ivaf_nurged)
-        plot(ax, t_nurged, ivaf_nurged - ivaf_nurged(1), 'm--', 'LineWidth', 2.5);
+        plot(ax, t_true, ivaf_nurged - ivaf_nurged(1), 'm--', 'LineWidth', 2.5);
         has_any = true;
     end
 
     if ~isempty(ivaf_ens)
-        plot(ax, t_ens, ivaf_ens - ivaf_ens(1), 'c:', 'LineWidth', 2.5);
+        plot(ax, t_true, ivaf_ens - ivaf_ens(1), 'c:', 'LineWidth', 2.5);
         has_any = true;
     end
 
@@ -689,7 +696,7 @@ function plot_gl_on_bed_evolution( ...
     if has_any
         ylabel(ax, '\Delta IVAF', 'FontWeight','bold','FontSize',16);
         xlabel(ax, 'time (yr)', 'FontWeight','bold','FontSize',16);
-        title(ax, '\Delta Ice Volume Above Floatation', 'FontWeight','bold');
+        title(ax, '\Delta Ice Volume Above Floatation (IVAF)', 'FontWeight','bold');
         grid(ax,'on');
 
         legend(ax, {'Perturbed','Unperturbed','Assimilated'}, ...
@@ -699,8 +706,10 @@ function plot_gl_on_bed_evolution( ...
             'Units','normalized', 'FontWeight','bold', 'FontSize',16, ...
             'HorizontalAlignment','left', 'VerticalAlignment','top', 'Color','k');
         
-        ylim([-9e12, 1e12]); 
-        xlim([-1.5,160]);
+        ylim([-12e12, 1e12]); 
+        xlim([-1.5,200]);
+        % ylim([-12e12, 1e12]); 
+        % xlim([-1.5,160]);
     else
         text(ax, 0.5, 0.5, 'IVAF time series not available', ...
             'Units','normalized', 'HorizontalAlignment','center', ...
@@ -782,7 +791,8 @@ function plot_gl_on_bed_evolution( ...
     end
 
     cb2 = colorbar(axs(4), 'Position',[colorbar_gap0 0.25 0.015 0.45]);
-    ylabel(cb2, ['\Delta ' bg_title units_str], 'FontSize',15, 'FontWeight','bold');
+    % ylabel(cb2, ['\Delta ' bg_title units_str], 'FontSize',15, 'FontWeight','bold');
+    ylabel(cb2, ['\Delta ' bg_title ' / Initial Friction'], 'FontSize', 15, 'FontWeight', 'bold');
 
     set(gcf,'Color','w');
 

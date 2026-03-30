@@ -326,6 +326,8 @@ def initialize_ensemble(ens, **kwargs):
     #*-----------------------
 
     enkf_scalar_file = f'{icesee_path}/{data_path}/ensemble_out_scalar_{ens_id}.h5'
+    if os.path.exists(enkf_scalar_file):
+        os.remove(enkf_scalar_file)
     with h5py.File(enkf_scalar_file, 'w') as f:
         nt = kwargs.get('nt')
         for key in kwargs.get('scalar_inputs', []):
@@ -355,41 +357,45 @@ def initialize_ensemble(ens, **kwargs):
                 print(f"[ICESEE initialize ensemble Warning] Key '{key}' not found in output file: {output_filename}")
 
     # --- compute the mean of the scalar inputs across all ensemble members and save in a separate file
-    comm = MPI.COMM_WORLD
-    comm.Barrier()
-    k = 0  # initial time step index
-    if comm.Get_rank() == 0:
-        nt = kwargs.get('nt')
-        nens = kwargs.get('Nens', 1)
-        scalar_inputs = kwargs.get('scalar_inputs', [])
-        scalar_means_file = f'{icesee_path}/{data_path}/ensemble_scalar_output.h5'
+    # first check if all Nens scalar output files are available before trying to read and compute the mean
+    expected_scalar_files = [f'{icesee_path}/{data_path}/ensemble_out_scalar_{i}.h5' for i in range(kwargs.get('Nens', 1))]
+    actual_scalar_files = [f for f in expected_scalar_files if os.path.exists(f)]
+    if len(actual_scalar_files) == kwargs.get('Nens', 1):
+        comm = MPI.COMM_WORLD
+        comm.Barrier()
+        k = 0  # initial time step index
+        if comm.Get_rank() == 0:
+            nt = kwargs.get('nt')
+            nens = kwargs.get('Nens', 1)
+            scalar_inputs = kwargs.get('scalar_inputs', [])
+            scalar_means_file = f'{icesee_path}/{data_path}/ensemble_scalar_output.h5'
 
-        if os.path.exists(scalar_means_file):
-            os.remove(scalar_means_file)
+            if os.path.exists(scalar_means_file):
+                os.remove(scalar_means_file)
 
-        with h5py.File(scalar_means_file, 'w') as f_out:
-            for key in kwargs.get('scalar_inputs', []):
-                f_out.create_dataset(key, shape=(nt,), dtype=np.float64)
-                
-                vals = []
-                for i in range(nens):
-                    enkf_scalar_file = f'{icesee_path}/{data_path}/ensemble_out_scalar_{i}.h5'
+            with h5py.File(scalar_means_file, 'w') as f_out:
+                for key in kwargs.get('scalar_inputs', []):
+                    f_out.create_dataset(key, shape=(nt,), dtype=np.float64)
+                    
+                    vals = []
+                    for i in range(nens):
+                        enkf_scalar_file = f'{icesee_path}/{data_path}/ensemble_out_scalar_{i}.h5'
 
-                    with h5py.File(enkf_scalar_file, 'r') as f_ens:
-                        if key in f_ens:
-                            arr = np.asarray(f_ens[key][:]).reshape(-1, order='F')
+                        with h5py.File(enkf_scalar_file, 'r') as f_ens:
+                            if key in f_ens:
+                                arr = np.asarray(f_ens[key][:]).reshape(-1, order='F')
 
-                            if arr.size > k:
-                                vals.append(arr[k])
+                                if arr.size > k:
+                                    vals.append(arr[k])
+                                else:
+                                    vals.append(np.nan)
                             else:
+                                print(f"[ICESEE Warning] Key '{key}' not found in scalar output file: {enkf_scalar_file}")
                                 vals.append(np.nan)
-                        else:
-                            print(f"[ICESEE Warning] Key '{key}' not found in scalar output file: {enkf_scalar_file}")
-                            vals.append(np.nan)
 
-                f_out[key][k] = np.nanmean(vals)
+                    f_out[key][k] = np.nanmean(vals)
 
-    comm.Barrier()
+        comm.Barrier()
        
     os.chdir(icesee_path)
     

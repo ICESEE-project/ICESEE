@@ -106,9 +106,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % change_times = [6.0, 12.0, 18.0, 22.0];
         % amps         = [0.25, 0.50, 0.75, 0.35];
         % sigma        = 20e3;   % 20 km
-        change_times = [12];   % years
-        amps         = [0.40];
-        sigma        = 20e3;   % 20 km
+        change_times = [2];   % years
+        amps         = [1.0];
+        sigma        = 15e3;   % 25 km
 
         % Background friction coefficient
         C0 = md.friction.coefficient;
@@ -116,7 +116,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % Gaussian patch centered in the middle of the mesh
         x = md.mesh.x;
         y = md.mesh.y;
-        x0 = (0.5 * (min(x) + max(x)))./2.0  % middle of the icesheet 
+        % x0 = (0.5 * (min(x) + max(x)))./2.0  % middle of the icesheet 
+        x0 = ((0.5 * (min(x) + max(x)))./2.0); % closer to the grounding line
         y0 = 0.5 * (min(y) + max(y));
         gauss = exp(-((x - x0).^2 + (y - y0).^2) ./ (2 * sigma^2));
 
@@ -257,13 +258,13 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % % read the friction_bed file
         filename = fullfile(icesee_path, data_path, sprintf('friction_bed_%d.h5', ens_id));
         % bed = h5read(filename, '/bed');
-        coefficient = h5read(filename, '/FrictionCoefficient');
+        % coefficient = h5read(filename, '/FrictionCoefficient');
 
 
-        md.friction.coefficient = friction_ref + coefficient;
-        % md.friction.coefficient = friction_ref;
-        md.friction.p=ones(md.mesh.numberofelements,1);
-        md.friction.q=ones(md.mesh.numberofelements,1);
+        % md.friction.coefficient = friction_ref + coefficient;
+        % % md.friction.coefficient = friction_ref;
+        % md.friction.p=ones(md.mesh.numberofelements,1);
+        % md.friction.q=ones(md.mesh.numberofelements,1);
 
         % bed_err = bed - bed_ref;
         % md.geometry.bed = (bed_ref + bed_err) - b_perturb*randn(md.mesh.numberofvertices, 1);
@@ -273,33 +274,33 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % md.geometry.thickness = md.geometry.surface - md.geometry.base; %- 50*ones(md.mesh.numberofvertices,1);
         
         % Ensure minimum ice thickness of 1 m
-        pos = find(md.geometry.thickness < 1);
-        md.geometry.thickness(pos) = 1;
-        md.geometry.surface = md.geometry.base + md.geometry.thickness;
+        % pos = find(md.geometry.thickness < 1);
+        % md.geometry.thickness(pos) = 1;
+        % md.geometry.surface = md.geometry.base + md.geometry.thickness;
 
-        % md.geometry.surface = md.geometry.surface + s_perturb*ones(md.mesh.numberofvertices,1);
+        % % md.geometry.surface = md.geometry.surface + s_perturb*ones(md.mesh.numberofvertices,1);
 
-        disp('      -- ice shelf base based on hydrostatic equilibrium');
-        di = md.materials.rho_ice / md.materials.rho_water;
+        % disp('      -- ice shelf base based on hydrostatic equilibrium');
+        % di = md.materials.rho_ice / md.materials.rho_water;
 
-        % Compute ocean level set based on hydrostatic equilibrium
-        md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
+        % % Compute ocean level set based on hydrostatic equilibrium
+        % md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
 
-        % Floating ice (ocean_levelset < 0)
-        pos = find(md.mask.ocean_levelset < 0);
-        md.geometry.surface(pos) = md.geometry.thickness(pos) .* ...
-        (md.materials.rho_water - md.materials.rho_ice) / md.materials.rho_water;
-        md.geometry.base = md.geometry.surface - md.geometry.thickness;
+        % % Floating ice (ocean_levelset < 0)
+        % pos = find(md.mask.ocean_levelset < 0);
+        % md.geometry.surface(pos) = md.geometry.thickness(pos) .* ...
+        % (md.materials.rho_water - md.materials.rho_ice) / md.materials.rho_water;
+        % md.geometry.base = md.geometry.surface - md.geometry.thickness;
 
-        % Ensure base not below bedrock
-        pos = find(md.geometry.base < md.geometry.bed);
-        md.geometry.base(pos) = md.geometry.bed(pos);
-        % md.geometry.base(pos) = md.geometry.base(pos);
+        % % Ensure base not below bedrock
+        % pos = find(md.geometry.base < md.geometry.bed);
+        % md.geometry.base(pos) = md.geometry.bed(pos);
+        % % md.geometry.base(pos) = md.geometry.base(pos);
 
-        % Grounded ice (ocean_levelset > 0)
-        pos = find(md.mask.ocean_levelset > 0);
-        md.geometry.base(pos) = md.geometry.bed(pos);
-        md.geometry.surface = md.geometry.base + md.geometry.thickness;
+        % % Grounded ice (ocean_levelset > 0)
+        % pos = find(md.mask.ocean_levelset > 0);
+        % md.geometry.base(pos) = md.geometry.bed(pos);
+        % md.geometry.surface = md.geometry.base + md.geometry.thickness;
 
         % md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
         % md.transient.ismovingfront=0;
@@ -410,22 +411,22 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md = loadmodel(filename);
             md = setflowequation(md,'SSA','all');
 
-            friction_ref = mean_friction*ones(md.mesh.numberofvertices,1);
+            % friction_ref = mean_friction*ones(md.mesh.numberofvertices,1);
 
-            thickness_ref = md.geometry.thickness;
-            bed_ref = md.geometry.bed;
-            base_ref = md.geometry.base;
+            % thickness_ref = md.geometry.thickness;
+            % bed_ref = md.geometry.bed;
+            % base_ref = md.geometry.base;
 
-             % % read the friction_bed file
-            filename = fullfile(icesee_path, data_path, sprintf('friction_bed_%d.h5', ens_id));
-            % bed = h5read(filename, '/bed');
-            coefficient = h5read(filename, '/FrictionCoefficient');
+            %  % % read the friction_bed file
+            % filename = fullfile(icesee_path, data_path, sprintf('friction_bed_%d.h5', ens_id));
+            % % bed = h5read(filename, '/bed');
+            % coefficient = h5read(filename, '/FrictionCoefficient');
 
-            %  update the friction and bed
-            md.friction.coefficient = friction_ref + coefficient;
-            % md.friction.coefficient = friction_ref;
-            md.friction.p=ones(md.mesh.numberofelements,1);
-            md.friction.q=ones(md.mesh.numberofelements,1);
+            % %  update the friction and bed
+            % md.friction.coefficient = friction_ref + coefficient;
+            % % md.friction.coefficient = friction_ref;
+            % md.friction.p=ones(md.mesh.numberofelements,1);
+            % md.friction.q=ones(md.mesh.numberofelements,1);
 
  
             % bed_err = bed - bed_ref;
@@ -563,8 +564,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             if ~exist(folder_true, 'dir')
                 mkdir(folder_true);
             end
-            filename = fullfile(folder_true, 'true_state.mat');
-            % filename = fullfile(folder_init, reference_data);
+            % filename = fullfile(folder_true, 'true_state.mat');
+            filename = fullfile(folder_init, reference_data);
             % filename = fullfile(icesee_path, 'data', wrong_reference_data);
 
             % filename = fullfile(folder, 'initialize_ensemble.mat');

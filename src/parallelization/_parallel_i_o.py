@@ -303,13 +303,13 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                         surface_idx = indx_map[vec]
                     # else:
                     #     surface_idx = 0
-                    if vec.lower() in ["bed","bedrock","base","bedtopography"]:
+                    if vec.lower() in ["Bed", "bed","bedrock","base","bedtopography"]:
                         bed_idx = indx_map[vec]
                     # else:
                     #     bed_idx = 0
 
                 for ii, vec in enumerate(model_kwargs.get("vec_inputs", [])):
-                    if vec.lower() in ["bed","bedrock","base","bedtopography"]:
+                    if vec.lower() in ["Bed", "bed","bedrock","base","bedtopography"]:
                         bed_prior = dset[indx_map[vec], :, timestep-1]
                         bed_now = recvbuf[indx_map[vec], :]
 
@@ -438,7 +438,7 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                                 #     velocity_y_prior = dset[indx_map[key], :, timestep-1]
                                 #     anomaly = recvbuf[indx_map[key], :] - value[:, np.newaxis]
                                     # recvbuf[indx_map[key], :] = value[:, np.newaxis]
-                                if key.lower() in ["coefficient","friction","friction_coefficient", 'fcoef']:
+                                if key.lower() in ["coefficient","friction","friction_coefficient", 'fcoef', "frictioncoefficient"]:
                                     data_before_arr[indx_map[key], :] = value[:, np.newaxis]
                             del mean_now
                             gc.collect()
