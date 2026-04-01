@@ -10,9 +10,9 @@ close all; clearvars; clear all
 
 global data_file_paths nvar ensemble_vec_full ...
         label_t t nt colorbar_gap bed_obs_xy
-data_file_paths = '_modelrun_datasets';
+% data_file_paths = '_modelrun_datasets';
 % data_file_paths = '_goodgrounding';
-% data_file_paths ='_modelrun_working_0';
+data_file_paths ='_modelrun_datasets_0';
 nvar = 6;
 colorbar_gap=0.92;
 
@@ -21,13 +21,13 @@ make_plots       = 0;
 make_multi_plots = 1;   % <-- ON (restored)
 frames_plot      = 0;
 compute_rmse     = 0;
-plotgl           = 0;
+plotgl           = 1;
 
 % ---------------- time steps ------------------
 % k_array = [0, 20,  60, 80, 89, 130, 330, 499]+1;
 % k_array= [ 0, 20,80, 120, 160, 220, 250, 320, 450]+1;
-% k_array = [0, 20, 80, 120, 160, 240, 360, 499] +1;
-k_array = [30, 70,100, 120, 180, 249]+1;
+k_array = [20, 80, 120, 240, 480, 560, 700] +1;
+% k_array = [30, 70,100, 120, 180, 249]+1;
 dt      = 0.2;
 
 % ---------------- Load essentials --------------
@@ -291,7 +291,8 @@ function plot_gl_on_bed_evolution( ...
     keepTopK_true         = 4;
     keepTopK_wrong        = 4;
     global t label_t nt
-    nt = 251;
+    % nt = 251;
+    nt = k_array(end);
     axs = gobjects(nrows,1);   % <-- store ONLY the real panel axes
 
     % (a) True

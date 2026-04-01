@@ -258,8 +258,9 @@ def run_model_inverse(ensemble, **kwargs):
     # Define filename for data saving
     fname = 'inverse_state.mat'
     kwargs.update({'fname': fname})
-    ens_id = 0 # for inverse model, we always use ens_id = 0
-    kwargs.update({'ens_id': ens_id})
+    # ens_id = 0 # for inverse model, we always use ens_id = 0
+    ens_id = kwargs.get('ens_id')
+    # kwargs.update({'ens_id': ens_id})
 
     # Generate output filename based on ensemble ID
     input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'

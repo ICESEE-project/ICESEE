@@ -7,7 +7,7 @@ physical-parameters:
 
 modeling-parameters:
   # Model parameters
-  num_years: 50          # Number of years to run the model (30-year assimilation period from paper)
+  num_years: 200          # Number of years to run the model (30-year assimilation period from paper)
   tinitial: 0.0           # Initial time
   timesteps_per_year: 0.2 # Number of timesteps per year (monthly for stability in SSA)
 
@@ -19,7 +19,7 @@ modeling-parameters:
   steps: 55                 # Increased steps for finer time integration
   verbose: True              # Enable verbosity for debugging
   deepwater_melting_rate: 150          # Basal melt rate (150 m/yr)
-  smb: -0.3             # Surface mass balance (negative for melt, -0.3 m/yr)
+  smb: -0.5             # Surface mass balance (negative for melt, -0.3 m/yr)
 
 
 enkf-parameters:
@@ -31,9 +31,10 @@ enkf-parameters:
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state: 0 # Generate true state for synthetic observations
-  generate_nurged_state: 0  # Generate nudged state for synthetic observations
-  initialize_ensemble: 1
-  initial_spread_factor: 1.12
+  generate_nurged_state: 0 # Generate nudged state for synthetic observations
+  generate_true_wrong_state_only: False  # Generate only true and wrong states for synthetic observations
+  initialize_ensemble: 0
+  initial_spread_factor: 1.0
   sequential_ensemble_initialization: 0
   use_ensemble_pertubations: 1
 
@@ -52,32 +53,32 @@ enkf-parameters:
   friction_idx: 5               # Index for friction coefficient in the state vector
   inversion_flag: 1         # Enable inversion for friction coefficient
   min_friction: 2000          # Minimum friction coefficient (2000 Pa s/m from paper)
-  max_friction: 4000         # Maximum friction coefficient (10000 Pa s/m
+  max_friction: 6500         # Maximum friction coefficient (10000 Pa s/m
   abs_vel_weight: 1.0        # Weight for absolute velocity in inversion
-  rel_vel_weight: 1.0        # Weight for relative velocity in inversion
-  tikhonov_regularization_weight: 1e-13  # Tikhonov regularization weight for inversion
+  rel_vel_weight: 100.0        # Weight for relative velocity in inversion
+  tikhonov_regularization_weight: 1e-14  # Tikhonov regularization weight for inversion
 
   # bed topography observations settings
   bed_obs_snapshot: []        # no bed observations
   bed_obs_stride: 4000          # Spacing of bedrock elevation observations (30 km)
-  bed_relaxation_factor: 0.05    # Relaxation factor for bedrock elevation updates (when bed is not observed) (-1< relaxation_factor <=1)
+  bed_relaxation_factor: 1    # Relaxation factor for bedrock elevation updates (when bed is not observed) (-1< relaxation_factor <=1)
   initial_bed_bias: 0.0015        # Initial bias for bedrock elevation (15 m)
 
   # Statistical parameters
-  sig_obs: [10, 7, 3, 2, 3, 0]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
+  sig_obs: [0, 3, 3, 1, 2, 0]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
   sig_Q: [0.01, 0.01, 0.01, 0.01, 0.01,0.01]          # Process noise std dev (adjusted for H, Vx, Vy)
   # length_scale: [300,320,380,350,320,350]               # Length scale for covariance (5 km for friction, per paper)
   # length_scale: [205,210,213,205, 205,213]               # Length scale for covariance (5 km for bed topography, per paper)
-  length_scale: [205,210,380,350, 205,213] 
+  # length_scale: [1,1,1,1, 1,1] 
   # length_scale: [80,85,85,80, 85,80]               # Length scale for covariance (2 km for bed topography, adjusted for resolution)
-  # length_scale: [40,45,45,40, 45,44] 
+  length_scale: [100,105,105,100, 110,110] 
 
   seed: 42                       # Seed for random number generator
   inflation_factor: 1.0       # Inflation factor (optimal range 1.10–1.18 from paper)
 
   # Estimation flags
-  joint_estimation: True       # Enable joint state and parameter estimation
-  parameter_estimation: True    # Enable parameter estimation
+  joint_estimation: 1       # Enable joint state and parameter estimation
+  parameter_estimation: 1    # Enable parameter estimation
   joint_estimated_params: ['Bed', 'FrictionCoefficient']  # parameters to be jointly estimated
   # joint_estimated_params: ['bed']  # parameters to be jointly estimated
 

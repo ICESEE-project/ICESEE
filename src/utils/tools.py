@@ -1080,3 +1080,29 @@ def icesee_savefig(fig, name="results.png", dpi=300, show=True):
     # Optionally display inline
     if show:
         plt.show()
+
+
+def read_scalar_timeseries(file_path, scalar_names):
+    import re
+    scalars = {k: [] for k in scalar_names}
+    times   = {k: [] for k in scalar_names}
+
+    with h5py.File(file_path, "r") as f:
+        for name in f.keys():
+
+            for key in scalar_names:
+                if name.startswith(key + "_"):
+
+                    # extract time index
+                    k = int(re.findall(r"\d+", name)[0])
+
+                    scalars[key].append(f[name][()])
+                    times[key].append(k)
+
+    # convert to numpy arrays and sort
+    for key in scalar_names:
+        order = np.argsort(times[key])
+        scalars[key] = np.array(scalars[key])[order]
+        times[key]   = np.array(times[key])[order]
+
+    return times, scalars
