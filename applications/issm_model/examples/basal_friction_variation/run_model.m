@@ -808,6 +808,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % filename = fullfile(folder, reference_data);
 
         folder_true = sprintf('./Models/ens_id_%d', 0);
+        % folder_true = sprintf('./Models/ens_id_%d', ens_id);
         % folder_true = sprintf('/Users/bkyanjo3/da_project/ISSM-matlab/examples/ISMIP_Choi/Models/ens_id_%d', 0);
         if ~exist(folder_true, 'dir')
             mkdir(folder_true);

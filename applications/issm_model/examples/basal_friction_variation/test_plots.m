@@ -740,7 +740,7 @@ function plot_gl_on_bed_evolution( ...
             'HorizontalAlignment','left', 'VerticalAlignment','top', 'Color','k');
         
         ylim([-9.5e12, 0.6e12]); 
-        xlim([-1.5,201]);
+        xlim([-1.5,200]);
         % ylim([-12e12, 1e12]); 
         % xlim([-1.5,160]);
     else

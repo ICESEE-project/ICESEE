@@ -30,10 +30,10 @@ enkf-parameters:
   obs_start_time: 2            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state: 1 # Generate true state for synthetic observations
-  generate_nurged_state: 1 # Generate nudged state for synthetic observations
+  generate_true_state: 0 # Generate true state for synthetic observations
+  generate_nurged_state: 0 # Generate nudged state for synthetic observations
   generate_true_wrong_state_only: False  # Generate only true and wrong states for synthetic observations
-  initialize_ensemble: 1
+  initialize_ensemble: 0
   initial_spread_factor: 1.0
   sequential_ensemble_initialization: 0
   use_ensemble_pertubations: 1
