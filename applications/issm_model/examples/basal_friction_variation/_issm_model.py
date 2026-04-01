@@ -10,12 +10,15 @@ import sys
 import os
 import shutil
 import numpy as np
+from mpi4py import MPI
 from scipy.stats import multivariate_normal,norm
 
 # --- Utility imports ---
 from ICESEE.config._utility_imports import icesee_get_index
 from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import setup_reference_data, setup_ensemble_data
 from ICESEE.applications.issm_model.issm_utils.matlab2python.server_utils import run_icesee_with_server
+
+os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
 # --- model initialization ---
 def initialize_model(**kwargs):
@@ -189,25 +192,45 @@ def run_model(ensemble, **kwargs):
     with h5py.File(output_filename, 'r') as f:
         for key in kwargs.get('vec_inputs'):
             if key in kwargs.get('joint_estimated_params') and not kwargs.get('joint_estimation'):
+                # print(f"[ICESEE run_model Warning] Skipping joint estimated parameter '{key}' in output file since joint_estimation is set to False.\n"); exit(0)
                 continue # skip the joint estimated parameters if we are not doing joint estimation
             if key in f:
                 updated_state[key] = f[key][:].reshape(-1, order='F')
             else:
                 print(f"[ICESEE run_model Warning] Key '{key}' not found in output file: {output_filename}")
 
-        # for key in kwargs.get('scalar_inputs', []):
-        #     if key in f:
-        #         diagnostics[key] = float(f[key][:].reshape(-1, order='F')[0])
-        # updated_state['_diagnostics'] = diagnostics
+    # --- compute the mean of the scalar inputs across all ensemble members and save in a separate file
+    comm = MPI.COMM_WORLD
+    comm.Barrier()
 
-    # copy scalars from matlab .h5 file to python side
-    # enkf_scalar_file = f'{icesee_path}/{data_path}/ensemble_out_scalar_{ens_id}.h5'
-    # with h5py.File(enkf_scalar_file, 'a') as f:
-    #     for key in kwargs.get('scalar_inputs', []):
-    #         if key in f:
-    #             f[key][k] = float(scalar_values[key])
-    #         else:
-    #             print(f"[ICESEE Warning] Scalar '{key}' missing from scalar_values at step {k}")
+    if comm.Get_rank() == 0:
+        nt = kwargs.get('nt')
+        nens = kwargs.get('Nens', 1)
+        scalar_inputs = kwargs.get('scalar_inputs', [])
+
+        scalar_means_file = f'{icesee_path}/{data_path}/ensemble_scalar_output.h5'
+
+        with h5py.File(scalar_means_file, 'a') as f_out:
+            for key in scalar_inputs:
+                vals = []
+
+                for i in range(nens):
+                    enkf_scalar_file = f'{icesee_path}/{data_path}/ensemble_out_scalar_{i}.h5'
+
+                    with h5py.File(enkf_scalar_file, 'r') as f_ens:
+                        if key in f_ens:
+                            arr = np.asarray(f_ens[key][:]).reshape(-1, order='F')
+
+                            if arr.size > k:
+                                vals.append(arr[k])
+                            else:
+                                vals.append(np.nan)
+                        else:
+                            vals.append(np.nan)
+
+                f_out[key][k] = np.nanmean(vals)
+
+    comm.Barrier()
 
     os.chdir(icesee_path)
 
@@ -254,8 +277,9 @@ def run_model_inverse(ensemble, **kwargs):
     # Define filename for data saving
     fname = 'inverse_state.mat'
     kwargs.update({'fname': fname})
-    ens_id = 0 # for inverse model, we always use ens_id = 0
-    kwargs.update({'ens_id': ens_id})
+    # ens_id = 0 # for inverse model, we always use ens_id = 0
+    # kwargs.update({'ens_id': ens_id})
+    ens_id = kwargs.get('ens_id')
 
     # Generate output filename based on ensemble ID
     input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'

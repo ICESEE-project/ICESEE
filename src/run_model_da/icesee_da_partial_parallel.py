@@ -164,7 +164,6 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         time_generation_true_and_wrong_state = MPI.Wtime() - time_generation_true_and_wrong_state
 
         comm_world.Barrier()
-        # exit(0);
 
         # --- Generate the Synthetic ObservationsObservations ---------------------------------------------------
         # --- time generation of synthetic observations ---
@@ -176,6 +175,23 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                     
         # --- Initialize the ensemble ---------------------------------------------------
         comm_world.Barrier()
+
+        # end here if user choses to only generate the synthetic observations and the true and nurged states
+        if model_kwargs.get("generate_true_wrong_state_only", False):
+            if rank_world == 0:
+                print("[ICESEE] Data generation complete. Exiting as per user request.")
+                # print(f"[ICESEE] Time taken to generate true and nurged states: {display_timing_default(time_generation_true_and_wrong_state)}")
+                # print(f"[ICESEE] Time taken to generate synthetic observations: {display_timing_default(time_generation_synthetic_obs)}")
+                # --- kill matlab processes if any
+            #     from ICESEE.scripts.matlab.kill_matlab_processes import kill_matlab_processes
+            #     kill_matlab_processes()
+                  
+            # # exit the program gracefully
+            # comm_world.Barrier()
+            exit(0)
+        # exit(0);
+
+
         Q_rho     = model_kwargs.get("Q_rho")
         len_scale = model_kwargs.get("length_scale")
         hdim  = params["nd"] // params["total_state_param_vars"]

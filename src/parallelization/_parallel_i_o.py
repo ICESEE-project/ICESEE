@@ -231,8 +231,358 @@ from ICESEE.src.utils.tools import icesee_get_index
 
 #     comm.Barrier()
 
+def parallel_write_ensemble_scattered(
+    timestep,
+    ensemble_mean,
+    params,
+    ensemble_chunk,
+    comm,
+    model_kwargs,
+    output_file="icesee_ensemble_data.h5"
+):
+    """
+    Write ensemble data using h5py and MPI, with only rank 0 writing to the dataset.
+    Optimized for large datasets and many processes using MPI_Gatherv, without parallel I/O.
+
+    This version replaces the single-mean inversion with a member-wise parallel inversion:
+      - rank 0 gathers the full ensemble
+      - all ranks participate in inversion
+      - each rank processes a subset of ensemble members
+      - updated members are gathered back to rank 0
+      - rank 0 writes the final result
+
+    Parameters
+    ----------
+    timestep : int
+        Current timestep index.
+    ensemble_mean : ndarray
+        Mean ensemble at current timestep.
+    params : dict
+        Global parameters dictionary.
+    ensemble_chunk : ndarray
+        Local data on each rank with shape (local_nd, Nens).
+    comm : MPI.Comm
+        MPI communicator.
+    model_kwargs : dict
+        Model-specific arguments.
+    output_file : str
+        Output HDF5 filename.
+    """
+    import os
+    import gc
+    import copy
+    import h5py
+    import numpy as np
+    from mpi4py import MPI
+
+    # ---------------- MPI setup ----------------
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+
+    # ---------------- Local dimensions ----------------
+    local_nd = ensemble_chunk.shape[0]
+    Nens = ensemble_chunk.shape[1]
+
+    # ---------------- Gather local row counts ----------------
+    local_nd_array = comm.gather(local_nd, root=0)
+
+    if rank == 0:
+        nd_total = sum(local_nd_array)
+        counts = [n * Nens for n in local_nd_array]
+        displs = [sum(counts[:i]) for i in range(size)]
+        recvbuf = np.empty((nd_total, Nens), dtype=ensemble_chunk.dtype)
+    else:
+        nd_total = None
+        counts = None
+        displs = None
+        recvbuf = None
+
+    nd_total = comm.bcast(nd_total, root=0)
+
+    # ---------------- Gather scattered state to rank 0 ----------------
+    mpi_dtype = MPI.DOUBLE
+    if ensemble_chunk.dtype == np.float32:
+        mpi_dtype = MPI.FLOAT
+    elif ensemble_chunk.dtype == np.int32:
+        mpi_dtype = MPI.INT
+    elif ensemble_chunk.dtype == np.int64:
+        mpi_dtype = MPI.LONG
+
+    comm.Gatherv(ensemble_chunk, [recvbuf, counts, displs, mpi_dtype], root=0)
+
+    output_file = os.path.join(model_kwargs.get("data_path"), output_file)
+
+    # ============================================================
+    # timestep = 0: only initialize file
+    # ============================================================
+    if timestep == 0 or timestep == 0.0:
+        if rank == 0:
+            with h5py.File(output_file, "w") as f:
+                dset = f.create_dataset(
+                    "ensemble",
+                    (nd_total, Nens, model_kwargs.get("nt", params["nt"]) + 1),
+                    dtype=ensemble_chunk.dtype
+                )
+                ens_mean = f.create_dataset(
+                    "ensemble_mean",
+                    (nd_total, model_kwargs.get("nt", params["nt"]) + 1),
+                    dtype=ensemble_chunk.dtype
+                )
+
+                dset[:, :, 0] = recvbuf
+                ens_mean[:, 0] = ensemble_mean
+
+                if model_kwargs.get("DEnKF_flag", False):
+                    mean0 = np.mean(dset[:, :, 0], axis=1)
+                    dset[:, :, 0] += mean0[:, np.newaxis]
+
+        comm.Barrier()
+        return
+
+    # ============================================================
+    # timestep > 0
+    # ============================================================
+
+    # ------------------------------------------------------------
+    # Step 1: rank 0 prepares recvbuf (bed relax + ISSM fixes)
+    # ------------------------------------------------------------
+    if rank == 0:
+        with h5py.File(output_file, "a") as f:
+            dset = f["ensemble"]
+            ens_mean_ds = f["ensemble_mean"]
+
+            # ---------------- index lookup for current recvbuf layout ----------------
+            vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+
+            thickness_idx = 0
+            surface_idx = 0
+            bed_idx = 0
+
+            for ii, vec in enumerate(model_kwargs.get("vec_inputs", [])):
+                vec_l = vec.lower()
+                if vec_l in ["thickness", "ice_thickness", "h"]:
+                    thickness_idx = indx_map[vec]
+                if vec_l in ["surface", "ice_surface", "s"]:
+                    surface_idx = indx_map[vec]
+                if vec_l in ["bed", "bedrock", "base", "bedtopography"]:
+                    bed_idx = indx_map[vec]
+
+            # ---------------- bed relaxation ----------------
+            for ii, vec in enumerate(model_kwargs.get("vec_inputs", [])):
+                vec_l = vec.lower()
+                if vec_l in ["bed", "bedrock", "base", "bedtopography"]:
+                    bed_prior = dset[indx_map[vec], :, timestep - 1]
+                    bed_now = recvbuf[indx_map[vec], :]
+
+                    thickness = recvbuf[thickness_idx, :]
+                    di = 0.8930
+                    ocean_levelset = thickness + (recvbuf[bed_idx, :] / di)
+
+                    dt = model_kwargs.get("dt", params["dt"])
+                    t = timestep * dt
+
+                    do_bed_snap = False
+                    for bed_snap in model_kwargs.get("bed_obs_snapshot", []):
+                        if np.isclose(t, bed_snap, rtol=0, atol=1e-12):
+                            do_bed_snap = True
+                            break
+
+                    if do_bed_snap:
+                        eta = 1.0
+                        rho = model_kwargs.get("rho", 1.0)
+                        sigma = 1e-3
+                        X5 = model_kwargs.get("X5", None)
+                        beta_t = model_kwargs.get("initial_bed_bias", 0.0015)
+
+                        if X5 is not None:
+                            for i in range(X5.shape[0]):
+                                for j in range(X5.shape[0]):
+                                    beta_t *= X5[j, i]
+
+                        for i_sig, sig in enumerate(params["sig_Q"]):
+                            if i_sig == ii:
+                                sigma = sig
+
+                        relaxation_factor = (eta + beta_t) * dt + np.sqrt(dt) * sigma * rho
+                        if relaxation_factor > 1.5:
+                            relaxation_factor = np.sqrt(dt) * sigma * rho
+                        relaxation_factor = min(relaxation_factor, 0.5)
+
+                        recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
+                    else:
+                        relaxation_factor = model_kwargs.get("bed_relaxation_factor", 0.05)
+                        recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
+
+            # ---------------- ISSM physical fixes ----------------
+            if model_kwargs.get("model_name", "").lower() == "issm":
+                di = 0.8930
+                rho_ice = 917.0
+                rho_sw = 1028.0
+
+                thickness = recvbuf[thickness_idx, :]
+                surface = recvbuf[surface_idx, :]
+                bed = recvbuf[bed_idx, :]
+
+                pos = np.where(thickness < 1)
+                thickness[pos] = 1.0
+
+                ocean_levelset = thickness + (bed / di)
+
+                # floating ice
+                pos_float = np.where(ocean_levelset < 0)
+                surface[pos_float] = thickness[pos_float] * ((rho_sw - rho_ice) / rho_sw)
+
+                recvbuf[surface_idx, :] = surface
+                base = surface - thickness
+
+                pos_grounded = np.where(ocean_levelset > 0)
+                base[pos_grounded] = bed[pos_grounded]
+
+                recvbuf[surface_idx, :] = base + thickness
+                recvbuf[thickness_idx, :] = thickness
+
+                del thickness, surface, bed, ocean_levelset, pos, pos_float, base, pos_grounded
+                gc.collect()
+
+            # Don't write yet if inversion is enabled. We'll do inversion first.
+            if not model_kwargs.get("inversion_flag", False):
+                dset[:, :, timestep] = recvbuf
+                ens_mean_ds[:, timestep] = np.mean(recvbuf, axis=1)
+
+                if model_kwargs.get("DEnKF_flag", False):
+                    mean_now = np.mean(dset[:, :, timestep], axis=1)
+                    dset[:, :, timestep] += mean_now[:, np.newaxis]
+
+    # If no inversion, we are done after rank 0 writes
+    if not model_kwargs.get("inversion_flag", False):
+        comm.Barrier()
+        return
+
+    # ------------------------------------------------------------
+    # Step 2: rank 0 prepares full inversion state
+    # ------------------------------------------------------------
+    if rank == 0:
+        inv_kwargs_root = dict(model_kwargs)
+        inv_kwargs_root["vec_inputs"] = copy.deepcopy(model_kwargs.get("vec_inputs_old", []))
+        inv_kwargs_root["nd"] = model_kwargs.get("nd_old", None)
+
+        vecs_inv, indx_map_inv, dim_per_proc_inv = icesee_get_index(**inv_kwargs_root)
+
+        with h5py.File(
+            f'{model_kwargs.get("data_path")}/ensemble_before_analysis_step_{timestep:04d}.h5',
+            "a"
+        ) as f_before:
+            data_before = f_before["ensemble_before_analysis"]
+            data_before_arr = data_before[:, :].copy()
+
+        hdim = data_before_arr.shape[0] // len(inv_kwargs_root.get("vec_inputs", []))
+
+        # inject updated analysis state from recvbuf into the full inversion state
+        for ii, key in enumerate(model_kwargs.get("vec_inputs_new", [])):
+            start = ii * hdim
+            end = start + hdim
+            data_before_arr[indx_map_inv[key], :] = recvbuf[start:end, :]
+
+        full_shape = np.array(data_before_arr.shape, dtype=np.int32)
+    else:
+        inv_kwargs_root = None
+        indx_map_inv = None
+        data_before_arr = None
+        full_shape = np.empty(2, dtype=np.int32)
+
+    # broadcast shape
+    comm.Bcast(full_shape, root=0)
+    nd_full, nens_full = int(full_shape[0]), int(full_shape[1])
+
+    # broadcast full state to all ranks
+    if rank != 0:
+        data_before_arr = np.empty((nd_full, nens_full), dtype=np.float64)
+    comm.Bcast(data_before_arr, root=0)
+
+    # ------------------------------------------------------------
+    # Step 3: all ranks do member-wise inversion in parallel
+    # ------------------------------------------------------------
+    inv_kwargs = dict(model_kwargs)
+    inv_kwargs["vec_inputs"] = copy.deepcopy(model_kwargs.get("vec_inputs_old", []))
+    inv_kwargs["nd"] = model_kwargs.get("nd_old", None)
+
+    # Each rank should treat each member independently
+    # Using COMM_SELF is the safest non-breaking choice here
+    inv_kwargs["comm"] = MPI.COMM_SELF
+
+    vecs_inv, indx_map_inv, dim_per_proc_inv = icesee_get_index(**inv_kwargs)
+    model_module = inv_kwargs.get("model_module", None)
+
+    local_updates = []
+
+    for ens_id in range(rank, Nens, size):
+        member = data_before_arr[:, ens_id].copy()
+
+        inv_kwargs_member = dict(inv_kwargs)
+        inv_kwargs_member["ens_id"] = ens_id
+
+        data = model_module.inverse_step_single(ensemble=member, **inv_kwargs_member)
+
+        update_dict = {"ens_id": ens_id}
+
+        for key, value in data.items():
+            key_l = key.lower()
+
+            if key_l in ["coefficient", "friction", "friction_coefficient", "fcoef", "frictioncoefficient"]:
+                update_dict["friction_idx"] = indx_map_inv[key]
+                update_dict["friction_val"] = np.asarray(value).copy()
+
+            # elif key_l in ["vx", "velocity_x", "vel_x", "v_x"]:
+            #     update_dict["vx_idx"] = indx_map_inv[key]
+            #     update_dict["vx_val"] = np.asarray(value).copy()
+
+            # elif key_l in ["vy", "velocity_y", "vel_y", "v_y"]:
+            #     update_dict["vy_idx"] = indx_map_inv[key]
+            #     update_dict["vy_val"] = np.asarray(value).copy()
+
+        local_updates.append(update_dict)
+
+        del member, data, inv_kwargs_member
+        gc.collect()
+
+    # Gather all updates to rank 0
+    gathered_updates = comm.gather(local_updates, root=0)
+
+    # ------------------------------------------------------------
+    # Step 4: rank 0 applies inversion updates and writes to HDF5
+    # ------------------------------------------------------------
+    if rank == 0:
+        for rank_updates in gathered_updates:
+            for upd in rank_updates:
+                ens_id = upd["ens_id"]
+
+                if "friction_idx" in upd and "friction_val" in upd:
+                    data_before_arr[upd["friction_idx"], ens_id] = upd["friction_val"]
+
+                # if "vx_idx" in upd and "vx_val" in upd:
+                    # data_before_arr[upd["vx_idx"], ens_id] = upd["vx_val"]
+
+                # if "vy_idx" in upd and "vy_val" in upd:
+                    # data_before_arr[upd["vy_idx"], ens_id] = upd["vy_val"]
+
+        with h5py.File(output_file, "a") as f:
+            dset = f["ensemble"]
+            ens_mean_ds = f["ensemble_mean"]
+
+            dset[:, :, timestep] = data_before_arr
+            ens_mean_ds[:, timestep] = np.mean(data_before_arr, axis=1)
+
+            if model_kwargs.get("DEnKF_flag", False):
+                mean_now = np.mean(dset[:, :, timestep], axis=1)
+                dset[:, :, timestep] += mean_now[:, np.newaxis]
+
+        del data_before_arr
+        gc.collect()
+
+    comm.Barrier()
+    
 # # ---- Will uncomment above after fixing parallel i/o issues on the cluster ----
-def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_chunk, comm, model_kwargs, output_file="icesee_ensemble_data.h5"):
+def parallel_write_ensemble_scattered_rank_0(timestep, ensemble_mean, params, ensemble_chunk, comm, model_kwargs, output_file="icesee_ensemble_data.h5"):
     """
     Write ensemble data using h5py and MPI, with only rank 0 writing to the dataset.
     Optimized for large datasets and many processes using MPI_Gatherv, without parallel I/O.
@@ -303,13 +653,13 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                         surface_idx = indx_map[vec]
                     # else:
                     #     surface_idx = 0
-                    if vec.lower() in ["bed","bedrock","base","bedtopography"]:
+                    if vec.lower() in ["Bed", "bed","bedrock","base","bedtopography"]:
                         bed_idx = indx_map[vec]
                     # else:
                     #     bed_idx = 0
 
                 for ii, vec in enumerate(model_kwargs.get("vec_inputs", [])):
-                    if vec.lower() in ["bed","bedrock","base","bedtopography"]:
+                    if vec.lower() in ["Bed", "bed","bedrock","base","bedtopography"]:
                         bed_prior = dset[indx_map[vec], :, timestep-1]
                         bed_now = recvbuf[indx_map[vec], :]
 
@@ -438,7 +788,7 @@ def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_
                                 #     velocity_y_prior = dset[indx_map[key], :, timestep-1]
                                 #     anomaly = recvbuf[indx_map[key], :] - value[:, np.newaxis]
                                     # recvbuf[indx_map[key], :] = value[:, np.newaxis]
-                                if key.lower() in ["coefficient","friction","friction_coefficient", 'fcoef']:
+                                if key.lower() in ["coefficient","friction","friction_coefficient", 'fcoef', "frictioncoefficient"]:
                                     data_before_arr[indx_map[key], :] = value[:, np.newaxis]
                             del mean_now
                             gc.collect()

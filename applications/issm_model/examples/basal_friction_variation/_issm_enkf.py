@@ -10,11 +10,14 @@ import numpy as np
 import h5py
 # import netCDF4
 import gstools as gs
+from mpi4py import MPI
 
 # --- import utility functions ---
 from _issm_model import *
 from ICESEE.config._utility_imports import icesee_get_index
 # from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import setup_ensemble_intial_data, MatlabServer
+
+os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
 # --- Forecast step ---
 def forecast_step_single(ensemble=None, **kwargs):
@@ -323,9 +326,12 @@ def initialize_ensemble(ens, **kwargs):
     #*-----------------------
 
     enkf_scalar_file = f'{icesee_path}/{data_path}/ensemble_out_scalar_{ens_id}.h5'
+    if os.path.exists(enkf_scalar_file):
+        os.remove(enkf_scalar_file)
     with h5py.File(enkf_scalar_file, 'w') as f:
+        nt = kwargs.get('nt')
         for key in kwargs.get('scalar_inputs', []):
-            f.create_dataset(key, shape=(kwargs.get('nt'),), dtype=np.float64)
+            f.create_dataset(key, shape=(nt,), dtype=np.float64)
             f[key][:] = np.nan
 
     try:
@@ -343,12 +349,54 @@ def initialize_ensemble(ens, **kwargs):
     with h5py.File(output_filename, 'r') as f:
         for key in kwargs.get('vec_inputs'):
             if key in kwargs.get('joint_estimated_params') and not kwargs.get('joint_estimation'):
+                print(f"[ICESEE run_model Warning] Skipping joint estimated parameter '{key}' in output file since joint_estimation is set to False.\n"); 
                 continue # skip the joint estimated parameters if we are not doing joint estimation
             if key in f:
                 updated_state[key] = f[key][:].reshape(-1, order='F')
             else:
                 print(f"[ICESEE initialize ensemble Warning] Key '{key}' not found in output file: {output_filename}")
 
+    # --- compute the mean of the scalar inputs across all ensemble members and save in a separate file
+    # first check if all Nens scalar output files are available before trying to read and compute the mean
+    expected_scalar_files = [f'{icesee_path}/{data_path}/ensemble_out_scalar_{i}.h5' for i in range(kwargs.get('Nens', 1))]
+    actual_scalar_files = [f for f in expected_scalar_files if os.path.exists(f)]
+    if len(actual_scalar_files) == kwargs.get('Nens', 1):
+        comm = MPI.COMM_WORLD
+        comm.Barrier()
+        k = 0  # initial time step index
+        if comm.Get_rank() == 0:
+            nt = kwargs.get('nt')
+            nens = kwargs.get('Nens', 1)
+            scalar_inputs = kwargs.get('scalar_inputs', [])
+            scalar_means_file = f'{icesee_path}/{data_path}/ensemble_scalar_output.h5'
+
+            if os.path.exists(scalar_means_file):
+                os.remove(scalar_means_file)
+
+            with h5py.File(scalar_means_file, 'w') as f_out:
+                for key in kwargs.get('scalar_inputs', []):
+                    f_out.create_dataset(key, shape=(nt,), dtype=np.float64)
+                    
+                    vals = []
+                    for i in range(nens):
+                        enkf_scalar_file = f'{icesee_path}/{data_path}/ensemble_out_scalar_{i}.h5'
+
+                        with h5py.File(enkf_scalar_file, 'r') as f_ens:
+                            if key in f_ens:
+                                arr = np.asarray(f_ens[key][:]).reshape(-1, order='F')
+
+                                if arr.size > k:
+                                    vals.append(arr[k])
+                                else:
+                                    vals.append(np.nan)
+                            else:
+                                print(f"[ICESEE Warning] Key '{key}' not found in scalar output file: {enkf_scalar_file}")
+                                vals.append(np.nan)
+
+                    f_out[key][k] = np.nanmean(vals)
+
+        comm.Barrier()
+       
     os.chdir(icesee_path)
     
     return updated_state
