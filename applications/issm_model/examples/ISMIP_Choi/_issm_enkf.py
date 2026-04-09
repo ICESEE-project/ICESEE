@@ -89,7 +89,6 @@ def generate_true_state(**kwargs):
 
     # get the data extracted from the matlab output file
     input_filename = f'{icesee_path}/{data_path}/ensemble_true_state_{ens_id}.h5'
-    # with h5py.File(input_filename, 'r', driver='mpio', comm=comm) as f:
     with h5py.File(input_filename, 'r') as f:
         # -- fetch state variables
         for k in range(1, kwargs.get('nt') + 1):
@@ -196,25 +195,6 @@ def generate_nurged_state(**kwargs):
     sill_bed = kwargs.get('sill_bed')
     range_bed = kwargs.get('range_bed')
     nugget_bed = kwargs.get('nugget_bed')
-    # var_bed = max(sill_bed - nugget_bed, 0.0)
-    # x = np.linspace(0, range_bed, fdim)
-    # x = np.linspace(0, Lx, fdim)
-    # bed_model = gs.Exponential(dim=2, var=sill_bed, len_scale=range_bed, nugget=nugget_bed)
-    # bed_model = gs.Exponential(dim=1, var=sill_bed, len_scale=range_bed, nugget=nugget_bed)
-    # bed_srf = gs.SRF(bed_model, seed=42)  # different stream
-    # # bed_field = np.asarray(bed_srf.structured([x, y])).reshape(-1)[:fdim]  # 1D
-    # bed_field = np.asarray(bed_srf.structured([xx])).reshape(-1)
-
-    # model_bed = gs.Exponential(
-    #     dim=2,
-    #     var=sill_bed,
-    #     len_scale=range_bed,
-    #     nugget=nugget_bed,
-    # )
-    # srf_bed = gs.SRF(model_bed, seed=seed_base)
-    # # unstructured evaluation at real node positions
-    # # bed_field = np.asarray(srf_bed((x_param / range_bed, y_param / range_bed)))  # (fdim,)
-    # bed_field = np.asarray(srf_bed((x_param, y_param)))  # (fdim,)
 
     bed_kriging_file = f'{icesee_path}/bed_kriging_results.h5'
     with h5py.File(bed_kriging_file, 'r') as f:
@@ -223,23 +203,10 @@ def generate_nurged_state(**kwargs):
     # bed_field = np.mean(bed_field, axis=0)
     bed_field = bed_field[0, :]
 
-
-    # import netCDF4
-    # fcoeff = f'{icesee_path}/data/Data/uncondition_fcoeff_err_ens1000.nc'
-    # bed_data = f'{icesee_path}/data/Data/condition_bed_err_30km.nc'
-    # with netCDF4.Dataset(fcoeff, 'r') as nc:
-    #         fcoeff = nc.variables['fcoeff'][ens_id, :fdim]
-    #         fcoeff = fcoeff.astype(float)
-    #         friction_field=np.array(fcoeff)
-
-    # with netCDF4.Dataset(bed_data, 'r') as nc:
-    #     bed = nc.variables['bed_err'][ens_id, :fdim]
-    #     bed = bed.astype(float)
-    #     bed_field = np.array(bed)
-
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
-    with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
+    # with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
+    with h5py.File(friction_bed_filename, 'w') as f:
         # -- write the friction field
         f.create_dataset('coefficient', data=friction_field)
         # -- write the bed field
@@ -255,7 +222,8 @@ def generate_nurged_state(**kwargs):
 
     # -- fetch the nurged state vector
     nurged_filename = f'{icesee_path}/{data_path}/ensemble_nurged_state_{ens_id}.h5'
-    with h5py.File(nurged_filename, 'r', driver='mpio', comm=comm) as f:
+    # with h5py.File(nurged_filename, 'r', driver='mpio', comm=comm) as f:
+    with h5py.File(nurged_filename, 'r') as f:
         # -- fetch state variables
         for k in range(1, kwargs.get('nt') + 1):
             # key_thickness=f'Thickness_{k}'
@@ -276,10 +244,14 @@ def generate_nurged_state(**kwargs):
             # statevec_nurged[indx_map['bed'], k-1] = f['bed'][0]
             # statevec_nurged[indx_map['coefficient'], k-1] = f['coefficient'][0]
 
+    updated_state = {}
+    for key in vec_inputs:
+        updated_state[key] = statevec_nurged[indx_map[key], :]    
+
     #  --- change directory back to the original directory ---
     os.chdir(icesee_path)
     
-    return statevec_nurged
+    return updated_state
 
         
 #  --- initialize ensemble members ---
@@ -330,38 +302,6 @@ def initialize_ensemble(ens, **kwargs):
     range_friction = kwargs.get('range_friction')
     mean_friction  = kwargs.get('mean_friction')
     nugget_friction = kwargs.get('nugget_friction')
-    # var_fric = max(sill_friction - nugget_friction, 0.0)
-    # xx = np.linspace(0, range_friction, fdim)
-    # # friction_model = gs.Gaussian(dim=2, var=sill_friction, len_scale=range_friction, nugget=nugget_friction)
-    # friction_model = gs.Gaussian(dim=1, var=sill_friction, len_scale=range_friction, nugget=nugget_friction)
-    # friction_srf = gs.SRF(friction_model, seed=seed_base + ens)  # different stream for each ensemble member
-    # # friction_field = np.asarray(friction_srf.structured([x,y])).reshape(-1)[:fdim]
-    # friction_field = np.asarray(friction_srf.structured([xx])).reshape(-1)
-
-    # # # --bed
-    # sill_bed = kwargs.get('sill_bed')
-    # range_bed = kwargs.get('range_bed')
-    # nugget_bed = kwargs.get('nugget_bed')
-    # var_bed = max(sill_bed - nugget_bed, 0.0)
-    # # x = np.linspace(0, range_bed, fdim)
-    # # x = np.linspace(0, Lx, fdim)
-    # # bed_model = gs.Exponential(dim=2, var=sill_bed, len_scale=range_bed, nugget=nugget_bed)
-    # bed_model = gs.Exponential(dim=1, var=sill_bed, len_scale=range_bed, nugget=nugget_bed)
-    # bed_srf = gs.SRF(bed_model, seed=seed_base + ens)  # different stream
-    # # bed_field = np.asarray(bed_srf.structured([x,y])).reshape(-1)[:fdim]  # 1D
-    # bed_field =  np.asarray(bed_srf.structured([xx])).reshape(-1)
-    # import netCDF4
-    # fcoeff = f'{icesee_path}/data/Data/uncondition_fcoeff_err_ens1000.nc'
-    # bed_data = f'{icesee_path}/data/Data/condition_bed_err_30km.nc'
-    # with netCDF4.Dataset(fcoeff, 'r') as nc:
-    #         fcoeff = nc.variables['fcoeff'][ens, :fdim]
-    #         fcoeff = fcoeff.astype(float)
-    #         friction_field=np.array(fcoeff)
-
-    # with netCDF4.Dataset(bed_data, 'r') as nc:
-    #     bed = nc.variables['bed_err'][ens, :fdim]
-    #     bed = bed.astype(float)
-    #     bed_field = np.array(bed)
 
     file_path = f'{icesee_path}/{data_path}/mesh_idxy_{0}.h5'
     with h5py.File(file_path, 'r') as f:
@@ -385,28 +325,14 @@ def initialize_ensemble(ens, **kwargs):
     friction_field = np.asarray(srf((x_param, y_param)))  # (fdim,)
 
 
-    # --bed
-    # sill_bed = kwargs.get('sill_bed')
-    # range_bed = kwargs.get('range_bed')
-    # nugget_bed = kwargs.get('nugget_bed')
-
-    # model_bed = gs.Exponential(
-    #     dim=2,
-    #     var=sill_bed,
-    #     len_scale=range_bed,
-    #     nugget=nugget_bed,
-    # )
-    # srf_bed = gs.SRF(model_bed, seed=seed_base+ens)
-    # # unstructured evaluation at real node positions
-    # bed_field = np.asarray(srf_bed((x_param, y_param)))  # 
-
     bed_kriging_file = f'{icesee_path}/bed_kriging_results.h5'
     with h5py.File(bed_kriging_file, 'r') as f:
         bed_field = f['bed_ens'][ens, :]
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
-    with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
+    # with h5py.File(friction_bed_filename, 'w', driver='mpio', comm=comm) as f:
+    with h5py.File(friction_bed_filename, 'w') as f:
         # -- write the friction field
         f.create_dataset('coefficient', data=friction_field)
         # -- write the bed field
@@ -421,17 +347,12 @@ def initialize_ensemble(ens, **kwargs):
         print(f"[ICESEE Initialize ensemble]] Error initializing ensemble: {e}")
         server.kill_matlab_processes()
 
-    # if nprocs <= Nens then make fname available to all processes
-    # Nens = kwargs.get('Nens')
-    # size_world = kwargs.get('size_world', 1)
-    # if size_world <= Nens:
-    #     data_dir = f'{issm_examples_dir}/Models/ens_id_0'
-    #     setup_ensemble_intial_data(Nens, data_dir, fname)
-
+    
     #  -- Read data from the ISSM side to be accessed by ICESEE on the python side
     output_filename = f'{icesee_path}/{data_path}/ensemble_out_{ens_id}.h5'
     updated_state = {}
-    with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+    # with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
+    with h5py.File(output_filename, 'r') as f:
         # for key in vec_inputs:
         #     updated_state[key] = f[key][0]
         updated_state['Thickness'] = f['Thickness'][:].reshape(-1, order='F')
@@ -442,21 +363,6 @@ def initialize_ensemble(ens, **kwargs):
         if kwargs.get('joint_estimation', False):
             updated_state['bed'] = f['bed'][:].reshape(-1, order='F')
             updated_state['coefficient'] = f['coefficient'][:].reshape(-1, order='F')
-            # ndim = updated_state['Thickness'].shape[0]
-            # temp_coeff_filename = f'{icesee_path}/{data_path}/temp_coefficient_{ens_id}.h5'
-            # if os.path.exists(temp_coeff_filename):
-            #     os.remove(temp_coeff_filename)
-            
-            # with h5py.File(temp_coeff_filename, 'w') as temp_f:
-            #     params = kwargs.get('params', {})
-            #     fcoef_dset = temp_f.create_dataset('coefficient', (ndim, kwargs.get('nt', params['nt']) + 1), dtype='f8')
-            #     vx_dset = temp_f.create_dataset('Vx', (ndim, kwargs.get('nt', params['nt']) + 1), dtype='f8')
-            #     vy_dset = temp_f.create_dataset('Vy', (ndim, kwargs.get('nt', params['nt']) + 1), dtype='f8')
-            #     fcoef_file= f'{icesee_path}/{data_path}/ensemble_friction_{ens_id}.h5'
-            #     with h5py.File(fcoef_file, 'r') as fcoef_f:
-            #         fcoef_dset[:,0] = fcoef_f['coefficient'][:].reshape(-1, order='F')
-            #         vx_dset[:,0] = fcoef_f['Vx'][:].reshape(-1, order='F')
-            #         vy_dset[:,0] = fcoef_f['Vy'][:].reshape(-1, order='F')
 
     os.chdir(icesee_path)
     

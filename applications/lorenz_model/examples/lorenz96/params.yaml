@@ -29,16 +29,16 @@ enkf-parameters:
   sig_Q: [0.01, 0.01, 0.01]          # process noise standard deviation
   length_scale: [2, 2, 2]   # length scale for the covariance matrix
 
-  generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state:    1   # Generate true state for synthetic observations
-  generate_nurged_state:    1   # Generate nudged state for synthetic observations
-  sequential_ensemble_initialization: 1
-  use_ensemble_pertubations: 1
+  generate_synthetic_obs: True  # Generate synthetic observations for testing
+  generate_true_state:    True   # Generate true state for synthetic observations
+  generate_nurged_state:  True   # Generate nudged state for synthetic observations
+  sequential_ensemble_initialization: True
+  use_ensemble_pertubations: true
 
   # estimation flags
-  joint_estimation: "False"  # joint estimation flag: True, False
-  state_estimation: "True"   # state estimation flag: True, False
-  parameter_estimation: "False" # parameter estimation flag: True, False
+  joint_estimation: False   # joint estimation flag: True, False
+  state_estimation: True   # state estimation flag: True, False
+  parameter_estimation: False # parameter estimation flag: True, False
 
   seed: 1                 # seed for random number generator
   inflation_factor: 1.0          # inflation factor
@@ -46,7 +46,7 @@ enkf-parameters:
 
   # enkf model parameters
   model_name: "lorenz"         # name of the model
-  filter_type: "EnRSKF"           # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
+  filter_type: "EnKF"           # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
   parallel_flag: "serial"             # parallel flag: Serial, MPI, MPI_model
   execution_mode: 0                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
   commandlinerun: "True"         # command line run flag: True, False

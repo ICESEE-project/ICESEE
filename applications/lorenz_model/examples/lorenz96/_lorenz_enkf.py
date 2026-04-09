@@ -103,11 +103,11 @@ def generate_nurged_state(**kwargs):
         statevec_nurged[indx_map['y'], k + 1] = state['y']
         statevec_nurged[indx_map['z'], k + 1] = state['z']
 
-    # updated_state = {'x' : statevec_nurged[indx_map['x'],:],
-    #                  'y' : statevec_nurged[indx_map['y'],:],
-    #                 'z' : statevec_nurged[indx_map['z'],:]}
+    updated_state = {'x' : statevec_nurged[indx_map['x'],:],
+                     'y' : statevec_nurged[indx_map['y'],:],
+                    'z' : statevec_nurged[indx_map['z'],:]}
     
-    return statevec_nurged
+    return updated_state
     
 # --- initialize the ensemble members ---
 def initialize_ensemble(ens, **kwargs):
@@ -134,6 +134,6 @@ def JObs_fun(nd=None):
     H_jac = np.eye(nd)
     return H_jac
 
-def Cov_Obs_fun(sig_obs=None,nd=None):
+def Cov_Obs_fun(sig_obs=None,nd=None, kwargs=None):
     R_cov = np.eye(nd) * (sig_obs ** 2)
     return R_cov

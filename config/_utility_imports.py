@@ -273,6 +273,10 @@ if not flag_jupyter:
         'abs_vel_weight': float(enkf_params.get('abs_vel_weight', 1.0)), # weight for absolute velocity in inversion
         'rel_vel_weight': float(enkf_params.get('rel_vel_weight', 1.0)), # weight for relative velocity in inversion
         'tikhonov_regularization_weight': float(enkf_params.get('tikhonov_regularization_weight', 1e-13)), # Tikhonov regularization weight for inversion
+        'var_nd': enkf_params.get('var_nd', None), # variable state dimension for each state variable in vec_inputs. Used when state variables have different dimensions
+        'scalar_inputs': enkf_params.get('scalar_inputs', []), # list of scalar input variables
+        'generate_true_wrong_state_only': enkf_params.get('generate_true_wrong_state_only', False), # flag to only generate true and wrong state without running the assimilation
+        'generate_synthetic_obs_only': bool(enkf_params.get('generate_synthetic_obs_only', False)), # flag to only generate synthetic observations without running the assimilation
     }
 
 
@@ -288,9 +292,9 @@ if not flag_jupyter:
 
     joint_estimated_params = len(kwargs.get('joint_estimated_params', []))
     if kwargs['joint_estimation']:
-        params['total_state_param_vars'] = params['num_state_vars'] + joint_estimated_params
+        params['total_state_param_vars'] = params['num_state_vars'] + params['num_param_vars']
     else:
-        params['total_state_param_vars'] = params['num_state_vars']
+        params['total_state_param_vars'] = params['num_state_vars'] + params['num_param_vars'] - joint_estimated_params
 
     # add joint estimation flag to params
     params['joint_estimation'] = kwargs['joint_estimation']
@@ -327,6 +331,7 @@ if not flag_jupyter:
         obs_t, obs_idx, num_observations = UtilsFunctions(params).generate_observation_schedule(**kwargs)
         kwargs['obs_index'] = obs_idx
         params['number_obs_instants'] = num_observations
+        kwargs['m_obs'] = num_observations
 
     kwargs['parallel_flag']       = enkf_params.get('parallel_flag', 'serial')
     kwargs['commandlinerun']      = enkf_params.get('commandlinerun', False)

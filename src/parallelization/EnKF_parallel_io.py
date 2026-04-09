@@ -22,12 +22,12 @@ import zarr
 import traceback
 import sys
 import shutil
-from numcodecs import blosc
+# from numcodecs import blosc
 import time
 import functools
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-blosc.use_threads = False
+# blosc.use_threads = False
 
 from typing import Callable, Optional, TypeVar, Any
 from ICESEE.src.utils.tools import icesee_get_index
@@ -808,10 +808,6 @@ class EnKF_fully_parallel_IO:
         with rows ordered exactly as `params["all_observed"]` concatenation.
         """
         try:
-            zarr_path = kwargs.get("H_matrix_zarr_path")
-            if zarr_path is None:
-                raise ValueError("H_matrix_zarr_path is required in kwargs")
-
             params = self.params
             observed = params["all_observed"]  # e.g. ['h','u','v','smb','bed']
             vec_inputs = kwargs.get("vec_inputs", [])
@@ -870,35 +866,78 @@ class EnKF_fully_parallel_IO:
             # m = number of real observations (rows)
             m = int(obs_indices.size)
 
-            # --- Allocate Zarr H ---
-            # Use chunking  with correct row count.
-            H_matrix_file = zarr.create_array(
-                store=zarr_path,
-                shape=(m, nd),
-                chunks=(min(50, m), min(1000, nd)),
-                dtype="f8",
-                overwrite=True,
-            )
+            # ---- Output path (HDF5) ----
+            H_matrix_file = kwargs.get("H_matrix_h5_path", f"{self.base_path}/H_matrix.h5")
 
-            # --- Write identity rows into Zarr in blocks (memory-safe) ---
-            block = int(kwargs.get("H_write_block_rows", 5000))
-            for r0 in range(0, m, block):
-                r1 = min(m, r0 + block)
-                rows = np.arange(r0, r1, dtype=int)
-                cols = obs_indices[r0:r1]
-            #     # Set the 1's for this block; everything else stays 0
-            #     H_matrix_file[rows, cols] = 1.0
-                for rr, cc in zip(rows, cols):
-                    H_matrix_file[rr, cc] = 1.0
-                
+            rank = self.mpi_comm.Get_rank()
+            if rank == 0:
+                import os
+                out_dir = os.path.dirname(H_matrix_file)
+                if out_dir:
+                    os.makedirs(out_dir, exist_ok=True)
+                try:
+                    os.remove(H_matrix_file)
+                except FileNotFoundError:
+                    pass
 
-            # --- Joint estimation: zero out parameter columns (preserve your original behavior) ---
-            if params.get("joint_estimation", False):
-                ndim = nd // params["total_state_param_vars"]
-                state_variables_size = ndim * params["num_state_vars"]
-                # if any obs accidentally landed in param part, this forces them off
-                H_matrix_file[:, state_variables_size:] = 0.0
+                # Tunables (safe defaults)
+                row_chunk = int(kwargs.get("H_row_chunk", min(512, m)))
+                col_chunk = int(kwargs.get("H_col_chunk", min(2048, nd)))
+                block_rows = int(kwargs.get("H_write_block_rows", row_chunk))
 
+                row_chunk = max(1, min(row_chunk, m))
+                col_chunk = max(1, min(col_chunk, nd))
+                block_rows = max(1, min(block_rows, m))
+
+                with h5py.File(H_matrix_file, "w") as f:
+                    # Dense dataset, but unwritten entries are 0
+                    dset = f.create_dataset(
+                        "H",
+                        shape=(m, nd),
+                        dtype="f8",
+                        chunks=(row_chunk, col_chunk),
+                        fillvalue=0.0
+                    )
+
+                    # Save indices too (very useful)
+                    f.create_dataset("obs_indices", data=obs_indices, dtype="i8")
+
+                    # --- Stream-writing the ones ---
+                    # Process rows in blocks
+                    for r0 in range(0, m, block_rows):
+                        r1 = min(m, r0 + block_rows)
+                        cols = obs_indices[r0:r1]  # length (r1-r0)
+
+                        # Determine which column-chunk each row's 1 lands in
+                        chunk_ids = (cols // col_chunk).astype(np.int64)
+
+                        # For each unique column-chunk in this row-block:
+                        for cid in np.unique(chunk_ids):
+                            c0 = int(cid * col_chunk)
+                            c1 = int(min(nd, c0 + col_chunk))
+
+                            # rows that belong to this col-chunk
+                            mask = (chunk_ids == cid)
+                            rows_sub = np.nonzero(mask)[0]  # indices within [r0,r1)
+                            if rows_sub.size == 0:
+                                continue
+
+                            # Build a small dense block: (#rows_sub, c1-c0)
+                            buf = np.zeros((rows_sub.size, c1 - c0), dtype=np.float64)
+
+                            # Place ones at local column offsets
+                            local_cols = (cols[rows_sub] - c0).astype(np.int64)
+                            buf[np.arange(rows_sub.size), local_cols] = 1.0
+
+                            # Write this hyperslab
+                            # Target rows are (r0 + rows_sub), contiguous? not necessarily.
+                            # h5py cannot write scattered rows in one hyperslab, so write in small loops
+                            # BUT rows_sub is typically small; still safe.
+                            for ii, rr_off in enumerate(rows_sub):
+                                rr = int(r0 + rr_off)
+                                dset[rr, c0:c1] = buf[ii, :]
+
+            self.mpi_comm.Barrier()
         except Exception as e:
             print(f"Error in H_matrix: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
@@ -912,15 +951,19 @@ class EnKF_fully_parallel_IO:
         k = k + 1 if k < self.nt - 1 else k
         km = kwargs.get('km')
         try:
-            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
-            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
+            # H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
+            # synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
             m = kwargs.get('m_obs')
             Nens = self.nens
 
             # --- Open H (read-only) once and slice local columns
-            H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')
+            # H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')
             # H has shape (m, nd_total); we take our local column block
-            H_local = H_matrix[:, self.nd_start_world:self.nd_end_world]  # (m, local_nd)
+            # H_local = H_matrix[:, self.nd_start_world:self.nd_end_world]  # (m, local_nd)
+
+            with h5py.File(f"{self.base_path}/H_matrix.h5", 'r', driver='mpio', comm=self.mpi_comm) as f:
+                    H_matrix = f['H']  # (m, nd_total)
+                    H_local = H_matrix[:, self.nd_start_world:self.nd_end_world]
 
             local_nd = self.nd_end_world - self.nd_start_world
 
@@ -981,8 +1024,6 @@ class EnKF_fully_parallel_IO:
 
             # --- D' = (d - Hmean)[:, None], same for all ensemble members
             Dprime = (d_global - Hmean_global)[:, None] * np.ones((1, Nens), dtype=HA.dtype)
-
-            # print(f"\n[Rank {self.mpi_comm.Get_rank()}] norms H: {np.linalg.norm(H_matrix)},  ens_mean:{np.linalg.norm(np.mean(States_local, axis=1))}, d: {np.linalg.norm(d_local)} D: {np.linalg.norm(d_global.reshape(-1,1) + Eta)}, HA: {np.linalg.norm(HA)}, Eta: {np.linalg.norm(Eta)}, ensemble_vec: {np.linalg.norm(States_local)} \n")
 
             return Dprime, Eta, Eta, kwargs
         except Exception as e:
@@ -1112,30 +1153,32 @@ class EnKF_fully_parallel_IO:
             # Read all ensemble data at once
             # all_states = np.zeros((local_dim, Nens))
             # write all_states to zarr file *--------------------------------
-            allstates_sate_zarr_path = f"{self.base_path}/all_states_rank_{rank}.zarr"
-            mean_params_zarr_path = f"{self.base_path}/mean_params_rank_{rank}.zarr"
-            pertubations_zarr_path = f"{self.base_path}/pertubations_rank_{rank}.zarr"
-            analysis_updates_zarr_path = f"{self.base_path}/analysis_updates_rank_{rank}.zarr"
+            # allstates_sate_zarr_path = f"{self.base_path}/all_states_rank_{rank}.zarr"
+            # mean_params_zarr_path = f"{self.base_path}/mean_params_rank_{rank}.zarr"
+            # pertubations_zarr_path = f"{self.base_path}/pertubations_rank_{rank}.zarr"
+            # analysis_updates_zarr_path = f"{self.base_path}/analysis_updates_rank_{rank}.zarr"
 
-            for path in [mean_params_zarr_path, pertubations_zarr_path, analysis_updates_zarr_path]:
-                if os.path.exists(path):
-                    shutil.rmtree(path)
+            # for path in [mean_params_zarr_path, pertubations_zarr_path, analysis_updates_zarr_path]:
+            #     if os.path.exists(path):
+            #         shutil.rmtree(path)
 
             # if os.path.exists(allstates_sate_zarr_path):
             #     shutil.rmtree(allstates_sate_zarr_path)
-            all_states_zarr = zarr.create_array(store=allstates_sate_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
-            mean_params = zarr.create_array(store=mean_params_zarr_path, shape=(local_dim, 1), chunks=(min(1000, local_dim), 1), dtype='f8', overwrite=True)
-            pertubations = zarr.create_array(store=pertubations_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
-            analysis_updates = zarr.create_array(store=analysis_updates_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
+            # all_states_zarr = zarr.create_array(store=allstates_sate_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
+            # mean_params = zarr.create_array(store=mean_params_zarr_path, shape=(local_dim, 1), chunks=(min(1000, local_dim), 1), dtype='f8', overwrite=True)
+            # pertubations = zarr.create_array(store=pertubations_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
+            # analysis_updates = zarr.create_array(store=analysis_updates_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
+
+            all_states = np.empty((local_dim, Nens), dtype=np.float64, order="F")
 
             _local_analysis_time0 = MPI.Wtime()
             for i in range(Nens):
                 # all_states_zarr[:, i] = self.read_analysis(k, i)
-                all_states_zarr[:, i] = self.read_analysis(k, i)
+                all_states[:, i] = self.read_analysis(k, i)
             _local_analysis_time0 = MPI.Wtime() - _local_analysis_time0
 
             # Compute analysis updates for all paucall ensembles using matrix multiplication
-            analysis_updates = all_states_zarr @ X5  # Matrix multiplication
+            analysis_updates = all_states @ X5  # Matrix multiplication
 
             # performm inflation
             inflation_factor = self.params.get('inflation_factor', 1.0)
@@ -1173,7 +1216,7 @@ class EnKF_fully_parallel_IO:
             _time_analysis_mean = MPI.Wtime()
             if kwargs.get('compute_analysis_mean', False):
                 yi = np.sum(X5, axis=1)
-                analysis_mean = np.dot(all_states_zarr, yi) / Nens
+                analysis_mean = np.dot(all_states, yi) / Nens
                 # print(f"[Rank {self.mpi_comm.Get_rank()}]  shape: {analysis_mean.shape} shape_ {self.nd_end_world - self.nd_start_world}")
                 file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
                 with h5py.File(file_path, 'a', driver='mpio', comm=self.mpi_comm) as f:
@@ -1193,9 +1236,9 @@ class EnKF_fully_parallel_IO:
             # clean up zarr file
             # if os.path.exists(zarr_path):
             #     shutil.rmtree(zarr_path)
-            for path in [allstates_sate_zarr_path, mean_params_zarr_path, pertubations_zarr_path, analysis_updates_zarr_path]:
-                if os.path.exists(path):
-                    shutil.rmtree(path)
+            # for path in [allstates_sate_zarr_path, mean_params_zarr_path, pertubations_zarr_path, analysis_updates_zarr_path]:
+            #     if os.path.exists(path):
+            #         shutil.rmtree(path)
             
             self.mpi_comm.Barrier()
             # del all_states_zarr
@@ -1217,214 +1260,5 @@ class EnKF_fully_parallel_IO:
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
-
-    
-    # def compute_X5_utils_batch(self, **kwargs):
-    #     """
-    #     Returns:
-    #     Eta   : (m, Nens)
-    #     Dprime: (m, Nens)   # constant across Nens (each column equal)
-    #     HA    : (m, Nens)
-    #     """
-    #     k = kwargs.get('k')
-    #     k = k + 1 if k < self.nt - 1 else k
-    #     km = kwargs.get('km', k)
-    #     nt = self.nt
-    #     try:
-    #         comm = self.mpi_comm
-    #         rank = comm.Get_rank()
-
-    #         # ---- Config / inputs
-    #         H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
-    #         synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
-    #         m = kwargs.get('m_obs')
-    #         Nens = int(self.nens)
-    #         block_size = int(kwargs.get('block_size', max(16, min(64, Nens))))  # tuneable batch size
-
-    #         # ---- Open H once and slice local columns
-    #         H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')  # shape (m_total, nd_total) or (m, nd_total) as per your layout
-    #         H_local = H_matrix[:, self.nd_start_world:self.nd_end_world]  # shape (m, local_nd)
-    #         H_local = np.ascontiguousarray(H_local, dtype=np.float64)
-    #         m_local, local_nd = H_local.shape  # expect m_local == m
-
-    #         # ---- Read local ensemble mean once
-    #         mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-    #         with h5py.File(mean_file_path, 'r', driver='mpio', comm=comm) as f:
-    #             ens_mean_local = f['mean'][self.nd_start_world:self.nd_end_world, k ]
-    #         ens_mean_local = np.ascontiguousarray(ens_mean_local, dtype=np.float64)  # (local_nd,)
-
-    #         # ---- Synthetic observations (local slice)
-    #         # synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
-    #         # synthetic_obs_local = synthetic_obs[self.nd_start_world:self.nd_end_world, km]
-    #         # synthetic_obs_local = np.ascontiguousarray(synthetic_obs_local, dtype=np.float64)  # (local_nd,)
-    #          # *--with open synthetic obs h5file *---rememdy for now---*
-    #         obs_file = f"{self.base_path}/synthetic_obs.h5"
-    #         with h5py.File(obs_file, 'r', driver='mpio', comm=self.mpi_comm) as f:
-    #             synthetic_obs_local = f['hu_obs'][self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
-    #         # *---rememdy for now---*
-
-    #         # ---- Fuse d and Hmean into a single GEMM + single Allreduce
-    #         # Build a 2-column local matrix [y_obs, ens_mean]
-    #         V_local = np.empty((local_nd, 2), dtype=np.float64, order='C')
-    #         V_local[:, 0] = synthetic_obs_local
-    #         V_local[:, 1] = ens_mean_local
-
-    #         Y_local = H_local @ V_local                   # (m, 2)
-    #         Y_global = np.empty_like(Y_local, order='C')  # (m, 2)
-
-    #         # Single collective for both vectors
-    #         comm.Allreduce([Y_local, MPI.DOUBLE], [Y_global, MPI.DOUBLE], op=MPI.SUM)
-    #         d_global     = Y_global[:, 0]                 # (m,)
-    #         Hmean_global = Y_global[:, 1]                 # (m,)
-
-    #         # ---- Compute HA for all ensemble members in batches
-    #         HA_global = np.empty((m_local, Nens), dtype=np.float64, order='C')
-
-    #         for j0 in range(0, Nens, block_size):
-    #             j1 = min(j0 + block_size, Nens)
-    #             B = j1 - j0
-
-    #             # Load a contiguous local block of states: shape (local_nd, B)
-    #             States_local_blk = np.empty((local_nd, B), dtype=np.float64, order='C')
-    #             for jj, ens_idx in enumerate(range(j0, j1)):
-    #                 States_local_blk[:, jj] = self.read_analysis(k, ens_idx)  # must return local slice (local_nd,)
-
-    #             # Local GEMM then one Allreduce for this batch
-    #             HA_local_blk = H_local @ States_local_blk             # (m, B)
-    #             HA_global_blk = np.empty_like(HA_local_blk, order='C')
-    #             comm.Allreduce([HA_local_blk, MPI.DOUBLE], [HA_global_blk, MPI.DOUBLE], op=MPI.SUM)
-
-    #             HA_global[:, j0:j1] = HA_global_blk
-
-    #         # ---- Eta and D'
-    #         # Eta = HA - Hmean[:, None]
-    #         Eta = HA_global - Hmean_global[:, None]                   # (m, Nens)
-    #         # print(f"\n[Rank {self.mpi_comm.Get_rank()}] H_local norm : {np.linalg.norm(H_local)}, ens_mean_local norm: {np.linalg.norm(ens_mean_local)}, synthetic_obs_local norm: {np.linalg.norm(synthetic_obs_local)}\n")
-
-    #         # D' = (d - Hmean) broadcast across columns
-    #         d_minus_Hmean = (d_global - Hmean_global)                 # (m,)
-    #         # Make every column identical, no extra collectives
-    #         Dprime = np.broadcast_to(d_minus_Hmean[:, None], (m_local, Nens)).copy()
-
-    #         return Eta, Dprime, HA_global
-
-    #     except Exception as e:
-    #         print(f"Error in compute_X5_utils: {e}")
-    #         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-    #         print(f"Traceback details:\n{tb_str}")
-    #         self.mpi_comm.Abort(1)
-
-    # def compute_X5_utils(self, **kwargs):
-    #     """
-    #     Parallel EnKF X5 minimal utilities:
-    #     d_global   = H @ y_obs
-    #     Hbar       = H @ ensemble_mean
-    #     Dprime     = d_global - Hbar
-    #     HAprime    = Eta (from H @ ensemble_perturbations)
-    #     """
-
-    #     import numpy as np, h5py, zarr, sys, traceback
-    #     from mpi4py import MPI
-
-    #     comm  = self.mpi_comm
-    #     rank  = comm.Get_rank()
-    #     size  = comm.Get_size()
-    #     k     = kwargs.get('k')
-    #     k = k + 1 if k < self.nt - 1 else k
-    #     km = kwargs.get('km', k)
-
-    #     try:
-    #         # ----------------------------------------------------------------------
-    #         # Parameters and file paths
-    #         # ----------------------------------------------------------------------
-    #         H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
-    #         # synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
-    #         Nens = self.nens
-
-    #         if kwargs.get("inversion_flag", False):
-    #             # exlude friction from assimilation
-    #             friction_idx = kwargs.get("friction_idx", None)
-    #             excluded_indices = [friction_idx]
-
-    #             # entire state vector on each rank
-    #             i0, i1 = self.nd_start_world, self.nd_end_world
-    #             local_nd = i1 - i0
-
-    #             print(f"[rank {rank}] Excluding friction index {local_nd} from assimilation"); exit(0)
-
-    #         else:
-    #             i0, i1 = self.nd_start_world, self.nd_end_world
-    #             local_nd = i1 - i0
-
-    #             # Choose MPI datatype dynamically (float32 or float64)
-    #             mpi_type = MPI._typedict[np.dtype(np.float64).char]
-
-    #             # ----------------------------------------------------------------------
-    #             # Load local column block of H and local slices of ensemble_mean, obs
-    #             # ----------------------------------------------------------------------
-    #             H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')
-    #             H_local  = np.asarray(H_matrix[:, i0:i1], dtype=np.float64, order='C')  # (m, local_nd)
-
-    #             # Synthetic observation local slice (y)
-    #             # synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
-    #             # y_local = np.asarray(synthetic_obs[i0:i1, km], dtype=np.float64)  # (local_nd,)
-    #             obs_file = f"{self.base_path}/synthetic_obs.h5"
-    #             with h5py.File(obs_file, 'r', driver='mpio', comm=self.mpi_comm) as f:
-    #                 y_local = np.asarray(f['hu_obs'][i0:i1, km], dtype=np.float64)  # (local_nd,)
-
-    #             # Ensemble mean local slice
-    #             mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-    #             with h5py.File(mean_file_path, 'r', driver='mpio', comm=comm) as f:
-    #                 # _k = k + 1 if k < self.nt - 1 else k
-    #                 ensemble_mean_local = np.asarray(f['mean'][i0:i1, k], dtype=np.float64)  # (local_nd,)
-
-    #             # ----------------------------------------------------------------------
-    #             # Compute d = H * y_obs   (GEMV + Allreduce)
-    #             # ----------------------------------------------------------------------
-    #             d_local = H_local @ y_local                    # (m,)
-    #             d_global = np.empty_like(d_local)
-    #             comm.Allreduce([d_local, mpi_type], [d_global, mpi_type], op=MPI.SUM)
-
-    #             # ----------------------------------------------------------------------
-    #             # Compute Hbar = H * ensemble_mean   (GEMV + Allreduce)
-    #             # ----------------------------------------------------------------------
-    #             Hbar_local = H_local @ ensemble_mean_local     # (m,)
-    #             Hbar_global = np.empty_like(Hbar_local)
-    #             comm.Allreduce([Hbar_local, mpi_type], [Hbar_global, mpi_type], op=MPI.SUM)
-
-    #             # ----------------------------------------------------------------------
-    #             # Compute Eta = H * (ensemble_vec - ensemble_mean)
-    #             # ----------------------------------------------------------------------
-    #             # Each rank reads its local portion of ensemble states
-    #             States_local = np.empty((local_nd, Nens), dtype=np.float64, order='C')
-    #             for j in range(Nens):
-    #                 States_local[:, j] = np.asarray(self.read_analysis(k, j), dtype=np.float64)
-
-    #             # Compute local ensemble perturbations
-    #             perturb_local = States_local - ensemble_mean_local[:, None]  # (local_nd, Nens)
-
-    #             # Project ensemble perturbations into observation space
-    #             Eta_local = H_local @ perturb_local                          # (m, Nens)
-    #             Eta = Eta_local.copy(order='C')
-    #             comm.Allreduce(MPI.IN_PLACE, [Eta, mpi_type], op=MPI.SUM)    # (m, Nens)
-
-    #             # ----------------------------------------------------------------------
-    #             # Compute Dprime and HAprime (final outputs)
-    #             # ----------------------------------------------------------------------
-    #             Dprime  = (d_global - Hbar_global)          # (m,1)
-    #             HAprime = Eta                                                # (m,Nens)
-
-    #             # Optional: diagnostics
-    #             if rank == 0:
-    #                 print(f"[rank {rank}] Shapes -> Dprime: {Dprime.shape}, HAprime: {HAprime.shape}")
-
-    #             return Dprime, Eta, HAprime, kwargs
-
-    #     except Exception as e:
-    #         print(f"[rank {rank}] Error in compute_X5_utils: {e}")
-    #         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-    #         print(f"Traceback details:\n{tb_str}")
-    #         comm.Abort(1)
-
 
     

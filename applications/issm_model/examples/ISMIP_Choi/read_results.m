@@ -6,26 +6,28 @@
 
 close all; clearvars; clear all
 
+% shg;
+
 global data_file_paths nvar ensemble_vec_full ...
-        label_t t nt colorbar_gap
-% data_file_paths = '_modelrun_datasets';
+        label_t t nt colorbar_gap bed_obs_xy
+data_file_paths = '_modelrun_datasets';
 % data_file_paths = '_goodgrounding';
-data_file_paths ='_modelrun_working_0';
+% data_file_paths ='_modelrun_working_0';
 nvar = 6;
-colorbar_gap=0.78;
+colorbar_gap=0.92;
 
 % ---------------- user toggles ----------------
 make_plots       = 0;
-make_multi_plots = 0;   % <-- ON (restored)
+make_multi_plots = 1;   % <-- ON (restored)
 frames_plot      = 0;
 compute_rmse     = 0;
-plotgl           = 1;
+plotgl           = 0;
 
 % ---------------- time steps ------------------
 % k_array = [0, 20,  60, 80, 89, 130, 330, 499]+1;
 % k_array= [ 0, 20,80, 120, 160, 220, 250, 320, 450]+1;
 % k_array = [0, 20, 80, 120, 160, 240, 360, 499] +1;
-k_array = [30, 70,100, 120, 180, 250]+1;
+k_array = [30, 70,100, 120, 180, 249]+1;
 dt      = 0.2;
 
 % ---------------- Load essentials --------------
@@ -37,7 +39,7 @@ ind_m    = h5read(file_path,'/obs_index');
 tm_m     = h5read(file_path,'/obs_max_time'); 
 run_mode = h5read(file_path,'/run_mode'); 
 
-% true / wrong (nurged)
+% --------- true / wrong (nurged)
 file_path          = fullfile(data_file_paths, 'true_nurged_states.h5');
 model_true_state   = h5read(file_path,'/true_state')';
 model_nurged_state = h5read(file_path,'/nurged_state')';
@@ -47,7 +49,7 @@ model_nurged_state = h5read(file_path,'/nurged_state')';
 file_path = fullfile(data_file_paths, 'synthetic_obs.h5');
 w = h5read(file_path, '/hu_obs')'; 
 
-% ensemble mean
+% ----- ensemble mean
 file_path         = fullfile(data_file_paths, 'icesee_ensemble_data.h5');
 ensemble_vec_mean = h5read(file_path, '/ensemble_mean')';
 ensemble_vec_full = h5read(file_path, '/ensemble'); 
@@ -57,6 +59,14 @@ md = loadmodel(fullfile("data","ISMIP.Parameterization1.mat"));
 md_true   = md;
 md_nurged = md;
 md_ens    = md;
+
+% ----- Bed observation XY (for overlay on True Bed) 
+hdim = nd / nvar;
+
+wbed = w(4*hdim + 1 : 5*hdim, 1);
+
+obs_idx = find(~isnan(wbed));   % <-- observations are the non-NaNs
+bed_obs_xy = [md_true.mesh.x(obs_idx), md_true.mesh.y(obs_idx)];
 
 % ---------------- GL midpoint points + pointwise RMSE ----------------
 [gl_mid] = compute_gl_midpoints( ...
@@ -93,9 +103,9 @@ if make_multi_plots
 
     % velocity
     plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, 'initialization.vel', 'Velocity', 'm/s');
+        md_true, md_nurged, md_ens, md, 'initialization.vel', 'Velocity', 'm/yr');
     plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, 'initialization.vel', 'Velocity', 'm/s');
+        md_true, md_nurged, md_ens, md, 'initialization.vel', 'Velocity', 'm/yr');
 
     % bed
     plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
@@ -184,7 +194,6 @@ function [md_true, md_nurged, md_ens] = setup_model_states( ...
     md_nurged.mask.ocean_levelset   = H + bed/di;
 
     % --- ENSEMBLE MEAN ---
-    % ensemble_vec_mean(:, 1) = model_nurged_state(:, 1);
     H  = ensemble_vec_mean(1:hdim, k);
     S  = ensemble_vec_mean(hdim+1:2*hdim, k);
     B  = S - H;
@@ -250,7 +259,8 @@ function plot_gl_on_bed_evolution( ...
     nk    = numel(k_array);
     nrows = 2+nk;
 
-    figure('Position',[400 400 1800 (180 + 150*nrows)]); clf;
+    % figure('Position',[400 400 1100 (180 + 150*nrows)]); clf;
+     figure('Position',[150 150 1800 1000]); clf;
 
     % ---- global color limits from TRUE background ----
     all_data = [];
@@ -270,12 +280,12 @@ function plot_gl_on_bed_evolution( ...
 
     % ---- filtering knobs ----
     minLen_true  = 3e4;
-    minLen_wrong = 3e4;
+    minLen_wrong = 5e4;
     minLen_ens   = 5e4;
     minArea      = 1;
 
     keepLargestOnly_true  = true;
-    keepLargestOnly_wrong = true;
+    keepLargestOnly_wrong = false;
     keepLargestOnly_ens   = false;
     keepTopK_ens          = 4;   % allow 2 longest for ensemble (prevents “loss”)
     keepTopK_true         = 4;
@@ -288,7 +298,7 @@ function plot_gl_on_bed_evolution( ...
     [md_true_k, ~, ~] = setup_model_states(1, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md);
     data_true = get_nested_field(md_true_k, bg_field);
-    plotmodel(md_true_k,'data',data_true,'title',sprintf('True %s',bg_title), ...
+    plotmodel(md_true_k,'data',data_true,'title',sprintf('True %s',lower(bg_title)), ...
         'subplot',[nrows,1,1],'caxis',[cmin cmax],'colorbar','off');
     ax = gca; axs(1) = ax;
     ttl = ax.Title;
@@ -316,15 +326,16 @@ function plot_gl_on_bed_evolution( ...
     [md_true_1, md_nurged_1, md_ens_1] = setup_model_states(1, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md);
     % diff_no = get_nested_field(md_ens_1, field) - get_nested_field(md_true_1, field);
-    ens_field = get_nested_field(md_nurged_1, bg_field);
-    % ens_field = get_nested_field(md_ens_1, bg_field);
+    % ens_field = get_nested_field(md_nurged_1, bg_field);
+    ens_field = get_nested_field(md_ens_1, bg_field);
     true_field = get_nested_field(md_true_1, bg_field);
    
     diff_no = ens_field - true_field;
     % diff_no = relative_error(ens_field, true_field);
-    % diff_no = signed_log_relerr(true_field, true_field);
+    % diff_no = signed_log_relerr(ens_field, true_field);
     maxAbs_no = max(abs(diff_no(:)));
     % maxAbs_no=1;
+    maxAbs_global = max(abs(diff_no(:)));
   
     % maxAbs_no = prctile(abs(diff_no(:)), 99);
     plotmodel(md_ens_1,'data',diff_no,'title',sprintf('no assimilation'), ...
@@ -397,9 +408,10 @@ function plot_gl_on_bed_evolution( ...
         % diff_k = relative_error(bg_ens, bg_true);
         diff_k = bg_ens - bg_true;
         % diff_k = signed_log_relerr(bg_ens, bg_true);
-        maxAbs = max(abs(diff_k(:)));
+        % maxAbs = max(abs(diff_k(:)));
         % maxAbs = maxAbs_no;
-        % maxAbs = ();
+        maxAbs_global = max(maxAbs_global, max(abs(diff_k(:))));
+        maxAbs = maxAbs_global;
 
         plotmodel(md_ens_k, 'data', diff_k, ...
             'title', sprintf('after %s years of assimilation', fmt_years(label_t)), ...
@@ -568,15 +580,33 @@ function plot_gl_on_bed_evolution( ...
     % for i = 1:nrows, colormap(axs(i), parula); end
     % cb = colorbar(axs(end), 'Position',[colorbar_gap0 0.25 0.025 0.45]);
     % ylabel(cb, [bg_title units_str], 'FontSize',12,'FontWeight','bold');
-    colorbar_gap0=0.785;
+    colorbar_gap0=0.91;
     cb1 = colorbar(axs(1), 'Position',[colorbar_gap0 0.75 0.015 0.16]);
     ylabel(cb1,[bg_title units_str],'FontSize',15,'FontWeight','bold');
     colormap(axs(1), parula);
 
-    for i = 2:nrows, colormap(axs(i), redblue(256)); end
+    % for i = 2:nrows, colormap(axs(i), redblue(256)); end
+    % cb = colorbar(axs(end), 'Position',[colorbar_gap0 0.25 0.015 0.45]);
+    % % ylabel(cb,'Relative Error','FontSize',15,'FontWeight','bold');
+    % ylabel(cb,['\Delta Thickness' units_str],'FontSize',15,'FontWeight','bold');
+    % % set_colorbar_ticks(cb, [-maxAbs_global maxAbs_global], 6);
+    % % caxis(axs(end), [-maxAbs_global maxAbs_global]);
+    % for i = 2:nrows
+    %     caxis(axs(i), [-maxAbs_global maxAbs_global]);
+    % end
+    % --- Shared DIFF colormap + shared clim across diff panels (rows 2..nrows) ---
+    for i = 2:nrows
+        colormap(axs(i), redblue(256));
+        caxis(axs(i), [-maxAbs_global maxAbs_global]);
+    end
+    
+    % Create the shared colorbar *after* clims are enforced
     cb = colorbar(axs(end), 'Position',[colorbar_gap0 0.25 0.015 0.45]);
-    % ylabel(cb,'Relative Error','FontSize',15,'FontWeight','bold');
     ylabel(cb,['\Delta Thickness' units_str],'FontSize',15,'FontWeight','bold');
+    
+    % 5–6 reasonable ticks, symmetric
+    % cb.Ticks = linspace(-maxAbs_global, maxAbs_global, 6);
+    % cb.TickLabels = arrayfun(@(v) sprintf('%.0f', v), cb.Ticks, 'UniformOutput', false);
    
 
     % ---- Clean legend (proxy only) ----
@@ -622,7 +652,7 @@ function plot_gl_on_bed_evolution( ...
         % lgd.Position(4)];
 
     lgd.Position = [ ...
-        0.42, ...   % left (centered)
+        0.525, ...   % left (centered)
         0.015, ...  % vertical position BELOW xlabel
         0.60, ...   % width
         0.04  ...   % height
@@ -722,17 +752,20 @@ end
 function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
     md_true, md_nurged, md_ens, md, field, field_title, units)
 
-    global t label_t nt colorbar_gap
+    global t label_t nt colorbar_gap bed_obs_xy
     % lightGray = [0.85 0.85 0.85];
     % lightGray = [0.93 0.69 0.13];
-    lightGray = 'm';
+    % lightGray = 'm';
+    lightGray = 'k';
     if nargin < 12, units = ''; end
     units_str = iff(~isempty(units), [' (' units ')'], '');
 
     nk    = length(k_array);
     nrows = 2 + nk;
+    % field_title=lower(field_title);
 
-    figure('Position',[400 400 1800 (180 + 150*nrows)]); clf;
+    % figure('Position',[400 400 1100 (180 + 150*nrows)]); clf;
+    figure('Position',[150 150 1800 1000]); clf;
     axs = gobjects(nrows,1);   % <-- store ONLY the real panel axes
 
     % global limits for absolute field (panel a)
@@ -755,10 +788,31 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
     [md_true_k, ~, ~] = setup_model_states(1, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md);
     data_true = get_nested_field(md_true_k, field);
-    plotmodel(md_true_k,'data',data_true,'title',sprintf('True %s',field_title), ...
+    plotmodel(md_true_k,'data',data_true,'title',sprintf('True %s',lower(field_title)), ...
         'subplot',[nrows,1,1],'caxis',[cmin cmax],'colorbar','off');
     
     ax = gca; axs(1) = ax;
+    % --- Overlay bed observation locations on panel (a1) only ---
+    if strcmp(field,'geometry.bed') && exist('bed_obs_xy','var') && ~isempty(bed_obs_xy)
+    
+        hold(ax,'on');
+    
+        hObs = scatter(ax, bed_obs_xy(:,1), bed_obs_xy(:,2), 16, ...   % 22 = marker size
+            'o', ...
+            'MarkerFaceColor','none', ...
+            'MarkerEdgeColor',[1 1 1]*0.98, ...
+            'LineWidth',0.9);
+    
+        % transparency (scatter supports this in modern MATLAB)
+        if isprop(hObs,'MarkerEdgeAlpha'), hObs.MarkerEdgeAlpha = 0.35; end
+        if isprop(hObs,'MarkerFaceAlpha'), hObs.MarkerFaceAlpha = 0; end
+    
+        set(hObs,'HandleVisibility','off');  % don’t pollute legend
+        hold(ax,'off');
+    
+        try uistack(hObs,'top'); catch, end
+    end
+
     ttl = ax.Title;
     ttl.FontSize   = 10;
     ttl.FontWeight = 'bold';   % or 'normal'
@@ -773,7 +827,7 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
     
     % ---- panel letter inside upper-left ----
     % panel = sprintf('(%c)', 'a'+(idx-1));
-    panel_idx = 1;   % change as needed
+    panel_idx = 2;   % change as needed
     panel = sprintf('(%c_{%d})','a', panel_idx);
     text(ax, 0.02, 0.95, panel, 'Units','normalized', ...
         'FontWeight','bold', 'FontSize', 16, ...
@@ -784,8 +838,8 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
     [md_true_1, md_nurged_1, md_ens_1] = setup_model_states(1, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md);
     % diff_no = get_nested_field(md_ens_1, field) - get_nested_field(md_true_1, field);
-    ens_field = get_nested_field(md_nurged_1, field);
-    % ens_field = get_nested_field(md_ens_1, field);
+    % ens_field = get_nested_field(md_nurged_1, field);
+    ens_field = get_nested_field(md_ens_1, field);
     true_field = get_nested_field(md_true_1, field);
     % if contains(field,'geometry.bed')
         % diff_no = relative_error(ens_field, true_field);
@@ -795,9 +849,10 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
         % diff_no = ens_field - true_field;
     % end
     maxAbs_no = max(abs(diff_no(:)));
+    maxAbs_global = maxAbs_no;
   
     % maxAbs_no = prctile(abs(diff_no(:)), 99);
-    plotmodel(md_ens_1,'data',diff_no,'title',sprintf('No assimilation'), ...
+    plotmodel(md_ens_1,'data',diff_no,'title',sprintf('no assimilation'), ...
         'subplot',[nrows,1,2],'caxis',[-maxAbs_no maxAbs_no],'colorbar','off');
 
     ax = gca; axs(2) = ax;
@@ -841,7 +896,9 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
         % end
         % diff_k = get_nested_field(md_ens_k, field) - get_nested_field(md_true_k, field);
 
-        maxAbs = max(abs(diff_k(:)));
+        % maxAbs = max(abs(diff_k(:)));
+        maxAbs_global = max(maxAbs_global, max(abs(diff_k(:))));
+        maxAbs=maxAbs_global;
       
         % maxAbs = prctile(abs(diff_k(:)), 99);
         % label  = sprintf('\\bf(%c)', 'b'+idx);
@@ -957,14 +1014,26 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
     cb1 = colorbar(axs(1), 'Position',[colorbar_gap 0.68 0.015 0.16]);
     ylabel(cb1,[field_title units_str],'FontSize',15,'FontWeight','bold');
     colormap(axs(1), parula);
-
-    for i = 2:nrows, colormap(axs(i), redblue(256)); end
-    cb2 = colorbar(axs(end), 'Position',[colorbar_gap 0.25 0.015 0.40]);
-    % ylabel(cb2,'Difference','FontSize',12,'FontWeight','bold');
-    % if contains(field,'geometry.bed')
-        ylabel(cb2,'Relative Error','FontSize',15,'FontWeight','bold');
+    % 
+    % for i = 2:nrows, colormap(axs(i), redblue(256)); end
+    % cb2 = colorbar(axs(end), 'Position',[colorbar_gap 0.25 0.015 0.40]);
+    % % ylabel(cb2,'Difference','FontSize',12,'FontWeight','bold');
+    % % if contains(field,'geometry.bed')
+    %     ylabel(cb2,'Relative Error','FontSize',15,'FontWeight','bold');
     % else
     %     ylabel(cb2,['Difference' units_str],'FontSize',12,'FontWeight','bold');
+    % end
+
+    for i = 2:nrows
+        colormap(axs(i), redblue(256));
+        caxis(axs(i), [-maxAbs_global maxAbs_global]);
+    end
+    cb2 = colorbar(axs(end), 'Position',[colorbar_gap 0.25 0.015 0.40]);
+    ylabel(cb2,'Relative Error','FontSize',15,'FontWeight','bold');
+    % if contains(field, 'initialization.vel')
+    %     ylabel(cb2,['\Delta |u|' units_str],'FontSize',15,'FontWeight','bold');
+    % else
+    %     ylabel(cb2,['\Delta ' field_title units_str],'FontSize',15,'FontWeight','bold');
     % end
 
     set(gcf,'Color','w');
@@ -989,7 +1058,7 @@ function plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, e
     nk    = length(k_array);
     nrows = 2 + nk;
 
-    figure('Position',[400 400 1800 (180 + 150*nrows)]); clf;
+    figure('Position',[400 400 1100 (180 + 150*nrows)]); clf;
     axs = gobjects(nrows,1);   % <-- store ONLY the real panel axes
 
     % global color limits across (true+ens) at requested steps
@@ -1013,6 +1082,7 @@ function plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, e
         md_true, md_nurged, md_ens, md);
     data_true = get_nested_field(md_true_last, field);
     k1 = 1;
+    nt = 251;
     label_t = iff(k1 == nt-1, t(nt), t(k1));
     plotmodel(md_true_last,'data',data_true, ...
         'title',sprintf('True %s ', field_title), ...
@@ -2077,8 +2147,9 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     out.dist_as     = dist_as;
 
     % -------------------------------
-    figure('Position',[200 200 1100 900]); clf;
-    
+    % figure('Position',[200 200 1100 900]); clf;
+    figure('Position',[150 150 1800 1200]); clf;
+
     fs_axis   = 15;
     fs_label  = 17;
     fs_title  = 16;
@@ -2091,6 +2162,7 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     
     % ---- Create tiledlayout with extra padding for legend space ----
     tl = tiledlayout(4,1, 'TileSpacing','compact', 'Padding','loose');
+    % tl = tiledlayout(2,2, 'TileSpacing','compact', 'Padding','loose');
     
     % ---------------- (a) Thickness ----------------
     ax1 = nexttile(tl,1);
@@ -2100,10 +2172,23 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     h4 = plot(out.time, out.rmse_h_as_g, 'b:', 'LineWidth',2.5); 
     h5 = plot(out.time, out.rmse_h_no_w, 'c-', 'LineWidth',2.5); 
     h6 = plot(out.time, out.rmse_h_as_w, 'c:', 'LineWidth',2.5); hold off
+
+    % try semilogy
+    % h1 = semilogy(out.time, rmse_h_no,   'r-', 'LineWidth',2.5); hold on
+    % h2 = semilogy(out.time, rmse_h_as,   'r:', 'LineWidth',2.5);
+    % h3 = semilogy(out.time, rmse_h_no_g, 'b-', 'LineWidth',2.5);
+    % h4 = semilogy(out.time, rmse_h_as_g, 'b:', 'LineWidth',2.5);
+    % h5 = semilogy(out.time, rmse_h_no_w, 'c-', 'LineWidth',2.5);
+    % h6 = semilogy(out.time, rmse_h_as_w, 'c:', 'LineWidth',2.5); hold off
     
     ylabel('RMSE (m)','FontWeight','bold','FontSize',fs_label);
     title('Thickness','FontWeight','bold','FontSize',fs_title);
-    ylim([-0.5,410]); xlim([-1.5,50])
+    % ylim([-0.5,410]); xlim([-1.5,50])
+    ylim([-10 440]); xlim([-1.5,50]);
+    % yticks([10 30 80 200 420]);
+    yticks([30 100 200 300 420]);
+    yticklabels({'30', '100', '200', '300', '420'});
+    set(gca,'YMinorTick','off');
     
     text(ax1,0.01,0.93,'(a)','Units','normalized', ...
         'FontWeight','bold','FontSize',fs_title, ...
@@ -2117,10 +2202,22 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     plot(out.time, out.rmse_vel_as_g, 'b:', 'LineWidth',2.5); 
     plot(out.time, out.rmse_vel_no_w, 'c-', 'LineWidth',2.5); 
     plot(out.time, out.rmse_vel_as_w, 'c:', 'LineWidth',2.5); hold off
+
+    % semilogy(out.time, rmse_vel_no,   'r-', 'LineWidth',2.5); hold on
+    % semilogy(out.time, rmse_vel_as,   'r:', 'LineWidth',2.5);
+    % semilogy(out.time, rmse_vel_no_g, 'b-', 'LineWidth',2.5);
+    % semilogy(out.time, rmse_vel_as_g, 'b:', 'LineWidth',2.5);
+    % semilogy(out.time, rmse_vel_no_w, 'c-', 'LineWidth',2.5);
+    % semilogy(out.time, rmse_vel_as_w, 'c:', 'LineWidth',2.5); hold off
     
     ylabel('RMSE (m/yr)','FontWeight','bold','FontSize',fs_label);
     title('Velocity','FontWeight','bold','FontSize',fs_title);
-    ylim([-20,750]); xlim([-1.5,50])
+    % ylim([-20,950]); xlim([-1.5,50])
+    ylim([-20 960]); xlim([-1.5,50]);
+    % yticks([0, 50 200 400  600 800])
+    yticks([20 200 400  600  800])
+    yticklabels({'20', '200', '400', '600' ,'800'})
+    set(gca,'YMinorTick','off');
     
     text(ax2,0.01,0.93,'(b)','Units','normalized', ...
         'FontWeight','bold','FontSize',fs_title, ...
@@ -2131,9 +2228,11 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     plot(out.time, out.rmse_c_no, 'r-', 'LineWidth',2.5); hold on
     plot(out.time, out.rmse_c_as, 'r:', 'LineWidth',2.5); 
     plot(out.time, out.rmse_c_no_g, 'b-', 'LineWidth',2.5); 
-    plot(out.time, out.rmse_c_as_g, 'b:', 'LineWidth',2.5); 
-    % plot(out.time, out.rmse_c_no_w, 'g-', 'LineWidth',2.5); 
-    % plot(out.time, out.rmse_c_as_w, 'm-', 'LineWidth',2.5); hold off
+    plot(out.time, out.rmse_c_as_g, 'b:', 'LineWidth',2.5); hold off
+    % semilogy(out.time, rmse_c_no,   'r-', 'LineWidth',2.5); hold on
+    % semilogy(out.time, rmse_c_as,   'r:', 'LineWidth',2.5);
+    % semilogy(out.time, rmse_c_no_g, 'b-', 'LineWidth',2.5);
+    % semilogy(out.time, rmse_c_as_g, 'b:', 'LineWidth',2.5); hold off
     
     
     ylabel('RMSE (Pa m^{-1/3} yr^{-1/3})','FontWeight','bold','FontSize',fs_label);
@@ -2147,13 +2246,18 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     % ---------------- (d) GL distance ----------------
     ax4 = nexttile(tl,4);
     plot(out.time, out.dist_no./1000, 'r-', 'LineWidth',2.5); hold on
-    plot(out.time, out.dist_as./1000, 'b-', 'LineWidth',2.5); hold off
+    plot(out.time, out.dist_as./1000, 'r:', 'LineWidth',2.5); hold off
+    % semilogy(out.time, out.dist_no./1000, 'r-', 'LineWidth',2.5); hold on
+    % semilogy(out.time, out.dist_as./1000, 'r:', 'LineWidth',2.5); hold off
     
     % xlabel('Time (years)','FontWeight','bold','FontSize',fs_label);
     ylabel('|Δx| (km)','FontWeight','bold','FontSize',fs_label);
     title('Absolute distance between GL positions along the centerline', ...
           'FontWeight','bold','FontSize',fs_title);
-    ylim([-1e4/1000,4e4/1000]); xlim([-1.5,50])
+    ylim([-0.5e4/1000,4e4/1000]); xlim([-1.5,50])
+    % yticks([0 1e4/1000 2e4/1000  3e4/1000 4e4/1000])
+    % yticklabels({'0','10','20','30','40'})
+    set(gca,'YMinorTick','off');
     
     text(ax4,0.01,0.93,'(d)','Units','normalized', ...
         'FontWeight','bold','FontSize',fs_title, ...

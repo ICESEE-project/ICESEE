@@ -8,6 +8,10 @@
 import sys
 import os
 import numpy as np
+from pathlib import Path
+
+# --- Set up paths ---
+os.chdir(Path(__file__).resolve().parent)
 
 # --- Configuration ---
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -47,13 +51,13 @@ kwargs.update({"a":a, "h0":h0, "u0":u0, "C":C, "A":A,"Q":Q,"V":V, "da":float(mod
         "u_nurge_ic":float(enkf_params["u_nurge_ic"]),"nurged_entries_percentage":float(enkf_params["nurged_entries_percentage"]),
         "a_in_p":float(modeling_params["a_in_p"]), "da_p":float(modeling_params["da_p"]),
         "solver":solver_weertman,
-        "a_p":a_p, "b_in":b_in, "b_out":b_out,
+        "a_p":a_p, "b_in":b_in, "b_out":b_out, "nd":params["nd"]
 })
 
 # --- nurged smb
 a_in = firedrake.Constant(kwargs["a_in_p"])
 da_p = firedrake.Constant(kwargs["da_p"])
-a_nuged = firedrake.interpolate(a_in + da_p*kwargs["x"]/kwargs["Lx"], kwargs["Q"])
+a_nuged = firedrake.Function(kwargs["Q"]).interpolate(a_in + da_p*kwargs["x"]/kwargs["Lx"])
 kwargs.update({"a_nuged":a_nuged})
 
 # --- Run Data Assimilation ---

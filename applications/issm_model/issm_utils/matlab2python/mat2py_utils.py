@@ -154,22 +154,23 @@ class _MatlabServer:
             return 'Unknown_OS'
 
     def issm_hpc_wrapper(self):
-        # if self.hpc:
-        # if True:
         if self.get_os() == 'Linux' or self.get_os() == 'Unknown_OS':
-            # Verify ISSM_DIR is set
             if 'ISSM_DIR' not in os.environ:
                 raise RuntimeError("ISSM_DIR environment variable is not set")
 
-            # Save original PATH and LD_LIBRARY_PATH
             original_path = os.environ.get('PATH', '')
             original_ld_library_path = os.environ.get('LD_LIBRARY_PATH', '')
 
-            # Source environment.sh and capture the modified environment
-            command = f"source $ISSM_DIR/etc/environment.sh && echo $PATH && echo $LD_LIBRARY_PATH"
-            result = subprocess.run(command, shell=True, executable="/bin/bash", capture_output=True, text=True, check=True)
+            command = "source $ISSM_DIR/etc/environment.sh && echo $PATH && echo $LD_LIBRARY_PATH"
+            result = subprocess.run(
+                command,
+                shell=True,
+                executable="/bin/bash",
+                capture_output=True,
+                text=True,
+                check=True
+            )
 
-            # Split the output into PATH and LD_LIBRARY_PATH
             output_lines = result.stdout.strip().split('\n')
             if len(output_lines) >= 2:
                 new_path = output_lines[0]
@@ -177,20 +178,29 @@ class _MatlabServer:
             else:
                 raise RuntimeError("Failed to capture PATH and LD_LIBRARY_PATH from environment.sh")
 
-            # Prepend original paths to ensure mvapich2 and gcc/12 take precedence
-            os.environ['PATH'] = f"{original_path}:{new_path}"
-            os.environ['LD_LIBRARY_PATH'] = f"{original_ld_library_path}:{new_ld_library_path}"
+            # Detect container mode
+            in_container = (
+                os.environ.get("ICESEE_CONTAINER", "0") == "1"
+                or os.path.exists("/.singularity.d")
+                or os.path.exists("/.dockerenv")
+                or "APPTAINER_NAME" in os.environ
+                or "SINGULARITY_NAME" in os.environ
+            )
 
-            # mvapich_bin = "/usr/local/pace-apps/manual/packages/openmpi/4.1.8/nvhpc-25.5/bin"
-            # mvapich_lib = "/usr/local/pace-apps/manual/packages/openmpi/4.1.8/nvhpc-25.5/lib"
+            if in_container:
+                # In container mode, preserve existing MPI/OpenMPI runtime
+                os.environ['PATH'] = f"{original_path}:{new_path}" if original_path else new_path
+                os.environ['LD_LIBRARY_PATH'] = (
+                    f"{original_ld_library_path}:{new_ld_library_path}"
+                    if original_ld_library_path else new_ld_library_path
+                )
+                return
 
-            # Function to find MPI bin and lib paths
+            # --- existing non-container behavior below ---
             def find_mpi_paths():
-                """Find MPI bin and lib paths by searching for mpirun/mpiexec and libmpi.so."""
                 mpi_bin_path = None
                 mpi_lib_path = None
 
-                # Search for mpirun or mpiexec in PATH
                 paths = os.environ.get("PATH", "").split(":")
                 mpi_executables = ["mpirun", "mpiexec"]
                 for path in paths:
@@ -202,7 +212,6 @@ class _MatlabServer:
                         if mpi_bin_path:
                             break
 
-                # Search for libmpi.so in LD_LIBRARY_PATH
                 lib_paths = os.environ.get("LD_LIBRARY_PATH", "").split(":")
                 for path in lib_paths:
                     if os.path.isfile(os.path.join(path, "libmpi.so")):
@@ -211,31 +220,27 @@ class _MatlabServer:
 
                 return mpi_bin_path, mpi_lib_path
 
-            # Get MPI bin and lib paths
-            mvapich_bin, mvapich_lib = find_mpi_paths()
-
-            # Get current PATH and LD_LIBRARY_PATH
-            path = os.environ.get("PATH", "")
-            ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
-
-            # Function to remove path using sed
             def remove_path(original, path_to_remove):
-                # Escape special characters for sed
+                if not original or not path_to_remove:
+                    return original
                 path_to_remove = path_to_remove.replace("/", r"\/")
-                # Use sed to remove the path
-                sed_command = f"echo '{original}' | sed 's|{path_to_remove}:||g; s|:{path_to_remove}||g; s|^{path_to_remove}$||g'"
+                sed_command = (
+                    f"echo '{original}' | sed "
+                    f"'s|{path_to_remove}:||g; s|:{path_to_remove}||g; s|^{path_to_remove}$||g'"
+                )
                 result = subprocess.run(sed_command, shell=True, capture_output=True, text=True)
                 return result.stdout.strip()
 
-            # Remove mvapich paths
-            new_path = remove_path(path, mvapich_bin)
-            new_ld_library_path = remove_path(ld_library_path, mvapich_lib)
+            os.environ['PATH'] = f"{original_path}:{new_path}"
+            os.environ['LD_LIBRARY_PATH'] = f"{original_ld_library_path}:{new_ld_library_path}"
 
-            # Remove mvapich paths and update environment variables
+            mvapich_bin, mvapich_lib = find_mpi_paths()
+
+            path = os.environ.get("PATH", "")
+            ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
+
             os.environ["PATH"] = remove_path(path, mvapich_bin)
             os.environ["LD_LIBRARY_PATH"] = remove_path(ld_library_path, mvapich_lib)
-
-
 
     def launch(self):
         """Launch the MATLAB server and wait for it to be ready.
@@ -272,9 +277,11 @@ class _MatlabServer:
             
             self.issm_hpc_wrapper()
 
+            if not self.matlab_path:
+                raise RuntimeError("self.matlab_path is not set")
             # matlab_cmd = f"{self.matlab_path} -nodisplay -nosplash -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
             matlab_cmd = f'bash -c "{self.matlab_path} -nodisplay -nosplash -r \\"matlab_server(\'{self.cmdfile}\', \'{self.statusfile}\')\\""'
-            
+
             self.process = subprocess.Popen(
                 matlab_cmd,
                 shell=True,
@@ -284,6 +291,10 @@ class _MatlabServer:
                 preexec_fn=os.setsid    # Create new process group for signal handling
             )
             
+            # %-->
+            print(f"[DEBUG] launched MATLAB pid={self.process.pid}")
+            # %-->
+
             self.running = True
 
             # Start threads to handle real-time output
@@ -300,7 +311,7 @@ class _MatlabServer:
             output_thread.start()
             
             # Wait for server to signal readiness via status file
-            timeout = 1000  # seconds
+            timeout = 10000  # seconds
             start_time = time.time()
             while not os.path.exists(self.statusfile):
                 if time.time() - start_time > timeout:
@@ -310,7 +321,11 @@ class _MatlabServer:
                     os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
                     sys.exit(1)
                 time.sleep(0.5)
-            
+                #%--->
+                if int(time.time() - start_time) % 10 == 0:
+                    print(f"[ICESEE::Launcher] still waiting for {self.statusfile} after {int(time.time() - start_time)} s")
+                #%--->
+
             # Check server status
             with open(self.statusfile, 'r') as f:
                 status = f.read().strip()
@@ -330,72 +345,6 @@ class _MatlabServer:
             if self.process:
                 os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
             sys.exit(1)
-
-    # def send_command(self, command, timeout=3600):
-    #     """Send a command to MATLAB and wait for it to be processed.
-
-    #     Writes the command to the command file and waits for MATLAB to process it
-    #     (indicated by the file being deleted). Provides periodic status updates if verbose
-    #     and only by rank zero if a communicator is provided. The verbose interval scales
-    #     dynamically with the timeout.
-
-    #     Args:
-    #         command (str): The MATLAB command to execute.
-    #         timeout (int, optional): Maximum time to wait for command processing (seconds). Defaults to 3600.
-
-    #     Returns:
-    #         bool: True if the command was processed successfully, False if it timed out.
-    #     """
-    #     # Set dynamic verbose interval: at least 60 seconds, or timeout / 20
-    #     verbose_interval = max(60.0, timeout / 20.0)
-
-    #     if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-    #         print(f"[ICESEE::Launcher] Sending command: {command}")
-        
-    #     try:
-    #         with open(self.cmdfile, 'w') as f:
-    #             f.write(command)
-    #     except OSError as e:
-    #         if self.comm is None or self.comm.Get_rank() == 0:
-    #             print(f"[ICESEE::Launcher] Error: Failed to write command file: {e}")
-    #         return False
-        
-    #     # Wait for command to be processed (file deleted)
-    #     start_time = time.time()
-    #     sleep_time = 0.2  # Initial sleep interval
-    #     max_sleep = 60.0  # Maximum sleep interval
-    #     last_verbose_time = start_time  # Track last verbose print
-    #     warning_threshold = timeout * 0.8  # Warn at 80% of timeout
-    #     warning_issued = False
-        
-    #     while os.path.exists(self.cmdfile):
-    #         elapsed_time = time.time() - start_time
-    #         if elapsed_time > timeout:
-    #             if self.comm is None or self.comm.Get_rank() == 0:
-    #                 print(f"[ICESEE::Launcher] Error: Command execution timed out after {timeout} seconds.")
-    #             return False
-            
-    #         # Issue warning if approaching timeout
-    #         if not warning_issued and elapsed_time > warning_threshold:
-    #             if self.comm is None or self.comm.Get_rank() == 0:
-    #                 print(f"[ICESEE::Launcher] Warning: Command has been running for {elapsed_time:.1f}s, approaching timeout of {timeout}s.")
-    #             warning_issued = True
-            
-    #         # Print periodic status if verbose
-    #         if self.verbose and (self.comm is None or self.comm.Get_rank() == 0) and (time.time() - last_verbose_time) >= verbose_interval:
-    #             print(f"[ICESEE::Launcher] Waiting for command to be processed... ({elapsed_time:.1f}s elapsed)")
-    #             last_verbose_time = time.time()
-            
-    #         time.sleep(sleep_time)
-    #         # Gradually increase sleep time to reduce CPU usage
-    #         sleep_time = min(sleep_time + (elapsed_time / 20.0), max_sleep)
-    #         if sleep_time == max_sleep and not warning_issued:
-    #             if self.comm is None or self.comm.Get_rank() == 0:
-    #                 print("[ICESEE::Launcher] Warning: Slow command processing detected.")
-        
-    #     if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
-    #         print("[ICESEE::Launcher] Command processed successfully.")
-    #     return True
 
     def send_command(self, command, timeout=12960000*1000):
         """Send a command to MATLAB and wait for it to be processed.
@@ -623,53 +572,7 @@ def subprocess_cmd_run(issm_cmd, nprocs: int, verbose: bool = True):
         print(f"❌ MATLAB exited with error code {e.returncode}")
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
-        
-# def subprocess_cmd_run(issm_cmd, nprocs: int, verbose: bool = True):
-#     """
-#     Run ISSM using a MATLAB script via subprocess.Popen.
 
-#     Parameters:
-#     - issm_cmd: Full command string to run ISSM in MATLAB
-#     - nprocs: Number of processors to pass to runme.m (for display/debug)
-#     - verbose: If True, print stdout (trimmed) and stderr (only if non-empty)
-#     """
-#     try:
-#         process = subprocess.Popen(
-#             issm_cmd,
-#             shell=True,
-#             stdout=subprocess.PIPE,
-#             stderr=subprocess.PIPE,
-#             universal_newlines=True
-#         )
-
-#         stdout, stderr = process.communicate()
-
-#         if verbose:
-#             stdout_lines = stdout.splitlines()
-#             trimmed_stdout = "\n".join(stdout_lines[9:])  # Skip banner
-#             print(f"\n[ICESEE] ➤ Running ISSM with {nprocs} processors")
-#             print("------ ICESEE ⇆ ISSM ------")
-#             print(trimmed_stdout.strip())
-
-#             if stderr.strip():  # Only print stderr if there's content
-#                 print("------ ICESEE ⇆ ISSM ------")
-#                 print(stderr.strip())
-
-#         if process.returncode != 0:
-#             # raise subprocess.CalledProcessError(
-#             #     process.returncode, issm_cmd, output=stdout, stderr=stderr
-#             # )
-#             raise subprocess.CalledProcessError(process.returncode, issm_cmd)
-
-#     except FileNotFoundError:
-#         print("❌ Error: MATLAB not found in PATH.")
-#     except subprocess.CalledProcessError as e:
-#         print(f"❌ MATLAB exited with error code {e.returncode}")
-#         if e.stderr.strip():
-#             print("------ MATLAB STDERR ------")
-#             print(e.stderr.strip())
-#     except Exception as e:
-#         print(f"❌ Unexpected error: {e}")
         
 #  --- Add ISSM_DIR to sys.path ---
 def add_issm_dir_to_sys_path(issm_dir=None):
@@ -693,8 +596,21 @@ def add_issm_dir_to_sys_path(issm_dir=None):
     if not os.path.isdir(issm_dir):
         raise FileNotFoundError(f"The ISSM_DIR directory does not exist: {issm_dir}")
 
-    for root, dirs, _ in os.walk(issm_dir):
-        sys.path.insert(0, root)
+    # for root, dirs, _ in os.walk(issm_dir):
+    #     sys.path.insert(0, root)
+
+    candidate_dirs = [
+        issm_dir,
+        os.path.join(issm_dir, "bin"),
+        os.path.join(issm_dir, "lib"),
+        # os.path.join(issm_dir, "execution"),
+        # os.path.join(issm_dir, "examples"),
+        # os.path.join(issm_dir, "src"),
+    ]
+
+    for path in candidate_dirs:
+        if os.path.isdir(path) and path not in sys.path:
+            sys.path.insert(0, path)
 
     # print(f"[ICESEE] Added ISSM directory and subdirectories from path: {issm_dir}")
 
@@ -949,70 +865,6 @@ def setup_reference_data(reference_data_dir, reference_data, use_reference_data,
 
     comm.Barrier()  # Synchronize all ranks
     return rank_data_dir, rank_data_file
-
-
-# def setup_reference_data(reference_data_dir, reference_data, use_reference_data=True):
-#     """
-#     Create ensemble directories with hard-linked reference data file for read-only access.
-    
-#     Parameters:
-#     - reference_data_dir: Directory containing the reference data file.
-#     - reference_data: Name of the reference data file.
-#     - use_reference_data: Flag to enable/disable reference data setup.
-    
-#     Returns:
-#     - rank_data_dir: Path to the rank's ensemble directory (e.g., './Models/ens_id_X').
-#     - rank_data_file: Path to the rank's reference data file.
-#     """
-#     from mpi4py import MPI
-#     import os
-#     import shutil
-
-#     comm = MPI.COMM_WORLD
-#     size = comm.Get_size()
-#     rank = comm.Get_rank()
-
-#     initial_data = os.path.abspath(os.path.join(reference_data_dir, reference_data))
-#     rank_data_dir = os.path.abspath(f'./Models/ens_id_{rank}')
-#     rank_data_file = os.path.join(rank_data_dir, reference_data)
-
-#     if use_reference_data and rank == 0:
-#         # Verify reference data exists
-#         if not os.path.isfile(initial_data):
-#             raise FileNotFoundError(f"[Rank {rank}] Reference data {initial_data} not found")
-
-#         #  only copy data to ens_id_0
-#         rank_data_dir = os.path.abspath(f'./Models/ens_id_{rank}')
-#         link_path = os.path.join(rank_data_dir, reference_data)
-#         os.makedirs(rank_data_dir, exist_ok=True)
-
-#         # Skip copy if destination exists and is identical
-#         if os.path.exists(link_path):
-#             if os.path.samefile(initial_data, link_path):
-#                 print(f"Skipping copy: {initial_data} and {link_path} are the same file.")
-#             else:
-#                 print(f"Destination {link_path} exists but is different. Overwriting.")
-#                 try:
-#                     shutil.copy2(initial_data, link_path)
-#                 except (OSError, PermissionError) as e:
-#                     try:
-#                         shutil.copy(initial_data, link_path)
-#                     except OSError as e:
-#                         raise RuntimeError(f"[Rank {rank}] Failed to copy {link_path} -> {initial_data}: {e}")
-#         else:
-#             # Destination does not exist, perform copy
-#             try:
-#                 shutil.copy2(initial_data, link_path)
-#             except (OSError, PermissionError) as e:
-#                 try:
-#                     shutil.copy(initial_data, link_path)
-#                 except OSError as e:
-#                     raise RuntimeError(f"[Rank {rank}] Failed to copy {link_path} -> {initial_data}: {e}")
-            
-#     comm.Barrier()  # Synchronize all ranks after copying
-#     return rank_data_dir, rank_data_file
-
-
 
 
 # make data available in all ensemble directories

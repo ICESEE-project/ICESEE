@@ -45,7 +45,9 @@
 | `friction_idx` | YAML configuration parameter for friction idx | int | 5 | No | None | YAML |
 | `generate_nurged_state` | YAML configuration parameter for generate nurged state | bool | True | No | None | YAML |
 | `generate_synthetic_obs` | YAML configuration parameter for generate synthetic obs | bool | True | No | None | YAML |
+| `generate_synthetic_obs_only` | flag to only generate synthetic observations without running the assimilation | bool | False | No | None | YAML |
 | `generate_true_state` | YAML configuration parameter for generate true state | bool | True | No | None | YAML |
+| `generate_true_wrong_state_only` | flag to only generate true and wrong state without running the assimilation | bool | False | No | None | YAML |
 | `global_analysis` | YAML configuration parameter for global analysis | bool | True | No | None | YAML |
 | `h5_file_chunk_size` | YAML configuration parameter for h5 file chunk size | int | 1000 | No | None | YAML |
 | `h5_file_compression` | e.g., 'gzip' or 'lzf' or 'szip' or None | NoneType | None | No | None | YAML |
@@ -61,6 +63,7 @@
 | `length_scale` | YAML configuration parameter for length scale | list | [] | No | None | YAML |
 | `local_analysis` | YAML configuration parameter for local analysis | bool | False | No | None | YAML |
 | `localization_flag` | --- Ensemble Parameters --- | Unknown | Computed | No | None | Dictionary |
+| `m_obs` | Parameter for m obs in dictionary | Unknown | Computed(num_observations) | No | None | Dictionary |
 | `mode` | Parameter for mode in dictionary | Unknown | Computed(execution_mode) | No | None | Dictionary |
 | `model_name` | --- Ensemble Parameters --- | Unknown | Computed | No | None | Dictionary |
 | `model_nprocs` | Parameter for model nprocs in dictionary | Unknown | Computed | No | None | Dictionary |
@@ -89,6 +92,7 @@
 | `rel_vel_weight` | weight for relative velocity in inversion | float | 1.0 | No | None | YAML |
 | `restart_enabled` | YAML configuration parameter for restart enabled | bool | True | No | None | YAML |
 | `run_flag` | Controls run flag behavior in script logic | bool | True | No | None | Internal |
+| `scalar_inputs` | list of scalar input variables | list | [] | No | None | YAML |
 | `sequential_ensemble_initialization` | YAML configuration parameter for sequential ensemble initialization | bool | False | No | None | YAML |
 | `sequential_run` | Parameter for sequential run in dictionary | bool | True | No | None | Dictionary |
 | `serial_file_creation` | --- Ensemble Parameters --- | Unknown | Computed | No | None | Dictionary |
@@ -101,6 +105,7 @@
 | `total_state_param_vars` | Parameter for total state param vars in dictionary | Unknown | Unknown | No | None | Dictionary |
 | `use_ensemble_pertubations` | YAML configuration parameter for use ensemble pertubations | bool | True | No | None | YAML |
 | `use_random_fields` | --- Ensemble Parameters --- | Unknown | Computed | No | None | Dictionary |
+| `var_nd` | variable state dimension for each state variable in vec_inputs. Used when state variables have different dimensions | NoneType | None | No | None | YAML |
 | `vec_inputs` | Parameter for vec inputs in dictionary | Unknown | Unknown | No | None | Dictionary |
 | `vel_idx` | YAML configuration parameter for vel idx | int | 2 | No | None | YAML |
 | `verbose` | YAML configuration parameter for verbose | bool | False | No | None | YAML |

@@ -12,6 +12,10 @@ import shutil
 import socket
 import numpy as np
 import scipy.io as sio
+from pathlib import Path
+
+# --- Set up paths ---
+os.chdir(Path(__file__).resolve().parent)
 
 # --- ICESEE imports ---
 # from ICESEE.config._utility_imports import *
@@ -131,6 +135,7 @@ os.chdir(icesee_cwd)
 
 # --- run the model ---
 kwargs.update({'params': params, 
+               'nd': params.get('nd'),
                'server': server})
 
 try:
