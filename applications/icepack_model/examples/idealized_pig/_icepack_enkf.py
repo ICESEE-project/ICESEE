@@ -42,16 +42,14 @@ def generate_true_state(**kwargs):
     h0 = kwargs.get('h0', None)
     u0 = kwargs.get('u', None)
     s0 = kwargs.get('s0', None)
+    floating = kwargs.get('floating', None)
+    grounded = kwargs.get('grounded', None)
     solver = kwargs.get('solver', None)
     statevec_true = kwargs["statevec_true"]
-    w2i     = float(kwargs.get('water_to_ice', 1.0))    # ratio of the density of water to ice
     save_steps = kwargs.get('save_steps', None)
 
     # # call the icesee_get_index function to get the indices of the state variables
     vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
-
-    # ---- net accumulation used by prognostic step ------
-    a_net = icepack.interpolate((smb - basal_melt_field) * w2i, Q)
 
     
     # # --- fetch the state variables ---
@@ -61,33 +59,101 @@ def generate_true_state(**kwargs):
     statevec_true[indx_map["s"],0] = s0.dat.data_ro
 
 
-    # # intialize the accumulation rate if joint estimation is enabled at the initial time step
+    # # add BMR field to EnKF state vector if joint estimation is enabled 
     if kwargs["joint_estimation"]:
         statevec_true[indx_map["basal_melt_field"],0] = basal_melt_field.dat.data_ro
 
-    #h = h0.copy(deepcopy=True)
-    #u = u0.copy(deepcopy=True) 
     h = h0.copy(deepcopy=True)
     u = u0.copy(deepcopy=True)
     s = s0.copy(deepcopy=True)
 
     # --- extract a profile of the flowline at the initial state ---
-    h_profiles, s_profiles, profile_points, distances, bed_values = initial_flowline_profile(kwargs)
+    h_profiles, s_profiles, valid_points, distances, bed_values = initial_flowline_profile(kwargs)
 
-    # --- steps at which to extract flowline profiles during the simulation -- 
-    flowline_profile_steps = {t/dt for t in kwargs["save_steps"]}
+    # --- step numbers at which to extract flowline profiles during the simulation -- 
+    flowline_profile_steps = [t/dt for t in kwargs["save_steps"]]
+    print(flowline_profile_steps)
 
     hs_files = f"_modelrun_datasets/hs_profiles_true"
     
     with h5py.File(hs_files, "w") as F:
-        dataset_h = F.create_dataset("h_profiles", (len(profile_points), len(save_steps)), dtype = "f8")
-        dataset_s = F.create_dataset("s_profiles", (len(profile_points), len(save_steps)), dtype = "f8")
+        dataset_h = F.create_dataset("h_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8")
+        dataset_s = F.create_dataset("s_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8")
+        dataset_s[:,0] = s_profiles # save the initial surface elevation profile
+        dataset_h[:,0] = h_profiles # save the initial thickness profile
+        dataset_bed = F.create_dataset("bed_values", data = bed_values)
+        dataset_distances = F.create_dataset("distances", data = distances)
+
     
-    for k in range(kwargs['nt']):
+   
+    kk = 0
+    
+    # loop through each step (k = 0 to k = 100)
+    for k in range(nt + 1):
+
+        #step = k * dt
+        step = k
         
+
+        ### Conditionals for depth-dependent basal melt rate function
+        ### Select forcing scenario between 1935 - 2017 
+        if step < (6/dt):
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1935 - 1941
+   
+        elif (6 / dt) <= step < (15/dt):
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1941 - 1950
+    
+        elif (15 / dt) <= step < (18/dt):
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1950 - 1953
+    
+        elif (18/ dt) <= step < (20/dt):
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1953 - 1955
+        
+        elif (20/ dt) <= step < (25/dt):
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1955 - 1960
+        
+        elif (25/ dt) <= step < (27/dt):
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1960 - 1962
+        
+        elif (27/ dt) <= step < (31/dt):
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1962 - 1966
+        
+        elif (31/ dt) <= step < (40/dt):
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1966 - 1975
+        
+        elif (40/ dt) <= step < (48/dt):
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1975 - 1983
+        
+        elif (48/dt) <= step < (50/dt):
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1983 - 1985
+        
+        elif (50/ dt) <= step < (59/dt):
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1985 - 1994
+        
+        elif (59/ dt) <= step < (64/dt):
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1994 - 2000
+        
+        elif (64/ dt) <= step < (69/dt):
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 2000 - 2005
+        
+        elif (69/ dt) <= step < (76/dt):
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 2005 - 2012
+        
+        elif (76/ dt) <= step:
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 2012 - 2017
+        
+        print(f"maximum_bmr=",{melt_max})
+        #print("basal melt field=",{np.mean(basal_melt_field.dat.data_ro)})
+        #print("floating", {np.mean(floating.dat.data_ro)})
+        #print("thickness", {np.mean(h.dat.data_ro)})
+        #print("sfc elevation", {np.mean(s.dat.data_ro)})
+        # print(f"\ninside true state s_mean = {np.mean(s.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
+        # exit(1)
+
+
         # call the ice stream model to update the state variables
-        h, u, s = Icepack(solver, h, u, a_net, bed, dt, h0, kwargs)
-        #print("\ninside true state\n")
+        h, u, s = Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, kwargs)
+        #print(f"\ninside true state s_mean = {np.mean(s.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
         #exit(0)
 
         statevec_true[indx_map["h"],k+1] = h.dat.data_ro
@@ -99,21 +165,26 @@ def generate_true_state(**kwargs):
         if kwargs["joint_estimation"]:
             statevec_true[indx_map["basal_melt_field"],k+1] = basal_melt_field.dat.data_ro
         
-        if k in flowline_profile_steps:
-            
-            h_profiles, s_profiles = flowline_profile(kwargs, h_profiles, s_profiles, profile_points)
-            
-            
-            with h5py.File(hs_files, "a") as F:
-                F["h_profiles"] = h_profiles
-                F["s_profiles"] = s_profiles
+        #print(f"t = {step}, k = {k}, kk = {kk}, flowline_profile_steps[{kk}] = {flowline_profile_steps[kk]}, nt = {nt},\n")
+        #exit(0)
+        if (kk <= len(flowline_profile_steps)-1):
+            if (k == int(flowline_profile_steps[kk])):
+                
+                h_profiles, s_profiles = flowline_profile(h, s, valid_points)
+                print(s_profiles.shape,h_profiles.shape,"\n")
+                
+                
+                with h5py.File(hs_files, "a") as F:
+                    F["h_profiles"][:,kk] = h_profiles
+                    F["s_profiles"][:,kk] = s_profiles
+                
+                kk += 1
 
-        updated_state = {} 
-        
-        for key in kwargs["vec_inputs"]:
-            updated_state[key] = statevec_true[indx_map[key], :]
+    updated_state = {}      
+    for key in kwargs["vec_inputs"]:
+        updated_state[key] = statevec_true[indx_map[key], :]
 
-        return updated_state
+    return updated_state
 
 
 # --- initialize the ensemble members ---

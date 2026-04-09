@@ -114,7 +114,7 @@ def initializeRun(kwargs, forward_solver, mesh, Q, V):
 
     """ define smb and melt """
     smb = readSMB(kwargs,Q)
-
+    
     return h, h0, s, s0, u, bed, zF, grounded, floating, A0, beta0, smb
 
 
@@ -229,7 +229,7 @@ def BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control'):
 
 def checkThickness(kwargs):
     Q = kwargs["Q"] 
-    h = kwargs["h0"]
+    h = kwargs["h"]
     hthresh = kwargs["hThresh"]
     h = icepack.interpolate(firedrake.max_value(hthresh, h), Q)
 
@@ -336,29 +336,27 @@ def initial_flowline_profile(kwargs):
     h_profiles.append(thickness_values)
     s_profiles.append(surface_values)
     
-    return(h_profiles, s_profiles, profile_points, distances, bed_values)
+    return(h_profiles, s_profiles, valid_points, distances, bed_values)
 
 
 
 
 # --- Visualizing the model with a flowline profile DURING THE SIMULATION  ---
-def flowline_profile(kwargs, h_profiles, s_profiles, profile_points): 
+def flowline_profile(h, s, valid_points): 
     
     # -- arrays to save the flowline profile outputs at a particular time step -- 
     surface_values, thickness_values = [], []
     
     # -- sample values from the flowline points -- 
-    for p in profile_points:
+    for p in valid_points:
         try:
-            surface_values.append(kwargs["s"].at(tuple(p)))
-            thickness_values.append(kwargs["h"].at(tuple(p)))
+            surface_values.append(s.at(tuple(p)))
+            thickness_values.append(h.at(tuple(p)))
         except firedrake.PointNotInDomainError:
             pass  # Ignore points that are outside the mesh
 
-    h_profiles.append(thickness_values)
-    s_profiles.append(surface_values)
     
-    return(h_profiles, s_profiles)
+    return np.array(thickness_values), np.array(surface_values)
 
 
 #########################################################################################
@@ -366,20 +364,26 @@ def flowline_profile(kwargs, h_profiles, s_profiles, profile_points):
 
 
 # --- icepack model ---
-def Icepack(solver, h, u, a, b, dt, h0, kwargs):
+#def Icepack(solver, h, u, a, bed, dt, h0, kwargs):
+def Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, kwargs):
     """inputs: solver - icepack solver
                 h - ice thickness
                 u - ice velocity
-                a - net ice accumulation
+                smb - ice accumulation field
+                basal_melt_field - basal melt rate 
                 b - ice bed
                 dt - time step
                 h0 - ice thickness inflow
                 kwargs - additional arguments for the model
         outputs: h - updated ice thickness
                  u - updated ice velocity
+                 s - updated ice surface elevation
     """
-    #h = kwargs["h"]
-    #u = kwargs["u"]
+    w2i     = float(kwargs.get('water_to_ice', 1.0))  
+
+     # ---- net accumulation used by prognostic step ------
+    a = icepack.interpolate((smb - basal_melt_field) * w2i, kwargs["Q"])
+
 
     h = solver.prognostic_solve(
         dt = dt,
@@ -388,10 +392,14 @@ def Icepack(solver, h, u, a, b, dt, h0, kwargs):
         accumulation = a,
         thickness_inflow = h0,
     )
+    
+    print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}, Mean_net_accumlation_field:{np.mean(a.dat.data_ro)}\n")
+    #exit(1)
 
+    kwargs["h"] = h
     h = checkThickness(kwargs)
 
-    s = icepack.compute_surface(thickness = h, bed = b)
+    s = icepack.compute_surface(thickness = h, bed = bed)
 
     # recompute flotation height 
     zF = mf.flotationHeight(kwargs["bed"], kwargs["Q"])
