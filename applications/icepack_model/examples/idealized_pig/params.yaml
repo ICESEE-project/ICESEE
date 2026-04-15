@@ -27,11 +27,12 @@ enkf-parameters:
   num_state_vars: 4      # number of state variables  [h,u,v]
   num_param_vars: 1       # number of parameter variables [bmr]
   vec_inputs: ['h','u','v', 's', 'basal_melt_field']
+  #vec_inputs: ['h','u','v', 's']
   observed_params: ['s']  # surface elevation
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state:    1  # Generate true state for synthetic observations
-  generate_nurged_state:  0  # Generate nudged state for synthetic observations
+  generate_true_state:    0  # Generate true state for synthetic observations
+  generate_nurged_state:  1  # Generate nudged state for synthetic observations
   use_ensemble_pertubations: 1 # Use ensemble perturbations for ensemble state
   sequential_ensemble_initialization: 1  # Sequential ensemble initialization (True for sequential, False for parallel)
 

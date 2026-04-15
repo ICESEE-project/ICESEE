@@ -74,7 +74,7 @@ def initializeMesh(**kwargs):
     
     initFile = kwargs["initFile"]
     meshFile = kwargs["meshFile"]
-    meshI = mf.getMeshFromCheckPoint(initFile)
+    meshI = mf.getMeshFromCheckPoint(initFile,kwargs)
     mesh, Q, V, meshOpts = \
         mf.setupMesh(meshFile, degree=1,
                      meshOversample=2,
@@ -427,6 +427,7 @@ def Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, kwargs):
 
 # --- Run model for the icepack model ---
 def run_model(ensemble, **kwargs):
+    
     """des: icepack model function
         inputs: ensemble - current state of the model
                 **kwargs - additional arguments for the model
@@ -434,22 +435,25 @@ def run_model(ensemble, **kwargs):
     """
 
     # unpack the **kwargs
-    k       = kwargs.get('k')                           # step number in the time loop
-    smb     = kwargs.get('smb', None)                   # accumulation rate field
+    k       = kwargs.get('k')                               # step number in the time loop
+    smb     = kwargs.get('smb', None)                       # accumulation rate field
     basal_melt_field = kwargs.get('basal_melt_field', None) # basal melt rate field
-    bed     = kwargs.get('bed', None)                   # bed topography
-    dt      = kwargs.get('dt', None)                    # time step size 
-    nt = kwargs.get('nt', None)                         # total number of time steps
-    A0      = kwargs.get('A0', None)                    # fluidity parameter
-    beta0   = kwargs.get('beta0', None)                 # basal friction coefficient parameter
-    Q       = kwargs.get('Q', None)                     # scalar function space
-    V       = kwargs.get('V', None)                     # vector function space
-    h0      = kwargs.get('h0', None)                    # initial thickness
-    u0 = kwargs.get('u', None)                          # initial velocity 
-    s0      = kwargs.get('s0', None)                    # initial elevation 
+    bed     = kwargs.get('bed', None)                       # bed topography
+    dt      = kwargs.get('dt', None)                        # time step size 
+    nt = kwargs.get('nt', None)                             # total number of time steps
+    A0      = kwargs.get('A0', None)                        # fluidity parameter
+    beta0   = kwargs.get('beta0', None)                     # basal friction coefficient parameter
+    Q       = kwargs.get('Q', None)                         # scalar function space
+    V       = kwargs.get('V', None)                         # vector function space
+    h      = kwargs.get('h', None)                          # thickness
+    h0      = kwargs.get('h0', None)                        # initial thickness
+    u = kwargs.get('u', None)                               # velocity 
+    s      = kwargs.get('s', None)                          # elevation 
     floating = kwargs.get('floating')
-    solver  = kwargs.get('solver', None)        # flow solver 
-    w2i     = float(kwargs.get('water_to_ice', 1.0))    # ratio of the density of water to ice
+    grounded = kwargs.get('grounded', None)
+    solver  = kwargs.get('solver', None)                    # flow solver 
+    w2i     = float(kwargs.get('water_to_ice', 1.0))        # ratio of the density of water to ice
+    save_steps = kwargs.get('save_steps', None)
 
 
     # call the icesee_get_index function to get the indices of the state variables
@@ -458,8 +462,8 @@ def run_model(ensemble, **kwargs):
     # calculate the time step using ICESEE's time-stepping index (k) and the step size (dt)
     step = k * dt
 
-    # --- steps at which to extract flowline profiles during the simulation -- 
-    flowline_profile_steps = {t/dt for t in kwargs["save_steps"]}
+    # -- steps at which to save profiles of the ensemble --
+    flowline_profile_steps = [t/dt for t in kwargs["save_steps"]]
 
     h = ensemble[indx_map["h"]]
     s = ensemble[indx_map["s"]]
@@ -526,10 +530,6 @@ def run_model(ensemble, **kwargs):
         if basal_melt is None:
             raise ValueError("basal_melt_field missing in kwargs when joint_estimation=False")
    
-   
-   
-    # ---- net accumulation used by prognostic step ------
-    a_net = icepack.interpolate((smb - basal_melt_field) * w2i, Q)
 
 
     # create firedrake functions from the ensemble members
@@ -544,7 +544,7 @@ def run_model(ensemble, **kwargs):
     s.dat.data[:] = ensemble[indx_map["s"]]
 
     # call the ice stream model to update the state variables
-    h, u, s = Icepack(kwargs, solver, h, u, a_net, bed, dt, h0)
+    h, u, s = Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, kwargs)
 
     # return a list of the updated state variables
     updated_state = {'h': h.dat.data_ro,
@@ -554,15 +554,46 @@ def run_model(ensemble, **kwargs):
     
     if kwargs["joint_estimation"]:
         updated_state['basal_melt_field'] = bmr_vec
-    
 
+    
     # -- extract the flowline profile at particular steps -- 
-    if step == 0:
-        h_profiles, s_profiles, profile_points, distances, bed_values = initial_flowline_profile(kwargs)
-
     
-    if step in flowline_profile_steps:
-        h_profiles, s_profiles = flowline_profile(kwargs, h_profiles, s_profiles, profile_points)
+    hs_ensemble_files = f"_modelrun_datasets/hs_ensemble_profiles"
+    
+    if step in int(flowline_profile_steps):
+
+        h_profiles, s_profiles = flowline_profile(h, s, valid_points)
+        print(s_profiles.shape, h_profiles.shape,"\n")
+
+        # -- manually saving at the time steps but need to find an efficient way to determine this --
+        if step == 20:
+            with h5py.File(hs_ensemble_files, "a") as F:
+                F["h_profiles"][:,1] = h_profiles
+                F["s_profiles"][:,1] = s_profiles
+        
+        if step == 40:
+            with h5py.File(hs_ensemble_files, "a") as F:
+                F["h_profiles"][:,2] = h_profiles
+                F["s_profiles"][:,2] = s_profiles
+        
+        if step == 80:
+            with h5py.File(hs_ensemble_files, "a") as F:
+                F["h_profiles"][:,3] = h_profiles
+                F["s_profiles"][:,3] = s_profiles
+        
+        # if (kk <= len(flowline_profile_steps)-1):
+        #     if (k == int(flowline_profile_steps[kk])):
+                
+        #         h_profiles, s_profiles = flowline_profile(h, s, valid_points)
+        #         print(s_profiles.shape,h_profiles.shape,"\n")
+                
+                
+        #         with h5py.File(hs_files, "a") as F:
+        #             F["h_profiles"][:,kk] = h_profiles
+        #             F["s_profiles"][:,kk] = s_profiles
+                
+        #         kk += 1
+
 
 
     return updated_state

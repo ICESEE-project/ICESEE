@@ -89,7 +89,7 @@ def generate_true_state(**kwargs):
     kk = 0
     
     # loop through each step (k = 0 to k = 100)
-    for k in range(nt + 1):
+    for k in range(nt):
 
         #step = k * dt
         step = k
@@ -153,20 +153,22 @@ def generate_true_state(**kwargs):
 
         # call the ice stream model to update the state variables
         h, u, s = Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, kwargs)
-        #print(f"\ninside true state s_mean = {np.mean(s.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
-        #exit(0)
+        
 
         statevec_true[indx_map["h"],k+1] = h.dat.data_ro
         statevec_true[indx_map["u"],k+1] = u.dat.data_ro[:,0]
         statevec_true[indx_map["v"],k+1] = u.dat.data_ro[:,1]
         statevec_true[indx_map["s"],k+1] = s.dat.data_ro
 
+
+
         # update the basal melt rate if joint estimation is enabled
         if kwargs["joint_estimation"]:
             statevec_true[indx_map["basal_melt_field"],k+1] = basal_melt_field.dat.data_ro
-        
-        #print(f"t = {step}, k = {k}, kk = {kk}, flowline_profile_steps[{kk}] = {flowline_profile_steps[kk]}, nt = {nt},\n")
-        #exit(0)
+       
+        for key in kwargs["vec_inputs"]:
+            print(f"index[{key}] = {indx_map[key]} size of [{key}] = {len(indx_map[key])}")
+       
         if (kk <= len(flowline_profile_steps)-1):
             if (k == int(flowline_profile_steps[kk])):
                 
@@ -192,40 +194,72 @@ def initialize_ensemble(ens, **kwargs):
     
     """initialize the ensemble members"""
 
-    # unpack the **kwargs
-    smb  = kwargs.get('smb', None)
+    ### unpack the **kwargs
+    # smb  = kwargs.get('smb', None)
+    # basal_melt_field = kwargs.get('basal_melt_field', None)
+    # wrong_basal_melt_field = kwargs.get('"wrong_basal_melt_field"', None)
+    # bed  = kwargs.get('bed', None)
+    # dt = kwargs.get('dt', None)
+    # nt = kwargs.get('nt', None)
+    # A0  = kwargs.get('A0', None)
+    # beta0  = kwargs.get('beta0', None)
+    # Q  = kwargs.get('Q', None)
+    # V  = kwargs.get('V', None)
+    # h0 = kwargs.get('h0', None)
+    # u0 = kwargs.get('u', None)
+    # solver = kwargs.get('solver', None)
+
+    ### UNPACK THE **kwargs DICTIONARY
+    #smb  = kwargs.get('smb', None)
     basal_melt_field = kwargs.get('basal_melt_field', None)
-    wrong_basal_melt_field = kwargs.get('"wrong_basal_melt_field"', None)
     bed  = kwargs.get('bed', None)
-    dt = kwargs.get('dt', None)
-    nt = kwargs.get('nt', None)
-    A0  = kwargs.get('A0', None)
-    beta0  = kwargs.get('beta0', None)
-    Q  = kwargs.get('Q', None)
-    V  = kwargs.get('V', None)
+    #dt = kwargs.get('dt', None)
+    #nt = kwargs.get('nt', None)
+    #A0  = kwargs.get('A0', None)
+    #beta0  = kwargs.get('beta0', None)
+    #Q  = kwargs.get('Q', None)
+    #V  = kwargs.get('V', None)
     h0 = kwargs.get('h0', None)
     u0 = kwargs.get('u', None)
-    solver = kwargs.get('solver', None)
+    s0 = kwargs.get('s0', None)
+    #floating = kwargs.get('floating', None)
+    #grounded = kwargs.get('grounded', None)
+    #solver = kwargs.get('solver', None)
+    save_steps = kwargs.get('save_steps', None)
+
     
-
-
-    # initialize the ensemble members
+    ### INITIALIZE THE ENSEMBLE MEMBERS
     basal_melt_field = basal_melt_field.dat.data_ro
     basal_melt_field_nudged = basal_melt_field + kwargs["wrong_basal_melt_field"]
     
-    h = checkThickness(kwargs) 
-    s = icepack.compute_surface(thickness=h, bed=bed)
+    ### I DON'T THINK I NEED THESE???
+    #h = checkThickness(kwargs) 
+    #s = icepack.compute_surface(thickness=h, bed=bed)
 
-    initialized_state = {'h': h.dat.data_ro,
+
+
+    initialized_state = {'h': h0.dat.data_ro,
                          'u': u0.dat.data_ro[:,0], 
                          'v': u0.dat.data_ro[:,1],
-                         's': s.dat.data_ro}
+                         's': s0.dat.data_ro}
     
     # -- for joint estimation --
     if kwargs["joint_estimation"]:
         initialized_state['basal_melt_field'] =  basal_melt_field_nudged
+
+    # --- create file to save ensemble flowline profiles ---
+    h_profiles, s_profiles, valid_points, distances, bed_values = initial_flowline_profile(kwargs)
+    hs_ensemble_files = f"_modelrun_datasets/hs_ensemble_profiles"
+
+    with h5py.File(hs_ensemble_files, "w") as F:
+        dataset_h_ensemble = F.create_dataset("h_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8")
+        dataset_s_ensemble = F.create_dataset("s_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8")
+        dataset_s_ensemble[:,0] = s_profiles # save the initial surface elevation profile
+        dataset_h_ensemble[:,0] = h_profiles # save the initial thickness profile
+        dataset_bed_ensemble = F.create_dataset("bed_values", data = bed_values)
+        dataset_distances_ensemble = F.create_dataset("distances", data = distances)
        
-    return initialized_state
+    return initialized_state, valid_points
 
 # --- generate the nurged state ---
 def generate_nurged_state(**kwargs):
