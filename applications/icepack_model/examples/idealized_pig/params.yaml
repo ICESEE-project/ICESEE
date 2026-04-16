@@ -1,7 +1,14 @@
+physical-parameters:
+  # Domain parameters
+  Lx: 50e2        # (m)
+  Ly: 12e2        # (m)
+  nx: 12         # number of elements in the x-direction
+  ny: 8      # number of elements in the y-direction
+
 modeling-parameters:
   # Model parameters
   num_years: 5         # number of years to run the model
-  timesteps_per_year: 0.05   # number of timesteps per year
+  timesteps_per_year: 0.2   # number of timesteps per year
   initFile: '/Users/jcruz89/Downloads/Research/PIG_to_SS_Outputs/extended_beta1000yrs.h5' # input file
   paramsFile: '/Users/jcruz89/Downloads/Research/PIG_to_SS_Outputs/extended_beta1000yrs.yaml' # parameter file
   meshFile: '/Users/jcruz89/Downloads/Research/JoughinShapero_PIGCode/meshes/PigFull2017GeomFull.exp' # mesh file
@@ -27,12 +34,12 @@ enkf-parameters:
   num_state_vars: 4      # number of state variables  [h,u,v]
   num_param_vars: 1       # number of parameter variables [bmr]
   vec_inputs: ['h','u','v', 's', 'basal_melt_field']
-  #vec_inputs: ['h','u','v', 's']
   observed_params: ['s']  # surface elevation
 
-  generate_synthetic_obs: 1  # Generate synthetic observations for testing
+  generate_synthetic_obs: 0  # Generate synthetic observations for testing
   generate_true_state:    0  # Generate true state for synthetic observations
-  generate_nurged_state:  1  # Generate nudged state for synthetic observations
+  generate_nurged_state:  0  # Generate nudged state for synthetic observations
+  initialize_ensemble: 1
   use_ensemble_pertubations: 1 # Use ensemble perturbations for ensemble state
   sequential_ensemble_initialization: 1  # Sequential ensemble initialization (True for sequential, False for parallel)
 

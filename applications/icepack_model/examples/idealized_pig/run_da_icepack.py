@@ -73,8 +73,6 @@ h, h0, s, s0, u, bed, zF, grounded, floating, A0, beta0, smb, basal_melt_field, 
 
 params["nd"] = h0.dat.data.size * params["total_state_param_vars"] # get the size of the entire vector
 
-### DEBUGGING ###
-print(f"Checking nd data type:,{type(params["nd"])}")
 
 kwargs.update({
 
@@ -97,6 +95,10 @@ kwargs.update({
     "wrong_basal_melt_field": float(enkf_params["wrong_basal_melt_field"]), 
     "solver": forward_solver,
     "nd": params["nd"],
+    "Lx":float(physical_params["Lx"]), 
+    "Ly":float(physical_params["Ly"]), 
+    "nx":float(physical_params["nx"]), 
+    "ny":float(physical_params["ny"]),
  
 })
 
