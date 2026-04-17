@@ -1,5 +1,10 @@
 physical-parameters:
   # Domain parameters
+  # Lx: 761180       # (m)
+  # Ly: 26000        # (m)
+  # nx: 600          # number of elements in the x-direction
+  # ny: 200          # number of elements in the y-direction
+
   Lx: 50e2        # (m)
   Ly: 12e2        # (m)
   nx: 12         # number of elements in the x-direction
@@ -41,7 +46,7 @@ enkf-parameters:
   generate_nurged_state:  0  # Generate nudged state for synthetic observations
   initialize_ensemble: 1
   use_ensemble_pertubations: 1 # Use ensemble perturbations for ensemble state
-  sequential_ensemble_initialization: 1  # Sequential ensemble initialization (True for sequential, False for parallel)
+  sequential_ensemble_initialization: 0  # Sequential ensemble initialization (True for sequential, False for parallel)
 
   # Statistical parameters (based on the number of state variables)
   sig_model: [0.1,0.1,0.1,0.1,0.1] # model error standard deviation

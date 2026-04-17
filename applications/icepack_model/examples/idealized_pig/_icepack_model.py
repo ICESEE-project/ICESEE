@@ -538,7 +538,7 @@ def run_model(ensemble, **kwargs):
         basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 2012 - 2017
 
     
-    print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
+    #print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
      
     h, u, s = Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, kwargs)
 
@@ -578,18 +578,23 @@ def run_model(ensemble, **kwargs):
     h_profiles, s_profiles = flowline_profile(h, s, valid_points)
     print(s_profiles.shape, h_profiles.shape,"\n")
 
+    print(f"t[{k}] = {t[k]}")
+
     # -- manually saving at the time steps but need to find an efficient way to determine this --
-    if t[k] == 20:
+    if t[k] == 5:
+        print(f"t[{k}] = {t[k]}")
         with h5py.File(hs_ensemble_files, "a") as F:
             F["h_profiles"][:,1] = h_profiles
             F["s_profiles"][:,1] = s_profiles
     
-    if t[k] == 40:
+    if t[k] == 10:
+        print(f"t[{k}] = {t[k]}")
         with h5py.File(hs_ensemble_files, "a") as F:
             F["h_profiles"][:,2] = h_profiles
             F["s_profiles"][:,2] = s_profiles
     
-    if t[k] == 80:
+    if t[k] == 20:
+        print(f"t[{k}] = {t[k]}")
         with h5py.File(hs_ensemble_files, "a") as F:
             F["h_profiles"][:,3] = h_profiles
             F["s_profiles"][:,3] = s_profiles
