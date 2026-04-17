@@ -344,18 +344,18 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
     else:
         N_size = params["total_state_param_vars"] * hdim
         # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=0)
-        model_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
-        # noise = generate_enkf_field(**model_kwargs)
+        model_kwargs.update({"ii_sig": None, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
 
         if (len(model_kwargs.get("scalar_inputs", [])) > 0) or (model_kwargs.get("var_nd", None) is not None):
-                noise_1 = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                noise_1 = generate_enkf_field(**model_kwargs)
                 ndim = 1 if len(model_kwargs.get("scalar_inputs", [])) > 0 else (model_kwargs["var_nd"][model_kwargs["scalar_inputs"][0]])
-                noise_2 = generate_enkf_field(None, np.sqrt(Lx*Ly), ndim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+                model_kwargs.update({ "noise_dim": ndim})
+                noise_2 = generate_enkf_field(**model_kwargs)
                 # concatenate noise_1 and noise_2 
                 noise = np.concatenate((noise_1, noise_2))[:-1]
 
         else:
-            noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+            noise = generate_enkf_field(**model_kwargs)
 
     for k in range(model_kwargs.get("nt",params["nt"])):
 

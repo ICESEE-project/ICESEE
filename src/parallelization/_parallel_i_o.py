@@ -1034,8 +1034,8 @@ def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, model_kwargs
 
                 # Create and write ensemble mean
                 ens_mean = f.create_dataset('ensemble_mean', (nd, model_kwargs.get('nt', params['nt']) + 1), dtype=dtype)
-                # ens_mean[:, 0] = ensemble_mean
-                ens_mean[:, 0] = full_ensemble[:, 0]
+                ens_mean[:, 0] = ensemble_mean
+                # ens_mean[:, 0] = full_ensemble[:, 0]
 
                 if model_kwargs.get("DEnKF_flag", False):
                     ensemble_mean = np.mean(dset[:, :, 0], axis=1)

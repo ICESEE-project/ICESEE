@@ -20,14 +20,14 @@ colorbar_gap=0.92;
 make_plots       = 0;
 make_multi_plots = 1;   % <-- ON (restored)
 frames_plot      = 0;
-compute_rmse     = 0;
-plotgl           = 0;
+compute_rmse     = 1;
+plotgl           = 1;
 
 % ---------------- time steps ------------------
 % k_array = [0, 20,  60, 80, 89, 130, 330, 499]+1;
 % k_array= [ 0, 20,80, 120, 160, 220, 250, 320, 450]+1;
 % k_array = [0, 20, 80, 120, 160, 240, 360, 499] +1;
-k_array = [30, 70,100, 120, 180, 249]+1;
+k_array = [30, 70,100, 120, 180, 245]+1;
 dt      = 0.2;
 
 % ---------------- Load essentials --------------
@@ -887,6 +887,10 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
             md_true, md_nurged, md_ens, md);
         ens_field = get_nested_field(md_ens_k, field);
         true_field = get_nested_field(md_true_k, field);
+        if contains(field,'friction.coefficient')
+            floating = md_ens_k.mask.ocean_levelset < 0;
+            ens_field(floating) = true_field(floating);
+        end
         % if contains(field,'geometry.bed')
             % diff_k = relative_error(ens_field, true_field);
             diff_k = signed_log_relerr(ens_field, true_field);
@@ -895,7 +899,7 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
             % diff_k = ens_field - true_field;
         % end
         % diff_k = get_nested_field(md_ens_k, field) - get_nested_field(md_true_k, field);
-
+        
         % maxAbs = max(abs(diff_k(:)));
         maxAbs_global = max(maxAbs_global, max(abs(diff_k(:))));
         maxAbs=maxAbs_global;
