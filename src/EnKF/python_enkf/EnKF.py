@@ -103,8 +103,8 @@ class EnsembleKalmanFilter:
                     if ii <=params["num_state_vars"]:
                         for jj, key in enumerate(model_kwargs['vec_inputs']):
                             if ii == jj:
-                                model_kwargs.update({"ii_sig": ii, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
-                                W = generate_enkf_field(ii,np.sqrt(Lx*Ly), len(indx_map[key]), params["total_state_param_vars"], rh=len_scale, verbose=False)
+                                model_kwargs.update({"ii_sig": ii, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": len(indx_map[key]), "hdim":hdim, "num_vars":params["total_state_param_vars"]})
+                                W = generate_enkf_field(**model_kwargs)
                                 noise_ = alpha*noise[indx_map[key]] + np.sqrt(1 - alpha**2)*W
                                 q0.append(noise_)
 
@@ -122,12 +122,6 @@ class EnsembleKalmanFilter:
                 noise = np.concatenate(q0, axis=0)
                 model_kwargs.update({"noise": noise})
                 del noise_all, q0, noise_, W
-
-                # q0 = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
-
-                # for key,value in updated_state.items():
-                    # ensemble[indx_map[key],ens] = value + q0[:len(value)]
-                    # ensemble[indx_map[key],ens] = value + np.random.multivariate_normal(np.zeros(len(value)), 0.0*np.eye(len(value)))
 
             return ensemble
 

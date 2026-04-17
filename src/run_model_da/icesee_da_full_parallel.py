@@ -496,9 +496,8 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         else:
             N_size = params["total_state_param_vars"] * hdim
             # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=0)
-            model_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
-            # noise = generate_enkf_field(**model_kwargs)
-            noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+            model_kwargs.update({"ii_sig": None, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
+            noise = generate_enkf_field(**model_kwargs)
         
         # synchronize all processes before starting the time loop
         comm_world.Barrier()
