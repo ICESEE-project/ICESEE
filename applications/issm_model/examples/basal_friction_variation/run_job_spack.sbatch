@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH -t25:00:00
+#SBATCH -t40:00:00
 #SBATCH -JISMIP
-#SBATCH -N 4
-#SBATCH -n 96
+#SBATCH -N 2
+#SBATCH -n 48
 #SBATCH --ntasks-per-node=24
 #SBATCH -p cpu-large                 # pick ONE partition; or switch to: -p inferno
 #SBATCH --mem=256G                   # ensure this is allowed per node on that partition
@@ -23,8 +23,8 @@ export LD_LIBRARY_PATH="$MPI_DIR/lib:$LD_LIBRARY_PATH"
 
 # --- Test Matrix ------------------------------------------------------
 np=8
-NENS=40
-MODEL_NPROCS=2
+NENS=80
+MODEL_NPROCS=1
 
 run_case () {
   local np="$1"
