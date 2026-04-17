@@ -55,8 +55,8 @@ def EnKF_X5(km,ensemble_vec, Nens, hu_obs, model_kwargs,UtilsFunctions):
     y_full[np.isnan(y_full)] = 0.0
     # d = U.Obs_fun(hu_obs[:, k_obs], H=H, km=k_obs)       # reuse
     d = U.Obs_fun(y_full, H=H, km=k_obs)       # reuse
-    if comm_world.Get_rank() == 0:
-        print(f"[ICESEE] Rank: {comm_world.Get_rank()} EnKF_X5 at time step km: {km} any NaN in H: {np.isnan(H).any()} d: {np.isnan(d).any()}")
+    # if comm_world.Get_rank() == 0:
+    #     print(f"[ICESEE] Rank: {comm_world.Get_rank()} EnKF_X5 at time step km: {km} any NaN in H: {np.isnan(H).any()} d: {np.isnan(d).any()}")
     # -- get ensemble pertubations
     use_ensemble_pertubations = model_kwargs.get("use_ensemble_pertubations", True)
     ensemble_mean = np.mean(ensemble_vec, axis=1).reshape(-1,1)
@@ -92,10 +92,8 @@ def EnKF_X5(km,ensemble_vec, Nens, hu_obs, model_kwargs,UtilsFunctions):
         for ens in range(Nens):
             noise_all = []
             for ii, sig in enumerate(sig_obs_filtered if model_kwargs.get("inversion_flag", False) else params["sig_obs"]):
-                model_kwargs.update({"ii_sig": ii, "hdim": hdim, "num_vars": params["total_state_param_vars"]})
-
-                W = generate_enkf_field(ii, np.sqrt(Lx * Ly), hdim, params["total_state_param_vars"],
-                                    rh=len_scale, verbose=False)
+                model_kwargs.update({"ii_sig": ii, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
+                W = generate_enkf_field(**model_kwargs)
                 noise_all.append(sig * W)
 
             noise_ = np.concatenate(noise_all, axis=0)
