@@ -14,10 +14,10 @@ modeling-parameters:
   # Model parameters
   num_years: 5         # number of years to run the model
   timesteps_per_year: 0.2   # number of timesteps per year
-  initFile: '/Users/jcruz89/Downloads/Research/PIG_to_SS_Outputs/extended_beta1000yrs.h5' # input file
-  paramsFile: '/Users/jcruz89/Downloads/Research/PIG_to_SS_Outputs/extended_beta1000yrs.yaml' # parameter file
-  meshFile: '/Users/jcruz89/Downloads/Research/JoughinShapero_PIGCode/meshes/PigFull2017GeomFull.exp' # mesh file
-  SMBFile: '/Users/jcruz89/Downloads/Research/JoughinShapero_PIGCode/forwardModelInputs/OLS_Trend_plus_Resid_9b9.tif' # SMB file
+  initFile: 'data/extended_beta1000yrs.h5' # input file
+  paramsFile: 'data/extended_beta1000yrs.yaml' # parameter file
+  meshFile: 'data/PigFull2017GeomFull.exp' # mesh file
+  SMBFile: 'data/OLS_Trend_plus_Resid_9b9.tif' # SMB file
   water_to_ice: 1.087241003            # density ratio of water to ice
   water_density: 1028
   GLThresh: 41
