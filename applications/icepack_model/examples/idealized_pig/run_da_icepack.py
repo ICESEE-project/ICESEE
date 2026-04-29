@@ -95,10 +95,10 @@ kwargs.update({
     "wrong_basal_melt_field": float(enkf_params["wrong_basal_melt_field"]), 
     "solver": forward_solver,
     "nd": params["nd"],
-    "Lx":float(physical_params["Lx"]), 
-    "Ly":float(physical_params["Ly"]), 
-    "nx":float(physical_params["nx"]), 
-    "ny":float(physical_params["ny"]),
+    #"Lx":float(physical_params["Lx"]), 
+    #"Ly":float(physical_params["Ly"]), 
+    #"nx":float(physical_params["nx"]), 
+    #"ny":float(physical_params["ny"]),
  
 })
 
