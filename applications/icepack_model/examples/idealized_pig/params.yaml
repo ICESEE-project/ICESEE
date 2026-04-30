@@ -1,58 +1,58 @@
-physical-parameters:
+#physical-parameters:
   # Domain parameters
-  Lx: 50e2        # (m)
-  Ly: 12e2        # (m)
-  nx: 12         # number of elements in the x-direction
-  ny: 8      # number of elements in the y-direction
-  degree: 2       # degree of the polynomial basis functions
+  # Lx: 761180       # (m)
+  # Ly: 26000        # (m)
+  # nx: 600          # number of elements in the x-direction
+  # ny: 200          # number of elements in the y-direction
 
-  # Bedrock slopes 
-  b_in: 200       # (m) above sea level at the inflow
-  b_out: -400.0     # (m) at the terminus
-
-  # Surface Elevation
-  s_in: 850       # (m)
-  s_out: 50       # (m)
-
-  # Guess for initial velocity
-  u_in:  20       # (m/yr)
-  u_out: 2400     # (m/yr)
+  #Lx: 50e2        # (m)
+  #Ly: 12e2        # (m)
+  #nx: 12         # number of elements in the x-direction
+  #ny: 8      # number of elements in the y-direction
 
 modeling-parameters:
   # Model parameters
-  T: 255.0                # (K) temperature
-  a_in: 1.7               # accumulation rate at the inflow
-  da:   -2.7              # change of accumulation rate
-  a_in_p: 0.17            # nurged accumulation rate at the inflow
-  da_p: -0.27           # nurged change of accumulation rate
-  num_years: 100          # number of years to run the model
-  timesteps_per_year: 2   # number of timesteps per year
+  num_years: 5         # number of years to run the model
+  timesteps_per_year: 0.2   # number of timesteps per year
+  initFile: 'data/extended_beta1000yrs.h5' # input file
+  paramsFile: 'data/extended_beta1000yrs.yaml' # parameter file
+  meshFile: 'data/PigFull2017GeomFull.exp' # mesh file
+  SMBFile: 'data/OLS_Trend_plus_Resid_9b9.tif' # SMB file
+  water_to_ice: 1.087241003            # density ratio of water to ice
+  water_density: 1028
+  GLThresh: 41
+  uThresh: 300
+  hThresh: 30                        # minimum ice thickness required in a mesh element with ice (meters)
+  tag: '001'
+  experiments: 0                     # experiment 1 for changing timing of basal melt, 1 for changing C, 2 for ... 
+  bmr_increase_time: 0               # timing (in years) of when to begin a linear increase in BMR (relative to start of simulation)
+  #save_steps: [19, 34, 54, 69, 81]  # years into the simulation at which to save the flowline profile (for a simulation of PIG between 1935 - 2017)
+  save_steps: [0, 2, 3, 4]              # years into the simulation at which to save the flowline profile
 
 enkf-parameters:
   # Ensemble Kalman Filter parameters
-  Nens: 40                      # number of ensemble members (now set in the command line)
-  freq_obs: 8              # frequency of observations
-  obs_max_time: 80         # maximum time for observations
-  obs_start_time: 4             # start time for observations
+  Nens: 40                 # number of ensemble members (now set in the command line)
+  freq_obs: 1              # frequency of observations (per year?)
+  obs_max_time: 4         # maximum time for observations
+  obs_start_time: 2        # start time for observations
 
-  num_state_vars: 3       # number of state variables  [h,u,v]
-  num_param_vars: 1       # number of parameter variables [smb]
-  vec_inputs: ['h','u','v','smb']
-  observed_params: ['smb']  #['smb']
+  num_state_vars: 4      # number of state variables  [h,u,v]
+  num_param_vars: 1       # number of parameter variables [bmr]
+  vec_inputs: ['h','u','v', 's', 'basal_melt_field']
+  observed_params: ['s']  # surface elevation
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state:    1  # Generate true state for synthetic observations
   generate_nurged_state:  1  # Generate nudged state for synthetic observations
+  initialize_ensemble: 1
   use_ensemble_pertubations: 1 # Use ensemble perturbations for ensemble state
-  sequential_ensemble_initialization: 1  # Sequential ensemble initialization (True for sequential, False for parallel)
+  sequential_ensemble_initialization: 0  # Sequential ensemble initialization (True for sequential, False for parallel)
 
   # Statistical parameters (based on the number of state variables)
-  sig_model: [0.1,0.1,0.1] # model error standard deviation
-  sig_obs: [5,0.5,0.1,0.1]   # observation error standard deviation
-  sig_Q: [0.8,0.4,0.01,0.08]    # process noise standard deviation
-  length_scale: [96,96,90,80] #[150, 150, 150, 150]   # length scale for the covariance matrix, can be a list
-
-  Q_rho: 0.95 
+  sig_model: [0.1,0.1,0.1,0.1,0.1] # model error standard deviation
+  sig_obs: [5,0.5,0.1,0.1,0.1]   # observation error standard deviation
+  sig_Q: [0.8,0.4,0.01,0.08,0.1]    # process noise standard deviation
+  length_scale: [96,96,90,80,80]   # length scale for the covariance matrix, can be a list
 
   seed: 1                 # seed for random number generator
   inflation_factor: 1.15          # inflation factor
@@ -61,12 +61,10 @@ enkf-parameters:
   # estimation flags
   joint_estimation: 1 # joint estimation flag: True, False
   parameter_estimation: True # parameter estimation flag: True, False
-  joint_estimated_params: ['smb']  # parameters to be jointly estimated
+  joint_estimated_params: ['basal_melt_field']  # parameter(s) to be jointly estimated
 
-  # nurged parameters
-  h_nurge_ic: 350         # nurged increment for initial thickness
-  u_nurge_ic: 0         # nurged increment for initial velocity
-  nurged_entries_percentage: 0.25 #%     # percentage of nurged entries in the state vector
+  # nudged parameters
+  wrong_basal_melt_field: 2         # scalar factor to "nudge" the basal melt rate field
 
   # enkf model parameters
   model_name: "icepack"               # name of the model
