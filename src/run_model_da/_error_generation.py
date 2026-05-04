@@ -880,6 +880,9 @@ def sample_periodic_exp_cov(hdim: int, sigma2: float, Lx: float, rng=None):
         rng = np.random.default_rng()
 
     n = int(hdim)
+    if Lx is None:
+        Lx = float(n)
+        
     if n <= 0:
         raise ValueError("hdim must be positive")
     if Lx <= 0:
