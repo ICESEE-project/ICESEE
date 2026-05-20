@@ -4,14 +4,18 @@
 
 ---
 
-##  What is ICESEE?
+## What is ICESEE?
 
-ICESEE simplifies the implementation of advanced data assimilation workflows—such as the Ensemble Kalman Filter (EnKF) and its variants—across a range of geophysical models. It is designed with:
+ICESEE (ICE ShEet state and parameter Estimator) is a scalable ensemble-based data assimilation framework designed for coupling with ice-sheet, climate, and geophysical models such as ISSM, Icepack, and idealized systems like Lorenz-96.
 
-- A modular Python interface  
-- Seamless integration with external model codes (MATLAB, Firedrake, ISSM, etc.)  
-- Support for high-performance computing and containerized workflows  
-- Scalability for future integration with cloud platforms like AWS and portals like GHUB  
+ICESEE provides a modular and extensible scientific computing infrastructure for ensemble forecasting, uncertainty quantification, parameter estimation, and hybrid physics–AI workflows in large-scale environmental modeling.
+
+The framework supports:
+- Ensemble-based data assimilation methods
+- Distributed-memory HPC execution
+- Cloud-enabled scientific workflows
+- Cross-language model coupling
+- AI-enhanced scientific computing and machine learning integration
 
 ---
 
@@ -24,8 +28,26 @@ To get started with ICESEE:
 - [Build ICESEE as a package](https://github.com/ICESEE-project/ICESEE/wiki/3.-Build-ICESEE-as-a-package)  
 - [Developmental notes](https://github.com/ICESEE-project/ICESEE/wiki/4.-Development-Notes)
 
->For Cluster installation and runs, see [ICESEE-Spack](https://github.com/ICESEE-project/ICESEE-Spack) 
+>For Cluster installation and runs, see [ICESEE-Spack](https://github.com/ICESEE-project/ICESEE-Spack) or [ICESEE-Containers](https://github.com/ICESEE-project/ICESEE-Containers)
  and for cloud runs, see [ICESEE-GHUB](https://github.com/ICESEE-project/ICESEE-GHUB)
+
+---
+
+## AI/ML Integration
+
+ICESEE is being extended with scientific machine learning and AI-enhanced workflows to support next-generation hybrid physics–AI modeling and scalable intelligent simulation systems.
+
+Current and planned AI/ML capabilities include:
+
+- Machine learning–based parameter estimation
+- Neural-network observation operators
+- AI-enhanced ensemble initialization
+- Adaptive covariance and inflation tuning
+- Surrogate forward models for accelerated simulations
+- Intelligent workflow automation and HPC optimization
+- AI-assisted diagnostics and parameter tuning
+
+The AI/ML framework is designed to integrate seamlessly with existing ensemble-based data assimilation workflows while maintaining compatibility with distributed HPC environments and scientific modeling systems.
 
 ---
 
@@ -49,10 +71,28 @@ Explore the Wiki to find:
 
 ---
 
-## Future Plans
+## Key Features
 
-- Integration with **AWS** for scalable cloud computing.
-- Incorporation into the **GHUB online ice sheet platform** with enhanced features.
+- Modular ensemble-based data assimilation framework
+- Cross-language scientific model coupling
+- Scalable HPC and distributed-memory workflows
+- HDF5/NetCDF-based scientific data pipelines
+- Containerized and cloud-enabled execution
+- AI/ML-ready scientific workflow infrastructure
+- Extensible APIs for integrating external models
+- Support for uncertainty quantification and ensemble forecasting
+
+---
+
+## Future Directions
+
+- Integration of scientific machine learning workflows into data assimilation pipelines
+- Development of neural surrogate models for accelerated ice-sheet simulations
+- AI-enhanced parameter estimation and adaptive ensemble tuning
+- Integration with AWS and cloud-native scientific computing environments
+- Expansion of distributed HPC workflows for large-scale ensemble forecasting
+- Incorporation into the GHUB online ice-sheet platform
+- Intelligent workflow orchestration and automated HPC diagnostics
 
 For questions or contributions, please open an issue or pull request on the [GitHub repository](https://github.com/ICESEE-project/ICESEE) or contact me at bkyanjo3@gatech.edu
 
