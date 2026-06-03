@@ -152,3 +152,9 @@ bkyanjo3@gatech.edu
 ICESEE is distributed as free and open-source software under the BSD 2-Clause License (see LICENSE).
 
 External software packages and coupled models, including ISSM, Icepack, Firedrake, MATLAB-based components, and other third-party dependencies, remain subject to their respective licenses, which are independent of the ICESEE license.
+
+## ICESEE CI Lorenz96 smoke test
+
+The figure below is generated automatically by the CI workflow after installing ICESEE and running the Lorenz96 example.
+
+![Lorenz96 CI result](docs/figures/lorenz96_ci.png)
