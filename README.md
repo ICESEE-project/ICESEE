@@ -1,13 +1,5 @@
 # ICESEE
 
-<p align="center">
-
-CI
-License
-GitHub Stars
-
-</p>
-
 ICESEE (ICE ShEet State and Parameter Estimator) is a data assimilation software framework designed for coupling with ice-sheet, climate, and geophysical models such as ISSM, Icepack, and idealized models such as Lorenz-96. It provides a modular and extensible platform for ensemble forecasting, state estimation, parameter estimation, and uncertainty quantification across a wide range of scientific modeling applications.
 
 ---
