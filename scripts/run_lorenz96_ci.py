@@ -11,7 +11,8 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import h5py
 
-from ICESEE.config._utility_imports import extract_datasets_from_h5
+# from ICESEE.config._utility_imports import extract_datasets_from_h5
+from ICESEE.src.utils.tools import extract_datasets_from_h5
 
 
 def add_icesee_parent_to_path():
