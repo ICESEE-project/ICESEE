@@ -11,20 +11,15 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import h5py
 
-# from ICESEE.config._utility_imports import extract_datasets_from_h5
-from ICESEE.src.utils.tools import extract_datasets_from_h5
 
-
-def add_icesee_parent_to_path():
-    repo = Path.cwd()
-    parent = repo.parent
-
-    if str(parent) not in sys.path:
-        sys.path.insert(0, str(parent))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+LORENZ_DIR = REPO_ROOT / "applications" / "lorenz_model" / "examples" / "lorenz96"
+FIGURE_DIR = REPO_ROOT / "docs" / "figures"
 
 
 def run_lorenz96_example():
     print("Running Lorenz96 example...")
+    print(f"Working directory: {LORENZ_DIR}")
 
     subprocess.run(
         [
@@ -32,77 +27,57 @@ def run_lorenz96_example():
             "-m",
             "ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96",
         ],
+        cwd=LORENZ_DIR,
         check=True,
     )
 
 
+def read_h5_dataset(file_path):
+    data = {}
+    with h5py.File(file_path, "r") as f:
+        for key in f.keys():
+            data[key] = f[key][:]
+    return data
+
+
 def load_lorenz_outputs():
-    data_dir = Path("_modelrun_datasets")
-    results_dir = Path("results")
+    results_dir = LORENZ_DIR / "results"
+    data_dir = LORENZ_DIR / "_modelrun_datasets"
 
-    model_name = "lorenz"
-    filter_type = "true-wrong"
-
-    tw_file = results_dir / f"{filter_type}-{model_name}.h5"
-    if not tw_file.exists():
-        raise FileNotFoundError(f"Missing expected Lorenz truth file: {tw_file}")
-
-    datasets_tw = extract_datasets_from_h5(str(tw_file))
-
-    t = datasets_tw["t"]
-    ind_m = datasets_tw["obs_index"]
-    tm_m = datasets_tw["obs_max_time"][0]
-    run_mode = datasets_tw["run_mode"][0]
-
-    filter_type = "EnTKF"
-
-    if run_mode != 0:
-        da_file = results_dir / f"{filter_type}-{model_name}.h5"
-        if not da_file.exists():
-            raise FileNotFoundError(f"Missing expected DA result file: {da_file}")
-
-        datasets = extract_datasets_from_h5(str(da_file))
-        ensemble_vec_mean = datasets["ensemble_vec_mean"]
-        ensemble_bg = datasets["ensemble_bg"]
-    else:
-        ensemble_file = data_dir / "icesee_ensemble_data.h5"
-        if not ensemble_file.exists():
-            raise FileNotFoundError(f"Missing expected ensemble file: {ensemble_file}")
-
-        with h5py.File(ensemble_file, "r") as f:
-            ensemble_vec_mean = f["ensemble_mean"][:]
-            ensemble_bg = None
-
+    tw_file = results_dir / "true-wrong-lorenz.h5"
+    ensemble_file = data_dir / "icesee_ensemble_data.h5"
     true_nudged_file = data_dir / "true_nurged_states.h5"
-    if not true_nudged_file.exists():
-        raise FileNotFoundError(f"Missing expected true/nudged state file: {true_nudged_file}")
+    obs_file = data_dir / "synthetic_obs.h5"
+
+    for path in [tw_file, ensemble_file, true_nudged_file, obs_file]:
+        if not path.exists():
+            raise FileNotFoundError(f"Missing expected Lorenz output file: {path}")
+
+    tw = read_h5_dataset(tw_file)
+
+    with h5py.File(ensemble_file, "r") as f:
+        ensemble_vec_mean = f["ensemble_mean"][:]
 
     with h5py.File(true_nudged_file, "r") as f:
         ensemble_true_state = f["true_state"][:]
         ensemble_nurged_state = f["nurged_state"][:]
 
-    obs_file = data_dir / "synthetic_obs.h5"
-    if not obs_file.exists():
-        raise FileNotFoundError(f"Missing expected observation file: {obs_file}")
-
     with h5py.File(obs_file, "r") as f:
         w = f["hu_obs"][:]
 
     return {
-        "t": t,
-        "ind_m": ind_m,
-        "tm_m": tm_m,
+        "t": tw["t"],
+        "ind_m": tw["obs_index"],
+        "tm_m": tw["obs_max_time"][0],
         "ensemble_true_state": ensemble_true_state,
         "ensemble_nurged_state": ensemble_nurged_state,
         "ensemble_vec_mean": ensemble_vec_mean,
-        "ensemble_bg": ensemble_bg,
         "w": w,
     }
 
 
 def plot_lorenz_outputs(data):
-    outdir = Path("docs/figures")
-    outdir.mkdir(parents=True, exist_ok=True)
+    FIGURE_DIR.mkdir(parents=True, exist_ok=True)
 
     mpl.rcParams["text.usetex"] = bool(shutil.which("latex"))
     mpl.rcParams["mathtext.fontset"] = "dejavusans"
@@ -144,7 +119,7 @@ def plot_lorenz_outputs(data):
     ax[0].legend(loc="center", bbox_to_anchor=(0.5, 1.25), ncol=4, fontsize=13)
     fig.subplots_adjust(hspace=0.5)
 
-    outfile = outdir / "lorenz96_ci.png"
+    outfile = FIGURE_DIR / "lorenz96_ci.png"
     fig.savefig(outfile, dpi=200, bbox_inches="tight")
     plt.close(fig)
 
@@ -152,7 +127,10 @@ def plot_lorenz_outputs(data):
 
 
 def main():
-    add_icesee_parent_to_path()
+    parent = REPO_ROOT.parent
+    if str(parent) not in sys.path:
+        sys.path.insert(0, str(parent))
+
     run_lorenz96_example()
     data = load_lorenz_outputs()
     plot_lorenz_outputs(data)
