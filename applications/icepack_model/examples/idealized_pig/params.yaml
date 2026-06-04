@@ -1,14 +1,14 @@
-physical-parameters:
+#physical-parameters:
   # Domain parameters
   # Lx: 761180       # (m)
   # Ly: 26000        # (m)
   # nx: 600          # number of elements in the x-direction
   # ny: 200          # number of elements in the y-direction
 
-  Lx: 50e2        # (m)
-  Ly: 12e2        # (m)
-  nx: 12         # number of elements in the x-direction
-  ny: 8      # number of elements in the y-direction
+  #Lx: 50e2        # (m)
+  #Ly: 12e2        # (m)
+  #nx: 12         # number of elements in the x-direction
+  #ny: 8      # number of elements in the y-direction
 
 modeling-parameters:
   # Model parameters
@@ -41,9 +41,9 @@ enkf-parameters:
   vec_inputs: ['h','u','v', 's', 'basal_melt_field']
   observed_params: ['s']  # surface elevation
 
-  generate_synthetic_obs: 0  # Generate synthetic observations for testing
-  generate_true_state:    0  # Generate true state for synthetic observations
-  generate_nurged_state:  0  # Generate nudged state for synthetic observations
+  generate_synthetic_obs: 1  # Generate synthetic observations for testing
+  generate_true_state:    1  # Generate true state for synthetic observations
+  generate_nurged_state:  1  # Generate nudged state for synthetic observations
   initialize_ensemble: 1
   use_ensemble_pertubations: 1 # Use ensemble perturbations for ensemble state
   sequential_ensemble_initialization: 0  # Sequential ensemble initialization (True for sequential, False for parallel)
