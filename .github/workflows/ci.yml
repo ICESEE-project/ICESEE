@@ -76,7 +76,7 @@ jobs:
           block = """
           ## ICESEE CI Lorenz96 smoke test
 
-          The figure shown ab is generated directly from the automated test workflow of Lorenz96 and serves as a lightweight end-to-end verification of the framework.
+          The figure shown below is generated directly from the automated test workflow of Lorenz96 and serves as a lightweight end-to-end verification of the framework.
 
           ![Lorenz96 CI result](scripts/ci/figures/lorenz96_ci.png)
 
