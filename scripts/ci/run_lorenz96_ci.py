@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import h5py
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 LORENZ_DIR = REPO_ROOT / "applications" / "lorenz_model" / "examples" / "lorenz96"
 CI_DIR = REPO_ROOT / "scripts" / "ci"
 FIGURE_DIR = CI_DIR / "figures"
