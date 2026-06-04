@@ -14,7 +14,8 @@ import h5py
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LORENZ_DIR = REPO_ROOT / "applications" / "lorenz_model" / "examples" / "lorenz96"
-FIGURE_DIR = REPO_ROOT / "docs" / "figures"
+CI_DIR = REPO_ROOT / "scripts" / "ci"
+FIGURE_DIR = CI_DIR / "figures"
 
 
 def run_lorenz96_example():
