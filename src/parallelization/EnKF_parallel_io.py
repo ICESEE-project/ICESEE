@@ -87,9 +87,16 @@ class EnKF_fully_parallel_IO:
             self.file_prefix = file_prefix
             self.batch_size = batch_size
             self.mpi_comm = mpi_comm
-            self.comm = subcomm if nens >= mpi_comm.Get_size() else mpi_comm
-            self.rank = self.comm.Get_rank() if nens >= mpi_comm.Get_size() else mpi_comm.Get_rank()
-            self.size = self.comm.Get_size() if nens >= mpi_comm.Get_size() else mpi_comm.Get_size()
+            # self.comm = subcomm if nens >= mpi_comm.Get_size() else mpi_comm
+            # self.rank = self.comm.Get_rank() if nens >= mpi_comm.Get_size() else mpi_comm.Get_rank()
+            # self.size = self.comm.Get_size() if nens >= mpi_comm.Get_size() else mpi_comm.Get_size()
+            self.comm = mpi_comm
+            self.rank = mpi_comm.Get_rank()
+            self.size = mpi_comm.Get_size()
+
+            self.subcomm = subcomm if subcomm is not None else MPI.COMM_SELF
+            self.sub_rank = self.subcomm.Get_rank()
+            self.sub_size = self.subcomm.Get_size()
             self.subcomm = subcomm
             self.serial_file_creation = serial_file_creation
             self.h5_file_compression = h5_file_compression
@@ -99,6 +106,9 @@ class EnKF_fully_parallel_IO:
             # collective I/O threshold (32 is a reasonable default for many systems)
             self.collective_threshold = int(params.get("collective_threshold", 16))
             self.use_collective_io = (self.mpi_comm.Get_size() >= self.collective_threshold)
+
+            def _state_file_name(self, t):
+                return f"{self.base_path}/{self.file_prefix}_{t:04d}.h5"
 
             def partition_1d(n, size, rank):
                 q, r = divmod(n, size)
@@ -153,49 +163,49 @@ class EnKF_fully_parallel_IO:
 
     def _create_batch_serial(self, t_start):
         try:
-            start = MPI.Wtime()
             self._close_batch()
             self.files = []
             self.datasets = []
             self.current_batch_start = t_start
-            # nfiles = min(self.batch_size, self.nt - t_start)
-            # --- PATCH: create at least one file and clamp to nt ---
+
             remaining = max(0, self.nt - t_start)
             if remaining == 0:
-                print(f"[Rank {self.rank}] WARNING: no files to create (t_start={t_start}, nt={self.nt})")
                 return
-            
-            nfiles = min(self.batch_size, remaining)
-            t_end = t_start + nfiles
-            print(f"[Rank {self.rank}] Creating batch from {t_start} to {t_end - 1} ({nfiles} files, nt={self.nt})")
 
-            if MPI.COMM_WORLD.Get_rank() == 0:
+            nfiles = min(self.batch_size, remaining)
+
+            if self.mpi_comm.Get_rank() == 0:
                 for t in range(t_start, t_start + nfiles):
-                    fname = f"{self.base_path}/{self.file_prefix}_ens_{t:04d}.h5"
-                    with h5py.File(fname, 'w') as f:
-                        # row_chunk = min(1024, self.nd)
-                        row_chunk = self.nd_local_world
-                        # col_chunk = min(32, self.nens)
+                    fname = self._state_file_name(t)
+
+                    with h5py.File(fname, "w") as f:
+                        row_chunk = max(1, min(self.h5_file_chunk_size, self.nd))
                         col_chunk = 1
+
                         f.create_dataset(
-                            'states', (self.nd, self.nens),
+                            "states",
+                            shape=(self.nd, self.nens),
                             chunks=(row_chunk, col_chunk),
-                            # compression="gzip", compression_opts=4,
-                            # compression="lzf",
-                            compression=None,
-                            dtype='f8'
+                            compression=self.h5_file_compression,
+                            compression_opts=(
+                                self.h5_file_compression_level
+                                if self.h5_file_compression is not None
+                                else None
+                            ),
+                            dtype="f8",
                         )
-                        
+
             self.mpi_comm.Barrier()
 
             for t in range(t_start, t_start + nfiles):
-                fname = f"{self.base_path}/{self.file_prefix}_ens_{t:04d}.h5"
-                f = h5py.File(fname, 'a', driver='mpio', comm=self.comm)
-                # f = h5py.File(fname, 'a', driver='mpio', comm=self.mpi_comm)
+                fname = self._state_file_name(t)
+                f = h5py.File(fname, "a", driver="mpio", comm=self.mpi_comm)
                 f.atomic = False
-                dset = f['states']
                 self.files.append(f)
-                self.datasets.append(dset)
+                self.datasets.append(f["states"])
+
+            self.mpi_comm.Barrier()
+
         except Exception as e:
             print(f"Error occurred in _create_batch_serial: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
@@ -204,31 +214,44 @@ class EnKF_fully_parallel_IO:
 
     def _create_batch_parallel(self, t_start):
         try:
-            start = MPI.Wtime()
             self._close_batch()
             self.files = []
             self.datasets = []
             self.current_batch_start = t_start
-            nfiles = min(self.batch_size, self.nt - t_start)
+
+            remaining = max(0, self.nt - t_start)
+            if remaining == 0:
+                return
+
+            nfiles = min(self.batch_size, remaining)
+
             for t in range(t_start, t_start + nfiles):
-                fname = f"{self.base_path}/{self.file_prefix}_{t:04d}.h5"
-                f = h5py.File(fname, 'w', driver='mpio', comm=self.comm)
-                # f = h5py.File(fname, 'w', driver='mpio', comm=self.mpi_comm)
+                fname = self._state_file_name(t)
+
+                f = h5py.File(fname, "w", driver="mpio", comm=self.mpi_comm)
                 f.atomic = False
-                # row_chunk = min(1024, self.nd)
-                row_chunk = self.nd_local_world
-                # col_chunk = min(32, self.nens)
+
+                row_chunk = max(1, min(self.h5_file_chunk_size, self.nd))
                 col_chunk = 1
+
                 dset = f.create_dataset(
-                    'states', (self.nd, self.nens),
+                    "states",
+                    shape=(self.nd, self.nens),
                     chunks=(row_chunk, col_chunk),
-                    # compression="gzip", compression_opts=4,
-                    # compression="lzf",
-                    compression=None,
-                    dtype='f8'
+                    compression=self.h5_file_compression,
+                    compression_opts=(
+                        self.h5_file_compression_level
+                        if self.h5_file_compression is not None
+                        else None
+                    ),
+                    dtype="f8",
                 )
+
                 self.files.append(f)
                 self.datasets.append(dset)
+
+            self.mpi_comm.Barrier()
+
         except Exception as e:
             print(f"Error occurred in _create_batch_parallel: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
@@ -312,51 +335,79 @@ class EnKF_fully_parallel_IO:
             ds.id.read(mem_space, file_space, out, dxpl=dxpl)
             return out
 
-    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD) 
+    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD)
     def read_forecast(self, t, ens_idx):
+        """
+        Forecast path: return the full ensemble vector.
+
+        This matches _mpi_forecast_functions.py where the MPI model receives
+        a complete state vector for one ensemble member.
+        """
         self._ensure_batch(t)
         batch_idx = t - self.current_batch_start
-        start = MPI.Wtime()
-        data = self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx]
-        # data = self._rw_select(self.datasets[batch_idx],
-        #                self.nd_start, self.nd_local, ens_idx, 1, write=False).reshape(-1)
 
-        return data
+        data = self.datasets[batch_idx][:, ens_idx]
+        return np.asarray(data, dtype=np.float64).reshape(-1)
        
 
-    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD) 
+    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD)
     def write_forecast(self, t, data, ens_idx):
-        self._ensure_batch(t)
-        batch_idx = t - self.current_batch_start
-        ds = self.datasets[batch_idx]
-        ds[self.nd_start:self.nd_end, ens_idx] = data
-        # self._rw_select(self.datasets[batch_idx],
-        #         self.nd_start, self.nd_local, ens_idx, 1, buf=data, write=True)
+        """
+        Forecast path: write one full ensemble vector.
 
-    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD) 
-    def read_analysis(self, t, ens_idx):
-        # try:
+        This should be called only by sub_rank == 0 from
+        parallel_forecast_step_default_full_parallel_run.
+        """
         self._ensure_batch(t)
         batch_idx = t - self.current_batch_start
-        start = MPI.Wtime()
-        data = self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx]
-        # data = self._rw_select(self.datasets[batch_idx],
-        #                self.nd_start_world, self.nd_local_world, ens_idx, 1, write=False).reshape(-1)
-        # print(f"[ICESEE] Finished reading analysisensemble {ens_idx} ensemble shape: {data.shape} norm {np.linalg.norm(data)}")
-        read_time = MPI.Wtime() - start
-        return data
+
+        data = np.asarray(data, dtype=np.float64).reshape(-1)
+
+        if data.size != self.nd:
+            raise ValueError(
+                f"write_forecast expected full vector of size {self.nd}, "
+                f"got {data.size}"
+            )
+
+        self.datasets[batch_idx][:, ens_idx] = data
+
+    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD)
+    def read_analysis(self, t, ens_idx):
+        """
+        Analysis path: return this world-rank's row block.
+        """
+        self._ensure_batch(t)
+        batch_idx = t - self.current_batch_start
+
+        data = self.datasets[batch_idx][
+            self.nd_start_world:self.nd_end_world,
+            ens_idx,
+        ]
+
+        return np.asarray(data, dtype=np.float64).reshape(-1)
        
 
-    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD) 
+    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD)
     def write_analysis(self, t, data, ens_idx):
-        # try:
+        """
+        Analysis path: write this world-rank's row block.
+        """
         self._ensure_batch(t)
         batch_idx = t - self.current_batch_start
-        start = MPI.Wtime()
-        # self.datasets[batch_idx][self.nd_start:self.nd_end, ens_idx] = data
-        self.datasets[batch_idx][self.nd_start_world:self.nd_end_world, ens_idx] = data
-        # self._rw_select(self.datasets[batch_idx],
-        #         self.nd_start_world, self.nd_local_world, ens_idx, 1, buf=data, write=True)
+
+        data = np.asarray(data, dtype=np.float64).reshape(-1)
+
+        expected = self.nd_local_world
+        if data.size != expected:
+            raise ValueError(
+                f"write_analysis rank {self.rank} expected local vector size "
+                f"{expected}, got {data.size}"
+            )
+
+        self.datasets[batch_idx][
+            self.nd_start_world:self.nd_end_world,
+            ens_idx,
+        ] = data
     
     def compute_forecast_mean_chunked_v2(self, k, flag=None):
         """
@@ -410,7 +461,7 @@ class EnKF_fully_parallel_IO:
             if flag == 'initial':
                 if rank == 0 and k==0: # remove old file if any
                     try:
-                        shutil.rmtree(file_path)
+                        os.remove(file_path)
                     except OSError:
                         pass
                 comm.Barrier()
@@ -1019,13 +1070,21 @@ class EnKF_fully_parallel_IO:
             )
 
 
-            # --- Eta = HA - Hmean[:, None]
-            Eta = HA - Hmean_global[:, None]             # (m, Nens)
+            #     # --- Eta = HA - Hmean[:, None]
+            #     Eta = HA - Hmean_global[:, None]             # (m, Nens)
 
-            # --- D' = (d - Hmean)[:, None], same for all ensemble members
-            Dprime = (d_global - Hmean_global)[:, None] * np.ones((1, Nens), dtype=HA.dtype)
+            #     # --- D' = (d - Hmean)[:, None], same for all ensemble members
+            #     # Dprime = (d_global - Hmean_global)[:, None] * np.ones((1, Nens), dtype=HA.dtype)
+            #     Dprime = d_global[:, None] - HA
 
-            return Dprime, Eta, Eta, kwargs
+            #     return Dprime, Eta, Eta, kwargs
+
+            HAprime = HA - Hmean_global[:, None]
+            Eta = HAprime
+
+            Dprime = d_global[:, None] - HA
+
+            return Dprime, Eta, HAprime, kwargs
         except Exception as e:
             print(f"Error in compute_X5_utils: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
@@ -1181,13 +1240,19 @@ class EnKF_fully_parallel_IO:
             analysis_updates = all_states @ X5  # Matrix multiplication
 
             # performm inflation
-            inflation_factor = self.params.get('inflation_factor', 1.0)
-            ndim = analysis_updates.shape[0]//self.params["total_state_param_vars"]
-            state_block_size = ndim * self.params["num_state_vars"]
-            mean_params = np.mean(analysis_updates[state_block_size:, :], axis=1).reshape(-1, 1)
-            pertubations = analysis_updates[state_block_size:, :] - mean_params
-            # inflated_pertubations = pertubations * inflation_factor
-            analysis_updates[state_block_size:, :] = mean_params + (pertubations * inflation_factor)
+            # inflation_factor = self.params.get('inflation_factor', 1.0)
+            # ndim = analysis_updates.shape[0]//self.params["total_state_param_vars"]
+            # state_block_size = ndim * self.params["num_state_vars"]
+            # mean_params = np.mean(analysis_updates[state_block_size:, :], axis=1).reshape(-1, 1)
+            # pertubations = analysis_updates[state_block_size:, :] - mean_params
+            # # inflated_pertubations = pertubations * inflation_factor
+            # analysis_updates[state_block_size:, :] = mean_params + (pertubations * inflation_factor)
+
+            inflation_factor = self.params.get("inflation_factor", 1.0)
+
+            mean_all = np.mean(analysis_updates, axis=1).reshape(-1, 1)
+            perturbations = analysis_updates - mean_all
+            analysis_updates = mean_all + perturbations * inflation_factor
 
             # check for negative thicknes and set to 1e-3 if vec_input contains h
             # Define valid thickness variable names
@@ -1220,13 +1285,17 @@ class EnKF_fully_parallel_IO:
                 # print(f"[Rank {self.mpi_comm.Get_rank()}]  shape: {analysis_mean.shape} shape_ {self.nd_end_world - self.nd_start_world}")
                 file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
                 with h5py.File(file_path, 'a', driver='mpio', comm=self.mpi_comm) as f:
-                    if 'mean' not in f:
-                        if rank == 0:
-                            f.create_dataset(
-                                'mean', (self.nd, self.nt),
-                                chunks=(min(self.nd, 1000), 1),
-                                dtype='f8'
-                            )
+                    exists_local = "mean" in f
+                    exists_any = comm.allreduce(1 if exists_local else 0, op=MPI.SUM) > 0
+
+                    if not exists_any:
+                        f.create_dataset(
+                            "mean",
+                            (self.nd, self.nt),
+                            chunks=(min(self.nd, 1000), 1),
+                            dtype="f8",
+                        )
+
                     comm.Barrier()
                     # _k = k + 1 if k < self.nt - 1 else k
                     f['mean'][self.nd_start_world:self.nd_end_world, k] = analysis_mean

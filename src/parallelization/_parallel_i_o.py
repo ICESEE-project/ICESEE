@@ -386,7 +386,8 @@ def parallel_write_ensemble_scattered(
                         if np.isclose(t, bed_snap, rtol=0, atol=1e-12):
                             do_bed_snap = True
                             break
-
+                    
+                    do_bed_snap = False #TODO: for test runs
                     if do_bed_snap:
                         eta = 1.0
                         rho = model_kwargs.get("rho", 1.0)

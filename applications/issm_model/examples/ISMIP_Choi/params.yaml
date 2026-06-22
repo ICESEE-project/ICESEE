@@ -29,13 +29,13 @@ enkf-parameters:
   obs_max_time: 24            # Maximum time for observations (30 years)
   obs_start_time: 2            # Start time for observations (start of simulation)
 
-  generate_synthetic_obs: "False"  # Generate synthetic observations for testing
-  generate_true_state: "False" # Generate true state for synthetic observations
-  generate_nurged_state: "False"   # Generate nudged state for synthetic observations
-  initialize_ensemble: "False"
-  initial_spread_factor: 1.12
-  sequential_ensemble_initialization: "False"
-  use_ensemble_pertubations: "True"
+  generate_synthetic_obs: 1  # Generate synthetic observations for testing
+  generate_true_state: 1 # Generate true state for synthetic observations
+  generate_nurged_state: 1   # Generate nudged state for synthetic observations
+  initialize_ensemble: 1
+  initial_spread_factor: 1.25
+  sequential_ensemble_initialization: 0
+  use_ensemble_pertubations: 1
 
   # num_state_vars: 4             # State variables: ice thickness (H), velocities (u, v)
   num_state_vars: 4             # State variables: ice thickness (H), surface elevation (S)
@@ -64,7 +64,8 @@ enkf-parameters:
 
   # Statistical parameters
   sig_obs: [10, 7, 3, 2, 3, 0]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
-  sig_Q: [0.01, 0.01, 0.01, 0.01, 0.01,0.01]          # Process noise std dev (adjusted for H, Vx, Vy)
+  # sig_Q: [0.01, 0.01, 0.01, 0.01, 0.01,0.01]          # Process noise std dev (adjusted for H, Vx, Vy)
+  sig_Q: [10, 5, 4, 1.75, 4,15]
   # length_scale: [300,320,380,350,320,350]               # Length scale for covariance (5 km for friction, per paper)
   # length_scale: [205,210,213,205, 205,213]               # Length scale for covariance (5 km for bed topography, per paper)
   length_scale: [205,210,380,350, 205,213] 
@@ -72,7 +73,7 @@ enkf-parameters:
   # length_scale: [40,45,45,40, 45,44] 
 
   seed: 42                       # Seed for random number generator
-  inflation_factor: 1.0       # Inflation factor (optimal range 1.10–1.18 from paper)
+  inflation_factor: 0.95       # Inflation factor (optimal range 1.10–1.18 from paper)
 
   # Estimation flags
   joint_estimation: True       # Enable joint state and parameter estimation

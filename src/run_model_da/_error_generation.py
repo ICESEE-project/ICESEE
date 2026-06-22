@@ -13,7 +13,66 @@ import numpy as np
 import warnings
 from scipy.optimize import brentq
 import scipy.sparse as sp
+import functools
 
+ 
+@functools.lru_cache(maxsize=256)
+def _cached_fft_calibration(N_ext, dx, rh):
+    """
+    Deterministic part of generate_pseudo_random_field_1d's FFT branch:
+    wavenumbers, dk, and the amplitude array A. Identical to the
+    original inline logic, just cached on (N_ext, dx, rh) since none of
+    it depends on randomness.
+ 
+    Cache-key note: N_ext is an int (exact), dx and rh are floats. As
+    long as a given run passes the same literal Lx/rh/N values each call
+    (the normal case - these come from config, not from a fresh
+    computation each time), float equality holds and the cache hits
+    reliably. A miss just means falling back to recomputing - never an
+    incorrect result, only a missed speedup.
+    """
+    kx = np.fft.fftfreq(N_ext, d=dx) * 2 * np.pi
+    dk = 2 * np.pi / (N_ext * dx)
+ 
+    def covariance_eq(sigma):
+        k2 = kx**2
+        exp_term = np.exp(-2 * k2 / sigma**2)
+        return np.sum(exp_term * np.cos(kx * rh)) / np.sum(exp_term) - np.exp(-1)
+ 
+    a, b = 1e-6, 100
+    fa, fb = covariance_eq(a), covariance_eq(b)
+    sigma = None
+ 
+    if fa * fb > 0:
+        warnings.warn(
+            "Initial interval [1e-6, 100] does not bracket a root. "
+            "Trying to find a new interval."
+        )
+        sigma_values = np.logspace(-6, 6, 25)
+        f_values = [covariance_eq(s) for s in sigma_values]
+        for i in range(len(f_values) - 1):
+            if f_values[i] * f_values[i + 1] < 0:
+                a, b = sigma_values[i], sigma_values[i + 1]
+                sigma = brentq(covariance_eq, a, b, rtol=1e-6)
+                break
+        if sigma is None:
+            warnings.warn(
+                "Could not find a bracketing interval. Using heuristic sigma based on rh."
+            )
+            sigma = 2 / rh
+    else:
+        try:
+            sigma = brentq(covariance_eq, a, b, rtol=1e-6)
+        except ValueError as e:
+            warnings.warn(f"brentq failed: {str(e)}. Using heuristic sigma.")
+            sigma = 2 / rh
+ 
+    k2 = kx**2
+    sum_exp = np.sum(np.exp(-2 * k2 / sigma**2))
+    c = np.sqrt(1.0 / (dk * sum_exp))
+    A = c * np.sqrt(dk) * np.exp(-k2 / sigma**2)
+ 
+    return kx, A
 
 def compute_Q_err_random_fields(hdim, num_blocks, sig_Q, rho, len_scale):
     """
@@ -87,75 +146,7 @@ def generate_pseudo_random_field_1d_(N, Lx, rh, grid_extension=2, verbose=False,
     # Extended grid to avoid periodicity
     N_ext = int(N * grid_extension)
     
-    # Wave numbers
-    kx = np.fft.fftfreq(N_ext, d=dx) * 2 * np.pi
-    
-    # Delta k for Fourier summation
-    dk = 2 * np.pi / (N_ext * dx)
-    
-    # Compute sigma by solving the covariance equation
-    def covariance_eq(sigma):
-        k2 = kx**2
-        exp_term = np.exp(-2 * k2 / sigma**2)
-        numerator = np.sum(exp_term * np.cos(kx * rh))
-        denominator = np.sum(exp_term)
-        return numerator / denominator - np.exp(-1)
-    
-    # Dynamically find a bracketing interval
-    a, b = 1e-6, 100
-    fa = covariance_eq(a)
-    fb = covariance_eq(b)
-    
-    if verbose:
-        print(f"[ICESEE] covariance_eq at sigma={a}: {fa}")
-        print(f"[ICESEE] covariance_eq at sigma={b}: {fb}")
-    
-    # Try expanding the interval if signs are the same
-    if fa * fb > 0:
-        warnings.warn("Initial interval [1e-6, 100] does not bracket a root. Trying to find a new interval.")
-        sigma_values = np.logspace(-6, 6, 25)  # Test a wider, finer range
-        f_values = [covariance_eq(s) for s in sigma_values]
-        
-        if verbose:
-            print("[ICESEE] Testing sigma values:")
-            for s, f in zip(sigma_values, f_values):
-                print(f"[ICESEE] sigma={s:.2e}, covariance_eq={f:.2e}")
-        
-        # Find a sign change
-        for i in range(len(f_values) - 1):
-            if f_values[i] * f_values[i + 1] < 0:
-                a, b = sigma_values[i], sigma_values[i + 1]
-                fa, fb = f_values[i], f_values[i + 1]
-                break
-        else:
-            # Fallback: Estimate sigma based on rh
-            warnings.warn("Could not find a bracketing interval. Using heuristic sigma based on rh.")
-            sigma = 2 / rh  # Heuristic: sigma ~ 2/rh
-            if verbose:
-                print(f"[ICESEE] Fallback sigma: {sigma}")
-    else:
-        # Solve for sigma
-        try:
-            sigma = brentq(covariance_eq, a, b, rtol=1e-6)
-            if verbose:
-                print(f"[ICESEE] Solved sigma: {sigma}")
-        except ValueError as e:
-            warnings.warn(f"brentq failed: {str(e)}. Using heuristic sigma.")
-            sigma = 2 / rh  # Fallback
-            if verbose:
-                print(f"[ICESEE] Fallback sigma: {sigma}")
-    
-    # Compute c from variance condition
-    k2 = kx**2
-    sum_exp = np.sum(np.exp(-2 * k2 / sigma**2))
-    c2 = 1 / (dk * sum_exp)
-    c = np.sqrt(c2)
-    
-    if verbose:
-        print(f"[ICESEE] Computed c: {c}")
-    
-    # Compute amplitude
-    A = c * np.sqrt(dk) * np.exp(-k2 / sigma**2)
+    kx, A = _cached_fft_calibration(N_ext, dx, rh)
     
     # Generate random phases with Hermitian symmetry
     phi = np.zeros(N_ext)
@@ -405,72 +396,7 @@ def generate_pseudo_random_field_1d(N=None, Lx=None, rh=None, grid_extension=2, 
     N_ext = int(N * grid_extension)
 
     # Wave numbers
-    kx = np.fft.fftfreq(N_ext, d=dx) * 2 * np.pi
-
-    # Delta k for Fourier summation
-    dk = 2 * np.pi / (N_ext * dx)
-
-    # Compute sigma by solving the covariance equation
-    def covariance_eq(sigma):
-        k2 = kx**2
-        exp_term = np.exp(-2 * k2 / sigma**2)
-        numerator = np.sum(exp_term * np.cos(kx * rh))
-        denominator = np.sum(exp_term)
-        return numerator / denominator - np.exp(-1)
-
-    # Dynamically find a bracketing interval
-    a, b = 1e-6, 100
-    fa = covariance_eq(a)
-    fb = covariance_eq(b)
-
-    if verbose:
-        print(f"[ICESEE] covariance_eq at sigma={a}: {fa}")
-        print(f"[ICESEE] covariance_eq at sigma={b}: {fb}")
-
-    # Try expanding the interval if signs are the same
-    if fa * fb > 0:
-        warnings.warn("Initial interval [1e-6, 100] does not bracket a root. Trying to find a new interval.")
-        sigma_values = np.logspace(-6, 6, 25)
-        f_values = [covariance_eq(s) for s in sigma_values]
-
-        if verbose:
-            print("[ICESEE] Testing sigma values:")
-            for s, f in zip(sigma_values, f_values):
-                print(f"[ICESEE] sigma={s:.2e}, covariance_eq={f:.2e}")
-
-        # Find a sign change
-        for i in range(len(f_values) - 1):
-            if f_values[i] * f_values[i + 1] < 0:
-                a, b = sigma_values[i], sigma_values[i + 1]
-                fa, fb = f_values[i], f_values[i + 1]
-                break
-        else:
-            warnings.warn("Could not find a bracketing interval. Using heuristic sigma based on rh.")
-            sigma = 2 / rh
-            if verbose:
-                print(f"[ICESEE] Fallback sigma: {sigma}")
-    else:
-        try:
-            sigma = brentq(covariance_eq, a, b, rtol=1e-6)
-            if verbose:
-                print(f"[ICESEE] Solved sigma: {sigma}")
-        except ValueError as e:
-            warnings.warn(f"brentq failed: {str(e)}. Using heuristic sigma.")
-            sigma = 2 / rh
-            if verbose:
-                print(f"[ICESEE] Fallback sigma: {sigma}")
-
-    # Compute c from variance condition
-    k2 = kx**2
-    sum_exp = np.sum(np.exp(-2 * k2 / sigma**2))
-    c2 = 1 / (dk * sum_exp)
-    c = np.sqrt(c2)
-
-    if verbose:
-        print(f"[ICESEE] Computed c: {c}")
-
-    # Compute amplitude
-    A = c * np.sqrt(dk) * np.exp(-k2 / sigma**2)
+    kx, A = _cached_fft_calibration(N_ext, dx, rh)
 
     # Generate random phases with Hermitian symmetry
     phi = np.zeros(N_ext)
