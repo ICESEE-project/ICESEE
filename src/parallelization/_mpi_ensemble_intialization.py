@@ -104,7 +104,7 @@ def ensemble_initialization(**model_kwargs):
                     model_kwargs.update({"ii_sig": None, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
                     noise = generate_enkf_field(**model_kwargs)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
-                    ensemble_vec[:, ens] += alpha*noise
+                    # ensemble_vec[:, ens] += alpha*noise
 
                     # for ii, sig in enumerate(params["sig_Q"]):
                     #     if ii <=params["num_state_vars"]:
@@ -121,6 +121,65 @@ def ensemble_initialization(**model_kwargs):
                     #     start_idx = ii * hdim
                     #     end_idx = start_idx + hdim
                     #     ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
+
+                    # k = model_kwargs.get("k", 0)
+                    # if k == 0: --->
+                    noise_all = []
+                    q0 = []
+                    dt = model_kwargs.get("dt", 1.0)
+                    # specified decorrelation length scale, tau,
+                    min_tau = 200
+                    max_tau = 500
+                    dt  = model_kwargs.get("dt",params["dt"])
+                    tau = max(max_tau,max(min_tau, dt))
+
+                    # tau = max(model_kwargs.get("dt",params["dt"]),10)
+                    alpha = 1 - dt/tau
+                    # make sure  0=<alpha<1
+                    if alpha <= 0 or alpha > 1:
+                        alpha = 0.5
+
+                    n = model_kwargs.get("nt",params["nt"])
+                    # rho = np.sqrt((1-alpha**2)/(dt*(n - 2*alpha - n*alpha**2 + 2*alpha**(n+1))))
+                    rho = np.sqrt((1/dt)*((1-alpha)**2)*(1/(n - (2*alpha) - (n*alpha**2) + (2*alpha**(n+1)))))
+                    for ii, sig in enumerate(params["sig_Q"]):
+                        # if ii <=params["num_state_vars"]:
+                        if ii <= params["total_state_param_vars"]:
+                            # W = np.random.normal(0, 1, hdim)
+                            # W = generate_pseudo_random_field_1d(hdim,np.sqrt(Lx*Ly), len_scale, verbose=0)
+                            model_kwargs.update({"ii_sig": ii, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
+                            W = generate_enkf_field(**model_kwargs)
+                            noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
+                            q0.append(noise_)
+
+                            Z = np.sqrt(dt)*sig*rho*noise_
+                            noise_all.append(Z)
+                    noise_ = np.concatenate(noise_all, axis=0)
+                    # ensemble_vec[:state_block_size] = ensemble_vec[:state_block_size] + noise_[:state_block_size]
+                    # ensemble_vec[:, ens] += model_kwargs.get("initial_spread_factor")*noise_
+
+                    # ensemble_vec[:, ens] += (model_kwargs.get("initial_spread_factor")*noise_ + noise)
+
+                    # scale the noise with sig_Q and add to the ensemble
+                    for ii, sig in enumerate(params["sig_Q"]):
+                        if ii <= params["total_state_param_vars"]:
+                            start_idx = ii * hdim
+                            end_idx = start_idx + hdim
+                            # ensure noise has zero mean
+                            # noise[start_idx:end_idx] *= sig
+                            # noise[start_idx:end_idx] -= np.mean(noise[start_idx:end_idx])
+                            # ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig* np.sqrt(dt)
+                            ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
+
+
+                    # noise = np.concatenate(q0, axis=0)
+                    model_kwargs.update({"noise": noise})  # save the noise to the model_kwargs dictionary
+
+                    # clean up memory
+                    # print("clearing memory for noise generation...")
+                    # del noise_all, q0, noise_, W
+
+                    # <---
 
                     del noise  # Free memory immediately
 
@@ -151,6 +210,24 @@ def ensemble_initialization(**model_kwargs):
                     ensemble_vec_final[:, i] = arr
                 shape_ens = np.array(ensemble_vec_final.shape, dtype=np.int32)
                 ensemble_vec = ensemble_vec_final  # Replace ensemble_vec with final array
+                # ---> multiplicative inflation
+                # time_analysis_mean_generation1  = MPI.Wtime() 
+                # mean_params = np.mean(analysis_vec[state_block_size:,:], axis=1)
+                mean_params = np.mean(ensemble_vec, axis=1)
+                # time_analysis_mean_generation1 = MPI.Wtime() - time_analysis_mean_generation1
+                # time_analysis_mean_generation += time_analysis_mean_generation1
+
+                #  compute parturbations
+                # pertubations = analysis_vec[state_block_size:,:] - mean_params.reshape(-1,1)
+                pertubations = ensemble_vec - mean_params.reshape(-1,1)
+                # apply the inflation factor
+                inflated_pertubations = pertubations * alpha
+
+                # update the analysis vector
+                # analysis_vec[state_block_size:,:] = mean_params.reshape(-1,1) + inflated_pertubations
+                ensemble_vec = mean_params.reshape(-1,1) + inflated_pertubations
+                # only inflate bed topography if it is directly observed
+                # observed_params = model_kwargs.get("observed_params", [])
                 del ensemble_vec_final  # Free memory
             else:
                 shape_ens = np.empty(2, dtype=np.int32)
@@ -217,14 +294,90 @@ def ensemble_initialization(**model_kwargs):
                         #     end_idx = start_idx + hdim
                         #     ensemble_vec[start_idx:end_idx, ens] += alpha * noise[start_idx:end_idx]
                             
-                    ensemble_vec[:,ens] += alpha*noise
+                    # ensemble_vec[:,ens] += alpha*noise
                     # for ii, sig in enumerate(params["sig_Q"]):
                     #     if ii <=params["num_state_vars"]:
                     #         start_idx = ii * hdim
                     #         end_idx = start_idx + hdim
                     #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
                     
+                    # ---->
+                    # noise_all = []
+                    # q0 = []
+                    # dt = model_kwargs.get("dt", 1.0)
+                    # # specified decorrelation length scale, tau,
+                    # min_tau = 200
+                    # max_tau = 500
+                    # dt  = model_kwargs.get("dt",params["dt"])
+                    # tau = max(max_tau,max(min_tau, dt))
+
+                    # # tau = max(model_kwargs.get("dt",params["dt"]),10)
+                    # alpha = 1 - dt/tau
+                    # # make sure  0=<alpha<1
+                    # if alpha <= 0 or alpha > 1:
+                    #     alpha = 0.5
+
+                    # n = model_kwargs.get("nt",params["nt"])
+                    # # rho = np.sqrt((1-alpha**2)/(dt*(n - 2*alpha - n*alpha**2 + 2*alpha**(n+1))))
+                    # rho = np.sqrt((1/dt)*((1-alpha)**2)*(1/(n - (2*alpha) - (n*alpha**2) + (2*alpha**(n+1)))))
+                    # for ii, sig in enumerate(params["sig_Q"]):
+                    #     # if ii <=params["num_state_vars"]:
+                    #     if ii < params["total_state_param_vars"]:
+                    #         # W = np.random.normal(0, 1, hdim)
+                    #         # W = generate_pseudo_random_field_1d(hdim,np.sqrt(Lx*Ly), len_scale, verbose=0)
+                    #         model_kwargs.update({"ii_sig": ii, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
+                    #         W = generate_enkf_field(**model_kwargs)
+                    #         noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
+                    #         q0.append(noise_)
+
+                    #         Z = np.sqrt(dt)*sig*rho*noise_
+                    #         noise_all.append(Z)
+                    # noise_ = np.concatenate(noise_all, axis=0)
+                    # # ensemble_vec[:state_block_size] = ensemble_vec[:state_block_size] + noise_[:state_block_size]
+                    # ensemble_vec[:, ens] += (model_kwargs.get("initial_spread_factor")*noise_ + noise)
+                    # ensemble_vec[:, ens] += model_kwargs.get("initial_spread_factor")*noise_
+
+
+                    # scale the noise with sig_Q and add to the ensemble
+                    for ii, sig in enumerate(params["sig_Q"]):
+                        if ii <= params["total_state_param_vars"]:
+                            start_idx = ii * hdim
+                            end_idx = start_idx + hdim
+                            # ensure noise has zero mean
+                            # noise[start_idx:end_idx] *= sig
+                            # noise[start_idx:end_idx] -= np.mean(noise[start_idx:end_idx])
+                            # ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig* np.sqrt(dt)
+                            ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
+
+
+                    # noise = np.concatenate(q0, axis=0)
+                    model_kwargs.update({"noise": noise})  # save the noise to the model_kwargs dictionary
+
+                    # clean up memory
+                    # print("clearing memory for noise generation...")
+                    # del noise_all, q0, noise_, W
+                    # ---->
+                    
                 shape_ens = np.array(ensemble_vec.shape,dtype=np.int32)
+
+                # ---> multiplicative inflation
+                # time_analysis_mean_generation1  = MPI.Wtime() 
+                # mean_params = np.mean(analysis_vec[state_block_size:,:], axis=1)
+                mean_params = np.mean(ensemble_vec, axis=1)
+                # time_analysis_mean_generation1 = MPI.Wtime() - time_analysis_mean_generation1
+                # time_analysis_mean_generation += time_analysis_mean_generation1
+
+                #  compute parturbations
+                # pertubations = analysis_vec[state_block_size:,:] - mean_params.reshape(-1,1)
+                pertubations = ensemble_vec - mean_params.reshape(-1,1)
+                # apply the inflation factor
+                inflated_pertubations = pertubations * alpha
+
+                # update the analysis vector
+                # analysis_vec[state_block_size:,:] = mean_params.reshape(-1,1) + inflated_pertubations
+                ensemble_vec = mean_params.reshape(-1,1) + inflated_pertubations
+                # only inflate bed topography if it is directly observed
+                # observed_params = model_kwargs.get("observed_params", [])
                 
     
             else:

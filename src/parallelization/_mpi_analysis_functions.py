@@ -95,6 +95,8 @@ def EnKF_X5(km,ensemble_vec, Nens, hu_obs, model_kwargs,UtilsFunctions):
                 model_kwargs.update({"ii_sig": ii, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
                 W = generate_enkf_field(**model_kwargs)
                 noise_all.append(sig * W)
+                # dt = model_kwargs.get("dt", 1.0)
+                # noise_all.append(sig*W*np.sqrt(dt))
 
             noise_ = np.concatenate(noise_all, axis=0)
             _eta.append(noise_)
@@ -105,8 +107,13 @@ def EnKF_X5(km,ensemble_vec, Nens, hu_obs, model_kwargs,UtilsFunctions):
         # o--->
 
     HAbar = np.dot(H, ensemble_mean)
-    Dprime = d.reshape(-1, 1) - HAbar  # mxNens
-    HAprime = copy.deepcopy(Eta)  # mxNens (requires H to be linear)
+    # Dprime = d.reshape(-1, 1) - HAbar  # mxNens
+    Dprime = d.reshape(-1, 1) - np.dot(H, ensemble_vec)  # mxNens
+    
+    # HAprime = copy.deepcopy(Eta)  # mxNens (requires H to be linear)
+    one_N = np.ones((Nens,Nens))/Nens
+    Aprime = np.dot(ensemble_vec, (np.eye(Nens) - one_N)) # mxNens
+    HAprime=np.dot(H, Aprime) # mxNens
 
     # get the min(m,Nens)
     m = d.shape[0]
@@ -288,17 +295,20 @@ def analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,time_analysis_me
         
         # ---> multiplicative inflation
         time_analysis_mean_generation1  = MPI.Wtime() 
-        mean_params = np.mean(analysis_vec[state_block_size:,:], axis=1)
+        # mean_params = np.mean(analysis_vec[state_block_size:,:], axis=1)
+        mean_params = np.mean(analysis_vec, axis=1)
         time_analysis_mean_generation1 = MPI.Wtime() - time_analysis_mean_generation1
         time_analysis_mean_generation += time_analysis_mean_generation1
 
         #  compute parturbations
-        pertubations = analysis_vec[state_block_size:,:] - mean_params.reshape(-1,1)
+        # pertubations = analysis_vec[state_block_size:,:] - mean_params.reshape(-1,1)
+        pertubations = analysis_vec - mean_params.reshape(-1,1)
         # apply the inflation factor
         inflated_pertubations = pertubations * params['inflation_factor']
 
         # update the analysis vector
-        analysis_vec[state_block_size:,:] = mean_params.reshape(-1,1) + inflated_pertubations
+        # analysis_vec[state_block_size:,:] = mean_params.reshape(-1,1) + inflated_pertubations
+        analysis_vec = mean_params.reshape(-1,1) + inflated_pertubations
         # only inflate bed topography if it is directly observed
         observed_params = model_kwargs.get("observed_params", [])
 
