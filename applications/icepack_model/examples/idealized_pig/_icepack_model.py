@@ -280,7 +280,8 @@ def initialize_model(**kwargs):
     
     forward_model = icepack.models.IceStream(friction=schoofFriction,viscosity=regViscosity)
     
-    opts = {"dirichlet_ids": meshOpts["dirichlet_ids"],"diagnostic_solver_parameters": {"max_iterations": 150, "tolerance": 1e-6},}
+    opts = {"dirichlet_ids": [1],"diagnostic_solver_parameters": {"max_iterations": 150, "tolerance": 1e-6},}
+    # opts = {"dirichlet_ids": meshOpts["dirichlet_ids"],"diagnostic_solver_parameters": {"max_iterations": 150, "tolerance": 1e-6},}
     
     forward_solver = icepack.solvers.FlowSolver(forward_model, **opts)
 
