@@ -1,6 +1,7 @@
 %% -----------------------------------------------------------
 % @author:  Brian Kyanjo
-% @date:    2025-06-30
+% @dat
+% e:    2025-06-30
 % @brief:   Reads and plots results from both ISSM and ICESEE
 % ------------------------------------------------------------
 
@@ -11,10 +12,10 @@ close all; clearvars; clear all
 global data_file_paths nvar ensemble_vec_full ...
         label_t t nt colorbar_gap bed_obs_xy
 data_file_paths = '_modelrun_datasets';
-% data_file_paths = '_goodgrounding';
+% data_file_paths = '_modelrun_datasets_ebf';
 % data_file_paths ='_modelrun_working_0';
 nvar = 6;
-colorbar_gap=0.92;
+colorbar_gap=0.775;
 
 % ---------------- user toggles ----------------
 make_plots       = 0;
@@ -24,11 +25,12 @@ compute_rmse     = 1;
 plotgl           = 1;
 
 % ---------------- time steps ------------------
-% k_array = [0, 20,  60, 80, 89, 130, 330, 499]+1;
+% k_array = [30, 60, 90, 120, 139]+1;
 % k_array= [ 0, 20,80, 120, 160, 220, 250, 320, 450]+1;
-% k_array = [0, 20, 80, 120, 160, 240, 360, 499] +1;
+% k_array = [20, 80, 120, 160, 240, 360, 499] +1;
 k_array = [30, 70,100, 120, 180, 245]+1;
 dt      = 0.2;
+nt = 249;
 
 % ---------------- Load essentials --------------
 results_dir = 'results';
@@ -76,7 +78,7 @@ bed_obs_xy = [md_true.mesh.x(obs_idx), md_true.mesh.y(obs_idx)];
 
 %% ------ RMSE -----
 if compute_rmse
-    compute_rmse_timeseries(k_array, dt, t, model_true_state, model_nurged_state, ensemble_vec_mean,md_true, md_nurged, md_ens, md, 'geometry.thickness');
+    compute_rmse_timeseries(k_array, nt, dt, t, model_true_state, model_nurged_state, ensemble_vec_mean,md_true, md_nurged, md_ens, md, 'geometry.thickness');
 end
 
 % ---------------- GL evolution plot ------------
@@ -291,7 +293,8 @@ function plot_gl_on_bed_evolution( ...
     keepTopK_true         = 4;
     keepTopK_wrong        = 4;
     global t label_t nt
-    nt = 251;
+    nt = 245;
+    % nt = 148;
     axs = gobjects(nrows,1);   % <-- store ONLY the real panel axes
 
     % (a) True
@@ -326,8 +329,8 @@ function plot_gl_on_bed_evolution( ...
     [md_true_1, md_nurged_1, md_ens_1] = setup_model_states(1, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md);
     % diff_no = get_nested_field(md_ens_1, field) - get_nested_field(md_true_1, field);
-    % ens_field = get_nested_field(md_nurged_1, bg_field);
-    ens_field = get_nested_field(md_ens_1, bg_field);
+    ens_field = get_nested_field(md_nurged_1, bg_field);
+    % ens_field = get_nested_field(md_ens_1, bg_field);
     true_field = get_nested_field(md_true_1, bg_field);
    
     diff_no = ens_field - true_field;
@@ -580,7 +583,7 @@ function plot_gl_on_bed_evolution( ...
     % for i = 1:nrows, colormap(axs(i), parula); end
     % cb = colorbar(axs(end), 'Position',[colorbar_gap0 0.25 0.025 0.45]);
     % ylabel(cb, [bg_title units_str], 'FontSize',12,'FontWeight','bold');
-    colorbar_gap0=0.91;
+    colorbar_gap0=0.77;
     cb1 = colorbar(axs(1), 'Position',[colorbar_gap0 0.75 0.015 0.16]);
     ylabel(cb1,[bg_title units_str],'FontSize',15,'FontWeight','bold');
     colormap(axs(1), parula);
@@ -652,7 +655,7 @@ function plot_gl_on_bed_evolution( ...
         % lgd.Position(4)];
 
     lgd.Position = [ ...
-        0.525, ...   % left (centered)
+        0.45, ...   % left (centered)
         0.015, ...  % vertical position BELOW xlabel
         0.60, ...   % width
         0.04  ...   % height
@@ -827,7 +830,7 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
     
     % ---- panel letter inside upper-left ----
     % panel = sprintf('(%c)', 'a'+(idx-1));
-    panel_idx = 2;   % change as needed
+    panel_idx = 1;   % change as needed
     panel = sprintf('(%c_{%d})','a', panel_idx);
     text(ax, 0.02, 0.95, panel, 'Units','normalized', ...
         'FontWeight','bold', 'FontSize', 16, ...
@@ -838,8 +841,8 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
     [md_true_1, md_nurged_1, md_ens_1] = setup_model_states(1, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md);
     % diff_no = get_nested_field(md_ens_1, field) - get_nested_field(md_true_1, field);
-    % ens_field = get_nested_field(md_nurged_1, field);
-    ens_field = get_nested_field(md_ens_1, field);
+    ens_field = get_nested_field(md_nurged_1, field);
+    % ens_field = get_nested_field(md_ens_1, field);
     true_field = get_nested_field(md_true_1, field);
     % if contains(field,'geometry.bed')
         % diff_no = relative_error(ens_field, true_field);
@@ -852,7 +855,7 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
     maxAbs_global = maxAbs_no;
   
     % maxAbs_no = prctile(abs(diff_no(:)), 99);
-    plotmodel(md_ens_1,'data',diff_no,'title',sprintf('no assimilation'), ...
+    plotmodel(md_nurged_1,'data',diff_no,'title',sprintf('no assimilation'), ...
         'subplot',[nrows,1,2],'caxis',[-maxAbs_no maxAbs_no],'colorbar','off');
 
     ax = gca; axs(2) = ax;
@@ -1086,7 +1089,7 @@ function plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, e
         md_true, md_nurged, md_ens, md);
     data_true = get_nested_field(md_true_last, field);
     k1 = 1;
-    nt = 251;
+    nt = 245;
     label_t = iff(k1 == nt-1, t(nt), t(k1));
     plotmodel(md_true_last,'data',data_true, ...
         'title',sprintf('True %s ', field_title), ...
@@ -1107,7 +1110,7 @@ function plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, e
     
     % ---- panel letter inside upper-left ----
     % panel = sprintf('(%c)', 'a'+(idx-1));
-    panel_idx = 2;   % change as needed
+    panel_idx = 1;   % change as needed
     panel = sprintf('(%c_{%d})','a', panel_idx);
     text(ax, 0.02, 0.95, panel, 'Units','normalized', ...
         'FontWeight','bold', 'FontSize', 16, ...
@@ -1115,10 +1118,11 @@ function plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, e
         'Color',lightGray);
 
     % (b) No assimilation (k=1) ensemble
-    [~, ~, md_ens_1] = setup_model_states(1, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+    [~, md_nurged_1, md_ens_1] = setup_model_states(1, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
         md_true, md_nurged, md_ens, md);
-    data_ens = get_nested_field(md_ens_1, field);
-    plotmodel(md_ens_1,'data',data_ens, ...
+    % data_ens = get_nested_field(md_ens_1, field);
+    data_ens = get_nested_field(md_nurged_1, field);
+    plotmodel(md_nurged_1,'data',data_ens, ...
         'title',sprintf(' No assimilation %s', field_title), ...
         'subplot',[nrows,1,2],'caxis',[cmin cmax],'colorbar','off');
 
@@ -1848,7 +1852,7 @@ function r = rmse_masked_pair(a, b, mask_a, mask_b, domain)
 end
 
 
-function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_nurged_state, ensemble_vec_mean, md_true, md_nurged, md_ens, md, field)
+function out = compute_rmse_timeseries(k_array, nt, dt, t, model_true_state, model_nurged_state, ensemble_vec_mean, md_true, md_nurged, md_ens, md, field)
 % compute_rmse_timeseries
 % Clean, plot-consistent RMSE time series for:
 %   (1) Thickness RMSE on TRUE grounded ice (ocean_levelset>0 & H>0)
@@ -1861,12 +1865,14 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
 % - Uses the same centerline GL point you use for plotting (via levelset=0 crossing).
 % - `field` kept for API compatibility (not used here, since you plot 4 panels anyway).
 
+global nt
     % -------------------------------
     % Time / step indexing
     % -------------------------------
     % if isempty(k_array)
         % nt = size(model_true_state, 2);
-        nt = 251;
+        nt = 245;
+        % nt = 141;
         kvec = 1:nt-1;
     % else
     %     kvec = k_array(:)';              % enforce row
@@ -2188,7 +2194,9 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     ylabel('RMSE (m)','FontWeight','bold','FontSize',fs_label);
     title('Thickness','FontWeight','bold','FontSize',fs_title);
     % ylim([-0.5,410]); xlim([-1.5,50])
-    ylim([-10 440]); xlim([-1.5,50]);
+
+    % ylim([-10 440]); xlim([-1.5,50]);
+
     % yticks([10 30 80 200 420]);
     yticks([30 100 200 300 420]);
     yticklabels({'30', '100', '200', '300', '420'});
@@ -2217,7 +2225,9 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     ylabel('RMSE (m/yr)','FontWeight','bold','FontSize',fs_label);
     title('Velocity','FontWeight','bold','FontSize',fs_title);
     % ylim([-20,950]); xlim([-1.5,50])
-    ylim([-20 960]); xlim([-1.5,50]);
+
+    % ylim([-20 960]); xlim([-1.5,50]);
+
     % yticks([0, 50 200 400  600 800])
     yticks([20 200 400  600  800])
     yticklabels({'20', '200', '400', '600' ,'800'})
@@ -2241,7 +2251,7 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     
     ylabel('RMSE (Pa m^{-1/3} yr^{-1/3})','FontWeight','bold','FontSize',fs_label);
     title('Friction coefficient','FontWeight','bold','FontSize',fs_title);
-    ylim([200,900]); xlim([-1.5,50])
+    % ylim([200,900]); xlim([-1.5,50])
     
     text(ax3,0.01,0.93,'(c)','Units','normalized', ...
         'FontWeight','bold','FontSize',fs_title, ...
@@ -2258,7 +2268,7 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
     ylabel('|Δx| (km)','FontWeight','bold','FontSize',fs_label);
     title('Absolute distance between GL positions along the centerline', ...
           'FontWeight','bold','FontSize',fs_title);
-    ylim([-0.5e4/1000,4e4/1000]); xlim([-1.5,50])
+    % ylim([-0.5e4/1000,4e4/1000]); xlim([-1.5,50])
     % yticks([0 1e4/1000 2e4/1000  3e4/1000 4e4/1000])
     % yticklabels({'0','10','20','30','40'})
     set(gca,'YMinorTick','off');

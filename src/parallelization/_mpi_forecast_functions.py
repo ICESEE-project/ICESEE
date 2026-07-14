@@ -224,11 +224,14 @@ def parallel_forecast_step_default_run(**model_kwargs):
                 for key, value in updated_state.items():
                     ensemble_local[indx_map[key]] = value
 
-                # ensemble_local = _add_process_noise(
-                #     ensemble_local,
-                #     ens_id,
-                #     local_kwargs,
-                # )
+                obs_index = model_kwargs["obs_index"]
+                km = model_kwargs.get("km")
+                if (km < params["number_obs_instants"]) and (k == obs_index[km]):
+                    ensemble_local = _add_process_noise(
+                        ensemble_local,
+                        ens_id,
+                        local_kwargs,
+                    )
 
                 if sub_rank == 0:
                     local_vec = ensemble_local

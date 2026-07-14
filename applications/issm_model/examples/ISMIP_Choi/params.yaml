@@ -26,14 +26,14 @@ enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 60                      # Number of ensemble members (paper uses 50)
   freq_obs: 2 #4                 # Frequency of observations (annual, as per paper)
-  obs_max_time: 24            # Maximum time for observations (30 years)
+  obs_max_time: 30            # Maximum time for observations (30 years)
   obs_start_time: 2            # Start time for observations (start of simulation)
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state: 1 # Generate true state for synthetic observations
   generate_nurged_state: 1   # Generate nudged state for synthetic observations
   initialize_ensemble: 1
-  initial_spread_factor: 1.25
+  initial_spread_factor: 1.0
   sequential_ensemble_initialization: 0
   use_ensemble_pertubations: 1
 
@@ -42,14 +42,14 @@ enkf-parameters:
   num_param_vars: 2             # Parameter variables: friction coefficient (C), bed topography (B)
   vec_inputs: ['Thickness', 'Surface','Vx','Vy','bed','coefficient'] # State vector inputs (ice surface and velocities)
   # vec_inputs: ['Thickness', 'Surface','Vx','Vy','bed'] # State vector inputs (ice thickness, surface, velocities, bed topography)
-  observed_vars: ['Surface','Vx', 'Vy']  # Observed variables (ice thickness, velocities, bed topography)
+  observed_vars: ['Thickness','Surface','Vx', 'Vy']  # Observed variables (ice thickness, velocities, bed topography)
   # observed_vars: ['Surface']  # Observed variables (ice surface elevation)
   observed_params: ['bed']   # Parameters to estimate (friction coefficient, bed topography)
 
   # inverse model parameters
   vel_idx: 2                     # Index for velocity x in the state vector
   friction_idx: 5               # Index for friction coefficient in the state vector
-  inversion_flag: 1         # Enable inversion for friction coefficient
+  inversion_flag: 0         # Enable inversion for friction coefficient
   min_friction: 2000          # Minimum friction coefficient (2000 Pa s/m from paper)
   max_friction: 4000         # Maximum friction coefficient (10000 Pa s/m
   abs_vel_weight: 1.0        # Weight for absolute velocity in inversion
@@ -57,29 +57,34 @@ enkf-parameters:
   tikhonov_regularization_weight: 1e-13  # Tikhonov regularization weight for inversion
 
   # bed topography observations settings
-  bed_obs_snapshot: [2]        # Bedrock elevation observations at 30 years
+  bed_obs_snapshot: [4, 10, 12, 18]        # Bedrock elevation observations at 30 years
   bed_obs_stride: 4000          # Spacing of bedrock elevation observations (30 km)
-  bed_relaxation_factor: 0.05    # Relaxation factor for bedrock elevation updates (when bed is not observed) (-1< relaxation_factor <=1)
+  bed_relaxation_factor: 1   # Relaxation factor for bedrock elevation updates (when bed is not observed) (-1< relaxation_factor <=1)
   initial_bed_bias: 0.0015        # Initial bias for bedrock elevation (15 m)
 
   # Statistical parameters
-  sig_obs: [10, 7, 3, 2, 3, 0]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
+  sig_obs: [15, 10, 7, 5, 8, 0]              # Observation error std dev: 5 m for H, 10 m/yr for Vx, Vy (paper)
   # sig_Q: [0.01, 0.01, 0.01, 0.01, 0.01,0.01]          # Process noise std dev (adjusted for H, Vx, Vy)
-  sig_Q: [10, 5, 4, 1.75, 4,15]
+  sig_Q: [12, 12, 8, 5, 6, 8]
   # length_scale: [300,320,380,350,320,350]               # Length scale for covariance (5 km for friction, per paper)
   # length_scale: [205,210,213,205, 205,213]               # Length scale for covariance (5 km for bed topography, per paper)
-  length_scale: [205,210,380,350, 205,213] 
+  length_scale: [50,60,80,70, 65,81] 
   # length_scale: [80,85,85,80, 85,80]               # Length scale for covariance (2 km for bed topography, adjusted for resolution)
   # length_scale: [40,45,45,40, 45,44] 
 
   seed: 42                       # Seed for random number generator
-  inflation_factor: 0.95       # Inflation factor (optimal range 1.10–1.18 from paper)
+  inflation_factor: 1.0
+  state_inflation_factor: 1.08
+  param_inflation_factor: 1.00
+  bed_inflation_factor: 0.85
 
   # Estimation flags
   joint_estimation: True       # Enable joint state and parameter estimation
   parameter_estimation: True    # Enable parameter estimation
   joint_estimated_params: ['bed', 'coefficient']  # parameters to be jointly estimated
   # joint_estimated_params: ['bed']  # parameters to be jointly estimated
+  localization_flag: True        # Enable localization for EnKF
+  localized_vars: ['bed', 'coefficient']  # Variables to apply localization to
 
   # Nudged parameters
   sill_friction: 10000      # Sill friction coefficient (90000 Pa s/m from paper)
@@ -89,8 +94,8 @@ enkf-parameters:
   sill_bed: 4000            # Sill bedrock elevation (4000 m from paper)
   range_bed: 50000          # Range bedrock elevation (50000 m from paper)
   nugget_bed: 200           # Nugget effect for bedrock elevation (200 m from paper)
-  b_nurge: 70                # Bedrock and base nudging coefficient 
-  s_nurge: 45                # Surface nudging coefficient
+  b_nurge: 0                # Bedrock and base nudging coefficient 
+  s_nurge: 0                # Surface nudging coefficient
  
   # EnKF model parameters
   model_name: "issm"            # Model name

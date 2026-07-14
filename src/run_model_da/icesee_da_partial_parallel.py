@@ -616,7 +616,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
 
                             if EnKF_flag:
                                 # compute the X5 matrix
-                                X5,analysis_vec_ij = EnKF_X5(k,ensemble_vec, Nens, hu_obs, model_kwargs,UtilsFunctions)
+                                X5,analysis_vec_ij = EnKF_X5(km,ensemble_vec, Nens, hu_obs, model_kwargs,UtilsFunctions)
                                 # X5 = EnKF_X5(Cov_obs, Nens, D, HA, Eta, d)
                                 y_i = np.sum(X5, axis=1)
                                 # ensemble_vec_mean[:,k+1] = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
@@ -626,7 +626,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
 
                             elif DEnKF_flag:
                                 # compute the X5 matrix
-                                X5,X5prime = DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, model_kwargs,UtilsFunctions)
+                                X5,X5prime = DEnKF_X5(km,ensemble_vec, Cov_obs, Nens, model_kwargs,UtilsFunctions)
                                 # y_i = np.sum(X5, axis=1)
                                 # ens_mean = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
                                 # H = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).JObs_fun(ensemble_vec.shape[0])
@@ -695,8 +695,14 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                             bound_idx_end = bound_idx + ndim
 
                             param_slice = hu_obs[bound_idx:bound_idx_end, km]
-                            param_min = np.min(param_slice)
-                            param_max = np.max(param_slice)
+                            param_slice = param_slice[~np.isnan(param_slice)]
+
+                            if param_slice.size > 0:
+                                param_min = np.min(param_slice)
+                                param_max = np.max(param_slice)
+                            else:
+                                param_min = None
+                                param_max = None
 
                             bounds.append(np.array([param_min, param_max]))
 

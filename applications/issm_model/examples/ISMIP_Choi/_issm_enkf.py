@@ -16,6 +16,30 @@ from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_model import *
 from ICESEE.config._utility_imports import icesee_get_index
 # from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import setup_ensemble_intial_data, MatlabServer
 
+# --- import kriging functions ---
+def _load_bed_from_kriging_file(bed_kriging_file, fdim, ens=None, use_mean=False):
+    with h5py.File(bed_kriging_file, "r") as f:
+        bed_ens = f["bed_ens"][:]
+
+        # expected Python shape: (npts, Ne), but be safe
+        if bed_ens.shape[0] != fdim and bed_ens.shape[1] == fdim:
+            bed_ens = bed_ens.T
+
+        if bed_ens.shape[0] != fdim:
+            raise ValueError(
+                f"bed_ens node mismatch: got {bed_ens.shape}, expected first dim {fdim}"
+            )
+
+        if use_mean:
+            bed_field = np.mean(bed_ens, axis=1)
+        else:
+            if ens is None:
+                ens = 0
+            ens = int(ens) % bed_ens.shape[1]
+            bed_field = bed_ens[:, ens]
+
+    return np.asarray(bed_field, dtype=float).ravel()
+
 # --- Forecast step ---
 def forecast_step_single(ensemble=None, **kwargs):
     """ensemble: packs the state variables and parameters of a single ensemble member
@@ -197,11 +221,11 @@ def generate_nurged_state(**kwargs):
     nugget_bed = kwargs.get('nugget_bed')
 
     bed_kriging_file = f'{icesee_path}/bed_kriging_results.h5'
-    with h5py.File(bed_kriging_file, 'r') as f:
-        bed_field = f['bed_ens'][...]
-
-    # bed_field = np.mean(bed_field, axis=0)
-    bed_field = bed_field[0, :]
+    bed_field = _load_bed_from_kriging_file(
+        bed_kriging_file,
+        fdim,
+        use_mean=True
+    )
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
@@ -326,8 +350,12 @@ def initialize_ensemble(ens, **kwargs):
 
 
     bed_kriging_file = f'{icesee_path}/bed_kriging_results.h5'
-    with h5py.File(bed_kriging_file, 'r') as f:
-        bed_field = f['bed_ens'][ens, :]
+    bed_field = _load_bed_from_kriging_file(
+        bed_kriging_file,
+        fdim,
+        ens=ens,
+        use_mean=False
+    )
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'

@@ -368,82 +368,84 @@ def parallel_write_ensemble_scattered(
                     bed_idx = indx_map[vec]
 
             # ---------------- bed relaxation ----------------
-            for ii, vec in enumerate(model_kwargs.get("vec_inputs", [])):
-                vec_l = vec.lower()
-                if vec_l in ["bed", "bedrock", "base", "bedtopography"]:
-                    bed_prior = dset[indx_map[vec], :, timestep - 1]
-                    bed_now = recvbuf[indx_map[vec], :]
+            if False: #TODO: for test runs
+                for ii, vec in enumerate(model_kwargs.get("vec_inputs", [])):
+                    vec_l = vec.lower()
+                    if vec_l in ["bed", "bedrock", "base", "bedtopography"]:
+                        bed_prior = dset[indx_map[vec], :, timestep - 1]
+                        bed_now = recvbuf[indx_map[vec], :]
 
-                    thickness = recvbuf[thickness_idx, :]
-                    di = 0.8930
-                    ocean_levelset = thickness + (recvbuf[bed_idx, :] / di)
+                        thickness = recvbuf[thickness_idx, :]
+                        di = 0.8930
+                        ocean_levelset = thickness + (recvbuf[bed_idx, :] / di)
 
-                    dt = model_kwargs.get("dt", params["dt"])
-                    t = timestep * dt
+                        dt = model_kwargs.get("dt", params["dt"])
+                        t = timestep * dt
 
-                    do_bed_snap = False
-                    for bed_snap in model_kwargs.get("bed_obs_snapshot", []):
-                        if np.isclose(t, bed_snap, rtol=0, atol=1e-12):
-                            do_bed_snap = True
-                            break
-                    
-                    do_bed_snap = False #TODO: for test runs
-                    if do_bed_snap:
-                        eta = 1.0
-                        rho = model_kwargs.get("rho", 1.0)
-                        sigma = 1e-3
-                        X5 = model_kwargs.get("X5", None)
-                        beta_t = model_kwargs.get("initial_bed_bias", 0.0015)
+                        do_bed_snap = False
+                        for bed_snap in model_kwargs.get("bed_obs_snapshot", []):
+                            if np.isclose(t, bed_snap, rtol=0, atol=1e-12):
+                                do_bed_snap = True
+                                break
+                        
+                        do_bed_snap = False #TODO: for test runs
+                        if do_bed_snap:
+                            eta = 1.0
+                            rho = model_kwargs.get("rho", 1.0)
+                            sigma = 1e-3
+                            X5 = model_kwargs.get("X5", None)
+                            beta_t = model_kwargs.get("initial_bed_bias", 0.0015)
 
-                        if X5 is not None:
-                            for i in range(X5.shape[0]):
-                                for j in range(X5.shape[0]):
-                                    beta_t *= X5[j, i]
+                            if X5 is not None:
+                                for i in range(X5.shape[0]):
+                                    for j in range(X5.shape[0]):
+                                        beta_t *= X5[j, i]
 
-                        for i_sig, sig in enumerate(params["sig_Q"]):
-                            if i_sig == ii:
-                                sigma = sig
+                            for i_sig, sig in enumerate(params["sig_Q"]):
+                                if i_sig == ii:
+                                    sigma = sig
 
-                        relaxation_factor = (eta + beta_t) * dt + np.sqrt(dt) * sigma * rho
-                        if relaxation_factor > 1.5:
-                            relaxation_factor = np.sqrt(dt) * sigma * rho
-                        relaxation_factor = min(relaxation_factor, 0.5)
+                            relaxation_factor = (eta + beta_t) * dt + np.sqrt(dt) * sigma * rho
+                            if relaxation_factor > 1.5:
+                                relaxation_factor = np.sqrt(dt) * sigma * rho
+                            relaxation_factor = min(relaxation_factor, 0.5)
 
-                        recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
-                    else:
-                        relaxation_factor = model_kwargs.get("bed_relaxation_factor", 0.05)
-                        recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
+                            recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
+                        else:
+                            relaxation_factor = model_kwargs.get("bed_relaxation_factor", 0.05)
+                            recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
 
             # ---------------- ISSM physical fixes ----------------
-            if model_kwargs.get("model_name", "").lower() == "issm":
-                di = 0.8930
-                rho_ice = 917.0
-                rho_sw = 1028.0
+            if True:
+                if model_kwargs.get("model_name", "").lower() == "issm":
+                    di = 0.8930
+                    rho_ice = 917.0
+                    rho_sw = 1028.0
 
-                thickness = recvbuf[thickness_idx, :]
-                surface = recvbuf[surface_idx, :]
-                bed = recvbuf[bed_idx, :]
+                    thickness = recvbuf[thickness_idx, :]
+                    surface = recvbuf[surface_idx, :]
+                    bed = recvbuf[bed_idx, :]
 
-                pos = np.where(thickness < 1)
-                thickness[pos] = 1.0
+                    pos = np.where(thickness < 1)
+                    thickness[pos] = 1.0
 
-                ocean_levelset = thickness + (bed / di)
+                    ocean_levelset = thickness + (bed / di)
 
-                # floating ice
-                pos_float = np.where(ocean_levelset < 0)
-                surface[pos_float] = thickness[pos_float] * ((rho_sw - rho_ice) / rho_sw)
+                    # floating ice
+                    pos_float = np.where(ocean_levelset < 0)
+                    surface[pos_float] = thickness[pos_float] * ((rho_sw - rho_ice) / rho_sw)
 
-                recvbuf[surface_idx, :] = surface
-                base = surface - thickness
+                    recvbuf[surface_idx, :] = surface
+                    base = surface - thickness
 
-                pos_grounded = np.where(ocean_levelset > 0)
-                base[pos_grounded] = bed[pos_grounded]
+                    pos_grounded = np.where(ocean_levelset > 0)
+                    base[pos_grounded] = bed[pos_grounded]
 
-                recvbuf[surface_idx, :] = base + thickness
-                recvbuf[thickness_idx, :] = thickness
+                    recvbuf[surface_idx, :] = base + thickness
+                    recvbuf[thickness_idx, :] = thickness
 
-                del thickness, surface, bed, ocean_levelset, pos, pos_float, base, pos_grounded
-                gc.collect()
+                    del thickness, surface, bed, ocean_levelset, pos, pos_float, base, pos_grounded
+                    gc.collect()
 
             # Don't write yet if inversion is enabled. We'll do inversion first.
             if not model_kwargs.get("inversion_flag", False):
@@ -719,35 +721,31 @@ def parallel_write_ensemble_scattered_rank_0(timestep, ensemble_mean, params, en
                     di = 0.8930
                     rho_ice = 917.0
                     rho_sw = 1028.0
-                    nd = model_kwargs.get("nd", params['nd'])
-                    ndim = nd // params["total_state_param_vars"]
-                    state_block_size = ndim*params["num_state_vars"]
-                    
-                    thickness = recvbuf[thickness_idx,:]
-                    surface = recvbuf[surface_idx,:]
-                    bed = recvbuf[bed_idx,:]
 
-                    pos = np.where(thickness < 1)
-                    thickness[pos] = 1.0
-                    ocean_levelset = thickness + (bed/di)
-                    # Floating ice (ocean_levelset < 0) find the indices
-                    pos = np.where(ocean_levelset < 0)
-                    surface[pos] = thickness[pos]* ((rho_sw - rho_ice)/rho_sw)
-                    # recvbuf[ndim:2*ndim,:] = surface
-                    recvbuf[surface_idx, :] = surface
+                    thickness = recvbuf[thickness_idx, :]
+                    surface   = recvbuf[surface_idx, :]
+                    bed       = recvbuf[bed_idx, :]
+
+                    thickness[thickness < 1.0] = 1.0
+
+                    ocean_levelset = thickness + bed / di
+
+                    pos_float = np.where(ocean_levelset < 0)
+                    surface[pos_float] = thickness[pos_float] * ((rho_sw - rho_ice) / rho_sw)
+
                     base = surface - thickness
 
                     pos_base = np.where(base < bed)
-                    base[pos_base] = base[pos_base]
+                    base[pos_base] = bed[pos_base]
 
-                    # grounded ice
                     pos_grounded = np.where(ocean_levelset > 0)
                     base[pos_grounded] = bed[pos_grounded]
 
-                    # update surface, bed and thickness in recvbuf
-                    recvbuf[surface_idx, :] = base + thickness
-                    # recvbuf[state_block_size:5*ndim,:] = bed
-                    recvbuf[thickness_idx,:] = thickness
+                    surface = base + thickness
+
+                    recvbuf[thickness_idx, :] = thickness
+                    recvbuf[surface_idx, :] = surface
+
                     # -------*ISSM
                     del thickness, surface, bed, ocean_levelset, pos, base, pos_base, pos_grounded
                     gc.collect()

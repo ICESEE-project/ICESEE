@@ -68,7 +68,18 @@ class UtilsFunctions:
         import numpy as np
 
         params = self.params
-        observed = params["all_observed"]                 # e.g., ['h','u','v','smb','bed']
+        # observed = params["all_observed"]                 # e.g., ['h','u','v','smb','bed']
+        observed = (
+            self.model_kwargs.get("observed_vars", []) +
+            self.model_kwargs.get("observed_params", [])
+        )
+
+        if len(observed) == 0:
+            observed = self.model_kwargs.get("all_observed", [])
+
+        if len(observed) == 0:
+            observed = self.params.get("all_observed", [])
+
         vec_inputs = self.model_kwargs["vec_inputs"]      # e.g., ['h','s','u','v','bed','fric','smb']
 
         vecs, indx_map, _ = icesee_get_index(**self.model_kwargs)
@@ -349,7 +360,7 @@ class UtilsFunctions:
                         x_param = np.asarray(f["/fric_x"][:], dtype=float).ravel() / 1000.0
                         y_param = np.asarray(f["/fric_y"][:], dtype=float).ravel() / 1000.0
 
-                    # tracks perpendicular to flow along x (as in your kriging script)
+                    # tracks perpendicular to flow along x (as in the kriging script)
                     x_min, x_max = x_param.min(), x_param.max()
                     stride = float(bed_stride_km)  # km
                     x_lines = np.arange(x_min, x_max + 1e-6, stride)
@@ -462,6 +473,8 @@ class UtilsFunctions:
         kwargs["bed_snap_cols"] = bed_snap_cols
         kwargs["bed_mask_map_static"] = bed_mask_map_static
         kwargs["bed_mask_map_cols"] = bed_mask_map_cols
+
+        self.model_kwargs.update(kwargs)
 
         bed_masks = {"static": bed_mask_map_static, "cols": bed_mask_map_cols}
         return hu_obs, error_R.T, bed_masks, kwargs

@@ -58,6 +58,16 @@ def ensemble_initialization(**model_kwargs):
     time_init_file_writing     = 0.0
     time_init_ensemble_mean_computation = 0.0
 
+    observed_vars = model_kwargs.get("observed_vars", [])
+    observed_params = model_kwargs.get("observed_params", [])
+
+    all_observed = list(observed_vars) + list(observed_params)
+
+    model_kwargs["observed_vars_params"] = all_observed
+    model_kwargs["all_observed"] = all_observed
+    params["all_observed"] = all_observed
+    params["nd_observed"] = len(all_observed) * (params["nd"] // params["total_state_param_vars"])
+
     if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
         if params["default_run"] and size_world <= params["Nens"] and not (model_kwargs.get("sequential_ensemble_initialization", False)):
         # if False:
@@ -280,12 +290,12 @@ def ensemble_initialization(**model_kwargs):
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
 
                     # lets inflate the noise to increase the spread
-                    model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
-                    # exclude bed variables from observed variables
-                    all_observed = model_kwargs['observed_vars_params']
-                    model_kwargs['all_observed'] = all_observed; params['all_observed'] = all_observed
-                    nd_new = len(all_observed) * hdim
-                    model_kwargs['nd_observed'] = nd_new
+                    # model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
+                    # # exclude bed variables from observed variables
+                    # all_observed = model_kwargs['observed_vars_params']
+                    # model_kwargs['all_observed'] = all_observed; params['all_observed'] = all_observed
+                    # nd_new = len(all_observed) * hdim
+                    # model_kwargs['nd_observed'] = nd_new
                     # for ii, key in enumerate(all_observed):
                     #     # if ii < params["num_state_vars"]:
                     #     ensemble_vec[indx_map[key], ens] += alpha * noise[indx_map[key]]
@@ -609,6 +619,16 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
     time_init_noise_generation = 0.0
     time_init_file_writing     = 0.0
     time_init_ensemble_mean_computation = 0.0
+
+    observed_vars = model_kwargs.get("observed_vars", [])
+    observed_params = model_kwargs.get("observed_params", [])
+
+    all_observed = list(observed_vars) + list(observed_params)
+
+    model_kwargs["observed_vars_params"] = all_observed
+    model_kwargs["all_observed"] = all_observed
+    params["all_observed"] = all_observed
+    params["nd_observed"] = len(all_observed) * (params["nd"] // params["total_state_param_vars"])
 
     if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
         if params["default_run"] and size_world <= params["Nens"] and not (model_kwargs.get("sequential_ensemble_initialization", False)):

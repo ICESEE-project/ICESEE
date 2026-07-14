@@ -39,7 +39,11 @@ def generate_synthetic_observations(**model_kwargs):
                 with h5py.File(_true_nurged, "r") as f:
                     ensemble_true_state = f['true_state'][:]
 
-                utils_funs = UtilsFunctions(params, ensemble_true_state)
+                utils_funs = UtilsFunctions(
+                    params=params,
+                    model_kwargs=model_kwargs,
+                    ensemble=ensemble_true_state
+                )
                 model_kwargs.update({"statevec_true": ensemble_true_state})
                 hu_obs, error_R, bed_masks, kwargs = utils_funs._create_synthetic_observations(**model_kwargs)
 
@@ -125,7 +129,11 @@ def generate_synthetic_observations(**model_kwargs):
                 subcomm.Barrier()
                 # comm_world.Bcast(hu_obs, root=0)
                 if sub_rank == 0:
-                    utils_funs = UtilsFunctions(params, ensemble_true_state)
+                    utils_funs = UtilsFunctions(
+                        params=params,
+                        model_kwargs=model_kwargs,
+                        ensemble=ensemble_true_state
+                    )
                     model_kwargs.update({"statevec_true": ensemble_true_state})
                     hu_obs, error_R, bed_mask_map, kwargs = utils_funs._create_synthetic_observations(**model_kwargs)
                     model_kwargs.update({"bed_mask_map": bed_mask_map})
@@ -188,9 +196,14 @@ def generate_synthetic_observations(**model_kwargs):
                 
                 # comm_world.Bcast(hu_obs, root=0)
                 if rank_world == 0:
-                    utils_funs = UtilsFunctions(params, ensemble_true_state)
+                    utils_funs = UtilsFunctions(
+                        params=params,
+                        model_kwargs=model_kwargs,
+                        ensemble=ensemble_true_state
+                    )
                     model_kwargs.update({"statevec_true": ensemble_true_state})
                     hu_obs, error_R, bed_mask_map, kwargs = utils_funs._create_synthetic_observations(**model_kwargs)
+                    model_kwargs.update(kwargs)
                     model_kwargs.update({"bed_mask_map": bed_mask_map})
                     shape_ = np.array(hu_obs.shape,dtype=np.int32)
                     shape_R = np.array(error_R.shape,dtype=np.int32)

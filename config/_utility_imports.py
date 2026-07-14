@@ -151,6 +151,9 @@ if not flag_jupyter:
         'num_param_vars': int(float(enkf_params.get('num_param_vars', 0))),
         'number_obs_instants': int(int(float(enkf_params.get('obs_max_time', 1))) / float(enkf_params.get('freq_obs', 1))),
         'inflation_factor': float(enkf_params.get('inflation_factor', 1.0)),
+        'state_inflation_factor': float(enkf_params.get('state_inflation_factor', float(enkf_params.get('inflation_factor', 1.0)))),
+        'param_inflation_factor': float(enkf_params.get('param_inflation_factor', float(enkf_params.get('inflation_factor', 1.0)))),
+        'bed_inflation_factor': float(enkf_params.get('bed_inflation_factor', int(float(enkf_params.get('inflation_factor', 1.0))))),
         'freq_obs': float(enkf_params.get('freq_obs', 1)),
         'obs_max_time': int(float(enkf_params.get('obs_max_time', 1))),
         'obs_start_time': float(enkf_params.get('obs_start_time', 1)),
@@ -277,6 +280,11 @@ if not flag_jupyter:
         'scalar_inputs': enkf_params.get('scalar_inputs', []), # list of scalar input variables
         'generate_true_wrong_state_only': enkf_params.get('generate_true_wrong_state_only', False), # flag to only generate true and wrong state without running the assimilation
         'generate_synthetic_obs_only': bool(enkf_params.get('generate_synthetic_obs_only', False)), # flag to only generate synthetic observations without running the assimilation
+        'localized_vars': enkf_params.get('localized_vars', []), # list of variables to localize (only used if localization_flag is True)
+        'localization_radius': enkf_params.get('localization_radius', 50.0), # localization radius (float or dict {var_name: radius})
+        'node_coords': enkf_params.get('node_coords', {}), # dict {var_name: (n_i,2) node coordinates}
+        'obs_node_coords': enkf_params.get('obs_node_coords', {}), # dict {var_name: (m_i,2) active obs-node coords, static/union across the run}
+        'taper_type': enkf_params.get('taper_type', 'gaspari_cohn'), # 'gaspari_cohn' (default) or 'gaussian'
     }
 
 
