@@ -4,7 +4,7 @@
 # @date: 2024-11-4
 # @author: Brian Kyanjo
 # ==============================================================================
-
+#_icepack_model.py
 # --- python imports ---
 import sys
 import os
@@ -134,8 +134,8 @@ def initialize_model(**kwargs):
 
     # print size h
     # print(f"Size of the function space: {h.dat.data.size} on rank {rank}")
-
-    return nx,ny,Lx,Ly,x,y,h,u,a,a_p,b,b_in,b_out,h0,u0,solver_weertman,A,C,Q,V,
+    kwargs.update({"nx":nx, "ny":ny, "Lx":Lx, "Ly":Ly, "x":x, "y":y, "h":h, "u":u, "a":a, "a_p":a_p, "b":b, "b_in":b_in, "b_out":b_out, "h0":h0, "u0":u0, "solver_weertman":solver_weertman, "A":A, "C":C, "Q":Q, "V":V, "mesh":mesh})
+    return kwargs
 
 # --- icepack model ---
 def Icepack(solver, h, u, a, b, dt, h0, **kwargs):
@@ -241,5 +241,25 @@ def run_model(ensemble, **kwargs):
 
     return updated_state
 
+def get_icepack_node_coordinates(model_kwargs):
+    """Return (n_dof, 2) physical coordinates for every Icepack DOF, in
+    the same ordering as h.dat.data / u.dat.data."""
+    import firedrake
+    Q = model_kwargs.get("Q")
+    mesh = model_kwargs.get("mesh")
+    if Q is None or mesh is None:
+        raise ValueError(
+            "Icepack coordinate provider requires 'Q' and 'mesh' in "
+            "model_kwargs (ensure initialize_model's kwargs.update includes them)."
+        )
+    coords_expr = firedrake.interpolate(
+        firedrake.SpatialCoordinate(mesh),
+        firedrake.VectorFunctionSpace(mesh, Q.ufl_element())
+    )
+    coords_func = firedrake.assemble(coords_expr)   # <-- forces evaluation into a Function
+    return coords_func.dat.data_ro.copy()
 
+# --- Utility imports ---
+from ICESEE.src.utils.localization import register_coord_provider
+register_coord_provider("icepack", get_icepack_node_coordinates)
 

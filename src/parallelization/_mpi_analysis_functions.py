@@ -15,486 +15,257 @@ import bigmpi4py as BM
 from scipy.stats import multivariate_normal, beta
 from mpi4py import MPI
 
-from ICESEE.src.parallelization._parallel_i_o import parallel_write_full_ensemble_from_root, \
-                                                parallel_write_ensemble_scattered
-from ICESEE.src.utils.tools import icesee_get_index, get_grid_dimensions
-
-# from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
-# rank_seed, rng = ParallelManager().initialize_seed(MPI.COMM_WORLD)
-
 # seed the random number generator
 # np.random.seed(0)
-from localization import apply_localization
+from ICESEE.src.utils.localization import apply_local_patches, compute_local_patches_X5, compute_X5_from_matrices, apply_smb_physics_correction
+
+from ICESEE.src.parallelization._parallel_i_o import (
+    partition_rows,
+    compute_HAprime_Eta_Dprime_partitioned,
+    write_analysis_partitioned,
+    parallel_write_ensemble_scattered
+)
 
 # ============================ EnKF functions ============================ 
-# def EnKF_X5(Cov_obs, Nens, D, HA, Eta, d): 
-def EnKF_X5(k_obs,ensemble_vec, Nens, hu_obs, model_kwargs,UtilsFunctions):
-    """
-    Function to compute the X5 matrix for the EnKF
-        - ensemble_vec: ensemble matrix of size (ndxNens)
-        - Cov_obs: observation covariance matrix
-        - Nens: ensemble size
-        - hu_obs: observations vector
-    """
+def EnKF_X5(k_obs, ensemble_vec, Nens, hu_obs, model_kwargs, UtilsFunctions):
     params = model_kwargs.get("params")
     comm_world = model_kwargs.get("comm_world")
-    generate_enkf_field = model_kwargs.get("generate_enkf_field", False)
-    rng = model_kwargs.get("rng", np.random.default_rng())
-    rank_seed = model_kwargs.get("rank_seed", 0)
-    Cov_obs = None
-    model_kwargs["hu_obs_loaded"] = hu_obs
 
+    if model_kwargs.get("partitioned_io_flag", False):
+        # ============================================== NEW BRANCH
+        input_file = model_kwargs.get("_forecast_h5_path")
+        timestep_forecast = model_kwargs.get("k")
+
+        model_kwargs["hu_obs_loaded"] = hu_obs
+        model_kwargs["km"] = k_obs
+
+        U = UtilsFunctions(params=params, model_kwargs=model_kwargs, ensemble=None)
+        obs_indices = U.JObs_indices(params["nd"])
+
+        y_full = hu_obs[:, k_obs].copy()
+        y_full[np.isnan(y_full)] = 0.0
+        d = y_full[obs_indices]
+
+        HAprime, Eta, Dprime = compute_HAprime_Eta_Dprime_partitioned(
+            input_file, timestep_forecast, obs_indices, d, Nens, comm_world
+        )
+
+        X5 = compute_X5_from_matrices(HAprime, Eta, Dprime, Nens)
+
+        local_patches = None
+        if model_kwargs.get("local_analysis", False):
+            local_patches = compute_local_patches_X5(
+                vec_inputs=model_kwargs.get("vec_inputs", []),
+                hdim=params["nd"] // params["total_state_param_vars"],
+                HAprime=HAprime, Eta=Eta, Dprime=Dprime,
+                Nens=Nens, obs_indices=obs_indices, model_kwargs=model_kwargs
+            )
+
+        model_kwargs["_analysis_h5_path"] = input_file
+        model_kwargs["_analysis_timestep_forecast"] = timestep_forecast
+
+        return X5, local_patches
+        # ============================================== END NEW
+
+    # ---- EXISTING in-memory path, unchanged below ----
+    generate_enkf_field = model_kwargs.get("generate_enkf_field", False)
+    model_kwargs["hu_obs_loaded"] = hu_obs
     model_kwargs["km"] = k_obs
 
-    # np.random.seed(rank_seed)
-
-    # H = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).JObs_fun(ensemble_vec.shape[0]) # mxNens, observation operator
     U = UtilsFunctions(params=params, model_kwargs=model_kwargs, ensemble=ensemble_vec)
+    obs_indices = U.JObs_indices(ensemble_vec.shape[0])
 
-    H = U.JObs_fun(ensemble_vec.shape[0])          # build once
-    # k_obs = model_kwargs.get("km")
-    # d = U.Obs_fun(hu_obs[:, k_obs], H=H, km=km)       # reuse
     y_full = hu_obs[:, k_obs].copy()
     y_full[np.isnan(y_full)] = 0.0
-    # d = U.Obs_fun(hu_obs[:, k_obs], H=H, km=k_obs)       # reuse
-    d = U.Obs_fun(y_full, H=H, km=k_obs)       # reuse
-    # if comm_world.Get_rank() == 0:
-    #     print(f"[ICESEE] Rank: {comm_world.Get_rank()} EnKF_X5 at time step km: {km} any NaN in H: {np.isnan(H).any()} d: {np.isnan(d).any()}")
-    # -- get ensemble pertubations
+    d = y_full[obs_indices]
+
     use_ensemble_pertubations = model_kwargs.get("use_ensemble_pertubations", True)
-    ensemble_mean = np.mean(ensemble_vec, axis=1).reshape(-1,1)
+    ensemble_mean = np.mean(ensemble_vec, axis=1).reshape(-1, 1)
+
     if use_ensemble_pertubations:
-        ensemble_perturbations = ensemble_vec - ensemble_mean # ensure mean is zero
-        Eta = np.dot(H, ensemble_perturbations) # mxNens, ensemble pertubations
-    else: #or use ensembles of perturbations
-        # generate ensemble of perturbations # mxNens o---->
+        ensemble_perturbations = ensemble_vec - ensemble_mean
+        Eta = ensemble_perturbations[obs_indices, :] 
+    else:
         if model_kwargs["joint_estimation"] or params["localization_flag"]:
             hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
         else:
             hdim = ensemble_vec.shape[0] // params["num_state_vars"]
 
         Lx, Ly = model_kwargs.get("Lx"), model_kwargs.get("Ly")
-        len_scale =  model_kwargs.get("length_scale")  # Length scale for localization
-        alpha = model_kwargs.get("alpha", 1.0)  # Mixing parameter for noise generation
-        rho = model_kwargs.get("rho", 1.0)  # Correlation coefficient for noise generation
-        dt = model_kwargs.get("dt", 1.0)  # Time step size
-        noise = model_kwargs.get("noise", None)  # Noise vector, should be provided
-        
-        # ensure mean of noise is zero
-        # ensure mean of noise is zero
+
         if model_kwargs.get("inversion_flag", False):
-            # exclude friction index from params['sig_obs']
-            friction_idx = int(model_kwargs.get("friction_idx", -1))  # int always
-            sig_obs_filtered = [
-                params["sig_obs"][i]
-                for i in range(len(params["sig_obs"]))
-                if i != friction_idx
-            ]
+            friction_idx = int(model_kwargs.get("friction_idx", -1))
+            sig_obs_filtered = [params["sig_obs"][i] for i in range(len(params["sig_obs"])) if i != friction_idx]
 
         _eta = []
         for ens in range(Nens):
             noise_all = []
             for ii, sig in enumerate(sig_obs_filtered if model_kwargs.get("inversion_flag", False) else params["sig_obs"]):
-                model_kwargs.update({"ii_sig": ii, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
+                model_kwargs.update({"ii_sig": ii, "Lx_dim": np.sqrt(Lx * Ly), "noise_dim": hdim, "num_vars": params["total_state_param_vars"]})
                 W = generate_enkf_field(**model_kwargs)
                 noise_all.append(sig * W)
-                # dt = model_kwargs.get("dt", 1.0)
-                # noise_all.append(sig*W*np.sqrt(dt))
-
             noise_ = np.concatenate(noise_all, axis=0)
             _eta.append(noise_)
-        _eta= np.array(_eta).T  # Convert to shape (nd, Nens)
+        _eta = np.array(_eta).T
+        _eta -= np.mean(_eta, axis=1).reshape(-1, 1)
+        Eta = _eta[obs_indices, :]
+        
+    Dprime = d.reshape(-1, 1) - ensemble_vec[obs_indices, :]
 
-        _eta -= np.mean(_eta, axis=1).reshape(-1, 1)  # Ensure mean is zero
-        Eta = np.dot(H, _eta)  # mxNens, ensemble perturbations
-        # o--->
+    one_N = np.ones((Nens, Nens)) / Nens
+    Aprime = np.dot(ensemble_vec, (np.eye(Nens) - one_N))
+    HAprime = Aprime[obs_indices, :]
 
-    # Dprime = d.reshape(-1, 1) - np.dot(H, ensemble_mean) # mxNens
-    Dprime = d.reshape(-1, 1) - np.dot(H, ensemble_vec)  # mxNens
-    
-    # HAprime = copy.deepcopy(Eta)  # mxNens (requires H to be linear)
-    one_N = np.ones((Nens,Nens))/Nens
-    Aprime = np.dot(ensemble_vec, (np.eye(Nens) - one_N)) # mxNens
-    HAprime=np.dot(H, Aprime) # mxNens
-
-    # get the min(m,Nens)
     m = d.shape[0]
     nrmin = min(m, Nens)
 
-    # --- compute HA' + eta
     HAprime_eta = HAprime + Eta
+    U_svd, sig, _ = np.linalg.svd(HAprime_eta, full_matrices=False)
+    sig = sig ** 2
 
-    # --- compute the SVD of HA' + eta
-    U, sig, _ = np.linalg.svd(HAprime_eta, full_matrices=False)
-
-    # --- convert s to eigenvalues
-    sig = sig**2
-    # for i in range(nrmin):
-    #     sig[i] = sig[i]**2
-    
-    # ---compute the number of significant eigenvalues
-    sigsum = np.sum(sig[:nrmin])  # Compute total sum of the first `nrmin` eigenvalues
+    sigsum = np.sum(sig[:nrmin])
     sigsum1 = 0.0
-    nrsigma = 0
-
     for i in range(nrmin):
         if sigsum1 / sigsum < 0.999:
-            nrsigma += 1
             sigsum1 += sig[i]
-            sig[i] = 1.0 / sig[i]  # Inverse of eigenvalue
+            sig[i] = 1.0 / sig[i]
         else:
-            sig[i:nrmin] = 0.0  # Set remaining eigenvalues to 0
-            break  # Exit the loop
-    
-    # compute X1 = sig*UT #Nens x m_obs
+            sig[i:nrmin] = 0.0
+            break
+
     X1 = np.empty((nrmin, m))
     for j in range(m):
         for i in range(nrmin):
-            X1[i,j] =sig[i]*U[j,i]
-    
-    # compute X2 = X1*Dprime # Nens x Nens
-    X2 = np.dot(X1, Dprime)
-    # del Cov_obs, sig, X1, Dprime; gc.collect()
-    
-    # print(f"[ICESEE] Rank: {rank_world} X2 shape: {X2.shape}")
-    #  compute X3 = U*X2 # m_obs x Nens
-    X3 = np.dot(U, X2)
+            X1[i, j] = sig[i] * U_svd[j, i]
 
-    # print(f"[ICESEE] Rank: {rank_world} X3 shape: {X3.shape}")
-    # compute X4 = (HAprime.T)*X3 # Nens x Nens
+    X2 = np.dot(X1, Dprime)
+    X3 = np.dot(U_svd, X2)
     X4 = np.dot(HAprime.T, X3)
-    del X2, X3, U, HAprime; gc.collect()
-    
-    # print(f"[ICESEE] Rank: {rank_world} X4 shape: {X4.shape}")
-    # compute X5 = X4 + I
+
     X5 = X4 + np.eye(Nens)
-    # sum of each column of X5 should be 1
     if np.sum(X5, axis=0).all() != 1.0:
         print(f"[ICESEE] Sum of each X5 column is not 1.0: {np.sum(X5, axis=0)}")
-    # print(f"[ICESEE] Rank: {comm_world.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
-    del X4; gc.collect()
 
-    # ===local computation
-    if model_kwargs.get("local_analysis",False):
-        nx, ny = model_kwargs.get("nx"), model_kwargs.get("ny")
-        from scipy.spatial import distance
-        # for each grid point
-        h = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).Obs_fun 
-        # d = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).Obs_fun(hu_obs[:,km])
-        analysis_vec_ij = np.empty_like(ensemble_vec)
-        dim = ensemble_vec.shape[0]//params["total_state_param_vars"]
-        mx, my = get_grid_dimensions(nx, ny, dim)
-        yg, xg = np.unravel_index(np.arange(dim), (my, mx))
-        lscale = 20
-        for ij in range(dim):
-            # reference point xg[ij], yg[ij]
-            # dist = np.sqrt((xg[ij] - xg)**2 + (yg[ij] - yg)**2)
-            dist = distance.cdist(np.array([[xg[ij], yg[ij]]]), np.column_stack((xg, yg)))[0]
-            # nearest_indices = np.argsort(dist)[:lscale]
-            nearest_indices = dist < np.abs(lscale)
-            # ensemble_vec_ij = ensemble_vec[nearest_indices,:]
+    local_patches = None
+    if model_kwargs.get("local_analysis", False):
+        local_patches = compute_local_patches_X5(
+            vec_inputs=model_kwargs.get("vec_inputs", []),
+            hdim=ensemble_vec.shape[0] // params["total_state_param_vars"],
+            HAprime=HAprime, Eta=Eta, Dprime=Dprime,
+            Nens=Nens, obs_indices=obs_indices, model_kwargs=model_kwargs
+        )
 
-            Eta_local = np.zeros(Nens)
-            D_local   = np.zeros_like(Eta_local)
-            HA_local  = np.zeros_like(D_local)
-            for ens in range(Nens):
-                for var in range(params["total_state_param_vars"]):
-                    idx = var*dim + ij
-                    # nearrest observations indices 
-                    idx_obs_loc = var*dim + nearest_indices
-                    print(f"[ICESEE] nearest_indices: {nearest_indices} idx_obs_loc: {idx_obs_loc}")
-                    # d_loc = d[idx]
-                    d_loc = d[idx_obs_loc]
-                    # Cov_obs_loc = Cov_obs[idx,idx]
-                    Cov_obs_loc = Cov_obs[idx_obs_loc,idx_obs_loc]
-                    # mean = np.zeros(1)
-                    # Eta_local[ens] = np.random.multivariate_normal(mean, cov=Cov_obs_loc)
-                    Eta_local[ens] = np.random.normal(0, np.sqrt(Cov_obs_loc))
-                    D_local[ens] = d_loc + Eta_local[ens]
-                    # HA_local[ens] = h(ensemble_vec[idx,ens])
-                    HA_local[ens] = UtilsFunctions(params, ensemble_vec[idx_obs_loc,ens]).Obs_fun(ensemble_vec[idx_obs_loc,ens])
+    del X2, X3, X4, U_svd, HAprime
+    gc.collect()
 
-            Dprime_local = D_local - HA_local
-            HAbar_local = np.mean(HA_local)
-            HAprime_local = HA_local - HAbar_local
-            m_obs_local = d_loc.shape[0]
-            nrmin_local = min(m_obs_local, Nens)
-            HAprime_eta_local = HAprime_local + Eta_local
-            U_local, sig_local, _ = np.linalg.svd(HAprime_eta_local, full_matrices=False)
-            sig_local = sig_local**2
-            sigsum_local = np.sum(sig_local[:nrmin_local])
-            sigsum1_local = 0.0
-            nrsigma_local = 0
-            for i in range(nrmin_local):
-                if sigsum1_local / sigsum_local < 0.999:
-                    nrsigma_local += 1
-                    sigsum1_local += sig_local[i]
-                    sig_local[i] = 1.0 / sig_local[i]
-                else:
-                    sig_local[i:nrmin_local] = 0.0
-                    break
-            X1_local = np.empty((nrmin_local, m_obs_local))
-            for j in range(m_obs_local):
-                for i in range(nrmin_local):
-                    X1_local[i,j] = sig_local[i]*U_local[j,i]
-            X2_local = np.dot(X1_local, Dprime_local)
-            X3_local = np.dot(U_local, X2_local)
-            X4_local = np.dot(HAprime_local.T, X3_local)
-            X5_local = X4_local + np.eye(Nens)
-
-            # compute the diff
-            X5_diff = X5_local - X5
-
-            # compute analysis vector
-            for var in range(params["total_state_param_vars"]):
-                # idx = var*dim + ij
-                idx = var*dim + nearest_indices
-                analysis_vec_ij[ij,:] = np.dot(ensemble_vec[idx,:], X5) + np.dot(ensemble_vec[idx,:], X5_diff)
-        
-    else:
-        analysis_vec_ij = None
-        
-
-    return X5, analysis_vec_ij
+    return X5, local_patches
 
 def analysis_enkf_update(
-    k,
-    ens_mean,
-    ensemble_vec,
-    shape_ens,
-    X5,
-    time_analysis_mean_generation,
-    time_analysis_file_writing,
-    analysis_vec_ij,
-    UtilsFunctions,
-    model_kwargs,
-    smb_scale
+    k, ens_mean, ensemble_vec, shape_ens, X5,
+    time_analysis_mean_generation, time_analysis_file_writing,
+    local_patches, UtilsFunctions, model_kwargs, smb_scale
 ):
-    """
-    Parallel EnKF analysis update
-
-    Logic:
-        1. Broadcast X5
-        2. Scatter ensemble rows across ranks
-        3. Compute analysis:
-               A = F X5
-        4. Apply local block-wise inflation
-        5. Freeze bed when no bed obs exist
-        6. Parallel write updated ensemble
-    """
-
     import gc
     import numpy as np
     from mpi4py import MPI
 
-    if model_kwargs.get("local_analysis", False):
-        return time_analysis_mean_generation, time_analysis_file_writing
-
     params = model_kwargs.get("params")
     comm_world = model_kwargs.get("comm_world")
+
+    if model_kwargs.get("partitioned_io_flag", False):
+        # ============================================== NEW BRANCH
+        h5_path = model_kwargs.get("_analysis_h5_path")
+        timestep_forecast = model_kwargs.get("_analysis_timestep_forecast")
+
+        t0 = MPI.Wtime()
+        write_analysis_partitioned(k, X5, local_patches, h5_path, timestep_forecast, model_kwargs, comm_world)
+        time_analysis_file_writing += MPI.Wtime() - t0
+
+        return time_analysis_mean_generation, time_analysis_file_writing
+        # ============================================== END NEW
+
+    # ---- EXISTING Scatterv-based path, unchanged below ----
     rank_world = comm_world.Get_rank()
     size_world = comm_world.Get_size()
 
-    # ------------------------------------------------------------
-    # Broadcast X5
-    # ------------------------------------------------------------
     X5 = BM.bcast(X5, comm=comm_world)
-    time_analysis_mean_generation = BM.bcast(
-        time_analysis_mean_generation,
-        comm=comm_world
-    )
-
+    time_analysis_mean_generation = BM.bcast(time_analysis_mean_generation, comm=comm_world)
     model_kwargs["X5"] = X5
 
-    # ------------------------------------------------------------
-    # Root allocates full ensemble only
-    # ------------------------------------------------------------
     if rank_world != 0:
         ensemble_vec = None
 
     nd_total, nens = shape_ens
 
-    # ------------------------------------------------------------
-    # Compute row decomposition
-    # ------------------------------------------------------------
     counts_rows = np.array(
-        [
-            nd_total // size_world + (1 if r < nd_total % size_world else 0)
-            for r in range(size_world)
-        ],
-        dtype=np.int32
+        [nd_total // size_world + (1 if r < nd_total % size_world else 0)
+         for r in range(size_world)], dtype=np.int32
     )
-
-    offsets_rows = np.insert(
-        np.cumsum(counts_rows),
-        0,
-        0
-    )[:-1].astype(np.int32)
-
+    offsets_rows = np.insert(np.cumsum(counts_rows), 0, 0)[:-1].astype(np.int32)
     local_nd = int(counts_rows[rank_world])
     row_offset = int(offsets_rows[rank_world])
+    global_rows = row_offset + np.arange(local_nd)
 
     counts = (counts_rows * nens).astype(np.int32)
     displs = (offsets_rows * nens).astype(np.int32)
 
-    # ------------------------------------------------------------
-    # Scatter ensemble by rows
-    # ------------------------------------------------------------
-    scatter_ensemble = np.empty(
-        (local_nd, nens),
-        dtype=np.float64
-    )
+    scatter_ensemble = np.empty((local_nd, nens), dtype=np.float64)
+    sendbuf = np.ascontiguousarray(ensemble_vec) if rank_world == 0 else None
+    comm_world.Scatterv([sendbuf, counts, displs, MPI.DOUBLE], scatter_ensemble, root=0)
 
-    if rank_world == 0:
-        sendbuf = np.ascontiguousarray(ensemble_vec)
-    else:
-        sendbuf = None
-
-    comm_world.Scatterv(
-        [sendbuf, counts, displs, MPI.DOUBLE],
-        scatter_ensemble,
-        root=0
-    )
-
-    # ------------------------------------------------------------
-    # Analysis update
-    # ------------------------------------------------------------
     analysis_vec = np.dot(scatter_ensemble, X5)
 
-    # ------------------------------------------------------------
-    # Local block-wise multiplicative inflation
-    # ------------------------------------------------------------
+    if model_kwargs.get("local_analysis", False):
+        analysis_vec = apply_local_patches(analysis_vec, scatter_ensemble, global_rows, local_patches)
+
     t0 = MPI.Wtime()
-
-    state_inflation = params.get(
-        "state_inflation_factor",
-        params.get("inflation_factor", 1.0)
-    )
-
-    param_inflation = params.get(
-        "param_inflation_factor",
-        params.get("inflation_factor", 1.0)
-    )
-
-    bed_inflation = params.get(
-        "bed_inflation_factor",
-        param_inflation
-    )
+    state_inflation = params.get("state_inflation_factor", params.get("inflation_factor", 1.0))
+    param_inflation = params.get("param_inflation_factor", params.get("inflation_factor", 1.0))
+    bed_inflation = params.get("bed_inflation_factor", param_inflation)
 
     vec_inputs = model_kwargs.get("vec_inputs", [])
     nblocks = len(vec_inputs)
-
-    # full state dimension per block
     hdim = model_kwargs.get("nd", params["nd"]) // nblocks
 
-    # local → global row map
-    global_rows = row_offset + np.arange(local_nd)
-
     inflation_vec = np.ones(local_nd) * param_inflation
-
     for ii, key in enumerate(vec_inputs):
-
-        start = ii * hdim
-        end = start + hdim
-
+        start, end = ii * hdim, ii * hdim + hdim
         local_mask = (global_rows >= start) & (global_rows < end)
-
         if not np.any(local_mask):
             continue
-
         key_l = key.lower()
-
-        # state variables
         if ii < params["num_state_vars"]:
             inflation_vec[local_mask] = state_inflation
-
-        # bed block
-        elif key_l in [
-            "bed",
-            "bedrock",
-            "bedtopography",
-            "bed_topography"
-        ]:
+        elif key_l in ["bed", "bedrock", "bedtopography", "bed_topography"]:
             inflation_vec[local_mask] = bed_inflation
-
-        # other parameters
         else:
             inflation_vec[local_mask] = param_inflation
 
-    local_mean = np.mean(
-        analysis_vec,
-        axis=1,
-        keepdims=True
-    )
-
+    local_mean = np.mean(analysis_vec, axis=1, keepdims=True)
     local_pert = analysis_vec - local_mean
-
     analysis_vec = local_mean + inflation_vec[:, None] * local_pert
-
     time_analysis_mean_generation += MPI.Wtime() - t0
 
-    # ------------------------------------------------------------
-    # Parameter-space localization (increment tapering) — no-op unless
-    # model_kwargs['localized_vars'] is set
-    # ------------------------------------------------------------
-    if model_kwargs.get("localization_flag", False):
-        analysis_vec = apply_localization(
-            analysis_vec, scatter_ensemble, global_rows, vec_inputs, hdim, model_kwargs
-        )
-
-    # ------------------------------------------------------------
-    # Freeze bed if no bed observation this cycle
-    # ------------------------------------------------------------
     km = model_kwargs.get("km", None)
     bed_snap_cols = set(model_kwargs.get("bed_snap_cols", []))
-
     if km is not None and int(km) not in bed_snap_cols:
-
         for ii, key in enumerate(vec_inputs):
-
-            if key.lower() not in [
-                "bed",
-                "bedrock",
-                "bedtopography",
-                "bed_topography"
-            ]:
+            if key.lower() not in ["bed", "bedrock", "bedtopography", "bed_topography"]:
                 continue
-
-            start = ii * hdim
-            end = start + hdim
-
+            start, end = ii * hdim, ii * hdim + hdim
             local_mask = (global_rows >= start) & (global_rows < end)
-
             if np.any(local_mask):
                 analysis_vec[local_mask, :] = scatter_ensemble[local_mask, :]
 
-    # ------------------------------------------------------------
-    # Parallel write updated ensemble
-    # ------------------------------------------------------------
     t0 = MPI.Wtime()
-
-    parallel_write_ensemble_scattered(
-        k + 1,
-        ens_mean,
-        params,
-        analysis_vec,
-        comm_world,
-        model_kwargs
-    )
-
+    parallel_write_ensemble_scattered(k + 1, ens_mean, params, analysis_vec, comm_world, model_kwargs)
     time_analysis_file_writing += MPI.Wtime() - t0
 
-    # ------------------------------------------------------------
-    # Cleanup
-    # ------------------------------------------------------------
-    del scatter_ensemble
-    del analysis_vec
+    del scatter_ensemble, analysis_vec
     gc.collect()
 
-    return (
-        time_analysis_mean_generation,
-        time_analysis_file_writing
-    )
+    return time_analysis_mean_generation, time_analysis_file_writing
+
 
 # ============================ EnKF functions ============================
 

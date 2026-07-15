@@ -14,6 +14,8 @@ from scipy.stats import multivariate_normal, beta
 from mpi4py import MPI
 from ICESEE.src.utils.tools import icesee_get_index
 
+from ICESEE.src.utils.localization import apply_smb_physics_correction
+
 
 # def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_chunk, comm, model_kwargs, output_file="icesee_ensemble_data.h5"):
 #     """
@@ -446,6 +448,46 @@ def parallel_write_ensemble_scattered(
 
                     del thickness, surface, bed, ocean_levelset, pos, pos_float, base, pos_grounded
                     gc.collect()
+
+            # ============================================== NEW
+            # SMB physics correction — safe no-op if physics_smb_inference
+            # is off, or if smb/h/u/v aren't all present in vec_inputs.
+            model_kwargs.update({
+                "physics_smb_inference": True,
+
+                "smb_history_length": 5,
+                "smb_divergence_neighbors": 24,
+                "smb_graph_neighbors": 12,
+
+                "smb_spatial_regularization": 40.0,
+                "smb_temporal_regularization": 4.0,
+                "smb_blend_factor": 0.35,
+
+                "smb_inference_start_time": 15.0,
+                "smb_spinup_hold_factor": 1.0,
+                "smb_blend_ramp_time": 10.0,
+
+                # Appropriate because this experiment's true SMB is linear in x.
+                "smb_projection_basis": "x_linear",
+
+                "mesh_coordinate_scale_to_m": 1.0,
+                "smb_physical_bounds": (-2.0, 2.0),
+            })
+            vec_inputs = model_kwargs.get("vec_inputs", [])
+            if len(vec_inputs) > 0:
+                hdim = recvbuf.shape[0] // len(vec_inputs)
+                model_dt = model_kwargs.get("dt", params["dt"])
+                current_model_time = timestep * model_dt
+
+                recvbuf = apply_smb_physics_correction(
+                    recvbuf,
+                    vec_inputs,
+                    hdim,
+                    model_kwargs,
+                    timestep=timestep,
+                    model_time=current_model_time,
+                )
+            # ============================================== END NEW
 
             # Don't write yet if inversion is enabled. We'll do inversion first.
             if not model_kwargs.get("inversion_flag", False):
@@ -920,76 +962,6 @@ def parallel_write_vector_from_root(full_ensemble=None, comm=None, data_shape=No
 
     comm.Barrier()
 
-
-    
-# def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, model_kwargs,full_ensemble=None, comm=None, output_file="icesee_ensemble_data.h5"):
-#     """
-#     Append ensemble data in parallel where the full matrix exists on rank 0.
-#     Each call appends a new time step, resulting in a dataset of shape (nd, Nens, nt).
-
-#     full_ensemble: complete matrix on rank 0 with shape (nd, Nens)
-#     comm: MPI communicator
-#     output_file: Name of the output HDF5 file
-#     """
-#     params = model_kwargs.get("params")
-
-#     # MPI setup
-#     rank = comm.Get_rank()
-#     size = comm.Get_size()
-
-#     # Get dimensions on root and broadcast
-#     if rank == 0:
-#         nd, Nens = full_ensemble.shape
-#         dtype = full_ensemble.dtype
-#     else:
-#         nd, Nens, dtype = None, None, None
-    
-#     nd = comm.bcast(nd, root=0)
-#     Nens = comm.bcast(Nens, root=0)
-#     dtype = comm.bcast(dtype, root=0)
-
-#     # Calculate local chunk sizes
-#     local_nd = nd // size
-#     remainder = nd % size
-
-#     if rank < remainder:
-#         local_nd += 1
-#     offset = rank * (nd // size) + min(rank, remainder)
-
-#     # Scatter the data from rank 0
-#     if rank == 0:
-#         chunks = np.array_split(full_ensemble, size, axis=0)
-#     else:
-#         chunks = None
-    
-#     local_chunk = BM.scatter(chunks, comm)
-
-#     # Define output file path
-#     output_file = os.path.join(params.get('data_path'), output_file)
-
-#     # Open file in parallel mode
-#     if timestep == 0:
-#         with h5py.File(output_file, 'w', driver='mpio', comm=comm) as f:
-#             # Create dataset with total dimensions
-#             dset = f.create_dataset('ensemble', (nd, Nens, model_kwargs.get('nt', params['nt'])+1), dtype=dtype)
-            
-#             # Each rank writes its chunk
-#             dset[offset:offset + local_nd, :,0] = local_chunk
-
-#             # ens_mean 
-#             ens_mean = f.create_dataset('ensemble_mean', (nd, model_kwargs.get('nt', params['nt'])+1), dtype=dtype)
-#             if rank == 0:
-#                 ens_mean[:,0] = ensemble_mean
-#     else:
-#         with h5py.File(output_file, 'a', driver='mpio', comm=comm) as f:
-#             dset = f['ensemble']
-#             dset[offset:offset + local_nd, :,timestep] = local_chunk
-
-#             if rank == 0:
-#                 ens_mean = f['ensemble_mean']
-#                 ens_mean[:,timestep] = ensemble_mean
-#     comm.Barrier()
-
 # ---- Will uncomment above after fixing parallel i/o issues on the cluster ----
 def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, model_kwargs, full_ensemble=None, comm=None, output_file="icesee_ensemble_data.h5"):
     """
@@ -1172,3 +1144,278 @@ def gather_and_broadcast_data_default_run(updated_state, subcomm, sub_rank, comm
     # ensemble_vec = BM.bcast(ensemble_vec, comm_world)
 
     return ensemble_vec, shape_
+
+
+def compute_HA_block(h5_path, timestep, obs_indices, Nens, chunk_members=1):
+    """
+    Evensen (2003) Sec 5.4 block algorithm: build HA (m_obs, Nens) by
+    reading one ensemble member (or small chunk) from disk at a time,
+    projecting into observation space (row-select via obs_indices, since
+    H is a one-hot selector — see H_indices), and discarding the
+    full-length (nd,) column immediately. Never holds the full
+    (nd, Nens) ensemble in memory — only the much smaller (m_obs, Nens)
+    result accumulates.
+
+    h5_path   : path to the ensemble HDF5 file (the 'ensemble' dataset,
+                shape (nd, Nens, nt+1), as written by
+                parallel_write_ensemble_scattered)
+    timestep  : which time slice to read (the forecast state before this
+                analysis step)
+    obs_indices : (m_obs,) global row indices, from H_indices/JObs_indices
+    chunk_members : how many members to read per HDF5 call (1 = literal
+                    Evensen "one member at a time"; higher trades memory
+                    for fewer I/O calls)
+    """
+    import h5py
+    import numpy as np
+
+    with h5py.File(h5_path, "r") as f:
+        dset = f["ensemble"]
+        m_obs = obs_indices.size
+        HA = np.empty((m_obs, Nens), dtype=np.float64)
+
+        for start in range(0, Nens, chunk_members):
+            end = min(start + chunk_members, Nens)
+            member_chunk = dset[:, start:end, timestep]        # (nd, chunk)
+            HA[:, start:end] = member_chunk[obs_indices, :]    # (m_obs, chunk)
+            del member_chunk
+
+    return HA
+
+
+def compute_HAprime_block(h5_path, timestep, obs_indices, Nens, chunk_members=1):
+    """
+    Block version of HAprime = H @ (ensemble - mean) = HA - HAbar.
+    Since H is linear (one-hot selector), H @ mean == mean(HA, axis=1),
+    so this is exact, not an approximation.
+    """
+    HA = compute_HA_block(h5_path, timestep, obs_indices, Nens, chunk_members)
+    HAbar = HA.mean(axis=1, keepdims=True)
+    return HA - HAbar, HA  # return HA too — needed for Dprime below
+
+
+def compute_Dprime_block(h5_path, timestep, obs_indices, d, Nens, chunk_members=1):
+    """
+    Block version of Dprime = d.reshape(-1,1) - H @ ensemble_vec
+                              = d.reshape(-1,1) - HA.
+    Reuses the same streamed HA rather than re-reading the file.
+    """
+    HA = compute_HA_block(h5_path, timestep, obs_indices, Nens, chunk_members)
+    return d.reshape(-1, 1) - HA
+
+def partition_rows(nd, size, rank):
+    """Contiguous row partition, consistent with the rest of the partitioned path."""
+    q, r = divmod(nd, size)
+    start = rank * q + min(rank, r)
+    stop = start + q + (1 if rank < r else 0)
+    return start, stop
+
+
+def write_ensemble_member_direct(h5_path, timestep, ens_id, member_vec, nd, Nens, nt, comm):
+    """Each subcomm leader writes its own completed member directly —
+    no Gatherv, no full-ensemble array anywhere. Ranks with no completed
+    member this call (ens_id is None) still participate in the
+    collective open/write with an empty selection."""
+    import h5py
+    import h5py.h5p as h5p, h5py.h5s as h5s, h5py.h5fd as h5fd
+    import numpy as np
+
+    with h5py.File(h5_path, "a", driver="mpio", comm=comm) as f:
+        if "ensemble" not in f:
+            f.create_dataset("ensemble", (nd, Nens, nt + 1), dtype="f8")
+        dset = f["ensemble"]
+
+        dxpl = h5p.create(h5p.DATASET_XFER)
+        dxpl.set_dxpl_mpio(h5fd.MPIO_COLLECTIVE)
+
+        file_space = dset.id.get_space()
+        if ens_id is not None:
+            file_space.select_hyperslab((0, ens_id, timestep), (nd, 1, 1))
+            mem_space = h5s.create_simple((nd,))
+            buf = np.ascontiguousarray(member_vec, dtype=np.float64)
+        else:
+            mem_space = h5s.create_simple((0,))
+            file_space.select_none()
+            buf = np.empty((0,), dtype=np.float64)
+
+        dset.id.write(mem_space, file_space, buf, dxpl=dxpl)
+
+    comm.Barrier()
+
+
+def compute_and_apply_inflation_partitioned(h5_path, nd, Nens, alpha, comm, timestep=0):
+    """
+    Partial-parallel-native version of the mean+inflate-at-init step.
+    Two-pass, row-partitioned, no full ensemble anywhere:
+      Pass 1: each rank sums its own row-block across all Nens members
+              (Allreduce not needed here — each rank already has ONLY
+              its own rows; no cross-rank sum required since row-blocks
+              are disjoint).
+      Pass 2: each rank re-reads its row-block, applies
+              mean + alpha*(member - mean), writes back.
+    This mirrors compute_forecast_mean_chunked_v2's SPIRIT (running sum,
+    then per-rank write) but is self-contained here — no dependency on
+    EnKF_fully_parallel_IO.
+    """
+    import h5py
+    import numpy as np
+
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+    row_start, row_stop = partition_rows(nd, size, rank)
+    local_nd = row_stop - row_start
+
+    with h5py.File(h5_path, "a", driver="mpio", comm=comm) as f:
+        dset = f["ensemble"]
+
+        if local_nd > 0:
+            block = dset[row_start:row_stop, :, timestep]        # (local_nd, Nens)
+            mean_local = block.mean(axis=1, keepdims=True)
+            inflated = mean_local + alpha * (block - mean_local)
+            dset[row_start:row_stop, :, timestep] = inflated
+
+    comm.Barrier()
+
+def compute_HAprime_Eta_Dprime_partitioned(h5_path, timestep, obs_indices, d, Nens, comm):
+    """Row-partitioned, Allreduce-based HAprime/Eta/Dprime. No rank ever
+    holds the full (nd, Nens) ensemble."""
+    import h5py
+    from mpi4py import MPI
+    import numpy as np
+
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+
+    with h5py.File(h5_path, "r", driver="mpio", comm=comm) as f:
+        dset = f["ensemble"]
+        nd = dset.shape[0]
+        row_start, row_stop = partition_rows(nd, size, rank)
+        local_nd = row_stop - row_start
+        States_local = dset[row_start:row_stop, :, timestep] if local_nd > 0 else np.empty((0, Nens))
+
+    m_obs = obs_indices.size
+    HA_local = np.zeros((m_obs, Nens), dtype=np.float64)
+
+    if local_nd > 0:
+        in_range = (obs_indices >= row_start) & (obs_indices < row_stop)
+        rows_here = np.nonzero(in_range)[0]
+        local_rows = obs_indices[in_range] - row_start
+        if rows_here.size > 0:
+            HA_local[rows_here, :] = States_local[local_rows, :]
+
+    HA = np.empty_like(HA_local)
+    comm.Allreduce(HA_local, HA, op=MPI.SUM)
+
+    HAbar = HA.mean(axis=1, keepdims=True)
+    HAprime = HA - HAbar
+    Eta = HAprime.copy()
+    Dprime = d.reshape(-1, 1) - HA
+
+    return HAprime, Eta, Dprime
+
+
+def write_analysis_partitioned(k, X5, local_patches, h5_path, timestep_forecast, model_kwargs, comm):
+    """Row-partitioned analysis write: inflation + bed-freeze + local
+    patches applied per-rank on its own row-block only. No full
+    ensemble anywhere."""
+    import h5py
+    import numpy as np
+    from ICESEE.src.utils.localization import apply_local_patches
+
+    params = model_kwargs.get("params")
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+
+    with h5py.File(h5_path, "a", driver="mpio", comm=comm) as f:
+        dset = f["ensemble"]
+        nd, Nens, _ = dset.shape
+        row_start, row_stop = partition_rows(nd, size, rank)
+        local_nd = row_stop - row_start
+        global_rows = row_start + np.arange(local_nd)
+
+        if local_nd > 0:
+            prior_local = dset[row_start:row_stop, :, timestep_forecast]
+            analysis_local = prior_local @ X5
+
+            if model_kwargs.get("local_analysis", False):
+                analysis_local = apply_local_patches(analysis_local, prior_local, global_rows, local_patches)
+
+            state_inflation = params.get("state_inflation_factor", params.get("inflation_factor", 1.0))
+            param_inflation = params.get("param_inflation_factor", params.get("inflation_factor", 1.0))
+            bed_inflation = params.get("bed_inflation_factor", param_inflation)
+
+            vec_inputs = model_kwargs.get("vec_inputs", [])
+            hdim = nd // len(vec_inputs)
+
+            inflation_vec = np.ones(local_nd) * param_inflation
+            for ii, key in enumerate(vec_inputs):
+                start, end = ii * hdim, ii * hdim + hdim
+                local_mask = (global_rows >= start) & (global_rows < end)
+                if not np.any(local_mask):
+                    continue
+                key_l = key.lower()
+                if ii < params["num_state_vars"]:
+                    inflation_vec[local_mask] = state_inflation
+                elif key_l in ["bed", "bedrock", "bedtopography", "bed_topography"]:
+                    inflation_vec[local_mask] = bed_inflation
+                else:
+                    inflation_vec[local_mask] = param_inflation
+
+            local_mean = np.mean(analysis_local, axis=1, keepdims=True)
+            local_pert = analysis_local - local_mean
+            analysis_local = local_mean + inflation_vec[:, None] * local_pert
+
+            km = model_kwargs.get("km", None)
+            bed_snap_cols = set(model_kwargs.get("bed_snap_cols", []))
+            if km is not None and int(km) not in bed_snap_cols:
+                for ii, key in enumerate(vec_inputs):
+                    if key.lower() not in ["bed", "bedrock", "bedtopography", "bed_topography"]:
+                        continue
+                    start, end = ii * hdim, ii * hdim + hdim
+                    local_mask = (global_rows >= start) & (global_rows < end)
+                    if np.any(local_mask):
+                        analysis_local[local_mask, :] = prior_local[local_mask, :]
+
+            dset[row_start:row_stop, :, k + 1] = analysis_local
+
+    comm.Barrier()
+
+
+def write_ensemble_member_direct_h5(dset, timestep, ens_id, member_vec, nd, comm):
+    """
+    Write ONE member's column using an ALREADY-OPEN dataset handle.
+    No file open/close here — caller manages the file lifecycle.
+    Still a collective call (every rank must call this together, even
+    with ens_id=None/member_vec=None) since the dataset uses mpio.
+    """
+    import h5py.h5p as h5p, h5py.h5s as h5s, h5py.h5fd as h5fd
+    import numpy as np
+
+    dxpl = h5p.create(h5p.DATASET_XFER)
+    dxpl.set_dxpl_mpio(h5fd.MPIO_COLLECTIVE)
+
+    file_space = dset.id.get_space()
+    if ens_id is not None:
+        file_space.select_hyperslab((0, ens_id, timestep), (nd, 1, 1))
+        mem_space = h5s.create_simple((nd,))
+        buf = np.ascontiguousarray(member_vec, dtype=np.float64)
+    else:
+        mem_space = h5s.create_simple((0,))
+        file_space.select_none()
+        buf = np.empty((0,), dtype=np.float64)
+
+    dset.id.write(mem_space, file_space, buf, dxpl=dxpl)
+
+
+def open_ensemble_file(h5_path, nd, Nens, nt, comm, mode="a"):
+    """
+    Open the shared ensemble file ONCE, creating the dataset if needed.
+    Caller is responsible for closing it (use as a context manager or
+    call .close() explicitly) — reused across many collective writes
+    within a timestep/round-loop to avoid repeated mpio file-open cost.
+    """
+    import h5py
+    f = h5py.File(h5_path, mode, driver="mpio", comm=comm)
+    if "ensemble" not in f:
+        f.create_dataset("ensemble", (nd, Nens, nt + 1), dtype="f8")
+    return f

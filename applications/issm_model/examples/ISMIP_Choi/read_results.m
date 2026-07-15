@@ -7,7 +7,7 @@
 
 close all; clearvars; clear all
 
-% shg;
+shg;
 
 global data_file_paths nvar ensemble_vec_full ...
         label_t t nt colorbar_gap bed_obs_xy

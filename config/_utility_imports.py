@@ -281,10 +281,15 @@ if not flag_jupyter:
         'generate_true_wrong_state_only': enkf_params.get('generate_true_wrong_state_only', False), # flag to only generate true and wrong state without running the assimilation
         'generate_synthetic_obs_only': bool(enkf_params.get('generate_synthetic_obs_only', False)), # flag to only generate synthetic observations without running the assimilation
         'localized_vars': enkf_params.get('localized_vars', []), # list of variables to localize (only used if localization_flag is True)
-        'localization_radius': enkf_params.get('localization_radius', 50.0), # localization radius (float or dict {var_name: radius})
+        'localization_radius': enkf_params.get('localization_radius', None), # localization radius (float or dict {var_name: radius})
         'node_coords': enkf_params.get('node_coords', {}), # dict {var_name: (n_i,2) node coordinates}
         'obs_node_coords': enkf_params.get('obs_node_coords', {}), # dict {var_name: (m_i,2) active obs-node coords, static/union across the run}
         'taper_type': enkf_params.get('taper_type', 'gaspari_cohn'), # 'gaspari_cohn' (default) or 'gaussian'
+        'partitioned_io_flag': enkf_params.get('partitioned_io_flag', False), # when true: no rank ever holds the full (nd, Nens) ensemble
+        'adaptive_radius': enkf_params.get('adaptive_radius', 1), # adaptive radius flag: True, False
+        'physics_smb_inference' : enkf_params.get('physics_smb_inference', 1), # when true: use physics-based inference for SMB parameter
+        'smb_blend_factor' : enkf_params.get('smb_blend_factor', 1.0), # blend factor for physics-based SMB inference
+
     }
 
 

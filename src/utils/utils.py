@@ -155,6 +155,98 @@ class UtilsFunctions:
         H = np.zeros((m_obs, n_model), dtype=float)
         H[np.arange(m_obs), obs_indices] = 1.0
         return H
+    
+    def H_indices(self, n_model, km=None, obs_mask_full=None):
+        """
+        Same index-selection logic as H_matrix, but returns just the integer
+        row indices (obs_indices) instead of materializing a dense (m, n)
+        one-hot matrix. Use this wherever H is only ever used as H @ v — that
+        product is exactly v[obs_indices], computed without the O(m*n)
+        memory/compute cost of the dense matrix.
+        """
+        import numpy as np
+
+        observed = (
+            self.model_kwargs.get("observed_vars", []) +
+            self.model_kwargs.get("observed_params", [])
+        )
+        if len(observed) == 0:
+            observed = self.model_kwargs.get("all_observed", [])
+        if len(observed) == 0:
+            observed = self.params.get("all_observed", [])
+
+        vec_inputs = self.model_kwargs["vec_inputs"]
+        vecs, indx_map, _ = icesee_get_index(**self.model_kwargs)
+
+        bed_aliases = {'bed', 'bedrock', 'bed_topography', 'bedtopo', 'bedtopography'}
+        is_bed_key = lambda k: (str(k).lower() in bed_aliases)
+
+        bed_mask_static = self.model_kwargs.get("bed_mask_map_static", {})
+        bed_mask_cols = self.model_kwargs.get("bed_mask_map_cols", {})
+        bed_snap_cols = set(self.model_kwargs.get("bed_snap_cols", []))
+
+        all_obs_indices = []
+
+        for key in observed:
+            idx = np.asarray(indx_map[key], dtype=int)
+
+            if is_bed_key(key):
+                if km is not None:
+                    if int(km) not in bed_snap_cols:
+                        continue
+                    if key in bed_mask_cols:
+                        mask = np.asarray(bed_mask_cols[key][:, int(km)], dtype=bool)
+                    elif key in bed_mask_static:
+                        mask = np.asarray(bed_mask_static[key], dtype=bool)
+                    else:
+                        continue
+                    if mask.size != idx.size:
+                        raise ValueError(
+                            f"[H_indices] bed mask size mismatch for '{key}': "
+                            f"mask={mask.size}, idx={idx.size}"
+                        )
+                    idx = idx[mask]
+                else:
+                    if key in bed_mask_static:
+                        mask = np.asarray(bed_mask_static[key], dtype=bool)
+                        if mask.size != idx.size:
+                            raise ValueError(
+                                f"[H_indices] bed static mask size mismatch for '{key}': "
+                                f"mask={mask.size}, idx={idx.size}"
+                            )
+                        idx = idx[mask]
+
+            if obs_mask_full is not None:
+                obs_mask_full = np.asarray(obs_mask_full, dtype=bool).ravel()
+                idx = idx[obs_mask_full[idx]]
+
+            if idx.size > 0:
+                all_obs_indices.append(idx)
+
+        if len(all_obs_indices) == 0:
+            return np.array([], dtype=int)
+
+        obs_indices = np.concatenate(all_obs_indices).astype(int)
+        if obs_indices.size > 0 and obs_indices.max() >= n_model:
+            raise ValueError(f"[H_indices] obs index {obs_indices.max()} >= state size {n_model}")
+
+        return obs_indices
+
+
+    def JObs_indices(self, n_model):
+        """Index-based counterpart to JObs_fun — returns obs_indices instead
+        of a dense H matrix."""
+        k_model = self.model_kwargs.get("k", None)
+        km = None
+        if k_model is not None:
+            km = self._get_obs_col_from_model_step(k_model)
+
+        hu_obs = self.model_kwargs.get("hu_obs_loaded", None)
+        obs_mask_full = None
+        if (hu_obs is not None) and (km is not None):
+            obs_mask_full = ~np.isnan(hu_obs[:, int(km)])
+
+        return self.H_indices(n_model, km=km, obs_mask_full=obs_mask_full)
 
     def Obs_fun(self, virtual_obs, H=None, km=None):
         n = 1 if np.isscalar(virtual_obs) else virtual_obs.shape[0]

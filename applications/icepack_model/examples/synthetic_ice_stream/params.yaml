@@ -25,15 +25,15 @@ modeling-parameters:
   da:   -2.7              # change of accumulation rate
   a_in_p: 0.9 #0.17            # nurged accumulation rate at the inflow
   da_p: -1.35 #-0.27           # nurged change of accumulation rate
-  num_years: 200          # number of years to run the model
+  num_years: 120          # number of years to run the model
   timesteps_per_year: 2   # number of timesteps per year
 
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 40                      # number of ensemble members (now set in the command line)
   freq_obs: 4              # frequency of observations
-  obs_max_time: 190        # maximum time for observations
-  obs_start_time: 4             # start time for observations
+  obs_max_time: 80        # maximum time for observations
+  obs_start_time: 8             # start time for observations
 
   num_state_vars: 3       # number of state variables  [h,u,v]
   num_param_vars: 1       # number of parameter variables [smb]
@@ -56,21 +56,25 @@ enkf-parameters:
   # sig_Q: [20,2.5,1.5,0.4]    # process noise standard deviation
   # length_scale: [500,450,670,400] #[150, 150, 150, 150]   # length scale for the covariance matrix, can be a list
   # sig_Q: [10,5,4,0.15]
-  sig_Q: [10,4,1.75,0.12]    # initial pertubation noise standard deviation
+  sig_Q: [10,4,1.75,0.14]    # initial pertubation noise standard deviation
   # sig_Q: [10,4,1.75,0.3] 
-  length_scale: [25, 25, 25, 1025] #[150, 150, 150, 150]   # length scale for the covariance matrix, can be a list
+  length_scale: [25, 25, 25, 1030] #[150, 150, 150, 150]   # length scale for the covariance matrix, can be a list
 
   Q_rho: 0.95 
 
   seed: 1                 # seed for random number generator
   inflation_factor: 1.0          # inflation factor
-  state_inflation_factor: 1.12
-  param_inflation_factor: 1.18 #1.08
+  state_inflation_factor: 1.2
+  param_inflation_factor: 1.08 #1.08
   localization_flag: 1      # localization flag: True, False
   localized_vars: ['smb']  # list of variables to localize (only used if localization_flag is True)
-  localization_radius: 50.0  # localization radius (float or dict {var_name: radius})
+  adaptive_radius: false    # adaptive radius flag: True, False
+  localization_radius: 900  # localization radius (float or dict {var_name: radius})
   taper_type: 'gaspari_cohn'  # 'gaspari_cohn' (default) or 'gaussian'
-  
+  partitioned_io_flag: 0   # when true: no rank ever holds the full (nd, Nens) ensemble
+  physics_smb_inference: 1 # when true: use physics-based inference for SMB parameter
+  smb_blend_factor: 0.5
+
 
   # estimation flags
   joint_estimation: 1 # joint estimation flag: True, False
@@ -87,7 +91,7 @@ enkf-parameters:
   model_name: "icepack"               # name of the model
   model_solver: "solver_weertman"     # name of the solver
   filter_type: "EnKF"               # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
-  local_analysis: False           # local analysis flag: True, False, global analysis is default
+  local_analysis: false           # local analysis flag: True, False, global analysis is default
   parallel_flag: "MPI_model"             # parallel flag: Serial, MPI, MPI_model
   n_modeltasks: 1                     # number of model tasks (for MPI)
   commandlinerun: "True"              # command line run flag: True, False
