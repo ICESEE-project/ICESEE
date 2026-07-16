@@ -49,7 +49,7 @@ enkf-parameters:
   # inverse model parameters
   vel_idx: 2                     # Index for velocity x in the state vector
   friction_idx: 5               # Index for friction coefficient in the state vector
-  inversion_flag: 0         # Enable inversion for friction coefficient
+  inversion_flag: 1         # Enable inversion for friction coefficient
   min_friction: 2000          # Minimum friction coefficient (2000 Pa s/m from paper)
   max_friction: 4000         # Maximum friction coefficient (10000 Pa s/m
   abs_vel_weight: 1.0        # Weight for absolute velocity in inversion
@@ -84,7 +84,7 @@ enkf-parameters:
   joint_estimated_params: ['bed', 'coefficient']  # parameters to be jointly estimated
   # joint_estimated_params: ['bed']  # parameters to be jointly estimated
   localization_flag: True        # Enable localization for EnKF
-  localized_vars: ['bed', 'coefficient']  # Variables to apply localization to
+  localized_vars: ['bed']  # Variables to apply localization to
 
   # Nudged parameters
   sill_friction: 10000      # Sill friction coefficient (90000 Pa s/m from paper)

@@ -39,7 +39,9 @@ enkf-parameters:
   num_param_vars: 1       # number of parameter variables [smb]
   vec_inputs: ['h','u','v','smb']
   observed_vars: ['h','u','v']   #['h','u','v']
-  observed_params: ['smb']  #['smb']
+  # When present here, SMB uses the observation-constrained EnKF branch.
+  # Set [] to switch automatically to continuity inference from h, u, and v.
+  observed_params: ['smb']
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state:    1  # Generate true state for synthetic observations
@@ -72,8 +74,40 @@ enkf-parameters:
   localization_radius: 900  # localization radius (float or dict {var_name: radius})
   taper_type: 'gaspari_cohn'  # 'gaspari_cohn' (default) or 'gaussian'
   partitioned_io_flag: 0   # when true: no rank ever holds the full (nd, Nens) ensemble
-  physics_smb_inference: 1 # when true: use physics-based inference for SMB parameter
-  smb_blend_factor: 0.5
+  # Feature-flagged SMB/bed inference plugin
+  inference_plugin_enabled: true
+  physics_smb_inference: true
+
+  # SMB inference settings. If 'smb' is in observed_params, the plugin keeps
+  # the observation-constrained EnKF posterior. Otherwise, because SMB remains
+  # in vec_inputs, it switches automatically to continuity inference.
+  smb_history_length: 5
+  smb_divergence_neighbors: 24
+  smb_graph_neighbors: 12
+  smb_spatial_regularization: 40.0
+  smb_temporal_regularization: 4.0
+  smb_blend_factor: 0.35
+  smb_inference_start_time: 15.0
+  smb_spinup_hold_factor: 1.0
+  smb_blend_ramp_time: 10.0
+  smb_projection_basis: x_linear
+  smb_physical_bounds: null
+  mesh_coordinate_scale_to_m: 1.0
+
+  # Bed plugin remains disabled until a bed-inference experiment is selected.
+  physics_bed_inference: false
+  bed_update_mode: legacy
+  bed_inference_start_time: 0.0
+  bed_spinup_hold_factor: 1.0
+  bed_blend_ramp_time: 0.0
+  bed_update_blend_factor: 0.15
+  bed_spatial_regularization: 40.0
+  bed_graph_neighbors: 12
+  bed_max_update_per_cycle: null
+  bed_projection_basis: none
+  bed_physical_bounds: null
+  bed_enforce_below_surface: true
+  bed_min_surface_separation: 1.0
 
 
   # estimation flags

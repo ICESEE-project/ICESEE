@@ -14,7 +14,9 @@ from scipy.stats import multivariate_normal, beta
 from mpi4py import MPI
 from ICESEE.src.utils.tools import icesee_get_index
 
-from ICESEE.src.utils.localization import apply_smb_physics_correction
+from ICESEE.src.utils.inference_plugin import (
+    apply_global_inference_hook,
+)
 
 
 # def parallel_write_ensemble_scattered(timestep, ensemble_mean, params, ensemble_chunk, comm, model_kwargs, output_file="icesee_ensemble_data.h5"):
@@ -417,6 +419,24 @@ def parallel_write_ensemble_scattered(
                             relaxation_factor = model_kwargs.get("bed_relaxation_factor", 0.05)
                             recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
 
+            vec_inputs = model_kwargs.get("vec_inputs", [])
+
+            if vec_inputs:
+                hdim = recvbuf.shape[0] // len(vec_inputs)
+                model_dt = model_kwargs.get("dt", params["dt"])
+                current_model_time = timestep * model_dt
+
+                recvbuf = apply_global_inference_hook(
+                    analysis_vec=recvbuf,
+                    vec_inputs=vec_inputs,
+                    hdim=hdim,
+                    params=params,
+                    model_kwargs=model_kwargs,
+                    timestep=timestep,
+                    model_time=current_model_time,
+                    stage="pre_geometry",  # bed only
+                )
+
             # ---------------- ISSM physical fixes ----------------
             if True:
                 if model_kwargs.get("model_name", "").lower() == "issm":
@@ -449,45 +469,16 @@ def parallel_write_ensemble_scattered(
                     del thickness, surface, bed, ocean_levelset, pos, pos_float, base, pos_grounded
                     gc.collect()
 
-            # ============================================== NEW
-            # SMB physics correction — safe no-op if physics_smb_inference
-            # is off, or if smb/h/u/v aren't all present in vec_inputs.
-            model_kwargs.update({
-                "physics_smb_inference": True,
-
-                "smb_history_length": 5,
-                "smb_divergence_neighbors": 24,
-                "smb_graph_neighbors": 12,
-
-                "smb_spatial_regularization": 40.0,
-                "smb_temporal_regularization": 4.0,
-                "smb_blend_factor": 0.35,
-
-                "smb_inference_start_time": 15.0,
-                "smb_spinup_hold_factor": 1.0,
-                "smb_blend_ramp_time": 10.0,
-
-                # Appropriate because this experiment's true SMB is linear in x.
-                "smb_projection_basis": "x_linear",
-
-                "mesh_coordinate_scale_to_m": 1.0,
-                "smb_physical_bounds": (-2.0, 2.0),
-            })
-            vec_inputs = model_kwargs.get("vec_inputs", [])
-            if len(vec_inputs) > 0:
-                hdim = recvbuf.shape[0] // len(vec_inputs)
-                model_dt = model_kwargs.get("dt", params["dt"])
-                current_model_time = timestep * model_dt
-
-                recvbuf = apply_smb_physics_correction(
-                    recvbuf,
-                    vec_inputs,
-                    hdim,
-                    model_kwargs,
-                    timestep=timestep,
-                    model_time=current_model_time,
-                )
-            # ============================================== END NEW
+            recvbuf = apply_global_inference_hook(
+                analysis_vec=recvbuf,
+                vec_inputs=vec_inputs,
+                hdim=hdim,
+                params=params,
+                model_kwargs=model_kwargs,
+                timestep=timestep,
+                model_time=current_model_time,
+                stage="post_geometry",  # SMB only
+            )
 
             # Don't write yet if inversion is enabled. We'll do inversion first.
             if not model_kwargs.get("inversion_flag", False):

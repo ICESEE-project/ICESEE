@@ -287,8 +287,41 @@ if not flag_jupyter:
         'taper_type': enkf_params.get('taper_type', 'gaspari_cohn'), # 'gaspari_cohn' (default) or 'gaussian'
         'partitioned_io_flag': enkf_params.get('partitioned_io_flag', False), # when true: no rank ever holds the full (nd, Nens) ensemble
         'adaptive_radius': enkf_params.get('adaptive_radius', 1), # adaptive radius flag: True, False
-        'physics_smb_inference' : enkf_params.get('physics_smb_inference', 1), # when true: use physics-based inference for SMB parameter
-        'smb_blend_factor' : enkf_params.get('smb_blend_factor', 1.0), # blend factor for physics-based SMB inference
+        # Feature-flagged parameter-inference plugin
+        'inference_plugin_enabled': bool(enkf_params.get('inference_plugin_enabled', False)),
+
+        # SMB: observed parameters use the EnKF posterior; unobserved SMB in
+        # vec_inputs automatically uses the continuity-based inference branch.
+        'physics_smb_inference': bool(enkf_params.get('physics_smb_inference', False)),
+        'smb_history_length': int(enkf_params.get('smb_history_length', 5)),
+        'smb_divergence_neighbors': int(enkf_params.get('smb_divergence_neighbors', 24)),
+        'smb_graph_neighbors': int(enkf_params.get('smb_graph_neighbors', 12)),
+        'smb_spatial_regularization': float(enkf_params.get('smb_spatial_regularization', 25.0)),
+        'smb_temporal_regularization': float(enkf_params.get('smb_temporal_regularization', 4.0)),
+        'smb_blend_factor': float(enkf_params.get('smb_blend_factor', 0.35)),
+        'smb_inference_start_time': float(enkf_params.get('smb_inference_start_time', 0.0)),
+        'smb_spinup_hold_factor': float(enkf_params.get('smb_spinup_hold_factor', 0.0)),
+        'smb_blend_ramp_time': float(enkf_params.get('smb_blend_ramp_time', 0.0)),
+        'smb_projection_basis': str(enkf_params.get('smb_projection_basis', 'none')),
+        'smb_physical_bounds': enkf_params.get('smb_physical_bounds', None),
+        'mesh_coordinate_scale_to_m': float(enkf_params.get('mesh_coordinate_scale_to_m', 1.0)),
+
+        # Bed: the EnKF supplies a raw increment and the plugin applies the
+        # declared increment prior/constraints when this feature is enabled.
+        'physics_bed_inference': bool(enkf_params.get('physics_bed_inference', False)),
+        'bed_update_mode': str(enkf_params.get('bed_update_mode', 'legacy')),
+        'bed_inference_start_time': float(enkf_params.get('bed_inference_start_time', 0.0)),
+        'bed_spinup_hold_factor': float(enkf_params.get('bed_spinup_hold_factor', 1.0)),
+        'bed_blend_ramp_time': float(enkf_params.get('bed_blend_ramp_time', 0.0)),
+        'bed_update_blend_factor': float(enkf_params.get('bed_update_blend_factor', 0.15)),
+        'bed_spatial_regularization': float(enkf_params.get('bed_spatial_regularization', 40.0)),
+        'bed_graph_neighbors': int(enkf_params.get('bed_graph_neighbors', 12)),
+        'bed_max_update_per_cycle': enkf_params.get('bed_max_update_per_cycle', None),
+        'bed_projection_basis': str(enkf_params.get('bed_projection_basis', 'none')),
+        'bed_physical_bounds': enkf_params.get('bed_physical_bounds', None),
+        'bed_enforce_below_surface': bool(enkf_params.get('bed_enforce_below_surface', True)),
+        'bed_min_surface_separation': float(enkf_params.get('bed_min_surface_separation', 1.0)),
+        'bed_update_mask': enkf_params.get('bed_update_mask', None),
 
     }
 
@@ -385,5 +418,4 @@ if not flag_jupyter:
         _modelrun_datasets = kwargs.get('data_path',None)
         if not os.path.exists(_modelrun_datasets):
             os.makedirs(_modelrun_datasets, exist_ok=True)
-
 

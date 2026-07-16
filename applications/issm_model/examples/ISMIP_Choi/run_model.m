@@ -672,7 +672,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         
             % parameters for bed and friction
             md.geometry.bed = h5read(filename, '/bed');
-            % md.friction.coefficient = h5read(filename, '/coefficient');
+            md.friction.coefficient = h5read(filename, '/coefficient');
 
             % Ensure minimum ice thickness
             pos = find(md.geometry.thickness < 1);
@@ -754,7 +754,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.mask.ocean_levelset      = md.results.TransientSolution(end).MaskOceanLevelset;
 
             md.geometry.bed = md.results.TransientSolution(end).Bed;
-            % md.friction.coefficient = md.results.TransientSolution(end).FrictionCoefficient;
+            md.friction.coefficient = md.results.TransientSolution(end).FrictionCoefficient;
 
             % *--
             % Ensure minimum ice thickness of 1 m

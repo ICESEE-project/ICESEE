@@ -167,7 +167,7 @@ def run_model(ensemble, **kwargs):
     #  --- Joint Estimations ---
     if kwargs["joint_estimation"]:
         bed = ensemble[indx_map['bed']]
-        # coefficient = ensemble[indx_map['coefficient']]
+        coefficient = ensemble[indx_map['coefficient']]
     else: 
         if k == 0:
             bed_int = ensemble[indx_map['bed']]
@@ -207,7 +207,7 @@ def run_model(ensemble, **kwargs):
         # --Joint Estimations--
         if kwargs["joint_estimation"]:
             updated_state['bed'] = f['bed'][:].reshape(-1, order='F')
-            # updated_state['coefficient'] = f['coefficient'][:].reshape(-1, order='F')
+            updated_state['coefficient'] = f['coefficient'][:].reshape(-1, order='F')
 
         else:
             bed_int = bed

@@ -17,7 +17,11 @@ from mpi4py import MPI
 
 # seed the random number generator
 # np.random.seed(0)
-from ICESEE.src.utils.localization import apply_local_patches, compute_local_patches_X5, compute_X5_from_matrices, apply_smb_physics_correction
+from ICESEE.src.utils.localization import apply_local_patches, compute_local_patches_X5, compute_X5_from_matrices
+
+from ICESEE.src.utils.inference_plugin import (
+    apply_bed_update_gate_local,
+)
 
 from ICESEE.src.parallelization._parallel_i_o import (
     partition_rows,
@@ -246,16 +250,14 @@ def analysis_enkf_update(
     analysis_vec = local_mean + inflation_vec[:, None] * local_pert
     time_analysis_mean_generation += MPI.Wtime() - t0
 
-    km = model_kwargs.get("km", None)
-    bed_snap_cols = set(model_kwargs.get("bed_snap_cols", []))
-    if km is not None and int(km) not in bed_snap_cols:
-        for ii, key in enumerate(vec_inputs):
-            if key.lower() not in ["bed", "bedrock", "bedtopography", "bed_topography"]:
-                continue
-            start, end = ii * hdim, ii * hdim + hdim
-            local_mask = (global_rows >= start) & (global_rows < end)
-            if np.any(local_mask):
-                analysis_vec[local_mask, :] = scatter_ensemble[local_mask, :]
+    analysis_vec = apply_bed_update_gate_local(
+        analysis_vec=analysis_vec,
+        forecast_vec=scatter_ensemble,
+        global_rows=global_rows,
+        vec_inputs=vec_inputs,
+        hdim=hdim,
+        model_kwargs=model_kwargs,
+    )
 
     t0 = MPI.Wtime()
     parallel_write_ensemble_scattered(k + 1, ens_mean, params, analysis_vec, comm_world, model_kwargs)
