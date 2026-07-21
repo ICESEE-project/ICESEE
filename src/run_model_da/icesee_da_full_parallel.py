@@ -575,7 +575,25 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                             _time_analysis_step = MPI.Wtime()
                             model_kwargs.update({'km': km, 'k': k})
 
-                            inversion_flag = model_kwargs.get("inversion_flag", False)
+                            inversion_enabled = bool(model_kwargs.get(
+                                "inversion_enabled",
+                                model_kwargs.get("inversion_flag", False),
+                            ))
+                            inversion_start_time = float(
+                                model_kwargs.get("inversion_start_time", 0.0)
+                            )
+                            cycle_time = float(np.asarray(model_kwargs["t"])[k])
+                            inversion_flag = (
+                                inversion_enabled
+                                and cycle_time + 1.0e-12 >= inversion_start_time
+                            )
+                            model_kwargs["inversion_flag"] = inversion_flag
+                            if rank_world == 0 and inversion_enabled and not inversion_flag:
+                                print(
+                                    "[ICESEE] Deferring friction inversion at "
+                                    f"t={cycle_time:g} yr; configured start is "
+                                    f"{inversion_start_time:g} yr."
+                                )
                             nd_old = model_kwargs.get("nd", nd)
                             model_kwargs.update({"nd_old": nd_old})
         
@@ -849,5 +867,4 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
         print(f"Traceback details:\n{tb_str}")
         # comm_world.Abort(1)  # Abort all processes in the communicator
-
 

@@ -78,6 +78,14 @@ model_kwargs = {
                 'smb': float(modeling_params.get('smb', 0.0)),
                 'vel_idx': int(float(enkf_params.get('vel_idx', 2))),
                 'inversion_flag': enkf_params.get('inversion_flag', False),
+                # Keep the requested inversion mode separate from its
+                # cycle-dependent activation.  This permits a geometry-only
+                # spin-up before friction inversion without losing the fact
+                # that inversion must turn on at a later observation time.
+                'inversion_enabled': enkf_params.get('inversion_flag', False),
+                'inversion_start_time': float(
+                    enkf_params.get('inversion_start_time', 0.0)
+                ),
                 'friction_idx': int(float(enkf_params.get('friction_idx', 5))),
                 'min_friction': float(enkf_params.get('min_friction', 2000)),
                 'max_friction': float(enkf_params.get('max_friction', 4000)),

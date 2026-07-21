@@ -34,3 +34,25 @@ def test_reviewer_controls_inherit_hybrid_observation_design():
         assert control["inversion_flag"] == 0
     assert enkf_only["frozen_analysis_vars"] == []
     assert fixed["frozen_analysis_vars"] == ["coefficient"]
+
+
+def test_tuned_low_prior_hybrid_delays_inversion_and_keeps_bed_sparse():
+    path = (
+        "applications/issm_model/examples/ISMIP_Choi/"
+        "reviewer_experiments/"
+        "friction_inversion_hybrid_low_prior_tuned.yaml"
+    )
+    tuned = load_yaml_to_dict(path)["enkf-parameters"]
+
+    assert tuned["freq_obs"] == 1
+    assert tuned["obs_max_time"] == 30
+    assert tuned["bed_obs_snapshot"] == [2, 8, 14, 20, 24]
+    assert tuned["inversion_flag"] == 1
+    assert tuned["inversion_start_time"] == 6.0
+    assert tuned["frozen_analysis_vars"] == ["coefficient"]
+    assert tuned["min_friction"] == 1500
+    assert tuned["max_friction"] == 4500
+    assert tuned["bed_max_update_per_cycle"] == 20.0
+    assert tuned["analysis_increment_limits"]["bed"] == 20.0
+    assert tuned["initial_thickness_scale"] == 0.85
+    assert tuned["initial_bed_offset_m"] == -80.0
