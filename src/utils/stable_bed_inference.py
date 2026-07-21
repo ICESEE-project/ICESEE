@@ -177,7 +177,11 @@ def apply_bed_regularized_correction(
 
     previous = model_kwargs.get("_bed_previous_applied")
     if previous is None or np.shape(previous) != np.shape(bed_analysis):
-        previous = initial_reference.copy()
+        forecast_reference = model_kwargs.get("_bed_forecast_reference")
+        if np.shape(forecast_reference) == np.shape(bed_analysis):
+            previous = np.asarray(forecast_reference, dtype=float).copy()
+        else:
+            previous = initial_reference.copy()
 
     params = model_kwargs.get("params", {})
     dt = float(model_kwargs.get("dt", params.get("dt", 1.0)))

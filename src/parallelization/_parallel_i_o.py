@@ -15,6 +15,8 @@ from mpi4py import MPI
 from ICESEE.src.utils.tools import icesee_get_index
 
 from ICESEE.src.utils.inference_plugin import (
+    apply_bed_observation_anchor_global,
+    apply_bed_domain_gate_global,
     apply_global_inference_hook,
 )
 
@@ -242,7 +244,8 @@ def parallel_write_ensemble_scattered(
     ensemble_chunk,
     comm,
     model_kwargs,
-    output_file="icesee_ensemble_data.h5"
+    output_file="icesee_ensemble_data.h5",
+    forecast_chunk=None,
 ):
     """
     Write ensemble data using h5py and MPI, with only rank 0 writing to the dataset.
@@ -313,6 +316,26 @@ def parallel_write_ensemble_scattered(
         mpi_dtype = MPI.LONG
 
     comm.Gatherv(ensemble_chunk, [recvbuf, counts, displs, mpi_dtype], root=0)
+
+    forecast_recvbuf = None
+    if (
+        timestep not in (0, 0.0)
+        and str(model_kwargs.get("bed_update_domain", "all")).lower()
+        != "all"
+    ):
+        if forecast_chunk is None:
+            raise ValueError(
+                "grounded-only bed updates require the forecast ensemble chunk"
+            )
+        if rank == 0:
+            forecast_recvbuf = np.empty(
+                (nd_total, Nens), dtype=forecast_chunk.dtype
+            )
+        comm.Gatherv(
+            forecast_chunk,
+            [forecast_recvbuf, counts, displs, mpi_dtype],
+            root=0,
+        )
 
     output_file = os.path.join(model_kwargs.get("data_path"), output_file)
 
@@ -426,6 +449,25 @@ def parallel_write_ensemble_scattered(
                 model_dt = model_kwargs.get("dt", params["dt"])
                 current_model_time = timestep * model_dt
 
+                recvbuf = apply_bed_domain_gate_global(
+                    analysis_vec=recvbuf,
+                    forecast_vec=forecast_recvbuf,
+                    vec_inputs=vec_inputs,
+                    hdim=hdim,
+                    model_kwargs=model_kwargs,
+                )
+                recvbuf = apply_bed_observation_anchor_global(
+                    analysis_vec=recvbuf,
+                    vec_inputs=vec_inputs,
+                    hdim=hdim,
+                    model_kwargs=model_kwargs,
+                    stage="pre",
+                )
+                if bed_idx is not None and forecast_recvbuf is not None:
+                    model_kwargs["_bed_forecast_reference"] = np.asarray(
+                        forecast_recvbuf[bed_idx, :], dtype=float
+                    ).copy()
+
                 recvbuf = apply_global_inference_hook(
                     analysis_vec=recvbuf,
                     vec_inputs=vec_inputs,
@@ -437,6 +479,34 @@ def parallel_write_ensemble_scattered(
                     stage="pre_geometry",  # bed only
                 )
 
+                # Spatial regularization can spread an increment across the
+                # graph. Reapply the support gate so no smoothed correction
+                # leaks beneath unobserved floating ice.
+                recvbuf = apply_bed_domain_gate_global(
+                    analysis_vec=recvbuf,
+                    forecast_vec=forecast_recvbuf,
+                    vec_inputs=vec_inputs,
+                    hdim=hdim,
+                    model_kwargs=model_kwargs,
+                )
+                # Re-anchor the actual survey nodes after graph smoothing. The
+                # preceding gate still prevents inferred corrections beneath
+                # unobserved floating ice.
+                recvbuf = apply_bed_observation_anchor_global(
+                    analysis_vec=recvbuf,
+                    vec_inputs=vec_inputs,
+                    hdim=hdim,
+                    model_kwargs=model_kwargs,
+                    stage="post",
+                )
+                if (
+                    model_kwargs.get("physics_bed_inference", False)
+                    and bed_idx is not None
+                ):
+                    model_kwargs["_bed_previous_applied"] = np.asarray(
+                        recvbuf[bed_idx, :], dtype=float
+                    ).copy()
+
             # ---------------- ISSM physical fixes ----------------
             if True:
                 if model_kwargs.get("model_name", "").lower() == "issm":
@@ -447,6 +517,35 @@ def parallel_write_ensemble_scattered(
                     thickness = recvbuf[thickness_idx, :]
                     surface = recvbuf[surface_idx, :]
                     bed = recvbuf[bed_idx, :]
+
+                    projection_mode = str(
+                        model_kwargs.get(
+                            "geometry_projection_mode", "preserve_thickness"
+                        )
+                    ).lower()
+                    if projection_mode not in {
+                        "preserve_thickness",
+                        "preserve_surface",
+                    }:
+                        raise ValueError(
+                            "geometry_projection_mode must be "
+                            "'preserve_thickness' or 'preserve_surface'"
+                        )
+
+                    if projection_mode == "preserve_surface":
+                        # Surface is the observed geometry variable in this
+                        # profile. Diagnose H from S and b while retaining the
+                        # forecast grounding classification for this projection.
+                        grounded_before = thickness + (bed / di) >= 0.0
+                        floating_before = ~grounded_before
+                        thickness[grounded_before] = (
+                            surface[grounded_before] - bed[grounded_before]
+                        )
+                        thickness[floating_before] = (
+                            surface[floating_before]
+                            * rho_sw
+                            / (rho_sw - rho_ice)
+                        )
 
                     pos = np.where(thickness < 1)
                     thickness[pos] = 1.0
@@ -758,6 +857,32 @@ def parallel_write_ensemble_scattered_rank_0(timestep, ensemble_mean, params, en
                     thickness = recvbuf[thickness_idx, :]
                     surface   = recvbuf[surface_idx, :]
                     bed       = recvbuf[bed_idx, :]
+
+                    projection_mode = str(
+                        model_kwargs.get(
+                            "geometry_projection_mode", "preserve_thickness"
+                        )
+                    ).lower()
+                    if projection_mode not in {
+                        "preserve_thickness",
+                        "preserve_surface",
+                    }:
+                        raise ValueError(
+                            "geometry_projection_mode must be "
+                            "'preserve_thickness' or 'preserve_surface'"
+                        )
+
+                    if projection_mode == "preserve_surface":
+                        grounded_before = thickness + bed / di >= 0.0
+                        floating_before = ~grounded_before
+                        thickness[grounded_before] = (
+                            surface[grounded_before] - bed[grounded_before]
+                        )
+                        thickness[floating_before] = (
+                            surface[floating_before]
+                            * rho_sw
+                            / (rho_sw - rho_ice)
+                        )
 
                     thickness[thickness < 1.0] = 1.0
 
@@ -1267,7 +1392,17 @@ def compute_and_apply_inflation_partitioned(h5_path, nd, Nens, alpha, comm, time
 
     comm.Barrier()
 
-def compute_HAprime_Eta_Dprime_partitioned(h5_path, timestep, obs_indices, d, Nens, comm):
+def compute_HAprime_Eta_Dprime_partitioned(
+    h5_path,
+    timestep,
+    obs_indices,
+    d,
+    Nens,
+    comm,
+    sigma,
+    seed,
+    error_mode="stochastic_r",
+):
     """Row-partitioned, Allreduce-based HAprime/Eta/Dprime. No rank ever
     holds the full (nd, Nens) ensemble."""
     import h5py
@@ -1297,10 +1432,22 @@ def compute_HAprime_Eta_Dprime_partitioned(h5_path, timestep, obs_indices, d, Ne
     HA = np.empty_like(HA_local)
     comm.Allreduce(HA_local, HA, op=MPI.SUM)
 
-    HAbar = HA.mean(axis=1, keepdims=True)
-    HAprime = HA - HAbar
-    Eta = HAprime.copy()
-    Dprime = d.reshape(-1, 1) - HA
+    error_mode = str(error_mode).lower()
+    if error_mode == "stochastic_r":
+        from ICESEE.src.utils.localization import stochastic_observation_terms
+
+        HAprime, Eta, Dprime = stochastic_observation_terms(
+            HA, d, sigma, seed
+        )
+    elif error_mode == "legacy_prior_anomalies":
+        HAprime = HA - HA.mean(axis=1, keepdims=True)
+        Eta = HAprime.copy()
+        Dprime = d.reshape(-1, 1) - HA
+    else:
+        raise ValueError(
+            "enkf_observation_error_mode must be 'stochastic_R' or "
+            "'legacy_prior_anomalies'"
+        )
 
     return HAprime, Eta, Dprime
 
@@ -1311,7 +1458,10 @@ def write_analysis_partitioned(k, X5, local_patches, h5_path, timestep_forecast,
     ensemble anywhere."""
     import h5py
     import numpy as np
-    from ICESEE.src.utils.localization import apply_local_patches
+    from ICESEE.src.utils.localization import (
+        apply_local_patches,
+        restore_frozen_analysis_vars,
+    )
 
     params = model_kwargs.get("params")
     rank = comm.Get_rank()
@@ -1331,12 +1481,11 @@ def write_analysis_partitioned(k, X5, local_patches, h5_path, timestep_forecast,
             if model_kwargs.get("local_analysis", False):
                 analysis_local = apply_local_patches(analysis_local, prior_local, global_rows, local_patches)
 
+            vec_inputs = model_kwargs.get("vec_inputs", [])
+            hdim = nd // len(vec_inputs)
             state_inflation = params.get("state_inflation_factor", params.get("inflation_factor", 1.0))
             param_inflation = params.get("param_inflation_factor", params.get("inflation_factor", 1.0))
             bed_inflation = params.get("bed_inflation_factor", param_inflation)
-
-            vec_inputs = model_kwargs.get("vec_inputs", [])
-            hdim = nd // len(vec_inputs)
 
             inflation_vec = np.ones(local_nd) * param_inflation
             for ii, key in enumerate(vec_inputs):
@@ -1355,6 +1504,14 @@ def write_analysis_partitioned(k, X5, local_patches, h5_path, timestep_forecast,
             local_mean = np.mean(analysis_local, axis=1, keepdims=True)
             local_pert = analysis_local - local_mean
             analysis_local = local_mean + inflation_vec[:, None] * local_pert
+            analysis_local = restore_frozen_analysis_vars(
+                analysis_local,
+                prior_local,
+                global_rows,
+                vec_inputs,
+                hdim,
+                model_kwargs.get("frozen_analysis_vars", []),
+            )
 
             km = model_kwargs.get("km", None)
             bed_snap_cols = set(model_kwargs.get("bed_snap_cols", []))

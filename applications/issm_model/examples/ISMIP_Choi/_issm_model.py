@@ -107,12 +107,15 @@ def ISSM_model(**kwargs):
             f"run('issm_env'); run_model('{filename}', {ens_id}, {rank}, {nprocs}, {k}, {dt}, {tinitial}, {tfinal}); "
         )
         if not server.send_command(cmd):
-            print("[ICESEE DEBUG] Error sending command: {cmd}")
+            raise RuntimeError(
+                "ISSM MATLAB command failed; refusing to reuse the stale "
+                f"ensemble output for member {ens_id}, timestep {k}"
+            )
     except Exception as e:
-        print("[ICESEE DEBUG] Error sending command: {e}")
+        print(f"[ICESEE DEBUG] Error sending command: {e}")
         server.shutdown()
         server.reset_terminal()
-        sys.exit(1)
+        raise
 
 
 # ---- Run model for ISSM ----
@@ -187,13 +190,16 @@ def run_model(ensemble, **kwargs):
     except Exception as e:
         print(f"[ICESEE run_model Error] Error running the ISSM model: {e}")
         server.kill_matlab_processes()
-        return None
+        raise RuntimeError(
+            f"ISSM forecast failed for member {ens_id}, timestep {k}"
+        ) from e
 
     # Read output from HDF5 file to be accessed by ICESEE on the Python side
     output_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
     if not os.path.exists(output_filename):
-        print("[ICESEE run_model Error] File does not exist: {output_filename}")
-        return None
+        raise FileNotFoundError(
+            f"ISSM output does not exist after forecast: {output_filename}"
+        )
     
     updated_state = {}
     # with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:

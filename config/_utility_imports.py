@@ -236,6 +236,10 @@ if not flag_jupyter:
         'joint_estimated_params': enkf_params.get('joint_estimated_params', []),
         'global_analysis': bool(enkf_params.get('global_analysis', True)),
         'local_analysis': bool(enkf_params.get('local_analysis', False)),
+        'enkf_observation_error_mode': str(enkf_params.get(
+            'enkf_observation_error_mode',
+            'legacy_prior_anomalies' if enkf_params.get('use_ensemble_pertubations', True) else 'generated_R'
+        )),
         'observed_params':enkf_params.get('observed_params', []),
         'verbose':_verbose,
         'param_ens_spread': enkf_params.get('param_ens_spread', []),
@@ -262,9 +266,11 @@ if not flag_jupyter:
         'h5_file_chunk_size': int(enkf_params.get('h5_file_chunk_size', 1000)),
         'bed_obs_snapshot':enkf_params.get('bed_obs_snapshot', []),# list of time snapshots to observe bed variables
         'bed_obs_stride':enkf_params.get('bed_obs_stride',None ), # spatial stride in km for bed observations
+        'bed_obs_track_half_width_m': float(enkf_params.get('bed_obs_track_half_width_m', 1000.0)), # half-width of cross-flow radar-track sampling band
         'bed_obs_spacing':enkf_params.get('bed_obs_spacing', None), # observation spacing every n grid points {int}
         'bed_obs_indices':enkf_params.get('bed_obs_indices', None), # specific indices to observe {list} (bed subvector indices)
         'bed_obs_mask':enkf_params.get('bed_obs_mask', None), # boolean mask array for bed observations {np.array}
+        'bed_update_domain': str(enkf_params.get('bed_update_domain', 'all')),
         'initialize_ensemble':enkf_params.get('initialize_ensemble', True),
         'initial_spread_factor': enkf_params.get('initial_spread_factor', 1.0),
         'observed_vars': enkf_params.get('observed_vars', []),
@@ -281,6 +287,7 @@ if not flag_jupyter:
         'generate_true_wrong_state_only': enkf_params.get('generate_true_wrong_state_only', False), # flag to only generate true and wrong state without running the assimilation
         'generate_synthetic_obs_only': bool(enkf_params.get('generate_synthetic_obs_only', False)), # flag to only generate synthetic observations without running the assimilation
         'localized_vars': enkf_params.get('localized_vars', []), # list of variables to localize (only used if localization_flag is True)
+        'frozen_analysis_vars': enkf_params.get('frozen_analysis_vars', []), # state-vector blocks held fixed during the analysis update
         'localization_radius': enkf_params.get('localization_radius', None), # localization radius (float or dict {var_name: radius})
         'node_coords': enkf_params.get('node_coords', {}), # dict {var_name: (n_i,2) node coordinates}
         'obs_node_coords': enkf_params.get('obs_node_coords', {}), # dict {var_name: (m_i,2) active obs-node coords, static/union across the run}
@@ -418,4 +425,3 @@ if not flag_jupyter:
         _modelrun_datasets = kwargs.get('data_path',None)
         if not os.path.exists(_modelrun_datasets):
             os.makedirs(_modelrun_datasets, exist_ok=True)
-

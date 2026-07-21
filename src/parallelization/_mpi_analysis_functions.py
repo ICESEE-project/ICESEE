@@ -17,7 +17,14 @@ from mpi4py import MPI
 
 # seed the random number generator
 # np.random.seed(0)
-from ICESEE.src.utils.localization import apply_local_patches, compute_local_patches_X5, compute_X5_from_matrices
+from ICESEE.src.utils.localization import (
+    active_observation_std,
+    apply_local_patches,
+    compute_local_patches_X5,
+    compute_X5_from_matrices,
+    stochastic_observation_terms,
+    restore_frozen_analysis_vars,
+)
 
 from ICESEE.src.utils.inference_plugin import (
     apply_bed_update_gate_local,
@@ -30,12 +37,93 @@ from ICESEE.src.parallelization._parallel_i_o import (
     parallel_write_ensemble_scattered
 )
 
+
+def stabilize_analysis_increments(
+    analysis_vec,
+    forecast_vec,
+    global_rows,
+    vec_inputs,
+    hdim,
+    model_kwargs,
+):
+    """Damp and cap analysis increments block-by-block.
+
+    The operation is applied to increments, rather than absolute state values,
+    so physically large but valid velocities are not clipped.  Defaults are a
+    no-op; reviewer experiments opt in through the YAML configuration.
+    """
+    params = model_kwargs.get("params", {})
+    default_relaxation = float(
+        model_kwargs.get(
+            "analysis_relaxation_factor",
+            params.get("analysis_relaxation_factor", 1.0),
+        )
+    )
+    relaxation_by_var = model_kwargs.get(
+        "analysis_relaxation_factors",
+        params.get("analysis_relaxation_factors", {}),
+    ) or {}
+    increment_limits = model_kwargs.get(
+        "analysis_increment_limits",
+        params.get("analysis_increment_limits", {}),
+    ) or {}
+
+    if not 0.0 < default_relaxation <= 1.0:
+        raise ValueError("analysis_relaxation_factor must be in (0, 1]")
+
+    relaxation_by_var = {
+        str(key).lower(): float(value)
+        for key, value in relaxation_by_var.items()
+    }
+    increment_limits = {
+        str(key).lower(): float(value)
+        for key, value in increment_limits.items()
+    }
+
+    stabilized = np.array(analysis_vec, copy=True)
+    for block_index, key in enumerate(vec_inputs):
+        start = block_index * hdim
+        end = start + hdim
+        local_mask = (global_rows >= start) & (global_rows < end)
+        if not np.any(local_mask):
+            continue
+
+        key_lower = str(key).lower()
+        relaxation = relaxation_by_var.get(key_lower, default_relaxation)
+        if not 0.0 < relaxation <= 1.0:
+            raise ValueError(
+                f"analysis relaxation for {key!r} must be in (0, 1]"
+            )
+
+        increment = relaxation * (
+            analysis_vec[local_mask, :] - forecast_vec[local_mask, :]
+        )
+        limit = increment_limits.get(key_lower)
+        if limit is not None:
+            if not np.isfinite(limit) or limit <= 0.0:
+                raise ValueError(
+                    f"analysis increment limit for {key!r} must be positive"
+                )
+            increment = np.clip(increment, -limit, limit)
+
+        stabilized[local_mask, :] = forecast_vec[local_mask, :] + increment
+
+    if not np.all(np.isfinite(stabilized)):
+        raise FloatingPointError("non-finite values produced by EnKF analysis")
+    return stabilized
+
+
 # ============================ EnKF functions ============================ 
 def EnKF_X5(k_obs, ensemble_vec, Nens, hu_obs, model_kwargs, UtilsFunctions):
     params = model_kwargs.get("params")
     comm_world = model_kwargs.get("comm_world")
 
     if model_kwargs.get("partitioned_io_flag", False):
+        if str(model_kwargs.get("bed_update_domain", "all")).lower() != "all":
+            raise ValueError(
+                "a restricted bed_update_domain currently requires "
+                "partitioned_io_flag=False"
+            )
         # ============================================== NEW BRANCH
         input_file = model_kwargs.get("_forecast_h5_path")
         timestep_forecast = model_kwargs.get("k")
@@ -50,8 +138,28 @@ def EnKF_X5(k_obs, ensemble_vec, Nens, hu_obs, model_kwargs, UtilsFunctions):
         y_full[np.isnan(y_full)] = 0.0
         d = y_full[obs_indices]
 
+        error_mode = str(
+            model_kwargs.get("enkf_observation_error_mode", "stochastic_R")
+        ).lower()
+        sigma = (
+            active_observation_std(model_kwargs, k_obs, obs_indices)
+            if error_mode == "stochastic_r"
+            else None
+        )
+        obs_seed = int(model_kwargs.get("base_seed", 42)) + 1000003 * (
+            int(k_obs) + 1
+        )
+
         HAprime, Eta, Dprime = compute_HAprime_Eta_Dprime_partitioned(
-            input_file, timestep_forecast, obs_indices, d, Nens, comm_world
+            input_file,
+            timestep_forecast,
+            obs_indices,
+            d,
+            Nens,
+            comm_world,
+            sigma=sigma,
+            seed=obs_seed,
+            error_mode=error_mode,
         )
 
         X5 = compute_X5_from_matrices(HAprime, Eta, Dprime, Nens)
@@ -83,42 +191,63 @@ def EnKF_X5(k_obs, ensemble_vec, Nens, hu_obs, model_kwargs, UtilsFunctions):
     y_full[np.isnan(y_full)] = 0.0
     d = y_full[obs_indices]
 
-    use_ensemble_pertubations = model_kwargs.get("use_ensemble_pertubations", True)
-    ensemble_mean = np.mean(ensemble_vec, axis=1).reshape(-1, 1)
-
-    if use_ensemble_pertubations:
-        ensemble_perturbations = ensemble_vec - ensemble_mean
-        Eta = ensemble_perturbations[obs_indices, :] 
-    else:
+    error_mode = str(
+        model_kwargs.get("enkf_observation_error_mode", "stochastic_R")
+    ).lower()
+    HA = ensemble_vec[obs_indices, :]
+    if error_mode == "stochastic_r":
+        sigma = active_observation_std(model_kwargs, k_obs, obs_indices)
+        obs_seed = int(model_kwargs.get("base_seed", 42)) + 1000003 * (
+            int(k_obs) + 1
+        )
+        HAprime, Eta, Dprime = stochastic_observation_terms(
+            HA, d, sigma, obs_seed
+        )
+    elif error_mode == "legacy_prior_anomalies":
+        HAprime = HA - np.mean(HA, axis=1, keepdims=True)
+        Eta = HAprime.copy()
+        Dprime = d.reshape(-1, 1) - HA
+    elif error_mode == "generated_r":
         if model_kwargs["joint_estimation"] or params["localization_flag"]:
             hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
         else:
             hdim = ensemble_vec.shape[0] // params["num_state_vars"]
 
         Lx, Ly = model_kwargs.get("Lx"), model_kwargs.get("Ly")
-
         if model_kwargs.get("inversion_flag", False):
             friction_idx = int(model_kwargs.get("friction_idx", -1))
-            sig_obs_filtered = [params["sig_obs"][i] for i in range(len(params["sig_obs"])) if i != friction_idx]
+            sigma_blocks = [
+                value
+                for index, value in enumerate(params["sig_obs"])
+                if index != friction_idx
+            ]
+        else:
+            sigma_blocks = params["sig_obs"]
 
-        _eta = []
-        for ens in range(Nens):
-            noise_all = []
-            for ii, sig in enumerate(sig_obs_filtered if model_kwargs.get("inversion_flag", False) else params["sig_obs"]):
-                model_kwargs.update({"ii_sig": ii, "Lx_dim": np.sqrt(Lx * Ly), "noise_dim": hdim, "num_vars": params["total_state_param_vars"]})
-                W = generate_enkf_field(**model_kwargs)
-                noise_all.append(sig * W)
-            noise_ = np.concatenate(noise_all, axis=0)
-            _eta.append(noise_)
-        _eta = np.array(_eta).T
-        _eta -= np.mean(_eta, axis=1).reshape(-1, 1)
-        Eta = _eta[obs_indices, :]
-        
-    Dprime = d.reshape(-1, 1) - ensemble_vec[obs_indices, :]
-
-    one_N = np.ones((Nens, Nens)) / Nens
-    Aprime = np.dot(ensemble_vec, (np.eye(Nens) - one_N))
-    HAprime = Aprime[obs_indices, :]
+        eta_members = []
+        for _ in range(Nens):
+            noise_blocks = []
+            for block_index, block_sigma in enumerate(sigma_blocks):
+                model_kwargs.update(
+                    {
+                        "ii_sig": block_index,
+                        "Lx_dim": np.sqrt(Lx * Ly),
+                        "noise_dim": hdim,
+                        "num_vars": params["total_state_param_vars"],
+                    }
+                )
+                noise_blocks.append(block_sigma * generate_enkf_field(**model_kwargs))
+            eta_members.append(np.concatenate(noise_blocks, axis=0))
+        eta_all = np.asarray(eta_members).T
+        eta_all -= np.mean(eta_all, axis=1, keepdims=True)
+        Eta = eta_all[obs_indices, :]
+        HAprime = HA - np.mean(HA, axis=1, keepdims=True)
+        Dprime = d.reshape(-1, 1) + Eta - HA
+    else:
+        raise ValueError(
+            "enkf_observation_error_mode must be 'stochastic_R', "
+            "'legacy_prior_anomalies', or 'generated_R'"
+        )
 
     m = d.shape[0]
     nrmin = min(m, Nens)
@@ -214,6 +343,11 @@ def analysis_enkf_update(
     displs = (offsets_rows * nens).astype(np.int32)
 
     scatter_ensemble = np.empty((local_nd, nens), dtype=np.float64)
+    if rank_world == 0 and np.shape(ensemble_vec) != (nd_total, nens):
+        raise ValueError(
+            "analysis shape metadata does not match the active ensemble: "
+            f"shape_ens={(nd_total, nens)}, ensemble={np.shape(ensemble_vec)}"
+        )
     sendbuf = np.ascontiguousarray(ensemble_vec) if rank_world == 0 else None
     comm_world.Scatterv([sendbuf, counts, displs, MPI.DOUBLE], scatter_ensemble, root=0)
 
@@ -222,14 +356,24 @@ def analysis_enkf_update(
     if model_kwargs.get("local_analysis", False):
         analysis_vec = apply_local_patches(analysis_vec, scatter_ensemble, global_rows, local_patches)
 
+    vec_inputs = model_kwargs.get("vec_inputs", [])
+    nblocks = len(vec_inputs)
+    if nblocks == 0:
+        raise ValueError("vec_inputs is empty during EnKF analysis")
+    hdim = model_kwargs.get("nd", params["nd"]) // nblocks
+    analysis_vec = stabilize_analysis_increments(
+        analysis_vec=analysis_vec,
+        forecast_vec=scatter_ensemble,
+        global_rows=global_rows,
+        vec_inputs=vec_inputs,
+        hdim=hdim,
+        model_kwargs=model_kwargs,
+    )
+
     t0 = MPI.Wtime()
     state_inflation = params.get("state_inflation_factor", params.get("inflation_factor", 1.0))
     param_inflation = params.get("param_inflation_factor", params.get("inflation_factor", 1.0))
     bed_inflation = params.get("bed_inflation_factor", param_inflation)
-
-    vec_inputs = model_kwargs.get("vec_inputs", [])
-    nblocks = len(vec_inputs)
-    hdim = model_kwargs.get("nd", params["nd"]) // nblocks
 
     inflation_vec = np.ones(local_nd) * param_inflation
     for ii, key in enumerate(vec_inputs):
@@ -248,6 +392,14 @@ def analysis_enkf_update(
     local_mean = np.mean(analysis_vec, axis=1, keepdims=True)
     local_pert = analysis_vec - local_mean
     analysis_vec = local_mean + inflation_vec[:, None] * local_pert
+    analysis_vec = restore_frozen_analysis_vars(
+        analysis_vec,
+        scatter_ensemble,
+        global_rows,
+        vec_inputs,
+        hdim,
+        model_kwargs.get("frozen_analysis_vars", []),
+    )
     time_analysis_mean_generation += MPI.Wtime() - t0
 
     analysis_vec = apply_bed_update_gate_local(
@@ -260,7 +412,15 @@ def analysis_enkf_update(
     )
 
     t0 = MPI.Wtime()
-    parallel_write_ensemble_scattered(k + 1, ens_mean, params, analysis_vec, comm_world, model_kwargs)
+    parallel_write_ensemble_scattered(
+        k + 1,
+        ens_mean,
+        params,
+        analysis_vec,
+        comm_world,
+        model_kwargs,
+        forecast_chunk=scatter_ensemble,
+    )
     time_analysis_file_writing += MPI.Wtime() - t0
 
     del scatter_ensemble, analysis_vec
@@ -538,7 +698,15 @@ def analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, UtilsFunctions
 
         # gather from all processors
         # ensemble_vec = BM.allgather(analysis_vec, comm_world)
-        parallel_write_ensemble_scattered(k+1,ens_mean, params,analysis_vec, comm_world,model_kwargs)
+        parallel_write_ensemble_scattered(
+            k + 1,
+            ens_mean,
+            params,
+            analysis_vec,
+            comm_world,
+            model_kwargs,
+            forecast_chunk=scatter_ensemble,
+        )
 
         # clean the memory
         del scatter_ensemble, analysis_vec; gc.collect()
@@ -551,4 +719,3 @@ def analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, UtilsFunctions
 
 
 # ============================ Other functions ============================
-

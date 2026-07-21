@@ -50,6 +50,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
     Lx, Ly            = model_kwargs.get("Lx",1.0), model_kwargs.get("Ly",1.0)
     nx, ny            = model_kwargs.get("nx",1), model_kwargs.get("ny",1)
     b_in, b_out       = model_kwargs.get("b_in",0.0), model_kwargs.get("b_out",0.0) 
+    resume_timestep   = 0
 
     # --- call the ICESEE mpi parallel manager ---
     if re.match(r"\AMPI_model\Z", parallel_flag, re.IGNORECASE):
@@ -189,6 +190,50 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         hdim  = params["nd"] // params["total_state_param_vars"]
         model_kwargs.update({"hdim": hdim, "Q_rho": Q_rho, "len_scale": len_scale})
 
+        # The partial-parallel driver historically always restarted at zero.
+        # For long ISSM reviewer experiments, allow an explicit restart from a
+        # known-good ensemble slice.  This preserves the existing history and
+        # rewinds the member exchange files before the next forecast.
+        resume_timestep = int(model_kwargs.get("resume_from_timestep", 0) or 0)
+        resume_ensemble = None
+        if resume_timestep:
+            if not params.get("default_run", False):
+                raise ValueError(
+                    "resume_from_timestep currently requires default_run"
+                )
+            if rank_world == 0:
+                ensemble_history = os.path.join(
+                    _modelrun_datasets, "icesee_ensemble_data.h5"
+                )
+                if not os.path.exists(ensemble_history):
+                    raise FileNotFoundError(
+                        f"Cannot resume: {ensemble_history} does not exist"
+                    )
+                with h5py.File(ensemble_history, "r") as f:
+                    dset = f["ensemble"]
+                    if not 0 < resume_timestep < dset.shape[2]:
+                        raise ValueError(
+                            "resume_from_timestep must select an existing "
+                            f"positive slice; got {resume_timestep} for "
+                            f"history length {dset.shape[2]}"
+                        )
+                    resume_ensemble = np.asarray(
+                        dset[:, :, resume_timestep], dtype=float
+                    )
+                    if not np.all(np.isfinite(resume_ensemble)):
+                        raise ValueError(
+                            f"Ensemble slice {resume_timestep} is not finite"
+                        )
+                print(
+                    "[ICESEE] Resuming partial run from stored ensemble "
+                    f"timestep {resume_timestep}."
+                )
+            resume_shape = comm_world.bcast(
+                None if rank_world else resume_ensemble.shape, root=0
+            )
+        else:
+            resume_shape = None
+
          # --- get the process noise --->
         if params.get("use_random_fields", False):
             pos, gs_model, L_C = compute_Q_err_random_fields(hdim, params["total_state_param_vars"], params["sig_Q"], Q_rho, len_scale)
@@ -196,7 +241,63 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         
         # -- time ensemble initialization ---
         time_ensemble_initialization = MPI.Wtime()
-        if model_kwargs.get("initialize_ensemble", True):
+        if resume_timestep:
+            if rank_world == 0:
+                ensemble_vec = resume_ensemble
+                ensemble_vec_mean = np.mean(ensemble_vec, axis=1)
+                ensemble_vec_full = ensemble_vec
+                ensemble_bg = ensemble_vec.copy()
+
+                # Rewind the per-member ISSM exchange files to the same known-
+                # good slice.  The model MAT files retain boundary conditions;
+                # run_model replaces all six coupled fields from these files.
+                vec_inputs = model_kwargs.get(
+                    "vec_inputs", params.get("vec_inputs", [])
+                )
+                if len(vec_inputs) * hdim != ensemble_vec.shape[0]:
+                    raise ValueError(
+                        "Cannot resume: vec_inputs do not match ensemble rows"
+                    )
+                # ISSM ensemble IDs in this driver are normally zero based
+                # (ensemble_output_0 ... ensemble_output_39).  Retain support
+                # for older one-based datasets without assuming either form.
+                zero_based = os.path.exists(
+                    os.path.join(_modelrun_datasets, "ensemble_output_0.h5")
+                )
+                member_id_offset = 0 if zero_based else 1
+                for ens in range(ensemble_vec.shape[1]):
+                    member_id = ens + member_id_offset
+                    member_file = os.path.join(
+                        _modelrun_datasets, f"ensemble_output_{member_id}.h5"
+                    )
+                    if not os.path.exists(member_file):
+                        raise FileNotFoundError(
+                            f"Cannot resume: {member_file} does not exist"
+                        )
+                    with h5py.File(member_file, "a") as f:
+                        for block, key in enumerate(vec_inputs):
+                            values = ensemble_vec[
+                                block * hdim : (block + 1) * hdim, ens
+                            ]
+                            if key not in f:
+                                raise KeyError(
+                                    f"Cannot resume: /{key} missing from "
+                                    f"{member_file}"
+                                )
+                            f[key][...] = values.reshape(f[key].shape)
+                shape_ens = np.asarray(ensemble_vec.shape, dtype=np.int32)
+            else:
+                ensemble_vec = np.empty(resume_shape, dtype=float)
+                ensemble_vec_mean = None
+                ensemble_vec_full = None
+                ensemble_bg = None
+                shape_ens = None
+            shape_ens = comm_world.bcast(shape_ens, root=0)
+            comm_world.Barrier()
+            time_init_noise_generation = 0.0
+            time_init_ensemble_mean_computation = 0.0
+            time_init_file_writing = 0.0
+        elif model_kwargs.get("initialize_ensemble", True):
             # call the ensemble_initialization function
             model_kwargs, ensemble_vec, time_init_noise_generation, \
             time_init_ensemble_mean_computation, time_init_file_writing, \
@@ -304,6 +405,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
             print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {size_world*(params['model_nprocs']+1)} MPI ranks.")
             pbar = tqdm(
                 total=nt,
+                initial=resume_timestep,
                 desc=f"[ICESEE] Assimilation progress ({size_world*(params['model_nprocs']+1)} ranks)",
                 position=0,
                 leave=True,
@@ -331,7 +433,11 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
     n = model_kwargs.get("nt",params["nt"])
     rho = np.sqrt((1/dt)*((1-alpha)**2)*(1/(n - (2*alpha) - (n*alpha**2) + (2*alpha**(n+1)))))
     params_analysis_0 = np.zeros((2, Nens))
-    km = 0
+    if resume_timestep:
+        obs_index = np.asarray(model_kwargs.get("obs_index", []), dtype=int)
+        km = int(np.searchsorted(obs_index, resume_timestep, side="left"))
+    else:
+        km = 0
 
     if params.get("use_random_fields", False):
         pos_obs, gs_model_obs, L_C_obs = compute_Q_err_random_fields(hdim, params["total_state_param_vars"], params["sig_obs"], Q_rho, len_scale)
@@ -344,7 +450,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
     # Reset private inference memory once at the beginning of a fresh run.
     reset_inference_plugin_state(model_kwargs)
 
-    for k in range(model_kwargs.get("nt",params["nt"])):
+    for k in range(resume_timestep, model_kwargs.get("nt",params["nt"])):
 
         model_kwargs.update({"k": k, "km":km, "alpha": alpha, "rho": rho, "tau": tau, "dt": dt,"n": n})
         model_kwargs.update({"generate_enkf_field": generate_enkf_field})
@@ -473,6 +579,12 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                                     })
                             nd_new = comm_world.bcast(nd_new, root=0)
                             model_kwargs.update({'nd': nd_new}); params.update({'nd': nd_new})
+                            # The inversion workflow removes the friction block
+                            # before EnKF analysis. Keep the MPI Scatterv shape
+                            # synchronized with that reduced five-block vector;
+                            # retaining the full six-block shape over-allocates
+                            # rows and corrupts hdim in the analysis writer.
+                            shape_ens = np.array([nd_new, Nens], dtype=np.int32)
                             vec_inputs = comm_world.bcast(vec_inputs, root=0)
                             model_kwargs.update({'vec_inputs': vec_inputs})
                             params.update({'vec_inputs': vec_inputs})

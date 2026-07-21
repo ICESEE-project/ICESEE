@@ -175,9 +175,6 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % setup nugged state
         friction_ref = mean_friction * ones(md.mesh.numberofvertices,1);
 
-        bed_ref  = md.geometry.bed;
-        base_ref = md.geometry.base;
-
         filename = fullfile(icesee_path, data_path, sprintf('friction_bed_%d.h5', ens_id));
         bed = h5read(filename, '/bed');
         coefficient = h5read(filename, '/coefficient');
@@ -186,41 +183,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.friction.p = ones(md.mesh.numberofelements,1);
         md.friction.q = ones(md.mesh.numberofelements,1);
 
-        % Apply bed perturbation consistently to bed and base
-        bed_err = bed - bed_ref;
-
-        md.geometry.bed  = bed_ref  + bed_err;
-        md.geometry.base = base_ref + bed_err;
-
-        % Recompute thickness/surface consistency
-        md.geometry.thickness = md.geometry.surface - md.geometry.base;
-
-        pos = find(md.geometry.thickness < 1);
-        md.geometry.thickness(pos) = 1;
-        md.geometry.surface = md.geometry.base + md.geometry.thickness;
-
-        disp('      -- ice shelf base based on hydrostatic equilibrium');
-
-        di = md.materials.rho_ice / md.materials.rho_water;
-
-        md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
-
-        % Floating ice
-        pos_float = find(md.mask.ocean_levelset < 0);
-        md.geometry.surface(pos_float) = md.geometry.thickness(pos_float) .* ...
-            (md.materials.rho_water - md.materials.rho_ice) / md.materials.rho_water;
-
-        md.geometry.base = md.geometry.surface - md.geometry.thickness;
-
-        % Prevent base below bed
-        pos = find(md.geometry.base < md.geometry.bed);
-        md.geometry.base(pos) = md.geometry.bed(pos);
-
-        % Grounded ice
-        pos_grounded = find(md.mask.ocean_levelset > 0);
-        md.geometry.base(pos_grounded) = md.geometry.bed(pos_grounded);
-
-        md.geometry.surface = md.geometry.base + md.geometry.thickness;
+        md = apply_configured_initial_geometry(md, bed, kwargs);
 
         md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
         md.transient.ismovingfront=0;
@@ -404,10 +367,6 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             friction_ref = mean_friction*ones(md.mesh.numberofvertices,1);
 
-            thickness_ref = md.geometry.thickness;
-            bed_ref = md.geometry.bed;
-            base_ref = md.geometry.base;
-
              % % read the friction_bed file
             filename = fullfile(icesee_path, data_path, sprintf('friction_bed_%d.h5', ens_id));
             bed = h5read(filename, '/bed');
@@ -420,32 +379,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.friction.q=ones(md.mesh.numberofelements,1);
 
  
-            bed_err = bed - bed_ref;
-            md.geometry.bed = bed_ref + bed_err;
-            md.geometry.base = base_ref + bed_err;
-
-            md.geometry.thickness = md.geometry.surface - md.geometry.base;
-
-            pos = find(md.geometry.thickness < 1);
-            md.geometry.thickness(pos) = 1;
-            md.geometry.surface = md.geometry.base + md.geometry.thickness;
-
-            di = md.materials.rho_ice / md.materials.rho_water;
-            md.mask.ocean_levelset = md.geometry.thickness + md.geometry.bed / di;
-
-            pos = find(md.mask.ocean_levelset < 0);
-            md.geometry.surface(pos) = md.geometry.thickness(pos) .* ...
-                (md.materials.rho_water - md.materials.rho_ice) / md.materials.rho_water;
-
-            md.geometry.base = md.geometry.surface - md.geometry.thickness;
-
-            pos = find(md.geometry.base < md.geometry.bed);
-            md.geometry.base(pos) = md.geometry.bed(pos);
-
-            pos = find(md.mask.ocean_levelset > 0);
-            md.geometry.base(pos) = md.geometry.bed(pos);
-
-            md.geometry.surface = md.geometry.base + md.geometry.thickness;
+            md = apply_configured_initial_geometry(md, bed, kwargs);
 
             % pos = find(md.mask.ocean_levelset < 0);
             % md.geometry.thickness(pos)=1/(1-di)*md.geometry.surface(pos);
@@ -560,6 +494,11 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
              % Load ensemble input from HDF5
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
+            % Keep the last state accepted by ISSM.  The ensemble HDF5 file is
+            % written by the filter and can contain a one-cycle member outlier;
+            % the model file remains a safe persistence fallback.
+            fallback_vx = md.initialization.vx;
+            fallback_vy = md.initialization.vy;
             md.geometry.surface = h5read(filename, '/Surface');
             % md.geometry.base = h5read(filename, '/Base');
             md.geometry.thickness = h5read(filename, '/Thickness');
@@ -571,6 +510,35 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % parameters for bed and friction
             md.geometry.bed = h5read(filename, '/bed');
             md.friction.coefficient = h5read(filename, '/coefficient');
+
+            % Reject a divergent filter member before ISSM's less-informative
+            % geometry-consistency check. These limits are deliberately far
+            % outside the ISMIP-Choi solution range.
+            input_speed = hypot(md.initialization.vx, md.initialization.vy);
+            geometry_is_bad = any(~isfinite(md.geometry.thickness)) || ...
+                    any(~isfinite(md.geometry.surface)) || ...
+                    max(md.geometry.thickness) > 1.0e4 || ...
+                    max(abs(md.geometry.surface)) > 2.0e4;
+            velocity_is_bad = any(~isfinite(input_speed)) || ...
+                    max(input_speed) > 5.0e3;
+            fallback_speed = hypot(fallback_vx, fallback_vy);
+            if ~geometry_is_bad && velocity_is_bad && ...
+                    all(isfinite(fallback_speed)) && max(fallback_speed) <= 5.0e3
+                warning(['[ICESEE] Rejecting catastrophic member velocity ', ...
+                         '(max %.6g m/yr); retaining the last ISSM-accepted ', ...
+                         'velocity for this forecast.'], max(input_speed));
+                md.initialization.vx = fallback_vx;
+                md.initialization.vy = fallback_vy;
+                md.initialization.vel = fallback_speed;
+                input_speed = fallback_speed;
+                velocity_is_bad = false;
+            end
+            if geometry_is_bad || velocity_is_bad
+                error(['[ICESEE] Catastrophic EnKF member detected before ISSM: ', ...
+                       'max(H)=%.6g m, max(abs(S))=%.6g m, max(speed)=%.6g m/yr'], ...
+                      max(md.geometry.thickness), max(abs(md.geometry.surface)), ...
+                      max(input_speed));
+            end
 
             % --time stepping
             md.timestepping = timestepping();
@@ -608,6 +576,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Update surface geometry
             md.geometry.surface = md.geometry.base + md.geometry.thickness;
+            % Make ISSM's checked identity exact in its own evaluation order.
+            md.geometry.thickness = md.geometry.surface - md.geometry.base;
+            md.initialization.pressure = md.materials.rho_ice * ...
+                md.constants.g * md.geometry.thickness;
 
             % % Outputs and verbosity
             md.transient.requested_outputs = {'default','FrictionCoefficient','Thickness','Base','Bed'};
@@ -624,8 +596,29 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % % Verbose settings
             md.verbose = verbose('convergence', false, 'solution', true);
 
+            % Retain a physically accepted state so that a rare nonlinear
+            % transient burst cannot poison the next EnKF cycle.
+            accepted_thickness = md.geometry.thickness;
+            accepted_surface = md.geometry.surface;
+            accepted_vx = md.initialization.vx;
+            accepted_vy = md.initialization.vy;
+
             % % Solve transient
             md = solve(md, 'Transient','runtimename',false); %TODO: instead of solving just take th initial solution
+
+            result_speed = hypot(md.results.TransientSolution(end).Vx, ...
+                                 md.results.TransientSolution(end).Vy);
+            if any(~isfinite(result_speed)) || max(result_speed) > 5.0e3
+                warning(['[ICESEE] Rejecting catastrophic ISSM forecast velocity ', ...
+                         '(max %.6g m/yr) for member %d; using persistence ', ...
+                         'for this member and cycle.'], max(result_speed), ens_id);
+                md.results.TransientSolution(end).Thickness = accepted_thickness;
+                md.results.TransientSolution(end).Surface = accepted_surface;
+                md.results.TransientSolution(end).Base = accepted_surface - accepted_thickness;
+                md.results.TransientSolution(end).Vx = accepted_vx;
+                md.results.TransientSolution(end).Vy = accepted_vy;
+                md.results.TransientSolution(end).Vel = hypot(accepted_vx, accepted_vy);
+            end
 
             % Save model
             filename = fullfile(folder, data_fname);
@@ -658,10 +651,29 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             
             % Subsequent time steps: 
             filename = fullfile(folder, data_fname);
-            md = loadmodel(filename);
+            if exist(filename, 'file')
+                md = loadmodel(filename);
+            else
+                % A partial-run resume deliberately skips ensemble
+                % initialization, so its per-member MAT cache may not exist.
+                % Rebuild only the model container from the verified truth
+                % model; all six evolving member fields are replaced from the
+                % resumed ensemble HDF5 immediately below.
+                bootstrap_file = fullfile('./Models/ens_id_0', 'true_state.mat');
+                if ~exist(bootstrap_file, 'file')
+                    error(['[ICESEE] Cannot bootstrap resumed member: ', ...
+                           '%s does not exist'], bootstrap_file);
+                end
+                warning(['[ICESEE] Rebuilding missing member model cache ', ...
+                         '%s from %s'], filename, bootstrap_file);
+                md = loadmodel(bootstrap_file);
+            end
 
             % Load ensemble input from HDF5
             filename = fullfile(icesee_path, data_path, sprintf('ensemble_output_%d.h5', ens_id));
+            % Keep the last state accepted by ISSM as a member-level fallback.
+            fallback_vx = md.initialization.vx;
+            fallback_vy = md.initialization.vy;
             md.geometry.surface = h5read(filename, '/Surface');
             % md.geometry.base = h5read(filename, '/Base');
             md.geometry.thickness = h5read(filename, '/Thickness');
@@ -673,6 +685,35 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % parameters for bed and friction
             md.geometry.bed = h5read(filename, '/bed');
             md.friction.coefficient = h5read(filename, '/coefficient');
+
+            % Reject a divergent filter member before ISSM's less-informative
+            % geometry-consistency check. These limits are deliberately far
+            % outside the ISMIP-Choi solution range.
+            input_speed = hypot(md.initialization.vx, md.initialization.vy);
+            geometry_is_bad = any(~isfinite(md.geometry.thickness)) || ...
+                    any(~isfinite(md.geometry.surface)) || ...
+                    max(md.geometry.thickness) > 1.0e4 || ...
+                    max(abs(md.geometry.surface)) > 2.0e4;
+            velocity_is_bad = any(~isfinite(input_speed)) || ...
+                    max(input_speed) > 5.0e3;
+            fallback_speed = hypot(fallback_vx, fallback_vy);
+            if ~geometry_is_bad && velocity_is_bad && ...
+                    all(isfinite(fallback_speed)) && max(fallback_speed) <= 5.0e3
+                warning(['[ICESEE] Rejecting catastrophic member velocity ', ...
+                         '(max %.6g m/yr); retaining the last ISSM-accepted ', ...
+                         'velocity for this forecast.'], max(input_speed));
+                md.initialization.vx = fallback_vx;
+                md.initialization.vy = fallback_vy;
+                md.initialization.vel = fallback_speed;
+                input_speed = fallback_speed;
+                velocity_is_bad = false;
+            end
+            if geometry_is_bad || velocity_is_bad
+                error(['[ICESEE] Catastrophic EnKF member detected before ISSM: ', ...
+                       'max(H)=%.6g m, max(abs(S))=%.6g m, max(speed)=%.6g m/yr'], ...
+                      max(md.geometry.thickness), max(abs(md.geometry.surface)), ...
+                      max(input_speed));
+            end
 
             % Ensure minimum ice thickness
             pos = find(md.geometry.thickness < 1);
@@ -703,6 +744,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Update surface geometry
             md.geometry.surface = md.geometry.base + md.geometry.thickness;
+            % Make ISSM's checked identity exact in its own evaluation order.
+            md.geometry.thickness = md.geometry.surface - md.geometry.base;
+            md.initialization.pressure = md.materials.rho_ice * ...
+                md.constants.g * md.geometry.thickness;
 
             md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
             % md.transient.ismovingfront=0;
@@ -733,8 +778,29 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.transient.requested_outputs = {'default','FrictionCoefficient','Thickness','Base','Bed'};
             % md.transient.requested_outputs = {'default','Thickness','Surface','Base','Bed'};
 
+            % Retain a physically accepted state so that a rare nonlinear
+            % transient burst cannot poison the next EnKF cycle.
+            accepted_thickness = md.geometry.thickness;
+            accepted_surface = md.geometry.surface;
+            accepted_vx = md.initialization.vx;
+            accepted_vy = md.initialization.vy;
+
             % Solve transient
             md = solve(md, 'Transient','runtimename',false);
+
+            result_speed = hypot(md.results.TransientSolution(end).Vx, ...
+                                 md.results.TransientSolution(end).Vy);
+            if any(~isfinite(result_speed)) || max(result_speed) > 5.0e3
+                warning(['[ICESEE] Rejecting catastrophic ISSM forecast velocity ', ...
+                         '(max %.6g m/yr) for member %d; using persistence ', ...
+                         'for this member and cycle.'], max(result_speed), ens_id);
+                md.results.TransientSolution(end).Thickness = accepted_thickness;
+                md.results.TransientSolution(end).Surface = accepted_surface;
+                md.results.TransientSolution(end).Base = accepted_surface - accepted_thickness;
+                md.results.TransientSolution(end).Vx = accepted_vx;
+                md.results.TransientSolution(end).Vy = accepted_vy;
+                md.results.TransientSolution(end).Vel = hypot(accepted_vx, accepted_vy);
+            end
 
             % Save model
             filename = fullfile(folder, data_fname);
@@ -951,6 +1017,80 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         
         writeToHDF5(filename, data);
     end
+end
+
+function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
+%APPLY_CONFIGURED_INITIAL_GEOMETRY Build one physically consistent prior.
+% The same construction is used for the no-assimilation trajectory and each
+% ensemble member.  Surface is never biased independently: it is recovered
+% from bed/base and thickness, and floating ice is put in hydrostatic
+% equilibrium.  Defaults reproduce the historical behaviour.
+
+    thickness_scale = 1.0;
+    bed_offset_m = 0.0;
+    bed_domain = 'all';
+    if isfield(kwargs, 'initial_thickness_scale')
+        thickness_scale = double(kwargs.initial_thickness_scale);
+    end
+    if isfield(kwargs, 'initial_bed_offset_m')
+        bed_offset_m = double(kwargs.initial_bed_offset_m);
+    end
+    if isfield(kwargs, 'initial_bed_background_domain')
+        bed_domain = lower(strtrim(char(kwargs.initial_bed_background_domain)));
+    end
+    if ~isfinite(thickness_scale) || thickness_scale <= 0 || thickness_scale > 2
+        error('[ICESEE] initial_thickness_scale must be in (0, 2].');
+    end
+    if ~isfinite(bed_offset_m) || abs(bed_offset_m) > 2000
+        error('[ICESEE] initial_bed_offset_m must be finite and within 2000 m.');
+    end
+
+    bed_background = md.geometry.bed(:);
+    bed_candidate = double(bed_candidate(:));
+    if numel(bed_candidate) ~= md.mesh.numberofvertices
+        error('[ICESEE] Initial bed candidate has an incompatible size.');
+    end
+    initial_grounded = md.geometry.thickness(:) > 0 & ...
+                       md.mask.ocean_levelset(:) > 0;
+    switch bed_domain
+        case 'all'
+            apply_bed = true(md.mesh.numberofvertices, 1);
+        case 'grounded_only'
+            % The survey-derived kriging field has no observational support
+            % beneath the initial shelf. Retain the background there.
+            apply_bed = initial_grounded;
+        otherwise
+            error('[ICESEE] initial_bed_background_domain must be all or grounded_only.');
+    end
+
+    bed_new = bed_background;
+    bed_new(apply_bed) = bed_candidate(apply_bed) + bed_offset_m;
+    thickness_new = max(thickness_scale .* md.geometry.thickness(:), 1.0);
+
+    di = md.materials.rho_ice / md.materials.rho_water;
+    ocean_levelset = thickness_new + bed_new ./ di;
+    grounded = ocean_levelset >= 0;
+    floating = ~grounded;
+
+    base_new = bed_new;
+    base_new(floating) = -di .* thickness_new(floating);
+    surface_new = base_new + thickness_new;
+
+    md.geometry.bed = bed_new;
+    md.geometry.base = base_new;
+    md.geometry.thickness = thickness_new;
+    md.geometry.surface = surface_new;
+    md.mask.ocean_levelset = ocean_levelset;
+
+    consistency_error = max(abs(md.geometry.surface - md.geometry.base - ...
+                                md.geometry.thickness));
+    if consistency_error > 1e-8
+        error('[ICESEE] Failed to construct a consistent initial geometry.');
+    end
+    fprintf(['[ICESEE] Initial prior: H scale=%.3f, bed offset=%+.1f m, ' ...
+             'bed domain=%s, grounded=%d/%d\n'], ...
+            thickness_scale, bed_offset_m, bed_domain, nnz(grounded), ...
+            md.mesh.numberofvertices);
 end
 
 function writeToHDF5(filename, data)

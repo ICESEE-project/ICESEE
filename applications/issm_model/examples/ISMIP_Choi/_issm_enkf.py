@@ -14,7 +14,29 @@ import gstools as gs
 # --- import utility functions ---
 from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_model import *
 from ICESEE.config._utility_imports import icesee_get_index
+from ICESEE.src.utils.localization import register_coord_provider
 # from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import setup_ensemble_intial_data, MatlabServer
+
+
+def get_issm_node_coordinates(model_kwargs):
+    """Load the ISSM nodal coordinates used by localized EnKF analyses."""
+    data_path = model_kwargs.get("data_path", "_modelrun_datasets")
+    icesee_path = model_kwargs.get("icesee_path", os.getcwd())
+    mesh_path = os.path.join(icesee_path, data_path, "mesh_idxy_0.h5")
+
+    with h5py.File(mesh_path, "r") as mesh_file:
+        x_coord = np.asarray(mesh_file["fric_x"][:], dtype=float).ravel()
+        y_coord = np.asarray(mesh_file["fric_y"][:], dtype=float).ravel()
+
+    if x_coord.size != y_coord.size:
+        raise ValueError(
+            f"ISSM coordinate sizes disagree in {mesh_path}: "
+            f"x={x_coord.size}, y={y_coord.size}"
+        )
+    return np.column_stack((x_coord, y_coord))
+
+
+register_coord_provider("issm", get_issm_node_coordinates)
 
 # --- import kriging functions ---
 def _load_bed_from_kriging_file(bed_kriging_file, fdim, ens=None, use_mean=False):

@@ -79,8 +79,17 @@ class _MatlabServer:
                     if cmdline and any(flag in cmdline for flag in ['-nodisplay', '-nodesktop']):
                         is_gui = False
                     
-                    if not is_gui:
-                        # Terminate non-GUI process
+                    # Each MPI rank owns one server distinguished by its
+                    # cmdfile/statusfile suffix.  Never kill every headless
+                    # MATLAB process here: concurrent launchers would terminate
+                    # one another (and could also kill unrelated user jobs).
+                    command_line = " ".join(cmdline or [])
+                    owns_this_server = (
+                        self.cmdfile in command_line
+                        or self.statusfile in command_line
+                    )
+                    if not is_gui and owns_this_server:
+                        # Terminate only a stale server for this launcher.
                         if platform.system() == "Windows":
                             proc.terminate()  # Windows uses terminate
                         else:
@@ -310,31 +319,39 @@ class _MatlabServer:
             stderr_thread.start()
             output_thread.start()
             
-            # Wait for server to signal readiness via status file
+            # Wait for server to signal readiness via status file.  File
+            # creation and content publication are not one operation on every
+            # filesystem, so tolerate a transient missing/empty status.
             timeout = 10000  # seconds
             start_time = time.time()
-            while not os.path.exists(self.statusfile):
+            status = ""
+            while status != "ready":
                 if time.time() - start_time > timeout:
                     if self.comm is None or self.comm.Get_rank() == 0:
                         print("[ICESEE::Launcher] Error: MATLAB server failed to start within timeout.")
                     self.running = False
                     os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-                    sys.exit(1)
-                time.sleep(0.5)
+                    raise TimeoutError("MATLAB server readiness timed out")
+                if self.process.poll() is not None:
+                    raise RuntimeError(
+                        "MATLAB server exited before publishing ready status"
+                    )
+                try:
+                    with open(self.statusfile, 'r') as f:
+                        status = f.read().strip()
+                except (FileNotFoundError, OSError):
+                    status = ""
+                if status not in {"", "ready"}:
+                    raise RuntimeError(
+                        f"MATLAB server returned unexpected startup status {status!r}"
+                    )
+                if status == "ready":
+                    break
+                time.sleep(0.1)
                 #%--->
                 if int(time.time() - start_time) % 10 == 0:
                     print(f"[ICESEE::Launcher] still waiting for {self.statusfile} after {int(time.time() - start_time)} s")
                 #%--->
-
-            # Check server status
-            with open(self.statusfile, 'r') as f:
-                status = f.read().strip()
-            if status != 'ready':
-                if self.comm is None or self.comm.Get_rank() == 0:
-                    print(f"[ICESEE::Launcher] Error: Unexpected status '{status}'.")
-                self.running = False
-                os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-                sys.exit(1)
             
             if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
                 print("[ICESEE::Launcher] MATLAB server is ready.")
@@ -342,9 +359,12 @@ class _MatlabServer:
             if self.comm is None or self.comm.Get_rank() == 0:
                 print(f"[ICESEE::Launcher] Error launching MATLAB server: {e}")
             self.running = False
-            if self.process:
-                os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-            sys.exit(1)
+            if self.process and self.process.poll() is None:
+                try:
+                    os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+            raise RuntimeError("MATLAB server launch failed") from e
 
     def send_command(self, command, timeout=12960000*1000):
         """Send a command to MATLAB and wait for it to be processed.
@@ -368,8 +388,17 @@ class _MatlabServer:
             print(f"[ICESEE::Launcher] Sending command: {command}")
         
         try:
-            with open(self.cmdfile, 'w') as f:
+            # Mark the command in progress and publish both files atomically;
+            # this prevents MATLAB from reading a partially-written command.
+            status_tmp = f"{self.statusfile}.python-tmp"
+            with open(status_tmp, 'w') as f:
+                f.write("running")
+            os.replace(status_tmp, self.statusfile)
+
+            cmd_tmp = f"{self.cmdfile}.python-tmp"
+            with open(cmd_tmp, 'w') as f:
                 f.write(command)
+            os.replace(cmd_tmp, self.cmdfile)
         except OSError as e:
             if self.comm is None or self.comm.Get_rank() == 0:
                 print(f"[ICESEE::Launcher] Error: Failed to write command file: {e}")
@@ -418,6 +447,29 @@ class _MatlabServer:
                 if self.comm is None or self.comm.Get_rank() == 0:
                     print("[ICESEE::Launcher] Warning: Slow command processing detected.")
         
+        # MATLAB publishes done/error before deleting the command file.  Check
+        # the status explicitly so a MATLAB exception cannot masquerade as a
+        # successful forecast that merely reuses stale HDF5 data.
+        if command.strip() != "exit":
+            status_deadline = time.time() + 30.0
+            status = ""
+            while time.time() < status_deadline:
+                try:
+                    with open(self.statusfile, 'r') as f:
+                        status = f.read().strip()
+                except (FileNotFoundError, OSError):
+                    status = ""
+                if status in {"done", "error"}:
+                    break
+                time.sleep(0.05)
+            if status != "done":
+                if self.comm is None or self.comm.Get_rank() == 0:
+                    print(
+                        "[ICESEE::Launcher] MATLAB command failed with "
+                        f"status {status!r}."
+                    )
+                return False
+
         if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
             print("[ICESEE::Launcher] Command processed successfully.")
         return True
@@ -978,4 +1030,3 @@ def setup_example_directory(issm_dir, example_name):
         raise OSError(f"Rank {rank}: Path is not a directory: {issm_examples_dir}")
     
     return issm_examples_dir
-

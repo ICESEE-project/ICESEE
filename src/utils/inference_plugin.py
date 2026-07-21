@@ -98,6 +98,177 @@ def apply_bed_update_gate_local(
     return analysis_vec
 
 
+def apply_bed_domain_gate_global(
+    analysis_vec,
+    forecast_vec,
+    vec_inputs,
+    hdim,
+    model_kwargs,
+):
+    """Restrict bed increments to the configured physical/support domain.
+
+    ``grounded_only`` diagnoses grounding independently for each forecast
+    member. ``observed_only`` is stricter: it uses the truth-supported bed mask
+    stored with the synthetic observations and therefore cannot leak an update
+    beneath unobserved floating ice through a misclassified ensemble member.
+    """
+    domain = str(model_kwargs.get("bed_update_domain", "all")).lower()
+    if domain == "all":
+        return analysis_vec
+    if domain not in {"grounded_only", "observed_only"}:
+        raise ValueError(
+            "bed_update_domain must be 'all', 'grounded_only', or "
+            "'observed_only'"
+        )
+
+    km = model_kwargs.get("km")
+    snapshot_columns = {
+        int(value) for value in model_kwargs.get("bed_snap_cols", [])
+    }
+    if km is None or int(km) not in snapshot_columns:
+        return analysis_vec
+
+    thickness_block = None
+    bed_block = None
+    for block, key in enumerate(vec_inputs):
+        key_l = str(key).lower()
+        if key_l in {"thickness", "ice_thickness", "h"}:
+            thickness_block = block
+        elif key_l in _BED_ALIASES:
+            bed_block = block
+    if bed_block is None or (domain == "grounded_only" and thickness_block is None):
+        raise ValueError(
+            f"{domain} bed updates require the necessary state blocks"
+        )
+
+    thickness_slice = None
+    if thickness_block is not None:
+        thickness_slice = slice(
+            thickness_block * hdim, (thickness_block + 1) * hdim
+        )
+    bed_slice = slice(bed_block * hdim, (bed_block + 1) * hdim)
+    forecast_bed = np.asarray(forecast_vec[bed_slice, :], dtype=float)
+
+    bed_analysis = np.asarray(analysis_vec[bed_slice, :], dtype=float).copy()
+    if domain == "grounded_only":
+        forecast_thickness = np.asarray(
+            forecast_vec[thickness_slice, :], dtype=float
+        )
+        density_ratio = float(model_kwargs.get("di", 0.8930))
+        allowed = forecast_thickness + forecast_bed / density_ratio > 0.0
+    else:
+        masks_by_key = model_kwargs.get("bed_mask_map_cols", {})
+        support = None
+        for key in vec_inputs:
+            if str(key).lower() not in _BED_ALIASES:
+                continue
+            mask_columns = masks_by_key.get(key)
+            if mask_columns is None:
+                # HDF5 keys and configured aliases may differ only by case.
+                for stored_key, stored_value in masks_by_key.items():
+                    if str(stored_key).lower() == str(key).lower():
+                        mask_columns = stored_value
+                        break
+            if mask_columns is not None:
+                mask_columns = np.asarray(mask_columns, dtype=bool)
+                if (
+                    mask_columns.ndim == 2
+                    and mask_columns.shape[1] == hdim
+                    and mask_columns.shape[0] != hdim
+                ):
+                    mask_columns = mask_columns.T
+                if mask_columns.shape[0] != hdim or int(km) >= mask_columns.shape[1]:
+                    raise ValueError(
+                        "bed observation-support mask has an incompatible "
+                        f"shape: mask={mask_columns.shape}, hdim={hdim}, "
+                        f"obs_column={km}"
+                    )
+                support = mask_columns[:, int(km)]
+                break
+        if support is None:
+            raise ValueError(
+                "bed_update_domain='observed_only' requires bed_mask_map_cols"
+            )
+        allowed = support[:, None]
+
+    bed_analysis[~np.broadcast_to(allowed, bed_analysis.shape)] = (
+        forecast_bed[~np.broadcast_to(allowed, forecast_bed.shape)]
+    )
+    analysis_vec[bed_slice, :] = bed_analysis
+    return analysis_vec
+
+
+def apply_bed_observation_anchor_global(
+    analysis_vec,
+    vec_inputs,
+    hdim,
+    model_kwargs,
+    stage="pre",
+):
+    """Anchor surveyed bed nodes directly to their active observations.
+
+    The augmented EnKF still supplies spatial cross-covariances, while this
+    scalar relaxation guarantees that a direct bed observation cannot increase
+    its own innovation.  Unobserved nodes are untouched here and are handled by
+    the regularized/localized increment plus the physical domain gate.
+    """
+    if not bool(model_kwargs.get("_bed_update_active", False)):
+        return analysis_vec
+
+    stage = str(stage).lower()
+    if stage not in {"pre", "post"}:
+        raise ValueError("bed observation anchor stage must be 'pre' or 'post'")
+    factor_key = (
+        "bed_observation_nudge_factor"
+        if stage == "pre"
+        else "bed_observation_post_anchor_factor"
+    )
+    factor = float(model_kwargs.get(factor_key, 0.0))
+    if factor == 0.0:
+        return analysis_vec
+    if not 0.0 <= factor <= 1.0:
+        raise ValueError(f"{factor_key} must be in [0, 1]")
+
+    km = model_kwargs.get("km")
+    observations = model_kwargs.get("hu_obs_loaded")
+    if km is None or observations is None:
+        return analysis_vec
+    observations = np.asarray(observations, dtype=float)
+    if observations.ndim != 2 or int(km) >= observations.shape[1]:
+        raise ValueError("bed observation array has an incompatible shape")
+
+    bed_block = None
+    for block_index, key in enumerate(vec_inputs):
+        if str(key).lower() in _BED_ALIASES:
+            bed_block = block_index
+            break
+    if bed_block is None:
+        return analysis_vec
+
+    bed_slice = slice(bed_block * hdim, (bed_block + 1) * hdim)
+    if bed_slice.stop > observations.shape[0]:
+        raise ValueError("bed observation block is outside hu_obs_loaded")
+    target = observations[bed_slice, int(km)]
+    active = np.isfinite(target)
+    if not np.any(active):
+        return analysis_vec
+
+    bed = np.asarray(analysis_vec[bed_slice, :], dtype=float).copy()
+    mean_before = np.mean(bed[active, :], axis=1)
+    bed[active, :] += factor * (target[active, None] - bed[active, :])
+    if bool(model_kwargs.get("bed_observation_diagnostics", False)):
+        mean_after = np.mean(bed[active, :], axis=1)
+        rmse_before = np.sqrt(np.mean((mean_before - target[active]) ** 2))
+        rmse_after = np.sqrt(np.mean((mean_after - target[active]) ** 2))
+        print(
+            "[ICESEE][bed_anchor] "
+            f"stage={stage} obs_column={int(km)} n={int(np.sum(active))} "
+            f"innovation_RMSE={rmse_before:.3f}->{rmse_after:.3f} m"
+        )
+    analysis_vec[bed_slice, :] = bed
+    return analysis_vec
+
+
 def apply_global_inference_hook(
     analysis_vec,
     vec_inputs,

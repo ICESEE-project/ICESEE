@@ -36,6 +36,11 @@ enkf-parameters:
   initial_spread_factor: 1.0
   sequential_ensemble_initialization: 0
   use_ensemble_pertubations: 1
+  # Paper-freeze profile (2026-07-20): retain the reproducible formulation
+  # used by the best stable run (whole-domain bed RMSE 121.955 -> 119.742 m).
+  # The tested stochastic_R alternative remains available as a code-level
+  # switch, but is intentionally inactive for the manuscript results.
+  enkf_observation_error_mode: legacy_prior_anomalies
 
   # num_state_vars: 4             # State variables: ice thickness (H), velocities (u, v)
   num_state_vars: 4             # State variables: ice thickness (H), surface elevation (S)
@@ -59,6 +64,9 @@ enkf-parameters:
   # bed topography observations settings
   bed_obs_snapshot: [4, 10, 12, 18]        # Bedrock elevation observations at 30 years
   bed_obs_stride: 4000          # Spacing of bedrock elevation observations (30 km)
+  # Paper-freeze profile: reproduce the best stable baseline. The tested
+  # grounded_only gate remains available for later sensitivity experiments.
+  bed_update_domain: all
   bed_relaxation_factor: 1   # Relaxation factor for bedrock elevation updates (when bed is not observed) (-1< relaxation_factor <=1)
   initial_bed_bias: 0.0015        # Initial bias for bedrock elevation (15 m)
 

@@ -84,6 +84,15 @@ model_kwargs = {
                 'Nens': int(float(params.get('Nens'))),
                 'bed_relaxation_factor': float(enkf_params.get('bed_relaxation_factor', 0.05)),
                 'initial_bed_bias': float(enkf_params.get('initial_bed_bias', 0.0015)),
+                # Optional synthetic-experiment prior controls.  These are
+                # applied by run_model.m before the no-DA and ensemble
+                # transients, with geometry rebuilt so S = B + H and the
+                # floating shelf remains hydrostatic.
+                'initial_thickness_scale': float(enkf_params.get('initial_thickness_scale', 1.0)),
+                'initial_bed_offset_m': float(enkf_params.get('initial_bed_offset_m', 0.0)),
+                'initial_bed_background_domain': str(
+                    enkf_params.get('initial_bed_background_domain', 'all')
+                ),
                 'abs_vel_weight': float(enkf_params.get('abs_vel_weight', 1.0)),
                 'rel_vel_weight': float(enkf_params.get('rel_vel_weight', 1.0)),
                 'tikhonov_regularization_weight': float(enkf_params.get('tikhonov_regularization_weight', 1e-13)),

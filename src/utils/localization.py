@@ -39,6 +39,100 @@ def get_mesh_coordinates(model_kwargs):
     return coords
 
 
+def restore_frozen_analysis_vars(
+    analysis_vec,
+    forecast_vec,
+    global_rows,
+    vec_inputs,
+    hdim,
+    frozen_vars,
+):
+    """Restore selected state-vector blocks to their forecast values.
+
+    This provides a clean fixed-parameter control while retaining assimilation
+    updates for the remaining state and parameter blocks.
+    """
+    if not frozen_vars:
+        return analysis_vec
+
+    frozen_names = {str(value).lower() for value in frozen_vars}
+    global_rows = np.asarray(global_rows, dtype=int)
+
+    for block_index, key in enumerate(vec_inputs):
+        if str(key).lower() not in frozen_names:
+            continue
+        start = block_index * hdim
+        stop = start + hdim
+        mask = (global_rows >= start) & (global_rows < stop)
+        if np.any(mask):
+            analysis_vec[mask, :] = forecast_vec[mask, :]
+
+    return analysis_vec
+
+
+def active_observation_std(model_kwargs, k_obs, obs_indices):
+    """Return configured standard deviations for active observation rows."""
+    error_r = model_kwargs.get("error_R")
+    if error_r is None:
+        raise ValueError(
+            "enkf_observation_error_mode='stochastic_R' requires error_R"
+        )
+
+    error_r = np.asarray(error_r, dtype=float)
+    obs_indices = np.asarray(obs_indices, dtype=int)
+    k_obs = int(k_obs)
+    max_index = int(obs_indices.max()) if obs_indices.size else -1
+
+    if error_r.ndim == 1:
+        sigma = error_r[obs_indices]
+    elif (
+        error_r.ndim == 2
+        and error_r.shape[0] > k_obs
+        and error_r.shape[1] > max_index
+    ):
+        sigma = error_r[k_obs, obs_indices]
+    elif (
+        error_r.ndim == 2
+        and error_r.shape[1] > k_obs
+        and error_r.shape[0] > max_index
+    ):
+        sigma = error_r[obs_indices, k_obs]
+    else:
+        raise ValueError(
+            f"error_R shape {error_r.shape} is incompatible with observation "
+            f"column {k_obs} and {obs_indices.size} active rows"
+        )
+
+    sigma = np.asarray(sigma, dtype=float).ravel()
+    invalid = ~np.isfinite(sigma) | (sigma <= 0.0)
+    if np.any(invalid):
+        bad_rows = obs_indices[invalid][:8].tolist()
+        raise ValueError(
+            "Active observations require finite positive standard deviations; "
+            f"invalid rows include {bad_rows}"
+        )
+    return sigma
+
+
+def stochastic_observation_terms(HA, d, sigma, seed):
+    """Build consistent perturbed-observation terms from configured ``R``."""
+    HA = np.asarray(HA, dtype=float)
+    d = np.asarray(d, dtype=float).ravel()
+    sigma = np.asarray(sigma, dtype=float).ravel()
+    if HA.shape[0] != d.size or d.size != sigma.size:
+        raise ValueError(
+            f"Observation shapes disagree: HA={HA.shape}, d={d.shape}, "
+            f"sigma={sigma.shape}"
+        )
+
+    rng = np.random.default_rng(int(seed))
+    eta = rng.standard_normal(HA.shape) * sigma[:, None]
+    eta -= np.mean(eta, axis=1, keepdims=True)
+    ha_prime = HA - np.mean(HA, axis=1, keepdims=True)
+    d_prime = d[:, None] + eta - HA
+    return ha_prime, eta, d_prime
+
+
 def build_obs_coords(obs_indices, node_coords, vec_inputs, hdim):
     """Map global observation rows to per-block physical coordinates."""
     del vec_inputs  # retained in the public signature for compatibility

@@ -25,6 +25,28 @@ from ICESEE.src.utils.tools import icesee_get_index
 def isiterable(obj):
     return isinstance(obj, Iterable)
 
+
+def cross_flow_track_mask(x_coord_m, stride_km, half_width_m=1000.0):
+    """Select nodes lying near constant-x radar tracks.
+
+    The glacier flow direction is x, so constant-x lines are cross-flow tracks.
+    Track width is independent of track spacing; coupling the two would fill the
+    gaps and accidentally create full-domain bed observations.
+    """
+    x_coord_km = np.asarray(x_coord_m, dtype=float).ravel() / 1000.0
+    stride_km = float(stride_km)
+    half_width_km = float(half_width_m) / 1000.0
+    if stride_km <= 0.0 or half_width_km < 0.0:
+        raise ValueError("Track stride must be positive and width non-negative")
+
+    x_lines = np.arange(
+        x_coord_km.min(), x_coord_km.max() + 1.0e-9, stride_km
+    )
+    mask = np.zeros(x_coord_km.size, dtype=bool)
+    for x_line in x_lines:
+        mask |= np.abs(x_coord_km - x_line) <= half_width_km
+    return mask
+
 class UtilsFunctions:
     def __init__(self, params=None, model_kwargs=None, ensemble=None):
         self.params = params
@@ -398,6 +420,7 @@ class UtilsFunctions:
         model_name = kwargs.get("model_name", None)
 
         bed_stride_km = kwargs.get("bed_obs_stride", None)
+        bed_track_half_width_m = kwargs.get("bed_obs_track_half_width_m", 1000.0)
         bed_spacing_pts = kwargs.get("bed_obs_spacing", None)
         bed_indices_user = kwargs.get("bed_obs_indices", None)
         bed_mask_user = kwargs.get("bed_obs_mask", None)
@@ -449,23 +472,15 @@ class UtilsFunctions:
                     data_path = kwargs.get("data_path")
                     mesh_file = f"{icesee_path}/{data_path}/mesh_idxy_0.h5"
                     with h5py.File(mesh_file, "r") as f:
-                        x_param = np.asarray(f["/fric_x"][:], dtype=float).ravel() / 1000.0
-                        y_param = np.asarray(f["/fric_y"][:], dtype=float).ravel() / 1000.0
+                        x_param_m = np.asarray(
+                            f["/fric_x"][:], dtype=float
+                        ).ravel()
 
-                    # tracks perpendicular to flow along x (as in the kriging script)
-                    x_min, x_max = x_param.min(), x_param.max()
-                    stride = float(bed_stride_km)  # km
-                    x_lines = np.arange(x_min, x_max + 1e-6, stride)
-
-                    if x_lines.size > 1:
-                        dx_nom = (x_max - x_min) / max(x_lines.size - 1, 1)
-                    else:
-                        dx_nom = stride
-                    band = 0.5 * dx_nom
-
-                    mask = np.zeros(n_bed, dtype=bool)
-                    for xl in x_lines:
-                        mask |= (np.abs(x_param - xl) <= band)
+                    mask = cross_flow_track_mask(
+                        x_param_m,
+                        stride_km=bed_stride_km,
+                        half_width_m=bed_track_half_width_m,
+                    )
 
                     print(f"[ICESEE<-ISSM] bed static track mask '{k}': {mask.sum()} of {n_bed}")
 
