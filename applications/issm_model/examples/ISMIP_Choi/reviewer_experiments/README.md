@@ -27,6 +27,13 @@ observation-free forecast.
    member-wise inversion uses bounds of 1500--4500. The localized bed increment
    cap is reduced from 30 m to 20 m to suppress the observed survey-corridor
    overshoot patches.
+5. `friction_inversion_hybrid_heterogeneous.yaml`: robustness experiment with
+   the same tuned observation/inversion design but a spatially heterogeneous
+   initial condition. Its smooth, independent thickness and grounded-bed
+   modes contain both positive and negative local departures and are generated
+   solely from mesh coordinates. Surface remains diagnosed from consistent
+   geometry and velocity remains an ISSM response. Run `heterogeneous_ic_check.yaml`
+   first to inspect the signed errors and grounding line without launching DA.
 
 Run from the `ISMIP_Choi` directory, replacing the MPI layout as needed:
 
@@ -47,6 +54,13 @@ mpiexec -n 60 python run_da_issm.py -F reviewer_experiments/friction_inversion_h
 # do not resume it from an older profile with a different observation schedule.
 mpirun -np 8 python run_da_issm.py --Nens=40 --model_nprocs=1 \
   -F reviewer_experiments/friction_inversion_hybrid_low_prior_tuned.yaml
+
+# Heterogeneous-prior preflight (truth/no-DA only), then the full DA run after
+# the initial-error maps and physical diagnostics pass inspection.
+mpirun -np 8 python run_da_issm.py --Nens=40 --model_nprocs=1 \
+  -F reviewer_experiments/heterogeneous_ic_check.yaml
+mpirun -np 8 python run_da_issm.py --Nens=40 --model_nprocs=1 \
+  -F reviewer_experiments/friction_inversion_hybrid_heterogeneous.yaml
 ```
 
 Report RMSE for thickness, velocity, bed, and grounded friction (also grounded

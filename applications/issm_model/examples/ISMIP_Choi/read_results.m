@@ -13,7 +13,7 @@ global data_file_paths nvar ensemble_vec_full ...
         label_t t nt colorbar_gap bed_obs_xy assimilation_end_time
 
 % Select an experiment without editing this script, for example:
-% setenv('ICESEE_RESULTS_DIR', '_reviewer_friction_inversion_hybrid_low_prior_v1')
+setenv('ICESEE_RESULTS_DIR', '_reviewer_friction_inversion_hybrid_heterogeneous_validated_v1')
 % read_results
 data_file_paths = getenv('ICESEE_RESULTS_DIR');
 if isempty(data_file_paths)
@@ -55,8 +55,9 @@ plotgl           = 1;
 % k_array = [30, 60, 90, 120, 139]+1;
 % k_array= [ 0, 20,80, 120, 160, 220, 250, 320, 450]+1;
 % k_array = [20, 80, 120, 160, 240, 360, 499] +1;
-k_array = [30, 70, 100, 120, 180, 245] + 1;
+k_array = [30, 70, 100, 120, 180] + 1;
 dt      = 0.2;
+nt = 185;
 
 % ---------------- Load essentials --------------
 results_dir = 'results';

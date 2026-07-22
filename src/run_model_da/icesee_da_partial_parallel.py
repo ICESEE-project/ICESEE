@@ -168,6 +168,14 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
 
         comm_world.Barrier()
 
+        # A genuine initial-condition gate: the model-specific generators
+        # write only the unadvanced true/prior states.  Do not construct
+        # observations or enter ensemble initialization in this mode.
+        if model_kwargs.get("initial_state_only", False):
+            if rank_world == 0:
+                print("[ICESEE] Initial-state check complete; no transient or observations were generated.")
+            return None
+
         # --- Generate the Synthetic ObservationsObservations ---------------------------------------------------
         # --- time generation of synthetic observations ---
         time_generation_synthetic_obs = MPI.Wtime()

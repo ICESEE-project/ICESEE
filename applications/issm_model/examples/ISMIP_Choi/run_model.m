@@ -42,7 +42,39 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
     output_frequency = 1; % make sure this is set to 1 for coupling with ICESEE
 
     % Set up model for each EnKF stage
-    if strcmp(data_fname, 'true_state.mat')
+    if strcmp(data_fname, 'initial_true_state.mat')
+        folder = sprintf('./Models/ens_id_%d', ens_id_init);
+        md = loadmodel(fullfile(folder, reference_data));
+        writeInitialStateHDF5(fullfile(icesee_path, data_path, ...
+            sprintf('ensemble_true_state_%d.h5', ens_id)), md);
+
+    elseif strcmp(data_fname, 'initial_nurged_state.mat')
+        folder = sprintf('./Models/ens_id_%d', ens_id_init);
+        md = loadmodel(fullfile(folder, reference_data));
+        md = setflowequation(md, 'SSA', 'all');
+        prior_file = fullfile(icesee_path, data_path, ...
+            sprintf('friction_bed_%d.h5', ens_id));
+        bed = h5read(prior_file, '/bed');
+        coefficient = h5read(prior_file, '/coefficient');
+        md.friction.coefficient = mean_friction .* ...
+            ones(md.mesh.numberofvertices, 1) + coefficient;
+        md.friction.p = ones(md.mesh.numberofelements, 1);
+        md.friction.q = ones(md.mesh.numberofelements, 1);
+        md = apply_configured_initial_geometry(md, bed, kwargs);
+
+        % Diagnose the velocity implied by this geometry without advancing
+        % thickness, bed, grounding line, or time.
+        md.cluster = generic('name', oshostname(), 'np', nprocs);
+        md.settings.waitonlock = 1;
+        md.verbose = verbose('convergence', false, 'solution', false);
+        md = solve(md, 'Stressbalance', 'runtimename', false);
+        md.initialization.vx = md.results.StressbalanceSolution.Vx;
+        md.initialization.vy = md.results.StressbalanceSolution.Vy;
+        md.initialization.vel = md.results.StressbalanceSolution.Vel;
+        writeInitialStateHDF5(fullfile(icesee_path, data_path, ...
+            sprintf('ensemble_nurged_state_%d.h5', ens_id)), md);
+
+    elseif strcmp(data_fname, 'true_state.mat')
         % Special case for true state
         % if k == 0 || isempty(k)
         folder = sprintf('./Models/ens_id_%d', ens_id_init);
@@ -1029,6 +1061,20 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
     thickness_scale = 1.0;
     bed_offset_m = 0.0;
     bed_domain = 'all';
+    bed_gl_buffer_m = 0.0;
+    thickness_anomaly_fraction = 0.0;
+    thickness_anomaly_m = 0.0;
+    thickness_delta_min_m = -500.0;
+    thickness_delta_max_m = 500.0;
+    floating_thickness_anomaly_factor = 1.0;
+    bed_anomaly_m = 0.0;
+    bed_delta_min_m = -500.0;
+    bed_delta_max_m = 500.0;
+    pattern_length_x_m = 120000.0;
+    pattern_length_y_m = 40000.0;
+    pattern_phase = 0.0;
+    thickness_factor_min = 0.60;
+    thickness_factor_max = 1.25;
     if isfield(kwargs, 'initial_thickness_scale')
         thickness_scale = double(kwargs.initial_thickness_scale);
     end
@@ -1038,11 +1084,92 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
     if isfield(kwargs, 'initial_bed_background_domain')
         bed_domain = lower(strtrim(char(kwargs.initial_bed_background_domain)));
     end
+    if isfield(kwargs, 'initial_bed_gl_buffer_m')
+        bed_gl_buffer_m = double(kwargs.initial_bed_gl_buffer_m);
+    end
+    if isfield(kwargs, 'initial_thickness_anomaly_fraction')
+        thickness_anomaly_fraction = double(kwargs.initial_thickness_anomaly_fraction);
+    end
+    if isfield(kwargs, 'initial_thickness_anomaly_m')
+        thickness_anomaly_m = double(kwargs.initial_thickness_anomaly_m);
+    end
+    if isfield(kwargs, 'initial_thickness_delta_min_m')
+        thickness_delta_min_m = double(kwargs.initial_thickness_delta_min_m);
+    end
+    if isfield(kwargs, 'initial_thickness_delta_max_m')
+        thickness_delta_max_m = double(kwargs.initial_thickness_delta_max_m);
+    end
+    if isfield(kwargs, 'initial_floating_thickness_anomaly_factor')
+        floating_thickness_anomaly_factor = double( ...
+            kwargs.initial_floating_thickness_anomaly_factor);
+    end
+    if isfield(kwargs, 'initial_bed_anomaly_m')
+        bed_anomaly_m = double(kwargs.initial_bed_anomaly_m);
+    end
+    if isfield(kwargs, 'initial_bed_delta_min_m')
+        bed_delta_min_m = double(kwargs.initial_bed_delta_min_m);
+    end
+    if isfield(kwargs, 'initial_bed_delta_max_m')
+        bed_delta_max_m = double(kwargs.initial_bed_delta_max_m);
+    end
+    if isfield(kwargs, 'initial_prior_length_x_m')
+        pattern_length_x_m = double(kwargs.initial_prior_length_x_m);
+    end
+    if isfield(kwargs, 'initial_prior_length_y_m')
+        pattern_length_y_m = double(kwargs.initial_prior_length_y_m);
+    end
+    if isfield(kwargs, 'initial_prior_pattern_phase')
+        pattern_phase = double(kwargs.initial_prior_pattern_phase);
+    end
+    if isfield(kwargs, 'initial_thickness_factor_min')
+        thickness_factor_min = double(kwargs.initial_thickness_factor_min);
+    end
+    if isfield(kwargs, 'initial_thickness_factor_max')
+        thickness_factor_max = double(kwargs.initial_thickness_factor_max);
+    end
     if ~isfinite(thickness_scale) || thickness_scale <= 0 || thickness_scale > 2
         error('[ICESEE] initial_thickness_scale must be in (0, 2].');
     end
     if ~isfinite(bed_offset_m) || abs(bed_offset_m) > 2000
         error('[ICESEE] initial_bed_offset_m must be finite and within 2000 m.');
+    end
+    if ~isfinite(bed_gl_buffer_m) || bed_gl_buffer_m < 0 || ...
+            bed_gl_buffer_m > 200000
+        error('[ICESEE] initial_bed_gl_buffer_m must be in [0, 200000] m.');
+    end
+    if ~isfinite(thickness_anomaly_fraction) || ...
+            thickness_anomaly_fraction < 0 || thickness_anomaly_fraction > 0.5
+        error('[ICESEE] initial_thickness_anomaly_fraction must be in [0, 0.5].');
+    end
+    if ~isfinite(thickness_anomaly_m) || thickness_anomaly_m < 0 || ...
+            thickness_anomaly_m > 1000
+        error('[ICESEE] initial_thickness_anomaly_m must be in [0, 1000] m.');
+    end
+    if ~isfinite(thickness_delta_min_m) || ...
+            ~isfinite(thickness_delta_max_m) || ...
+            thickness_delta_max_m <= thickness_delta_min_m
+        error('[ICESEE] Invalid initial thickness-delta bounds.');
+    end
+    if ~isfinite(floating_thickness_anomaly_factor) || ...
+            floating_thickness_anomaly_factor < 0 || ...
+            floating_thickness_anomaly_factor > 1
+        error('[ICESEE] initial_floating_thickness_anomaly_factor must be in [0, 1].');
+    end
+    if ~isfinite(bed_anomaly_m) || bed_anomaly_m < 0 || bed_anomaly_m > 1000
+        error('[ICESEE] initial_bed_anomaly_m must be in [0, 1000] m.');
+    end
+    if ~isfinite(bed_delta_min_m) || ~isfinite(bed_delta_max_m) || ...
+            bed_delta_max_m <= bed_delta_min_m
+        error('[ICESEE] Invalid initial bed-delta bounds.');
+    end
+    if ~isfinite(pattern_length_x_m) || pattern_length_x_m <= 0 || ...
+            ~isfinite(pattern_length_y_m) || pattern_length_y_m <= 0
+        error('[ICESEE] Initial-prior pattern lengths must be positive.');
+    end
+    if ~isfinite(thickness_factor_min) || ~isfinite(thickness_factor_max) || ...
+            thickness_factor_min <= 0 || ...
+            thickness_factor_max <= thickness_factor_min
+        error('[ICESEE] Invalid initial thickness-factor bounds.');
     end
 
     bed_background = md.geometry.bed(:);
@@ -1063,9 +1190,55 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
             error('[ICESEE] initial_bed_background_domain must be all or grounded_only.');
     end
 
+    x = double(md.mesh.x(:));
+    y = double(md.mesh.y(:));
+    ice_mask = md.geometry.thickness(:) > 1.0;
+
+    % Keep the initial bed challenge away from the grounding transition. This
+    % prevents the bed prior itself from changing the mask before the first
+    % analysis while retaining heterogeneous upstream bed errors.
+    if bed_gl_buffer_m > 0
+        elements = double(md.mesh.elements);
+        element_grounded = initial_grounded(elements);
+        transition_elements = any(element_grounded, 2) & ...
+                              any(~element_grounded, 2);
+        gl_nodes = unique(elements(transition_elements, :));
+        if ~isempty(gl_nodes)
+            distance_to_gl = inf(size(x));
+            for j = 1:numel(gl_nodes)
+                node = gl_nodes(j);
+                distance_to_gl = min(distance_to_gl, ...
+                    hypot(x - x(node), y - y(node)));
+            end
+            apply_bed = apply_bed & distance_to_gl >= bed_gl_buffer_m;
+        end
+    end
+
+    % Use independent, broad deterministic modes for bed and thickness.  The
+    % modes are normalized on their application domains, so their configured
+    % amplitudes are standard deviations and do not change the requested mean
+    % biases.  They depend only on mesh coordinates and explicit configuration,
+    % making the experiment reproducible without consulting the hidden truth.
+    thickness_pattern = broad_thickness_pattern(x, y, initial_grounded);
+    bed_pattern = spatial_prior_pattern( ...
+        x, y, 1.25 .* pattern_length_x_m, 0.85 .* pattern_length_y_m, ...
+        pattern_phase + 2.10, apply_bed);
+
+    bed_delta = bed_offset_m + bed_anomaly_m .* bed_pattern;
+    bed_delta = min(max(bed_delta, bed_delta_min_m), bed_delta_max_m);
     bed_new = bed_background;
-    bed_new(apply_bed) = bed_candidate(apply_bed) + bed_offset_m;
-    thickness_new = max(thickness_scale .* md.geometry.thickness(:), 1.0);
+    bed_new(apply_bed) = bed_candidate(apply_bed) + bed_delta(apply_bed);
+    thickness_factor = thickness_scale + ...
+                       thickness_anomaly_fraction .* thickness_pattern;
+    thickness_factor = min(max(thickness_factor, thickness_factor_min), ...
+                           thickness_factor_max);
+    thickness_delta = thickness_anomaly_m .* thickness_pattern;
+    thickness_delta = min(max(thickness_delta, thickness_delta_min_m), ...
+                          thickness_delta_max_m);
+    thickness_delta(~initial_grounded) = floating_thickness_anomaly_factor .* ...
+                                         thickness_delta(~initial_grounded);
+    thickness_new = max(thickness_factor .* md.geometry.thickness(:) + ...
+                        thickness_delta, 1.0);
 
     di = md.materials.rho_ice / md.materials.rho_water;
     ocean_levelset = thickness_new + bed_new ./ di;
@@ -1087,10 +1260,82 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
     if consistency_error > 1e-8
         error('[ICESEE] Failed to construct a consistent initial geometry.');
     end
-    fprintf(['[ICESEE] Initial prior: H scale=%.3f, bed offset=%+.1f m, ' ...
-             'bed domain=%s, grounded=%d/%d\n'], ...
-            thickness_scale, bed_offset_m, bed_domain, nnz(grounded), ...
+    fprintf(['[ICESEE] Initial prior: mean H scale=%.3f, H fractional anomaly SD=%.3f, ' ...
+             'H additive anomaly SD=%.1f m, floating factor=%.2f, ' ...
+             'H delta range=[%.1f, %.1f] m, ' ...
+             'H factor range=[%.3f, %.3f], bed offset=%+.1f m, ' ...
+             'bed anomaly SD=%.1f m, bed delta range=[%.1f, %.1f] m, ' ...
+             'bed domain=%s, GL buffer=%.1f km, grounded=%d/%d\n'], ...
+            thickness_scale, thickness_anomaly_fraction, thickness_anomaly_m, ...
+            floating_thickness_anomaly_factor, ...
+            min(thickness_delta(ice_mask)), max(thickness_delta(ice_mask)), ...
+            min(thickness_factor(ice_mask)), max(thickness_factor(ice_mask)), ...
+            bed_offset_m, bed_anomaly_m, min(bed_delta(apply_bed)), ...
+            max(bed_delta(apply_bed)), bed_domain, bed_gl_buffer_m ./ 1000, ...
+            nnz(grounded), ...
             md.mesh.numberofvertices);
+end
+
+function pattern = broad_thickness_pattern(x, y, mask)
+%BROAD_THICKNESS_PATTERN Low-order mixed-sign geometry error.
+% This field contains no repeating short-wavelength lobes.  It represents a
+% domain-scale thickness tilt plus a gentle cross-flow component and is
+% normalized over existing ice.
+    xn = (x - min(x)) ./ max(max(x) - min(x), eps);
+    yn = (y - min(y)) ./ max(max(y) - min(y), eps);
+    raw = 0.70 .* cos(2 .* pi .* yn) + ...
+          0.25 .* sin(2 .* pi .* xn) + ...
+          0.15 .* cos(pi .* xn) .* sin(2 .* pi .* yn);
+    mask = logical(mask(:));
+    pattern = zeros(size(raw));
+    if ~any(mask)
+        return;
+    end
+    sigma = std(raw(mask));
+    if ~isfinite(sigma) || sigma < 1.0e-12
+        return;
+    end
+    pattern = (raw - mean(raw(mask))) ./ sigma;
+end
+
+function pattern = spatial_prior_pattern(x, y, length_x, length_y, phase, mask)
+%SPATIAL_PRIOR_PATTERN Smooth reproducible sign-changing field on a mesh.
+% A small spectral mixture avoids a single artificial stripe direction.  The
+% output has zero mean and unit standard deviation over MASK.
+
+    raw = sin(2 .* pi .* x ./ length_x + phase) .* ...
+          cos(2 .* pi .* y ./ length_y - 0.61) + ...
+          0.55 .* cos(2 .* pi .* x ./ (2.30 .* length_x) + ...
+                     2 .* pi .* y ./ (1.70 .* length_y) + 1.37 + phase) + ...
+          0.30 .* sin(2 .* pi .* x ./ (0.72 .* length_x) - ...
+                     2 .* pi .* y ./ (2.40 .* length_y) + 0.83 - phase);
+    mask = logical(mask(:));
+    pattern = zeros(size(raw));
+    if ~any(mask)
+        return;
+    end
+    mu = mean(raw(mask));
+    sigma = std(raw(mask));
+    if ~isfinite(sigma) || sigma < 1.0e-12
+        return;
+    end
+    pattern = (raw - mu) ./ sigma;
+end
+
+function writeInitialStateHDF5(filename, md)
+%WRITEINITIALSTATEHDF5 Save an unadvanced state using the transient schema.
+    if isfile(filename)
+        delete(filename);
+    end
+    names = {'Thickness_1', 'Surface_1', 'Vx_1', 'Vy_1', ...
+             'bed_1', 'coefficient_1'};
+    values = {md.geometry.thickness(:), md.geometry.surface(:), ...
+              md.initialization.vx(:), md.initialization.vy(:), ...
+              md.geometry.bed(:), md.friction.coefficient(:)};
+    for i = 1:numel(names)
+        h5create(filename, ['/' names{i}], size(values{i}));
+        h5write(filename, ['/' names{i}], values{i});
+    end
 end
 
 function writeToHDF5(filename, data)

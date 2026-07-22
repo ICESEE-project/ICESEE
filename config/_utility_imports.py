@@ -285,6 +285,7 @@ if not flag_jupyter:
         'var_nd': enkf_params.get('var_nd', None), # variable state dimension for each state variable in vec_inputs. Used when state variables have different dimensions
         'scalar_inputs': enkf_params.get('scalar_inputs', []), # list of scalar input variables
         'generate_true_wrong_state_only': enkf_params.get('generate_true_wrong_state_only', False), # flag to only generate true and wrong state without running the assimilation
+        'initial_state_only': enkf_params.get('initial_state_only', False),
         'generate_synthetic_obs_only': bool(enkf_params.get('generate_synthetic_obs_only', False)), # flag to only generate synthetic observations without running the assimilation
         'localized_vars': enkf_params.get('localized_vars', []), # list of variables to localize (only used if localization_flag is True)
         'frozen_analysis_vars': enkf_params.get('frozen_analysis_vars', []), # state-vector blocks held fixed during the analysis update

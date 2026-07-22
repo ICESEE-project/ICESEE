@@ -101,6 +101,52 @@ model_kwargs = {
                 'initial_bed_background_domain': str(
                     enkf_params.get('initial_bed_background_domain', 'all')
                 ),
+                'initial_bed_gl_buffer_m': float(
+                    enkf_params.get('initial_bed_gl_buffer_m', 0.0)
+                ),
+                # Optional deterministic, sign-changing prior modes.  These
+                # perturb the model background (never the hidden truth), and
+                # run_model.m subsequently rebuilds a consistent S = B + H
+                # geometry.  Zero amplitudes retain the historical prior.
+                'initial_thickness_anomaly_fraction': float(
+                    enkf_params.get('initial_thickness_anomaly_fraction', 0.0)
+                ),
+                'initial_thickness_anomaly_m': float(
+                    enkf_params.get('initial_thickness_anomaly_m', 0.0)
+                ),
+                'initial_thickness_delta_min_m': float(
+                    enkf_params.get('initial_thickness_delta_min_m', -500.0)
+                ),
+                'initial_thickness_delta_max_m': float(
+                    enkf_params.get('initial_thickness_delta_max_m', 500.0)
+                ),
+                'initial_floating_thickness_anomaly_factor': float(
+                    enkf_params.get('initial_floating_thickness_anomaly_factor', 1.0)
+                ),
+                'initial_bed_anomaly_m': float(
+                    enkf_params.get('initial_bed_anomaly_m', 0.0)
+                ),
+                'initial_bed_delta_min_m': float(
+                    enkf_params.get('initial_bed_delta_min_m', -500.0)
+                ),
+                'initial_bed_delta_max_m': float(
+                    enkf_params.get('initial_bed_delta_max_m', 500.0)
+                ),
+                'initial_prior_length_x_m': float(
+                    enkf_params.get('initial_prior_length_x_m', 120000.0)
+                ),
+                'initial_prior_length_y_m': float(
+                    enkf_params.get('initial_prior_length_y_m', 40000.0)
+                ),
+                'initial_prior_pattern_phase': float(
+                    enkf_params.get('initial_prior_pattern_phase', 0.0)
+                ),
+                'initial_thickness_factor_min': float(
+                    enkf_params.get('initial_thickness_factor_min', 0.60)
+                ),
+                'initial_thickness_factor_max': float(
+                    enkf_params.get('initial_thickness_factor_max', 1.25)
+                ),
                 'abs_vel_weight': float(enkf_params.get('abs_vel_weight', 1.0)),
                 'rel_vel_weight': float(enkf_params.get('rel_vel_weight', 1.0)),
                 'tikhonov_regularization_weight': float(enkf_params.get('tikhonov_regularization_weight', 1e-13)),

@@ -48,9 +48,11 @@ def generate_true_wrong_state(**model_kwargs):
         # save model_nprocs before update if rank_world == 0
         # model_nprocs = params.get("model_nprocs", 1)
         nd   = int(model_kwargs.get("nd", params["nd"]))
-        ntp1 = int(model_kwargs.get("nt", params["nt"]) + 1)
+        ntp1 = 1 if model_kwargs.get("initial_state_only", False) else int(
+            model_kwargs.get("nt", params["nt"]) + 1
+        )
 
-        
+
         if rank_world == 0:
             
             model_kwargs.update({'ens_id': rank_world})
@@ -238,7 +240,6 @@ def generate_true_wrong_state(**model_kwargs):
     # model_kwargs.update({"dim_list": dim_list, "global_shape": global_shape})
 
     return model_kwargs
-        
 
 def generate_true_wrong_state_full_parallel(**model_kwargs):
     """"Generate true and nurged states for the ICESEE model.
@@ -450,4 +451,3 @@ def generate_true_wrong_state_full_parallel(**model_kwargs):
     # model_kwargs.update({"dim_list": dim_list, "global_shape": global_shape})
 
     return model_kwargs
-        

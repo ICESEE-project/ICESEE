@@ -1,0 +1,8 @@
+extends: friction_inversion_hybrid_heterogeneous.yaml
+
+enkf-parameters:
+  # Cheap gate before the 40-member DA run. Inspect signed initial H, S, and
+  # bed errors, geometry consistency, grounded area, speed, and the GL first.
+  data_path: _reviewer_heterogeneous_ic_check
+  initial_state_only: true
+  generate_true_wrong_state_only: false

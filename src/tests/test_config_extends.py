@@ -56,3 +56,50 @@ def test_tuned_low_prior_hybrid_delays_inversion_and_keeps_bed_sparse():
     assert tuned["analysis_increment_limits"]["bed"] == 20.0
     assert tuned["initial_thickness_scale"] == 0.85
     assert tuned["initial_bed_offset_m"] == -80.0
+
+
+def test_heterogeneous_hybrid_changes_prior_not_assimilation_design():
+    root = (
+        "applications/issm_model/examples/ISMIP_Choi/"
+        "reviewer_experiments/"
+    )
+    tuned = load_yaml_to_dict(
+        f"{root}friction_inversion_hybrid_low_prior_tuned.yaml"
+    )["enkf-parameters"]
+    mixed = load_yaml_to_dict(
+        f"{root}friction_inversion_hybrid_heterogeneous.yaml"
+    )["enkf-parameters"]
+
+    # The robustness run must remain an apples-to-apples filter comparison.
+    for key in (
+        "freq_obs",
+        "obs_max_time",
+        "bed_obs_snapshot",
+        "inversion_start_time",
+        "min_friction",
+        "max_friction",
+        "bed_max_update_per_cycle",
+    ):
+        assert mixed[key] == tuned[key]
+
+    assert mixed["initial_thickness_scale"] == 1.0
+    assert mixed["initial_thickness_anomaly_fraction"] == 0.0
+    assert mixed["initial_thickness_anomaly_m"] == 120.0
+    assert mixed["initial_thickness_delta_min_m"] == -180.0
+    assert mixed["initial_thickness_delta_max_m"] == 180.0
+    assert mixed["initial_floating_thickness_anomaly_factor"] == 0.25
+    assert mixed["initial_bed_gl_buffer_m"] == 25000.0
+    assert mixed["initial_bed_offset_m"] == -80.0
+    assert mixed["initial_bed_anomaly_m"] == 120.0
+    assert mixed["initial_bed_delta_min_m"] == -250.0
+    assert mixed["initial_bed_delta_max_m"] == 150.0
+    assert mixed["initial_prior_length_x_m"] == 120000.0
+    assert mixed["initial_prior_length_y_m"] == 40000.0
+    assert mixed["initial_bed_background_domain"] == "grounded_only"
+
+    check = load_yaml_to_dict(f"{root}heterogeneous_ic_check.yaml")[
+        "enkf-parameters"
+    ]
+    assert check["initial_state_only"] is True
+    assert check["generate_true_wrong_state_only"] is False
+    assert check["data_path"] == "_reviewer_heterogeneous_ic_check"

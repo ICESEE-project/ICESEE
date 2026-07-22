@@ -111,7 +111,8 @@ def generate_true_state(**kwargs):
     os.chdir(issm_examples_dir)
 
     # --- filename for data saving
-    fname = 'true_state.mat'
+    initial_state_only = bool(kwargs.get('initial_state_only', False))
+    fname = 'initial_true_state.mat' if initial_state_only else 'true_state.mat'
     kwargs.update({'fname': fname})
     ens_id = kwargs.get('ens_id')
 
@@ -137,7 +138,8 @@ def generate_true_state(**kwargs):
     input_filename = f'{icesee_path}/{data_path}/ensemble_true_state_{ens_id}.h5'
     with h5py.File(input_filename, 'r') as f:
         # -- fetch state variables
-        for k in range(1, kwargs.get('nt') + 1):
+        output_count = 1 if initial_state_only else kwargs.get('nt')
+        for k in range(1, output_count + 1):
             key_Thickness=f'Thickness_{k}'
             # key_base = f'Base_{k}'
             key_surface = f'Surface_{k}'
@@ -181,7 +183,8 @@ def generate_nurged_state(**kwargs):
     rank = comm.Get_rank()
 
     # --- filename for data saving
-    fname = 'nurged_state.mat'
+    initial_state_only = bool(kwargs.get('initial_state_only', False))
+    fname = 'initial_nurged_state.mat' if initial_state_only else 'nurged_state.mat'
     kwargs.update({'fname': fname})
     ens_id = kwargs.get('ens_id')
     params = kwargs.get('params', {})
@@ -271,7 +274,8 @@ def generate_nurged_state(**kwargs):
     # with h5py.File(nurged_filename, 'r', driver='mpio', comm=comm) as f:
     with h5py.File(nurged_filename, 'r') as f:
         # -- fetch state variables
-        for k in range(1, kwargs.get('nt') + 1):
+        output_count = 1 if initial_state_only else kwargs.get('nt')
+        for k in range(1, output_count + 1):
             # key_thickness=f'Thickness_{k}'
             key_Thickness=f'Thickness_{k}'
             # key_base = f'Base_{k}'
