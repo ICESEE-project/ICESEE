@@ -225,15 +225,20 @@ def generate_bed_kriging(
     )
 
     # ------------------------------------------------------------------
-    # Floating mask
+    # Optional floating-prior mask
     # ------------------------------------------------------------------
     floating_mask = np.zeros(npts, dtype=bool)
 
     if use_floating_mask:
-        # crude approximation: deep negative bed
-        floating_mask = bed_true < -900.0
+        # Legacy runs used the hidden true bed both to define this mask and
+        # to overwrite every masked ensemble value.  That made the floating
+        # bed artificially perfect and imprinted a truth-shaped edge in the
+        # prior.  If this optional guard is requested, diagnose it from the
+        # smooth background and retain that background instead.
+        floating_mask = bed_bg < -900.0
         print(
-            f"[bed-kriging] Floating points excluded: {floating_mask.sum()}"
+            "[bed-kriging] Deep-background points held at the smooth prior: "
+            f"{floating_mask.sum()}"
         )
 
     # ------------------------------------------------------------------
@@ -259,6 +264,9 @@ def generate_bed_kriging(
 
     # reconstructed mean bed
     bed_kriged = bed_bg + resid_kriged
+    if use_floating_mask:
+        bed_kriged[floating_mask] = bed_bg[floating_mask]
+        resid_var[floating_mask] = 0.0
 
     # ------------------------------------------------------------------
     # Conditional residual ensemble
@@ -284,7 +292,7 @@ def generate_bed_kriging(
             field[obs_mask] = bed_true[obs_mask]
 
         if use_floating_mask:
-            field[floating_mask] = bed_true[floating_mask]
+            field[floating_mask] = bed_bg[floating_mask]
 
         bed_ens[:, e] = field
 
@@ -375,7 +383,14 @@ def parse_args():
         help="Truncate Gaussian smoothing beyond this many length scales",
     )
     parser.add_argument("--enforce-obs", action="store_true")
-    parser.add_argument("--use-floating-mask", action="store_true")
+    parser.add_argument(
+        "--use-floating-mask",
+        action="store_true",
+        help=(
+            "Hold deep-bed points at the smooth background prior; never "
+            "replace them with the hidden true bed"
+        ),
+    )
     parser.add_argument("--seed-base", type=int, default=1234)
     parser.add_argument(
         "--output-file",

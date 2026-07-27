@@ -104,6 +104,34 @@ model_kwargs = {
                 'initial_bed_gl_buffer_m': float(
                     enkf_params.get('initial_bed_gl_buffer_m', 0.0)
                 ),
+                'initial_floating_bed_anomaly_factor': float(
+                    enkf_params.get('initial_floating_bed_anomaly_factor', 0.0)
+                ),
+                'initial_floating_bed_max_error_m': float(
+                    enkf_params.get('initial_floating_bed_max_error_m', 100.0)
+                ),
+                'initial_floating_bed_transition_m': float(
+                    enkf_params.get('initial_floating_bed_transition_m', 25000.0)
+                ),
+                'initial_floating_bed_flotation_margin_m': float(
+                    enkf_params.get(
+                        'initial_floating_bed_flotation_margin_m', 5.0
+                    )
+                ),
+                'initial_bed_smoothing_iterations': int(
+                    enkf_params.get('initial_bed_smoothing_iterations', 35)
+                ),
+                'initial_bed_smoothing_strength': float(
+                    enkf_params.get('initial_bed_smoothing_strength', 0.65)
+                ),
+                'initial_bed_seed_max_x_m': float(
+                    enkf_params.get('initial_bed_seed_max_x_m', 300000.0)
+                ),
+                'initial_bed_downstream_anomaly_factor': float(
+                    enkf_params.get(
+                        'initial_bed_downstream_anomaly_factor', 0.60
+                    )
+                ),
                 # Optional deterministic, sign-changing prior modes.  These
                 # perturb the model background (never the hidden truth), and
                 # run_model.m subsequently rebuilds a consistent S = B + H

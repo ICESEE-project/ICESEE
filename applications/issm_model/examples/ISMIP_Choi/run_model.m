@@ -1062,6 +1062,14 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
     bed_offset_m = 0.0;
     bed_domain = 'all';
     bed_gl_buffer_m = 0.0;
+    floating_bed_anomaly_factor = 0.0;
+    floating_bed_max_error_m = 100.0;
+    floating_bed_transition_m = 25000.0;
+    floating_bed_flotation_margin_m = 5.0;
+    bed_smoothing_iterations = 35;
+    bed_smoothing_strength = 0.65;
+    bed_seed_max_x_m = 300000.0;
+    bed_downstream_anomaly_factor = 0.60;
     thickness_anomaly_fraction = 0.0;
     thickness_anomaly_m = 0.0;
     thickness_delta_min_m = -500.0;
@@ -1086,6 +1094,37 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
     end
     if isfield(kwargs, 'initial_bed_gl_buffer_m')
         bed_gl_buffer_m = double(kwargs.initial_bed_gl_buffer_m);
+    end
+    if isfield(kwargs, 'initial_floating_bed_anomaly_factor')
+        floating_bed_anomaly_factor = double( ...
+            kwargs.initial_floating_bed_anomaly_factor);
+    end
+    if isfield(kwargs, 'initial_floating_bed_max_error_m')
+        floating_bed_max_error_m = double( ...
+            kwargs.initial_floating_bed_max_error_m);
+    end
+    if isfield(kwargs, 'initial_floating_bed_transition_m')
+        floating_bed_transition_m = double( ...
+            kwargs.initial_floating_bed_transition_m);
+    end
+    if isfield(kwargs, 'initial_floating_bed_flotation_margin_m')
+        floating_bed_flotation_margin_m = double( ...
+            kwargs.initial_floating_bed_flotation_margin_m);
+    end
+    if isfield(kwargs, 'initial_bed_smoothing_iterations')
+        bed_smoothing_iterations = double( ...
+            kwargs.initial_bed_smoothing_iterations);
+    end
+    if isfield(kwargs, 'initial_bed_smoothing_strength')
+        bed_smoothing_strength = double( ...
+            kwargs.initial_bed_smoothing_strength);
+    end
+    if isfield(kwargs, 'initial_bed_seed_max_x_m')
+        bed_seed_max_x_m = double(kwargs.initial_bed_seed_max_x_m);
+    end
+    if isfield(kwargs, 'initial_bed_downstream_anomaly_factor')
+        bed_downstream_anomaly_factor = double( ...
+            kwargs.initial_bed_downstream_anomaly_factor);
     end
     if isfield(kwargs, 'initial_thickness_anomaly_fraction')
         thickness_anomaly_fraction = double(kwargs.initial_thickness_anomaly_fraction);
@@ -1137,6 +1176,51 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
             bed_gl_buffer_m > 200000
         error('[ICESEE] initial_bed_gl_buffer_m must be in [0, 200000] m.');
     end
+    if ~isfinite(floating_bed_anomaly_factor) || ...
+            floating_bed_anomaly_factor < 0 || ...
+            floating_bed_anomaly_factor > 1
+        error(['[ICESEE] initial_floating_bed_anomaly_factor must be ', ...
+               'in [0, 1].']);
+    end
+    if ~isfinite(floating_bed_max_error_m) || ...
+            floating_bed_max_error_m <= 0 || ...
+            floating_bed_max_error_m > 1000
+        error(['[ICESEE] initial_floating_bed_max_error_m must be ', ...
+               'in (0, 1000] m.']);
+    end
+    if ~isfinite(floating_bed_transition_m) || ...
+            floating_bed_transition_m <= 0 || ...
+            floating_bed_transition_m > 200000
+        error(['[ICESEE] initial_floating_bed_transition_m must be ', ...
+               'in (0, 200000] m.']);
+    end
+    if ~isfinite(floating_bed_flotation_margin_m) || ...
+            floating_bed_flotation_margin_m < 0 || ...
+            floating_bed_flotation_margin_m > 100
+        error(['[ICESEE] initial_floating_bed_flotation_margin_m must be ', ...
+               'in [0, 100] m.']);
+    end
+    if ~isfinite(bed_smoothing_iterations) || ...
+            bed_smoothing_iterations < 0 || ...
+            bed_smoothing_iterations > 200 || ...
+            bed_smoothing_iterations ~= floor(bed_smoothing_iterations)
+        error(['[ICESEE] initial_bed_smoothing_iterations must be an ', ...
+               'integer in [0, 200].']);
+    end
+    if ~isfinite(bed_smoothing_strength) || ...
+            bed_smoothing_strength < 0 || bed_smoothing_strength > 1
+        error(['[ICESEE] initial_bed_smoothing_strength must be in ', ...
+               '[0, 1].']);
+    end
+    if ~isfinite(bed_seed_max_x_m) || bed_seed_max_x_m <= 0
+        error('[ICESEE] initial_bed_seed_max_x_m must be positive.');
+    end
+    if ~isfinite(bed_downstream_anomaly_factor) || ...
+            bed_downstream_anomaly_factor < 0 || ...
+            bed_downstream_anomaly_factor > 1
+        error(['[ICESEE] initial_bed_downstream_anomaly_factor must be ', ...
+               'in [0, 1].']);
+    end
     if ~isfinite(thickness_anomaly_fraction) || ...
             thickness_anomaly_fraction < 0 || thickness_anomaly_fraction > 0.5
         error('[ICESEE] initial_thickness_anomaly_fraction must be in [0, 0.5].');
@@ -1179,6 +1263,7 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
     end
     initial_grounded = md.geometry.thickness(:) > 0 & ...
                        md.mask.ocean_levelset(:) > 0;
+    tapered_floating_bed = false;
     switch bed_domain
         case 'all'
             apply_bed = true(md.mesh.numberofvertices, 1);
@@ -1186,8 +1271,15 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
             % The survey-derived kriging field has no observational support
             % beneath the initial shelf. Retain the background there.
             apply_bed = initial_grounded;
+        case 'grounded_plus_tapered_floating'
+            % Retain the validated grounded kriging prior. Beneath floating
+            % ice, perturb the background with a smaller independent field
+            % that tapers to zero at the GL and cannot change flotation.
+            apply_bed = initial_grounded;
+            tapered_floating_bed = true;
         otherwise
-            error('[ICESEE] initial_bed_background_domain must be all or grounded_only.');
+            error(['[ICESEE] initial_bed_background_domain must be all, ', ...
+                   'grounded_only, or grounded_plus_tapered_floating.']);
     end
 
     x = double(md.mesh.x(:));
@@ -1197,7 +1289,8 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
     % Keep the initial bed challenge away from the grounding transition. This
     % prevents the bed prior itself from changing the mask before the first
     % analysis while retaining heterogeneous upstream bed errors.
-    if bed_gl_buffer_m > 0
+    distance_to_gl = inf(size(x));
+    if bed_gl_buffer_m > 0 || tapered_floating_bed
         elements = double(md.mesh.elements);
         element_grounded = initial_grounded(elements);
         transition_elements = any(element_grounded, 2) & ...
@@ -1210,7 +1303,9 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
                 distance_to_gl = min(distance_to_gl, ...
                     hypot(x - x(node), y - y(node)));
             end
-            apply_bed = apply_bed & distance_to_gl >= bed_gl_buffer_m;
+            if bed_gl_buffer_m > 0 && ~tapered_floating_bed
+                apply_bed = apply_bed & distance_to_gl >= bed_gl_buffer_m;
+            end
         end
     end
 
@@ -1227,7 +1322,58 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
     bed_delta = bed_offset_m + bed_anomaly_m .* bed_pattern;
     bed_delta = min(max(bed_delta, bed_delta_min_m), bed_delta_max_m);
     bed_new = bed_background;
-    bed_new(apply_bed) = bed_candidate(apply_bed) + bed_delta(apply_bed);
+    if tapered_floating_bed
+        % Use the survey/kriging-supported upstream correction as the spatial
+        % template. Stretch that same cross-flow structure continuously across
+        % the domain rather than stitching or inventing a second realization.
+        % Only its anomaly amplitude decreases smoothly downstream.
+        seed_error = bed_candidate - bed_background;
+        coherent_pattern = stretched_seed_bed_pattern( ...
+            x, y, seed_error, ice_mask, initial_grounded, ...
+            bed_seed_max_x_m);
+        xn = (x - min(x(ice_mask))) ./ ...
+             max(max(x(ice_mask)) - min(x(ice_mask)), eps);
+        downstream_taper = min(max(xn, 0), 1);
+        downstream_taper = downstream_taper .^ 2 .* ...
+                           (3 - 2 .* downstream_taper);
+        anomaly_envelope = 1 - ...
+            (1 - bed_downstream_anomaly_factor) .* downstream_taper;
+        coherent_delta = bed_offset_m + bed_anomaly_m .* ...
+            anomaly_envelope .* coherent_pattern;
+        % Smoothly approach the configured bounds rather than hard-clipping.
+        % Hard clipping creates large constant-color plateaus in the prior.
+        bound_center = 0.5 .* (bed_delta_min_m + bed_delta_max_m);
+        bound_half_width = 0.5 .* ...
+            (bed_delta_max_m - bed_delta_min_m);
+        coherent_delta = bound_center + bound_half_width .* tanh( ...
+            (coherent_delta - bound_center) ./ bound_half_width);
+
+        % Use the same field on both sides of the GL. Its amplitude approaches
+        % the configured floating factor continuously through the grounded
+        % transition zone and stays at that moderate level beneath the shelf.
+        domain_factor = floating_bed_anomaly_factor .* ones(size(x));
+        grounded_apply = ice_mask & initial_grounded;
+        if bed_gl_buffer_m > 0
+            grounded_taper = min(max(distance_to_gl ./ bed_gl_buffer_m, 0), 1);
+            grounded_taper(~isfinite(grounded_taper)) = 1;
+            grounded_taper = grounded_taper .^ 2 .* ...
+                              (3 - 2 .* grounded_taper);
+        else
+            grounded_taper = ones(size(x));
+        end
+        domain_factor(grounded_apply) = floating_bed_anomaly_factor + ...
+            (1 - floating_bed_anomaly_factor) .* ...
+            grounded_taper(grounded_apply);
+        applied_delta = domain_factor .* coherent_delta;
+        floating_apply = ice_mask & ~initial_grounded;
+        applied_delta(floating_apply) = min(max( ...
+            applied_delta(floating_apply), -floating_bed_max_error_m), ...
+            floating_bed_max_error_m);
+        bed_new(ice_mask) = bed_background(ice_mask) + ...
+                            applied_delta(ice_mask);
+    else
+        bed_new(apply_bed) = bed_candidate(apply_bed) + bed_delta(apply_bed);
+    end
     thickness_factor = thickness_scale + ...
                        thickness_anomaly_fraction .* thickness_pattern;
     thickness_factor = min(max(thickness_factor, thickness_factor_min), ...
@@ -1241,6 +1387,15 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
                         thickness_delta, 1.0);
 
     di = md.materials.rho_ice / md.materials.rho_water;
+    if tapered_floating_bed
+        % Preserve the original floating topology without copying the hidden
+        % bed. The margin is expressed in equivalent ice-thickness metres.
+        original_floating = ice_mask & ~initial_grounded;
+        maximum_floating_bed = -di .* ...
+            (thickness_new + floating_bed_flotation_margin_m);
+        bed_new(original_floating) = min(bed_new(original_floating), ...
+                                         maximum_floating_bed(original_floating));
+    end
     ocean_levelset = thickness_new + bed_new ./ di;
     grounded = ocean_levelset >= 0;
     floating = ~grounded;
@@ -1320,6 +1475,48 @@ function pattern = spatial_prior_pattern(x, y, length_x, length_y, phase, mask)
         return;
     end
     pattern = (raw - mu) ./ sigma;
+end
+
+function pattern = stretched_seed_bed_pattern(x, y, seed_error, mask, ...
+                                              norm_mask, seed_max_x)
+%STRETCHED_SEED_BED_PATTERN Extend the supported upstream error structure.
+% The upstream kriged-minus-background field is treated as a structural
+% template, not as truth. Its x-coordinate is stretched continuously over the
+% full ice domain, so there are no repeated tiles or stitched realizations.
+    x = double(x(:));
+    y = double(y(:));
+    seed_error = double(seed_error(:));
+    mask = logical(mask(:));
+    norm_mask = logical(norm_mask(:)) & mask;
+    pattern = zeros(size(x));
+    if ~any(mask) || ~any(norm_mask)
+        return;
+    end
+
+    source = mask & isfinite(seed_error) & x <= seed_max_x;
+    if nnz(source) < 10
+        error(['[ICESEE] Too few upstream vertices to construct the ', ...
+               'stretched bed-error template.']);
+    end
+
+    source_x_min = min(x(source));
+    source_x_max = max(x(source));
+    domain_x_min = min(x(mask));
+    domain_x_max = max(x(mask));
+    x_query = source_x_min + (x - domain_x_min) .* ...
+        (source_x_max - source_x_min) ./ ...
+        max(domain_x_max - domain_x_min, eps);
+
+    interpolant = scatteredInterpolant( ...
+        x(source), y(source), seed_error(source), 'natural', 'nearest');
+    raw = interpolant(x_query, y);
+
+    mu = mean(raw(norm_mask));
+    sigma = std(raw(norm_mask));
+    if ~isfinite(sigma) || sigma < 1.0e-12
+        return;
+    end
+    pattern(mask) = (raw(mask) - mu) ./ sigma;
 end
 
 function writeInitialStateHDF5(filename, md)
