@@ -1075,6 +1075,8 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
     thickness_delta_min_m = -500.0;
     thickness_delta_max_m = 500.0;
     floating_thickness_anomaly_factor = 1.0;
+    gl_seaward_thickness_m = 0.0;
+    gl_seaward_width_m = 50000.0;
     bed_anomaly_m = 0.0;
     bed_delta_min_m = -500.0;
     bed_delta_max_m = 500.0;
@@ -1141,6 +1143,13 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
     if isfield(kwargs, 'initial_floating_thickness_anomaly_factor')
         floating_thickness_anomaly_factor = double( ...
             kwargs.initial_floating_thickness_anomaly_factor);
+    end
+    if isfield(kwargs, 'initial_gl_seaward_thickness_m')
+        gl_seaward_thickness_m = double( ...
+            kwargs.initial_gl_seaward_thickness_m);
+    end
+    if isfield(kwargs, 'initial_gl_seaward_width_m')
+        gl_seaward_width_m = double(kwargs.initial_gl_seaward_width_m);
     end
     if isfield(kwargs, 'initial_bed_anomaly_m')
         bed_anomaly_m = double(kwargs.initial_bed_anomaly_m);
@@ -1239,6 +1248,14 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
             floating_thickness_anomaly_factor > 1
         error('[ICESEE] initial_floating_thickness_anomaly_factor must be in [0, 1].');
     end
+    if ~isfinite(gl_seaward_thickness_m) || ...
+            gl_seaward_thickness_m < 0 || gl_seaward_thickness_m > 1000
+        error('[ICESEE] initial_gl_seaward_thickness_m must be in [0, 1000] m.');
+    end
+    if ~isfinite(gl_seaward_width_m) || ...
+            gl_seaward_width_m <= 0 || gl_seaward_width_m > 200000
+        error('[ICESEE] initial_gl_seaward_width_m must be in (0, 200000] m.');
+    end
     if ~isfinite(bed_anomaly_m) || bed_anomaly_m < 0 || bed_anomaly_m > 1000
         error('[ICESEE] initial_bed_anomaly_m must be in [0, 1000] m.');
     end
@@ -1290,7 +1307,9 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
     % prevents the bed prior itself from changing the mask before the first
     % analysis while retaining heterogeneous upstream bed errors.
     distance_to_gl = inf(size(x));
-    if bed_gl_buffer_m > 0 || tapered_floating_bed
+    distance_to_upstream_gl = inf(size(x));
+    if bed_gl_buffer_m > 0 || tapered_floating_bed || ...
+            gl_seaward_thickness_m > 0
         elements = double(md.mesh.elements);
         element_grounded = initial_grounded(elements);
         transition_elements = any(element_grounded, 2) & ...
@@ -1302,6 +1321,22 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
                 node = gl_nodes(j);
                 distance_to_gl = min(distance_to_gl, ...
                     hypot(x - x(node), y - y(node)));
+            end
+            if gl_seaward_thickness_m > 0
+                % The truth GL is U-shaped. Euclidean distance to all of it
+                % would make nearly the entire shelf close to a lateral arm.
+                % Instead, find the leftmost (upstream) transition locally in
+                % y and measure only the along-flow distance to that front.
+                y_band = max(5000.0, 0.05 .* (max(y) - min(y)));
+                for i = 1:numel(x)
+                    local_gl = gl_nodes(abs(y(gl_nodes) - y(i)) <= y_band);
+                    if isempty(local_gl)
+                        [~, nearest] = min(abs(y(gl_nodes) - y(i)));
+                        local_gl = gl_nodes(nearest);
+                    end
+                    upstream_gl_x = min(x(local_gl));
+                    distance_to_upstream_gl(i) = abs(x(i) - upstream_gl_x);
+                end
             end
             if bed_gl_buffer_m > 0 && ~tapered_floating_bed
                 apply_bed = apply_bed & distance_to_gl >= bed_gl_buffer_m;
@@ -1389,12 +1424,30 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
     di = md.materials.rho_ice / md.materials.rho_water;
     if tapered_floating_bed
         % Preserve the original floating topology without copying the hidden
-        % bed. The margin is expressed in equivalent ice-thickness metres.
+        % bed for the ordinary prior. The margin is expressed in equivalent
+        % ice-thickness metres. This safeguard intentionally precedes the
+        % optional seaward-GL bump so that the robustness experiment can
+        % physically ground a controlled strip of the original shelf.
         original_floating = ice_mask & ~initial_grounded;
         maximum_floating_bed = -di .* ...
             (thickness_new + floating_bed_flotation_margin_m);
         bed_new(original_floating) = min(bed_new(original_floating), ...
                                          maximum_floating_bed(original_floating));
+    end
+    if gl_seaward_thickness_m > 0
+        % Controlled robustness experiment: start with a grounding line on
+        % the seaward side of truth. Add a smooth, compact thickness bump
+        % across both sides of the grounding zone. Including the grounded
+        % side first repairs any local retreat caused by the heterogeneous
+        % background prior; the same continuous bump can then ground a
+        % controlled strip of shelf. This modifies the flotation function
+        % physically; it does not shift a plotted contour or copy hidden bed.
+        gl_taper = max(1 - distance_to_upstream_gl ./ ...
+                       gl_seaward_width_m, 0);
+        gl_taper(~isfinite(gl_taper)) = 0;
+        gl_taper = gl_taper .^ 2 .* (3 - 2 .* gl_taper);
+        thickness_new(ice_mask) = thickness_new(ice_mask) + ...
+            gl_seaward_thickness_m .* gl_taper(ice_mask);
     end
     ocean_levelset = thickness_new + bed_new ./ di;
     grounded = ocean_levelset >= 0;
@@ -1418,13 +1471,15 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
     fprintf(['[ICESEE] Initial prior: mean H scale=%.3f, H fractional anomaly SD=%.3f, ' ...
              'H additive anomaly SD=%.1f m, floating factor=%.2f, ' ...
              'H delta range=[%.1f, %.1f] m, ' ...
-             'H factor range=[%.3f, %.3f], bed offset=%+.1f m, ' ...
+             'H factor range=[%.3f, %.3f], seaward GL bump=%.1f m/%.1f km, ' ...
+             'bed offset=%+.1f m, ' ...
              'bed anomaly SD=%.1f m, bed delta range=[%.1f, %.1f] m, ' ...
              'bed domain=%s, GL buffer=%.1f km, grounded=%d/%d\n'], ...
             thickness_scale, thickness_anomaly_fraction, thickness_anomaly_m, ...
             floating_thickness_anomaly_factor, ...
             min(thickness_delta(ice_mask)), max(thickness_delta(ice_mask)), ...
             min(thickness_factor(ice_mask)), max(thickness_factor(ice_mask)), ...
+            gl_seaward_thickness_m, gl_seaward_width_m ./ 1000, ...
             bed_offset_m, bed_anomaly_m, min(bed_delta(apply_bed)), ...
             max(bed_delta(apply_bed)), bed_domain, bed_gl_buffer_m ./ 1000, ...
             nnz(grounded), ...

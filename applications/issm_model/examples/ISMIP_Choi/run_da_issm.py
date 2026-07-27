@@ -151,6 +151,12 @@ model_kwargs = {
                 'initial_floating_thickness_anomaly_factor': float(
                     enkf_params.get('initial_floating_thickness_anomaly_factor', 1.0)
                 ),
+                'initial_gl_seaward_thickness_m': float(
+                    enkf_params.get('initial_gl_seaward_thickness_m', 0.0)
+                ),
+                'initial_gl_seaward_width_m': float(
+                    enkf_params.get('initial_gl_seaward_width_m', 50000.0)
+                ),
                 'initial_bed_anomaly_m': float(
                     enkf_params.get('initial_bed_anomaly_m', 0.0)
                 ),

@@ -1,0 +1,16 @@
+# Robustness experiment with an initial grounding line seaward of truth.
+#
+# All observations, localization, regularization, prior bed structure, and
+# friction settings inherit from the accepted rebuttal baseline. The only
+# scientific change is a smooth thickness perturbation on the initially
+# floating side of the grounding zone.
+extends: ../param.yaml
+
+enkf-parameters:
+  data_path: _modelrun_datasets_rebuttal_seaward_gl_base
+
+  # The bump is maximum at the true initial GL and decays with a smoothstep
+  # over 50 km on both sides. It first repairs the heterogeneous prior's
+  # local retreat, then grounds a controlled strip of the shelf.
+  initial_gl_seaward_thickness_m: 500.0 #600.0
+  initial_gl_seaward_width_m: 40000.0 #50000.0
