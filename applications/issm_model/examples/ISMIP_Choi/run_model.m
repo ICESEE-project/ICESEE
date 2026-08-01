@@ -418,10 +418,13 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
 
             % --time stepping
+            % dt/tinitial/tfinal are supplied by initialize_ensemble().  Their
+            % historical defaults still give one 0.2-year step, while an
+            % experiment may request a longer pre-DA dynamic spin-up.
             md.timestepping = timestepping();
-            md.timestepping.time_step = 0.2;
-            md.timestepping.start_time = 0;
-            md.timestepping.final_time = 0.2;
+            md.timestepping.time_step = dt;
+            md.timestepping.start_time = tinitial;
+            md.timestepping.final_time = tfinal;
             md.settings.output_frequency = output_frequency; %make sure this is set to 1 for 
             md.stressbalance.maxiter = 100;
             md.stressbalance.restol = 1;
@@ -443,6 +446,11 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
             % Solve transient
             md = solve(md, 'Transient','runtimename',false);
+            spinup_speed = hypot(md.results.TransientSolution(end).Vx, ...
+                                 md.results.TransientSolution(end).Vy);
+            fprintf(['[ICESEE] Ensemble %d initialization spin-up: ', ...
+                     'duration=%.6g yr, dt=%.6g yr, max(speed)=%.6g m/yr\n'], ...
+                    ens_id, tfinal - tinitial, dt, max(spinup_speed));
              
             % save updated model to every ensemble folder
             folder = sprintf('./Models/ens_id_%d', ens_id);

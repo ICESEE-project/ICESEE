@@ -22,7 +22,8 @@ setenv('ICESEE_RELATIVE_ERROR_MAPS','');
 setenv('ICESEE_OVERLAY_ASSIMILATED_GL','');
 
 % Select an experiment without editing this script, for example:
-setenv('ICESEE_RESULTS_DIR', '_modelrun_datasets_ibf')
+setenv('ICESEE_RESULTS_DIR', '_modelrun_datasets_ibf_2')
+% setenv('ICESEE_RESULTS_DIR', '_modelrun_datasets_method_comparison_40yr_ebf')
 % read_results
 % Do not set ICESEE_RESULTS_DIR here: doing so silently overrides the
 % caller's selection and can make a corrected run appear unchanged.
@@ -53,33 +54,40 @@ end
 
 fprintf('[read_results] Loading: %s\n', ensemble_file);
 nvar = 6;
-colorbar_gap=0.775;
+colorbar_gap=0.8;
 
 % ---------------- user toggles ----------------
 make_plots       = 0;
-make_multi_plots = 1;   % <-- ON (restored)
+make_multi_plots = 1;
+friction_plots_only = 1;
 frames_plot      = 0;
-compute_rmse     = 1;
-plotgl           = 1;   % GL overlays are reserved for estimated friction maps
+compute_rmse     = 0;
+plotgl           = 0;   % GL overlays are reserved for estimated friction maps
 
 % ---------------- time steps ------------------
 % k_array = [30, 60, 90, 120, 139]+1;
-k_array= [ 30, 80, 150, 220, 320, 480]+1;
-% k_array = [20, 80, 120, 160, 240, 360, 499] +1;
+% k_array= [ 30, 80, 150, 220, 320, 480]+1;
+% k_array = [30, 120, 200, 350, 500, 748] +1;
 % k_array = [30, 70, 130, 190, 245, 295] + 1;
-% k_array = [20, 38];
+
+k_array = [25, 75, 150, 250, 400, 499] +1;
 dt      = 0.2;
+t = 0:0.2:100;
+
+% k_array = [50, 150, 240, 350, 400] +1;
+% dt      = 0.1;
 % nt = 185;
 
 % ---------------- Load essentials --------------
 results_dir = 'results';
 filter_type = 'true-wrong';
 file_path   = fullfile(results_dir, sprintf('%s-issm.h5', filter_type));
-t        = h5read(file_path,'/t'); 
+% t        = h5read(file_path,'/t'); 
 ind_m    = h5read(file_path,'/obs_index'); 
 tm_m     = h5read(file_path,'/obs_max_time'); 
 run_mode = h5read(file_path,'/run_mode'); 
-assimilation_end_time = double(tm_m(1));
+% assimilation_end_time = double(tm_m(1));
+assimilation_end_time = 55;
 
 % --------- true / wrong (nurged)
 file_path          = fullfile(data_file_paths, 'true_nurged_states.h5');
@@ -124,6 +132,7 @@ if last_valid < ncols
         'Ignoring %d unpopulated terminal state column(s); last valid time is %.3g years.', ...
         ncols-last_valid, t(last_valid));
 end
+% last_valid = 750;
 model_true_state   = model_true_state(:,1:last_valid);
 model_nurged_state = model_nurged_state(:,1:last_valid);
 ensemble_vec_mean  = ensemble_vec_mean(:,1:last_valid);
@@ -176,29 +185,31 @@ if plotgl
 end
 % ---------------- multi-plots restored ----------
 if make_multi_plots
-    % thickness
-    plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, 'geometry.thickness', 'Thickness', 'm');
-    plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, 'geometry.thickness', 'Thickness', 'm');
+    if ~friction_plots_only
+        % thickness
+        plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md, 'geometry.thickness', 'Thickness', 'm');
+        plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md, 'geometry.thickness', 'Thickness', 'm');
 
-    % surface
-    plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, 'geometry.surface', 'Surface', 'm');
-    plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, 'geometry.surface', 'Surface', 'm');
+        % surface
+        plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md, 'geometry.surface', 'Surface', 'm');
+        plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md, 'geometry.surface', 'Surface', 'm');
 
-    % velocity
-    plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, 'initialization.vel', 'Velocity', 'm/yr');
-    plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, 'initialization.vel', 'Velocity', 'm/yr');
+        % velocity
+        plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md, 'initialization.vel', 'Velocity', 'm/yr');
+        plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md, 'initialization.vel', 'Velocity', 'm/yr');
 
-    % bed
-    plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, 'geometry.bed', 'Bed Elevation', 'm');
-    plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
-        md_true, md_nurged, md_ens, md, 'geometry.bed', 'Bed', 'm');
+        % bed
+        plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md, 'geometry.bed', 'Bed Elevation', 'm');
+        plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
+            md_true, md_nurged, md_ens, md, 'geometry.bed', 'Bed', 'm');
+    end
 
     % friction
     plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, ensemble_vec_mean, ...
@@ -216,13 +227,13 @@ if make_plots
         md_true, md_nurged, md_ens, md);
 
     plot_triptych(md_true_k, md_nurged_k, md_ens_k, ...
-        'geometry.thickness', sprintf('\\bfIce Thickness after %s years', fmt_years(label_t)), parula, 'm');
+        'geometry.thickness', sprintf('\\bfIce Thickness after %s years', fmt_years(round(label_t))), parula, 'm');
     plot_triptych(md_true_k, md_nurged_k, md_ens_k, ...
-        'geometry.surface', sprintf('\\bfIce Surface after %s years', fmt_years(label_t)), parula, 'm');
+        'geometry.surface', sprintf('\\bfIce Surface after %s years', fmt_years(round(label_t))), parula, 'm');
     plot_triptych(md_true_k, md_nurged_k, md_ens_k, ...
-        'geometry.bed', sprintf('\\bfBed after %s years', fmt_years(label_t)), parula, 'm');
+        'geometry.bed', sprintf('\\bfBed after %s years', fmt_years(round(label_t))), parula, 'm');
     plot_triptych(md_true_k, md_nurged_k, md_ens_k, ...
-        'mask.ocean_levelset', sprintf('\\bfGrounding Line after %s years', fmt_years(label_t)), parula, 'm');
+        'mask.ocean_levelset', sprintf('\\bfGrounding Line after %s years', fmt_years(round(label_t))), parula, 'm');
     
 end
 
@@ -405,8 +416,8 @@ function plot_gl_on_bed_evolution( ...
     minLen_ens   = 5e4;
     minArea      = 1;
 
-    keepLargestOnly_true  = true;
-    keepLargestOnly_wrong = false;
+    keepLargestOnly_true  = false;
+    keepLargestOnly_wrong = true;
     keepLargestOnly_ens   = false;
     keepTopK_ens          = 4;   % allow 2 longest for ensemble (prevents “loss”)
     keepTopK_true         = 4;
@@ -518,6 +529,11 @@ function plot_gl_on_bed_evolution( ...
     plot_gl_contour_filtered(Xg, Yg, Phi_ens,   'c',':',  3.0, minLen_ens,   minArea, keepLargestOnly_ens,  keepTopK_ens);
     % hold(ax,'off');
 
+    overlay_gl_window_points(gca, md_true_1, md_nurged_1, md_ens_1, ...
+    gl_midpoint_at_index(gl_mid, 1), ...
+    'x_halfwidth',30e3, 'y_halfwidth',20e3);
+    hold(ax,'off');
+
 
     for idx = 1:nk
         k = k_array(idx);
@@ -537,7 +553,7 @@ function plot_gl_on_bed_evolution( ...
         maxAbs = maxAbs_global;
 
         plotmodel(md_ens_k, 'data', diff_k, ...
-            'title', snapshot_title(label_t), ...
+            'title', snapshot_title(round(label_t)), ...
             'subplot', [nrows, 1, idx+2], ...
             'caxis', [-maxAbs maxAbs], ...
             'colorbar', 'off');
@@ -593,6 +609,11 @@ function plot_gl_on_bed_evolution( ...
         plot_gl_contour_filtered(Xg, Yg, Phi_wrong, 'm','-', 3.0, minLen_wrong, minArea, keepLargestOnly_wrong,  keepTopK_wrong);
         plot_gl_contour_filtered(Xg, Yg, Phi_ens,   'c',':',  3.0, minLen_ens,   minArea, keepLargestOnly_ens,  keepTopK_ens);
         % hold(ax,'off');
+
+        overlay_gl_window_points(gca, md_true_k, md_nurged_k, md_ens_k, ...
+        gl_midpoint_at_index(gl_mid, idx), ...
+        'x_halfwidth',30e3, 'y_halfwidth',20e3);
+        hold(ax,'off');
     end
 
     xlabel(ax,'x (km)','FontWeight','bold','FontSize',18);
@@ -745,10 +766,12 @@ function plot_gl_on_bed_evolution( ...
     % hold(ax0,'off');
     hold(ax0,'on');
 
-    p3 = plot(ax0, NaN, NaN, 'c:', 'LineWidth', 3.0);
+    p1 = plot(ax0, NaN, NaN, 'k-',  'LineWidth', 3.0);
+    p2 = plot(ax0, NaN, NaN, 'm-',  'LineWidth', 3.0);
+    p3 = plot(ax0, NaN, NaN, 'c-.', 'LineWidth', 3.0);
     
-    lgd = legend(ax0, p3, ...
-        {'Assimilated GL'}, ...
+    lgd = legend(ax0, [p1 p2 p3], ...
+        {'True GL','No assimilation GL','Assimilated GL'}, ...
         'Orientation','horizontal', ...
         'FontSize',14, ...
         'Box','off');
@@ -872,8 +895,8 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
     global t label_t nt colorbar_gap bed_obs_xy diagnostic_relative_errors
     % lightGray = [0.85 0.85 0.85];
     % lightGray = [0.93 0.69 0.13];
-    % lightGray = 'm';
     lightGray = 'k';
+    % lightGray = 'k';
     if nargin < 12, units = ''; end
     units_str = iff(~isempty(units), [' (' units ')'], '');
 
@@ -949,7 +972,7 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
     
     % ---- panel letter inside upper-left ----
     % panel = sprintf('(%c)', 'a'+(idx-1));
-    panel_idx = 1;   % change as needed
+    panel_idx = 2;   % change as needed
     panel = sprintf('(%c_{%d})','a', panel_idx);
     text(ax, 0.02, 0.95, panel, 'Units','normalized', ...
         'FontWeight','bold', 'FontSize', 16, ...
@@ -964,8 +987,17 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
     ens_field = get_nested_field(md_nurged_1, field);
     % ens_field = get_nested_field(md_ens_1, field);
     true_field = get_nested_field(md_true_1, field);
-    [diff_no, error_label] = diagnostic_error_field( ...
-        ens_field, true_field, field, md_true_1, md_nurged_1);
+    if contains(field,'friction.coefficient')
+        % Before assimilation/inversion, show the prescribed wrong-friction
+        % prior over the complete mesh. Grounded-only interpretation and the
+        % gray floating-ice display mask apply only to assimilated panels
+        % (c_2)--(h_2).
+        diff_no = ens_field - true_field;
+        error_label = '\Delta Friction (Pa m^{-1/3} yr^{-1/3})';
+    else
+        [diff_no, error_label] = diagnostic_error_field( ...
+            ens_field, true_field, field, md_true_1, md_nurged_1);
+    end
     maxAbs_no = max(abs(diff_no(:)),[],'omitnan');
     if isempty(maxAbs_no) || ~isfinite(maxAbs_no) || maxAbs_no == 0
         maxAbs_no = 1;
@@ -1021,11 +1053,12 @@ function plot_var_diff(k_array, dt, model_true_state, model_nurged_state, ensemb
         % maxAbs = prctile(abs(diff_k(:)), 99);
         % label  = sprintf('\\bf(%c)', 'b'+idx);
         plotmodel(md_ens_k,'data',diff_k, ...
-            'title',snapshot_title(label_t), ...
+            'title',snapshot_title(round(label_t)), ...
             'subplot',[nrows,1,idx+2],'caxis',[-maxAbs maxAbs],'colorbar','off');
 
         ax = gca;
         draw_full_mesh_parameter(ax, md_ens_k, diff_k, field);
+        mask_unconstrained_floating_friction(ax, md_ens_k, field);
         ttl = ax.Title;
         ttl.FontSize   = 10;
         ttl.FontWeight = 'bold';   % or 'normal'
@@ -1286,10 +1319,11 @@ function plot_var_evolution(k_array, dt, model_true_state, model_nurged_state, e
         data_ens = get_nested_field(md_ens_k, field);
         % label = sprintf('\\bf(%c)', 'b'+idx);
         plotmodel(md_ens_k,'data',data_ens, ...
-            'title',snapshot_title(label_t), ...
+            'title',snapshot_title(round(label_t)), ...
             'subplot',[nrows,1,idx+2],'caxis',[cmin cmax],'colorbar','off');
         ax = gca;
         draw_full_mesh_parameter(ax, md_ens_k, data_ens, field);
+        mask_unconstrained_floating_friction(ax, md_ens_k, field);
         ttl = ax.Title;
         ttl.FontSize   = 10;
         ttl.FontWeight = 'bold';   % or 'normal'
@@ -1587,9 +1621,43 @@ function draw_full_mesh_parameter(ax, md_plot, data, field)
     hold(ax,'off');
 end
 
+function mask_unconstrained_floating_friction(ax, md_plot, field)
+% Gray out floating ice on assimilated friction panels. Basal traction is
+% inactive there, and neither the EnKF observations nor the inversion
+% constrain a physically interpretable friction coefficient in that region.
+% The mask is display-only and does not alter the stored coefficient.
+    if ~contains(field,'friction.coefficient')
+        return
+    end
+
+    floating = md_plot.geometry.thickness(:) > 0 & ...
+               md_plot.mask.ocean_levelset(:) < 0;
+    if numel(floating) ~= md_plot.mesh.numberofvertices
+        return
+    end
+
+    elements = md_plot.mesh.elements;
+    % Least-aggressive display mask: gray only triangles whose three
+    % vertices are floating in the assimilated state.
+    masked_faces = all(floating(elements),2);
+    if ~any(masked_faces)
+        return
+    end
+
+    hold(ax,'on');
+    patch(ax, ...
+        'Faces',elements(masked_faces,:), ...
+        'Vertices',[md_plot.mesh.x(:), md_plot.mesh.y(:)], ...
+        'FaceColor',[0.72 0.72 0.72], ...
+        'EdgeColor','none', ...
+        'HandleVisibility','off');
+    hold(ax,'off');
+end
+
 function [err, label] = diagnostic_error_field(estimate, truth, field, md_true_k, md_estimate_k)
-% Paper-facing map metric. Geometry and speed retain physical units;
-% friction is reported only where both truth and estimate are grounded.
+% Paper-facing map metric. Geometry and speed retain physical units.
+% Friction differences are computed over the complete stored field. The
+% plotting routine separately grays floating ice in assimilated panels.
     global diagnostic_relative_errors
 
     relative_field = contains(field,'initialization.vel') || ...
@@ -1630,13 +1698,16 @@ function [err, label] = diagnostic_error_field(estimate, truth, field, md_true_k
     end
 
     if contains(field,'friction.coefficient')
-        scale = max(abs(truth), eps(max(abs(truth))));
-        err = 100 .* (estimate - truth) ./ scale;
+        err = estimate - truth;
+        % Preserve the full signed field so grounding-line disagreement and
+        % mixed mesh elements do not become artificial white NaN patches.
+        % Floating ice is hidden by a gray, display-only overlay in panels
+        % (c_2)--(h_2).
         err(~isfinite(truth) | ~isfinite(estimate)) = NaN;
-        label = 'Stored friction-coefficient error (%)';
+        label = '\Delta Friction (Pa m^{-1/3} yr^{-1/3})';
     elseif contains(field,'initialization.vel')
         err = estimate - truth;
-        label = '\Delta speed (m yr^{-1})';
+        label = '\Delta Velocity (m/yr)';
     elseif contains(field,'geometry.thickness')
         err = estimate - truth;
         label = '\Delta thickness (m)';
@@ -2270,7 +2341,7 @@ function out = compute_rmse_timeseries(k_array, nt, dt, t, model_true_state, mod
     plot(time_vec,out.v_as_g,'r:','LineWidth',2.6);
     plot(time_vec,out.v_no_u,'b-','LineWidth',2.2); plot(time_vec,out.v_as_u,'b:','LineWidth',2.6);
     plot(time_vec,out.v_no_w,'c-','LineWidth',2.2); plot(time_vec,out.v_as_w,'c:','LineWidth',2.6); hold off
-    title('Velocity'); ylabel('RMSE (m yr^{-1})');
+    title('Velocity'); ylabel('RMSE (m/yr)');
 
     ax(3)=nexttile; plot(time_vec,out.c_no_g,'r-','LineWidth',2.2); hold on
     plot(time_vec,out.c_as_g,'r:','LineWidth',2.6);
@@ -3371,4 +3442,20 @@ function stats = gl_dx_misplacement_stats(Ptrue, Pmodel)
     stats.bias_dx = mean(dx);
     stats.med_dx  = median(dx);
     stats.n       = numel(dx);
+end
+function point = gl_midpoint_at_index(gl_mid, idx)
+% Return one snapshot's tracked centerline points in a compact struct.
+% Older/fallback gl_mid structures contain only the true x/y point.
+
+    point.x = gl_mid.x(idx);
+    point.y = gl_mid.y(idx);
+
+    optional = {'x_true','y_true','x_nurged','y_nurged','x_ens','y_ens'};
+    for io = 1:numel(optional)
+        name = optional{io};
+        if isfield(gl_mid, name)
+            values = gl_mid.(name);
+            point.(name) = values(idx);
+        end
+    end
 end

@@ -86,6 +86,20 @@ model_kwargs = {
                 'inversion_start_time': float(
                     enkf_params.get('inversion_start_time', 0.0)
                 ),
+                # Optional pre-assimilation ensemble equilibration.  The
+                # defaults reproduce the historical single-step initializer.
+                'ensemble_spinup_dt': float(
+                    enkf_params.get(
+                        'ensemble_spinup_dt',
+                        modeling_params.get('timesteps_per_year'),
+                    )
+                ),
+                'ensemble_spinup_years': float(
+                    enkf_params.get(
+                        'ensemble_spinup_years',
+                        modeling_params.get('timesteps_per_year'),
+                    )
+                ),
                 'friction_idx': int(float(enkf_params.get('friction_idx', 5))),
                 'min_friction': float(enkf_params.get('min_friction', 2000)),
                 'max_friction': float(enkf_params.get('max_friction', 4000)),

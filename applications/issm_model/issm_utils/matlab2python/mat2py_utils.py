@@ -341,11 +341,16 @@ class _MatlabServer:
                         status = f.read().strip()
                 except (FileNotFoundError, OSError):
                     status = ""
-                if status not in {"", "ready"}:
+                # A rank can observe the transient "running" value when a
+                # just-started server and the first command publication cross
+                # at the filesystem boundary. It is not a startup failure;
+                # keep waiting for the server to publish ready/done instead
+                # of terminating all ranks.
+                if status not in {"", "running", "ready", "done"}:
                     raise RuntimeError(
                         f"MATLAB server returned unexpected startup status {status!r}"
                     )
-                if status == "ready":
+                if status in {"ready", "done"}:
                     break
                 time.sleep(0.1)
                 #%--->

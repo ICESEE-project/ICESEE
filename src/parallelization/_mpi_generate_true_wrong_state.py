@@ -81,8 +81,17 @@ def generate_true_wrong_state(**model_kwargs):
                 if model_kwargs.get("verbose", False):
                     print(f"[ICESEE] true/nurged generation disabled — reusing existing: {_true_nurged}")
             else:
-                # Open existing file if present; otherwise create it.
-                mode = "a" if os.path.exists(_true_nurged) else "w"
+                # A fresh run must not append to a stale or partially written
+                # initialization file.  In particular, an interrupted HDF5
+                # create may leave only the user block/header on disk, which
+                # exists but cannot be opened in append mode.
+                force_fresh = bool(
+                    model_kwargs.get(
+                        "force_fresh_start",
+                        params.get("force_fresh_start", False),
+                    )
+                )
+                mode = "w" if force_fresh or not os.path.exists(_true_nurged) else "a"
                 with h5py.File(_true_nurged, mode) as f:
                     # Helper: create or replace dataset safely if shape mismatch
                     def require_dataset(name: str, shape, dtype="f8", chunks=None):
@@ -293,7 +302,13 @@ def generate_true_wrong_state_full_parallel(**model_kwargs):
                     print(f"[ICESEE] true/nurged generation disabled — reusing existing: {_true_nurged}")
             else:
                 # Open existing file if present; otherwise create it.
-                mode = "a" if os.path.exists(_true_nurged) else "w"
+                force_fresh = bool(
+                    model_kwargs.get(
+                        "force_fresh_start",
+                        params.get("force_fresh_start", False),
+                    )
+                )
+                mode = "w" if force_fresh or not os.path.exists(_true_nurged) else "a"
                 with h5py.File(_true_nurged, mode) as f:
                     # Helper: create or replace dataset safely if shape mismatch
                     def require_dataset(name: str, shape, dtype="f8", chunks=None):

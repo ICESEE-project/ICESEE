@@ -327,10 +327,28 @@ def initialize_ensemble(ens, **kwargs):
     ens_id =  ens
     kwargs.update({'ens_id': ens_id})
 
-    #  -- control time stepping
-    kwargs.update({'k':0}) 
-    dt = kwargs.get('dt')
-    kwargs.update({'tinitial': 0, 'tfinal': dt})
+    # -- Optional pre-assimilation dynamic spin-up.  Historical profiles
+    # retain the former one-model-step initialization because the default
+    # duration equals the configured model timestep.  Reviewer smoke profiles
+    # can request a longer, more finely substepped transient without consuming
+    # any observation time: the returned end state is still DA timestep zero.
+    kwargs.update({'k': 0})
+    model_dt = float(kwargs.get('dt', 0.2))
+    spinup_dt = float(kwargs.get('ensemble_spinup_dt', model_dt))
+    spinup_years = float(
+        kwargs.get('ensemble_spinup_years', spinup_dt)
+    )
+    if spinup_dt <= 0.0:
+        raise ValueError("ensemble_spinup_dt must be positive")
+    if spinup_years < spinup_dt:
+        raise ValueError(
+            "ensemble_spinup_years must be at least ensemble_spinup_dt"
+        )
+    kwargs.update({
+        'dt': spinup_dt,
+        'tinitial': 0.0,
+        'tfinal': spinup_years,
+    })
 
 
     # --- filename for data saving
