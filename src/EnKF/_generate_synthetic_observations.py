@@ -42,7 +42,8 @@ def generate_synthetic_observations(**model_kwargs):
                     model_kwargs=model_kwargs,
                     ensemble=ensemble_true_state,
                 )
-                hu_obs, error_R, model_kwargs['bed_mask_map'], model_kwargs = utils_funs._create_synthetic_observations(**model_kwargs)
+                hu_obs, error_R, bed_masks, model_kwargs = utils_funs._create_synthetic_observations(**model_kwargs)
+                model_kwargs.update({"bed_mask_map": bed_masks})
 
                 # observe or don't observe parameters.
                 vecs, indx_map,_ = icesee_get_index(hu_obs, **model_kwargs)
