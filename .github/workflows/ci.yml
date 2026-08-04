@@ -107,7 +107,10 @@ jobs:
 
       - name: Commit updated CI figure and README
         if: github.event_name == 'push'
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
+          # The generated figure is intentionally tracked even though the
+          # surrounding model-output directory is ignored.
+          add_options: "-f"
           commit_message: "Update Lorenz96 CI figure"
           file_pattern: applications/lorenz_model/examples/lorenz96/_modelrun_datasets/figures/lorenz96_ci.png README.md
