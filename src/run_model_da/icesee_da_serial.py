@@ -381,7 +381,11 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
        
         # -------------- Analysis step
         # generate Observation schedule
-        obs_t, ind_m, m_obs = UtilsFunctions(params, ensemble_vec).generate_observation_schedule(**model_kwargs)
+        obs_t, ind_m, m_obs = UtilsFunctions(
+            params=params,
+            model_kwargs=model_kwargs,
+            ensemble=ensemble_vec,
+        ).generate_observation_schedule(**model_kwargs)
         params.update({"number_obs_instants": m_obs, 'obs_index': ind_m})
         model_kwargs.update({"m_obs": m_obs, "obs_t": obs_t, "obs_index": ind_m})
         model_kwargs.update({"params": params})
@@ -455,7 +459,11 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
             #                 parallel_flag=   parallel_flag)
 
             # Create default functions object once
-            utils = UtilsFunctions(params, ensemble_vec)
+            utils = UtilsFunctions(
+                params=params,
+                model_kwargs=model_kwargs,
+                ensemble=ensemble_vec,
+            )
 
             if hasattr(model_module, "Cov_Obs_fun") and callable(model_module.Cov_Obs_fun):
                 R = model_module.Cov_Obs_fun(sig_obs=params["sig_obs"][0],  nd=nd, kwargs=model_kwargs)
