@@ -13,8 +13,14 @@ def register_coord_provider(model_name, fn):
 
 
 def get_mesh_coordinates(model_kwargs):
-    """Return and cache ``(n_dof, 2)`` coordinates for the current model."""
-    if "mesh_coords" in model_kwargs:
+    """Return and cache physical coordinates for the current model nodes.
+
+    Providers may return one- or multi-dimensional coordinates, but their
+    leading dimension must follow the model state-vector node ordering.  A
+    failed/early lookup is deliberately not cached so that file-backed model
+    providers (for example ISSM) can be retried after model initialization.
+    """
+    if model_kwargs.get("mesh_coords") is not None:
         return model_kwargs["mesh_coords"]
 
     model_name = str(model_kwargs.get("model_name", "")).lower()
@@ -23,19 +29,81 @@ def get_mesh_coordinates(model_kwargs):
 
     if provider is None:
         print(
-            f"[ICESEE][localization] No coordinate provider for model "
-            f"'{model_name}'; localization disabled for this run."
+            f"[ICESEE][coordinates] No coordinate provider for model "
+            f"'{model_name}'; coordinate-dependent features are unavailable."
         )
     else:
         try:
             coords = provider(model_kwargs)
         except Exception as exc:
             print(
-                f"[ICESEE][localization] Coordinate provider for "
+                f"[ICESEE][coordinates] Coordinate provider for "
                 f"'{model_name}' failed: {exc}"
             )
 
+    if coords is None:
+        return None
+
+    coords = np.asarray(coords, dtype=float)
+    if coords.ndim == 1:
+        coords = coords[:, None]
+    if coords.ndim != 2 or coords.shape[1] < 1:
+        raise ValueError(
+            "Mesh coordinates must have shape (n_nodes,) or "
+            f"(n_nodes, n_spatial_dims); got {coords.shape}"
+        )
+    if not np.all(np.isfinite(coords)):
+        raise ValueError("Mesh coordinates contain non-finite values")
+
     model_kwargs["mesh_coords"] = coords
+    return coords
+
+
+def prepare_random_field_coordinates(model_kwargs, expected_nodes=None):
+    """Pack registered mesh coordinates for graph random-field generation.
+
+    This is called after model initialization and before ensemble
+    initialization.  FFT fields require no coordinates and therefore retain
+    their historical behavior.  In graph mode, silently falling back to an
+    index-space chain would defeat the purpose of selecting the graph method,
+    so a missing provider or incompatible node count is reported immediately.
+    """
+    method = str(
+        model_kwargs.get(
+            "random_field_method",
+            model_kwargs.get("enkf_field_method", "fft"),
+        )
+    ).strip().lower()
+    if method not in {"fft", "graph"}:
+        raise ValueError(
+            f"Unsupported random_field_method={method!r}; expected 'fft' or 'graph'"
+        )
+
+    # Store the normalized spelling so every downstream noise-generation path
+    # (initial ensemble, forecast noise, and stochastic observations) agrees.
+    model_kwargs["random_field_method"] = method
+    if method == "fft":
+        return None
+
+    coords = get_mesh_coordinates(model_kwargs)
+    if coords is None:
+        model_name = model_kwargs.get("model_name", "model")
+        raise ValueError(
+            f"random_field_method='graph' requires registered node coordinates "
+            f"for model {model_name!r}"
+        )
+    if expected_nodes is not None and coords.shape[0] != int(expected_nodes):
+        raise ValueError(
+            "Registered mesh-coordinate count does not match the spatial state "
+            f"dimension: {coords.shape[0]} != {int(expected_nodes)}"
+        )
+
+    model_kwargs["mesh_coords"] = coords
+    if model_kwargs.get("verbose", False):
+        print(
+            f"[ICESEE] graph random fields use {coords.shape[0]} registered "
+            f"mesh coordinates ({coords.shape[1]}D)"
+        )
     return coords
 
 

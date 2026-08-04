@@ -16,6 +16,7 @@ import logging
 import traceback
 from mpi4py import MPI
 import json, glob, tempfile, hashlib
+from pathlib import Path
 
 CKPT_DIRNAME = "_checkpoints"
 CKPT_BASENAME = "icesee_ckpt.json"
@@ -220,7 +221,14 @@ def install_requirements(force_install=False, verbose=False):
         raise RuntimeError("Failed to install dependencies from requirements.txt. Please check the file and try again.")
 
 # ==== saves arrays to h5 file
-def save_arrays_to_h5(filter_type=None, model=None, parallel_flag=None, commandlinerun=None, **datasets):
+def save_arrays_to_h5(
+    filter_type=None,
+    model=None,
+    parallel_flag=None,
+    commandlinerun=None,
+    data_path=None,
+    **datasets,
+):
     """
     Save multiple arrays to an HDF5 file, optionally in a parallel environment (MPI).
 
@@ -229,23 +237,25 @@ def save_arrays_to_h5(filter_type=None, model=None, parallel_flag=None, commandl
         model (str): Name of the model (e.g., 'icepack').
         parallel_flag (str): Flag to indicate if MPI parallelism is enabled. Default is 'MPI'.
         commandlinerun (bool): Indicates if the function is triggered by a command-line run. Default is False.
+        data_path (str or os.PathLike): Run-output directory. Defaults to
+            ``_modelrun_datasets``.
         **datasets (dict): Keyword arguments where keys are dataset names and values are arrays to save.
 
     Returns:
         dict: The datasets if not running in parallel, else None.
     """
-    output_dir = "results"
-    output_file = f"{output_dir}/{filter_type}-{model}.h5"
+    output_dir = Path(data_path or "_modelrun_datasets")
+    output_file = output_dir / f"{filter_type}-{model}.h5"
 
     if parallel_flag == "MPI" or commandlinerun:
-        # Create the results folder if it doesn't exist
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-            print("[ICESEE] Creating results folder")
+        # Create the configured run-output folder if it does not exist.
+        if not output_dir.exists():
+            output_dir.mkdir(parents=True, exist_ok=True)
+            print(f"[ICESEE] Creating run-output folder {output_dir}")
 
         # Remove the existing file, if any
-        if os.path.exists(output_file):
-            os.remove(output_file)
+        if output_file.exists():
+            output_file.unlink()
             print(f"[ICESEE] Existing file {output_file} removed.")
 
         print(f"[ICESEE] Writing data to {output_file}")
@@ -294,10 +304,13 @@ def extract_datasets_from_h5(file_path):
     return datasets
 
 # --- best for saving all data to h5 file in parallel environment
-def save_all_data(enkf_params=None, nofilter=None, **kwargs):
+def save_all_data(enkf_params=None, nofilter=None, data_path=None, **kwargs):
     """
     General function to save datasets based on the provided parameters.
     """
+    # Keep summary metadata beside the ensemble/state files for this run.
+    data_path = data_path or enkf_params.get("data_path") or "_modelrun_datasets"
+
     # Update filter_type only if nofilter is provided
     filter_type = "true-wrong" if nofilter else enkf_params["filter_type"]
 
@@ -315,6 +328,7 @@ def save_all_data(enkf_params=None, nofilter=None, **kwargs):
                 model=enkf_params["model_name"],
                 parallel_flag=enkf_params["parallel_flag"],
                 commandlinerun=enkf_params["commandlinerun"],
+                data_path=data_path,
                 **kwargs
             )
         else:
@@ -325,6 +339,7 @@ def save_all_data(enkf_params=None, nofilter=None, **kwargs):
             model=enkf_params["model_name"],
             parallel_flag=enkf_params["parallel_flag"],
             commandlinerun=enkf_params["commandlinerun"],
+            data_path=data_path,
             **kwargs
         )
 
@@ -573,12 +588,19 @@ def format_time(seconds: float) -> str:
     millis = int((seconds % 1) * 1000)
     return f"{days:02d}:{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
 
-def setup_logger(log_file: str = "icesee_timing.log"):
+def setup_logger(log_file: str = None):
     """Set up a logger for timing output."""
     import logging
     import sys
     from mpi4py import MPI
     
+    if log_file is None:
+        diagnostics_dir = Path(
+            os.environ.get("ICESEE_RESULTS_DIR", "_modelrun_datasets")
+        ) / "diagnostics"
+        diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        log_file = diagnostics_dir / "icesee_timing.log"
+
     logger = logging.getLogger("ICESEE_Timing")
     logger.setLevel(logging.INFO)
     
@@ -661,12 +683,19 @@ def format_time(seconds: float) -> str:
     millis = int((seconds % 1) * 1000)
     return f"{days:02d}:{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
 
-def setup_logger(log_file: str = "icesee_timing.log"):
+def setup_logger(log_file: str = None):
     """Set up a logger for timing output."""
     import logging
     import sys
     from mpi4py import MPI
     
+    if log_file is None:
+        diagnostics_dir = Path(
+            os.environ.get("ICESEE_RESULTS_DIR", "_modelrun_datasets")
+        ) / "diagnostics"
+        diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        log_file = diagnostics_dir / "icesee_timing.log"
+
     logger = logging.getLogger("ICESEE_Timing")
     logger.setLevel(logging.INFO)
     
@@ -1047,10 +1076,18 @@ def load_bed_masks_from_h5(f):
 
 
 
-def icesee_savefig(fig, name="results.png", dpi=300, show=True):
+def icesee_savefig(
+    fig,
+    name="results.png",
+    dpi=300,
+    show=True,
+    data_path=None,
+    subdir="figures",
+):
     """
     ICESEE-OnLINE helper:
-    Always save plots into ./figures/ so the GUI can display them.
+    Save plots beneath the configured run-output directory so data and
+    diagnostics remain self-contained.
 
     Parameters
     ----------
@@ -1062,15 +1099,21 @@ def icesee_savefig(fig, name="results.png", dpi=300, show=True):
         Resolution.
     show : bool
         Whether to call plt.show() after saving.
+    data_path : str or pathlib.Path, optional
+        Run-output directory. If omitted, ``ICESEE_RESULTS_DIR`` is used when
+        set, otherwise ``_modelrun_datasets``.
+    subdir : str
+        Figure subdirectory within ``data_path``.
     """
 
     from pathlib import Path
     import matplotlib.pyplot as plt
-    # Ensure figures folder exists
-    Path("figures").mkdir(exist_ok=True)
+    run_dir = Path(data_path or os.environ.get("ICESEE_RESULTS_DIR", "_modelrun_datasets"))
+    out_dir = run_dir / subdir
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     # Full output path
-    out_path = Path("figures") / name
+    out_path = out_dir / name
 
     # Save figure
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")

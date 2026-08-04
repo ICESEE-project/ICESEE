@@ -15,9 +15,14 @@ from mpi4py import MPI
 # --- import utility functions ---
 from _issm_model import *
 from ICESEE.config._utility_imports import icesee_get_index
+from ICESEE.applications.issm_model.issm_utils._coordinates import (
+    register_issm_coordinate_provider,
+)
 # from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import setup_ensemble_intial_data, MatlabServer
 
 os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+
+register_issm_coordinate_provider()
 
 # --- Forecast step ---
 def forecast_step_single(ensemble=None, **kwargs):
@@ -400,4 +405,3 @@ def initialize_ensemble(ens, **kwargs):
     os.chdir(icesee_path)
     
     return updated_state
-

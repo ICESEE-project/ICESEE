@@ -31,6 +31,7 @@ from ICESEE.src.utils.tools import icesee_get_index, display_timing_default,disp
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
                               generate_enkf_field
+from ICESEE.src.utils.localization import prepare_random_field_coordinates
 
 from ICESEE.src.utils.inference_plugin import (
     reset_inference_plugin_state,
@@ -93,7 +94,8 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         model_kwargs.update({"comm_world": comm_world, "subcomm": subcomm})
 
         # --- check if the modelrun dataset directory is present ---
-        _modelrun_datasets = model_kwargs.get("data_path",None)
+        _modelrun_datasets = model_kwargs.get("data_path") or "_modelrun_datasets"
+        os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
         if rank_world == 0 and not os.path.exists(_modelrun_datasets):
             # cretate the directory
             os.makedirs(_modelrun_datasets, exist_ok=True)
@@ -197,6 +199,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         len_scale = model_kwargs.get("length_scale")
         hdim  = params["nd"] // params["total_state_param_vars"]
         model_kwargs.update({"hdim": hdim, "Q_rho": Q_rho, "len_scale": len_scale})
+        prepare_random_field_coordinates(model_kwargs, expected_nodes=hdim)
 
         # The partial-parallel driver historically always restarted at zero.
         # For long ISSM reviewer experiments, allow an explicit restart from a
@@ -339,7 +342,8 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         sub_rank = 0
         color = 0
 
-        _modelrun_datasets = model_kwargs.get("data_path",None)
+        _modelrun_datasets = model_kwargs.get("data_path") or "_modelrun_datasets"
+        os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
         if rank_world == 0 and not os.path.exists(_modelrun_datasets):
             os.makedirs(_modelrun_datasets, exist_ok=True)
 
@@ -773,6 +777,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
 
     save_all_data(
             enkf_params=model_kwargs['enkf_params'],
+            data_path=_modelrun_datasets,
             nofilter=True,
             t=model_kwargs["t"], b_io=np.array([b_in,b_out]),
             Lxy=np.array([Lx,Ly]),nxy=np.array([nx,ny]),

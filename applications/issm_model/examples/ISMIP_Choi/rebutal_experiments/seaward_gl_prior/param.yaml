@@ -10,7 +10,7 @@ enkf-parameters:
   data_path: _modelrun_datasets_rebuttal_seaward_gl_base
 
   # The bump is maximum at the true initial GL and decays with a smoothstep
-  # over 50 km on both sides. It first repairs the heterogeneous prior's
+  # over 40 km on both sides. It first repairs the heterogeneous prior's
   # local retreat, then grounds a controlled strip of the shelf.
   initial_gl_seaward_thickness_m: 500.0 #600.0
   initial_gl_seaward_width_m: 40000.0 #50000.0

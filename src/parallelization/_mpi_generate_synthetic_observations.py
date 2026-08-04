@@ -91,8 +91,19 @@ def generate_synthetic_observations(**model_kwargs):
 
                     # ---- metadata needed to rebuild H consistently ----
                     f.create_dataset("bed_snap_cols", data=np.asarray(kwargs["bed_snap_cols"], dtype=int))
-                    f.create_dataset("ind_m", data=np.asarray(kwargs["ind_m"], dtype=int))
-                    f.create_dataset("obs_t", data=np.asarray(kwargs["obs_t"], dtype=float))
+                    obs_index = np.asarray(kwargs["ind_m"], dtype=int)
+                    obs_t = np.asarray(kwargs["obs_t"], dtype=float)
+                    f.create_dataset("ind_m", data=obs_index)
+                    f.create_dataset("obs_t", data=obs_t)
+                    # Plotting-facing aliases keep all observation data and
+                    # metadata together in synthetic_obs.h5.  The original
+                    # names remain for backward compatibility with existing
+                    # analysis and restart code.
+                    f.create_dataset("obs_index", data=obs_index)
+                    f.create_dataset(
+                        "obs_max_time",
+                        data=np.asarray([np.max(obs_t)], dtype=float),
+                    )
 
                     # obs_model_to_col is a dict -> store as parallel arrays
                     m = kwargs.get("obs_model_to_col", {})

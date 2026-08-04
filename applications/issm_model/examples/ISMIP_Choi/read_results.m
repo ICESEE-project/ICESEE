@@ -22,8 +22,11 @@ setenv('ICESEE_RELATIVE_ERROR_MAPS','');
 setenv('ICESEE_OVERLAY_ASSIMILATED_GL','');
 
 % Select an experiment without editing this script, for example:
-setenv('ICESEE_RESULTS_DIR', '_modelrun_datasets_ibf_2')
+% setenv('ICESEE_RESULTS_DIR', '_modelrun_datasets_ibf_2')
 % setenv('ICESEE_RESULTS_DIR', '_modelrun_datasets_method_comparison_40yr_ebf')
+% setenv('ICESEE_RESULTS_DIR', ...
+%     '_modelrun_datasets_p3q0_principal_ibf_100yr_seaward_gl')
+setenv('ICESEE_RESULTS_DIR', '_modelrun_p3_')
 % read_results
 % Do not set ICESEE_RESULTS_DIR here: doing so silently overrides the
 % caller's selection and can make a corrected run appear unchanged.
@@ -59,10 +62,10 @@ colorbar_gap=0.8;
 % ---------------- user toggles ----------------
 make_plots       = 0;
 make_multi_plots = 1;
-friction_plots_only = 1;
+friction_plots_only = 0;
 frames_plot      = 0;
 compute_rmse     = 0;
-plotgl           = 0;   % GL overlays are reserved for estimated friction maps
+plotgl           = 1;   % GL overlays are reserved for estimated friction maps
 
 % ---------------- time steps ------------------
 % k_array = [30, 60, 90, 120, 139]+1;
@@ -74,29 +77,24 @@ k_array = [25, 75, 150, 250, 400, 499] +1;
 dt      = 0.2;
 t = 0:0.2:100;
 
+% k_array = [25,75,140] +1;
+% dt      = 0.2;
+
 % k_array = [50, 150, 240, 350, 400] +1;
 % dt      = 0.1;
 % nt = 185;
 
-% ---------------- Load essentials --------------
-results_dir = 'results';
-filter_type = 'true-wrong';
-file_path   = fullfile(results_dir, sprintf('%s-issm.h5', filter_type));
-% t        = h5read(file_path,'/t'); 
-ind_m    = h5read(file_path,'/obs_index'); 
-tm_m     = h5read(file_path,'/obs_max_time'); 
-run_mode = h5read(file_path,'/run_mode'); 
-% assimilation_end_time = double(tm_m(1));
+% ---------------- Load observation essentials --------------
+file_path = fullfile(data_file_paths, 'synthetic_obs.h5');
+% [ind_m, tm_m] = read_observation_metadata(file_path);
+w         = h5read(file_path, '/hu_obs')';
+
 assimilation_end_time = 55;
 
 % --------- true / wrong (nurged)
 file_path          = fullfile(data_file_paths, 'true_nurged_states.h5');
 model_true_state   = h5read(file_path,'/true_state')';
 model_nurged_state = h5read(file_path,'/nurged_state')';
-
-% obs (kept)
-file_path = fullfile(data_file_paths, 'synthetic_obs.h5');
-w = h5read(file_path, '/hu_obs')'; 
 
 % ----- ensemble mean
 file_path         = ensemble_file;
@@ -112,11 +110,11 @@ if size(model_true_state,1) ~= size(model_nurged_state,1) || ...
         'Truth, no-assimilation, and ensemble-mean state dimensions differ.');
 end
 ncols = min([size(model_true_state,2), size(model_nurged_state,2), ...
-             size(ensemble_vec_mean,2), numel(t)]);
+             size(ensemble_vec_mean,2)]);
 model_true_state   = model_true_state(:,1:ncols);
 model_nurged_state = model_nurged_state(:,1:ncols);
 ensemble_vec_mean  = ensemble_vec_mean(:,1:ncols);
-t = double(t(1:ncols));
+t = (0:ncols-1) .* dt;
 
 valid_true = all(isfinite(model_true_state),1) & any(abs(model_true_state) > 0,1);
 valid_no   = all(isfinite(model_nurged_state),1) & any(abs(model_nurged_state) > 0,1);
@@ -417,7 +415,7 @@ function plot_gl_on_bed_evolution( ...
     minArea      = 1;
 
     keepLargestOnly_true  = false;
-    keepLargestOnly_wrong = true;
+    keepLargestOnly_wrong = false;
     keepLargestOnly_ens   = false;
     keepTopK_ens          = 4;   % allow 2 longest for ensemble (prevents “loss”)
     keepTopK_true         = 4;
@@ -802,8 +800,7 @@ function plot_gl_on_bed_evolution( ...
 
     % ---- Save figure (300 dpi) ----
     % Use folder relative to THIS script (not MATLAB's current folder)
-    scriptdir = fileparts(mfilename('fullpath'));
-    outdir    = fullfile(scriptdir, 'figures');
+    outdir = ensure_figdir();
     
     if ~exist(outdir, 'dir')
         mkdir(outdir);
@@ -2066,12 +2063,9 @@ function s = snapshot_title(year)
 end
 
 function outdir = ensure_figdir()
-% Create a figures folder.
-    scriptdir = fileparts(mfilename('fullpath'));
-    if isempty(scriptdir)
-        scriptdir = pwd; % fallback
-    end
-    outdir = fullfile(scriptdir, 'figures');
+% Create the figures folder inside the selected run directory.
+    global data_file_paths
+    outdir = fullfile(data_file_paths, 'figures');
     if ~exist(outdir,'dir'), mkdir(outdir); end
 end
 
@@ -2384,8 +2378,7 @@ function out = compute_rmse_timeseries(k_array, nt, dt, t, model_true_state, mod
     title(tl,sprintf('State, parameter, and grounding-line errors (assimilation ends at year %s)', ...
         fmt_years(assimilation_end_time)),'FontWeight','bold','FontSize',17);
     set(gcf,'Color','w');
-    scriptdir=fileparts(mfilename('fullpath')); outdir=fullfile(scriptdir,'figures');
-    if ~exist(outdir,'dir'), mkdir(outdir); end
+    outdir = ensure_figdir();
     exportgraphics(gcf,fullfile(outdir,'RMSE_hvcgl.png'),'Resolution',300);
 
     % Surface and bed diagnostics are kept in a companion figure so the main
@@ -2926,8 +2919,7 @@ global nt
 
     % ---- Save figure (300 dpi) ----
     % Use folder relative to THIS script (not MATLAB's current folder)
-    scriptdir = fileparts(mfilename('fullpath'));
-    outdir    = fullfile(scriptdir, 'figures');
+    outdir = ensure_figdir();
     
     if ~exist(outdir, 'dir')
         mkdir(outdir);

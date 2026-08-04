@@ -173,6 +173,22 @@ if not flag_jupyter:
     })
 
     params.update({'batch_size': min(int(enkf_params.get('batch_size', 50)), params['nt'])})  # number of time steps to process in each batch
+
+    # Spatial random-field backend.  Keep FFT as the backward-compatible
+    # default; graph mode is selected explicitly and consumes the physical
+    # node coordinates registered by each model application.
+    random_field_method = str(
+        enkf_params.get(
+            'random_field_method',
+            enkf_params.get('enkf_field_method', 'fft'),
+        )
+    ).strip().lower()
+    if random_field_method not in {'fft', 'graph'}:
+        raise ValueError(
+            "enkf-parameters.random_field_method must be either 'fft' or 'graph'; "
+            f"got {random_field_method!r}"
+        )
+    params['random_field_method'] = random_field_method
     
     # --- incase CL args not provided ---
     if Nens == 1:
@@ -246,6 +262,7 @@ if not flag_jupyter:
         'data_path': params['data_path'],
         'example_name': modeling_params.get('example_name', params.get('model_name')),
         'length_scale': enkf_params.get('length_scale', []),
+        'random_field_method': random_field_method,
         'Q_rho': enkf_params.get('Q_rho', 1.0),
         'generate_synthetic_obs': enkf_params.get('generate_synthetic_obs', True),
         'generate_true_state': enkf_params.get('generate_true_state', True),
@@ -343,6 +360,10 @@ if not flag_jupyter:
     kwargs.update(physical_params)
     kwargs.update(modeling_params)
     kwargs.update(enkf_params)
+
+    # Re-apply the normalized value after the raw YAML update so the canonical
+    # spelling is what every downstream random-field path receives.
+    kwargs['random_field_method'] = random_field_method
 
     joint_estimated_params = len(kwargs.get('joint_estimated_params', []))
     if kwargs['joint_estimation']:

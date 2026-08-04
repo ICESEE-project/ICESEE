@@ -241,25 +241,8 @@ def run_model(ensemble, **kwargs):
 
     return updated_state
 
-def get_icepack_node_coordinates(model_kwargs):
-    """Return (n_dof, 2) physical coordinates for every Icepack DOF, in
-    the same ordering as h.dat.data / u.dat.data."""
-    import firedrake
-    Q = model_kwargs.get("Q")
-    mesh = model_kwargs.get("mesh")
-    if Q is None or mesh is None:
-        raise ValueError(
-            "Icepack coordinate provider requires 'Q' and 'mesh' in "
-            "model_kwargs (ensure initialize_model's kwargs.update includes them)."
-        )
-    coords_expr = firedrake.interpolate(
-        firedrake.SpatialCoordinate(mesh),
-        firedrake.VectorFunctionSpace(mesh, Q.ufl_element())
-    )
-    coords_func = firedrake.assemble(coords_expr)   # <-- forces evaluation into a Function
-    return coords_func.dat.data_ro.copy()
+from ICESEE.applications.icepack_model.icepack_utils._coordinates import (
+    register_icepack_coordinate_provider,
+)
 
-# --- Utility imports ---
-from ICESEE.src.utils.localization import register_coord_provider
-register_coord_provider("icepack", get_icepack_node_coordinates)
-
+register_icepack_coordinate_provider()

@@ -15,11 +15,20 @@ close all; clearvars; clc
 script_dir = fileparts(mfilename('fullpath'));
 root_dir = script_dir;
 
+% run_def = struct( ...
+%     'key',    {'WBF','EBF','IBF'}, ...
+%     'folder', {'_modelrun_datasets_method_comparison_40yr_wbf', ...
+%                '_modelrun_datasets_method_comparison_40yr_ebf', ...
+%                '_modelrun_datasets_method_comparison_40yr_ibf'}, ...
+%     'title',  {'WBF: EnKF state/bed update with fixed wrong friction', ...
+%                'EBF: EnKF-only friction recovery', ...
+%                'IBF: EnKF state/bed update plus friction inversion'});
+
 run_def = struct( ...
     'key',    {'WBF','EBF','IBF'}, ...
-    'folder', {'_modelrun_datasets_method_comparison_40yr_wbf', ...
-               '_modelrun_datasets_method_comparison_40yr_ebf', ...
-               '_modelrun_datasets_method_comparison_40yr_ibf'}, ...
+    'folder', {'_modelrun_datasets_p3q0_comparison_wbf_40yr', ...
+               '_modelrun_datasets_p3q0_comparison_ebf_40yr', ...
+               '_modelrun_datasets_p3q0_comparison_ibf_40yr'}, ...
     'title',  {'WBF: EnKF state/bed update with fixed wrong friction', ...
                'EBF: EnKF-only friction recovery', ...
                'IBF: EnKF state/bed update plus friction inversion'});
@@ -31,19 +40,20 @@ rho_water_fallback = 1028;        % kg m^-3
 % Keep rendering a clearly marked diagnostic preview when an experiment
 % fails the method-separation check. Set true to stop before plotting.
 fail_on_uncoupled_ebf = false;
-grounded_rmse_zoom_column = true; % dedicated, non-overlapping RMSE zooms
+grounded_rmse_zoom_column = false; % show only the main velocity/surface RMSE panels
 gl_rmse_zoom_panel = false;       % the full GL panel already resolves the method spread
 show_post_da_metric_blocks = false; % keep zoom curves unobscured; report values in LaTeX table
 velocity_rmse_zoom_limits = [25 120];
 velocity_rmse_zoom_ticks = [25 50 75 100];
-surface_rmse_zoom_limits = [25 55];
-surface_rmse_zoom_ticks = [25 35 45 55];
+surface_rmse_zoom_limits = [40 85]; %[25 55];
+surface_rmse_zoom_ticks = [40 55 70 85]; %[25 35 45 55];
 gl_rmse_zoom_limits = [0 8];
 gl_rmse_zoom_ticks = 0:8;
 surface_rmse_domain = 'grounded_excluding_gl';
 grounded_excluding_gl_xmax = 300e3; % upstream grounded ice, as in read_results_0.m
 
-figure_dir = fullfile(script_dir, 'figures');
+comparison_output_dir = fullfile(root_dir, '_modelrun_datasets_method_comparison_40yr');
+figure_dir = fullfile(comparison_output_dir, 'figures');
 if ~exist(figure_dir,'dir'), mkdir(figure_dir); end
 
 %% ---------------- Locate the mesh/model -------------------------------
@@ -356,22 +366,22 @@ ylabel(cb,'Basal friction (Pa m^{-1/3} yr^{-1/3})', ...
 if grounded_rmse_zoom_column
     metric_main_width = 0.67;
 else
-    metric_main_width = 0.87;
+    metric_main_width = 0.89;
 end
 
-% Compact the vertical stack while leaving enough room for titles and the
-% surface-zoom x label.
+% Compact the vertical stack with small, uniform gutters between RMSE panels.
 metric_vel_bottom = 0.390;
 metric_surf_bottom = 0.260;
-metric_gl_bottom = 0.115;
-metric_height = 0.085;
+metric_gl_bottom = 0.130;
+metric_height = 0.105;
 
 ax_vel = axes(fig,'Position',[0.09 metric_vel_bottom metric_main_width metric_height]);
 plot_metric(ax_vel,runs,'rmse_velocity',colors,styles, ...
     assimilation_times, ...
     'Velocity', ...
     'RMSE (m yr^{-1})',false);
-ylim(ax_vel,[0 1400]);
+% ylim(ax_vel,[0 1400]);
+ylim(ax_vel,[0 140]);
 add_panel_label(ax_vel,'(e)',false);
 
 ax_surf = axes(fig,'Position',[0.09 metric_surf_bottom metric_main_width metric_height]);
@@ -379,7 +389,8 @@ plot_metric(ax_surf,runs,'rmse_surface',colors,styles, ...
     assimilation_times, ...
     'Surface elevation', ...
     'RMSE (m)',false);
-ylim(ax_surf,[0 300]);
+% ylim(ax_surf,[0 300]);
+ylim(ax_surf,[0 100]);
 add_panel_label(ax_surf,'(f)',false);
 
 zoom_axes = gobjects(0);
@@ -402,7 +413,7 @@ end
 if grounded_rmse_zoom_column && gl_rmse_zoom_panel
     gl_main_width = metric_main_width;
 else
-    gl_main_width = 0.87;
+    gl_main_width = 0.89;
 end
 ax_gl = axes(fig,'Position',[0.09 metric_gl_bottom gl_main_width metric_height]);
 plot_metric(ax_gl,runs,'rmse_gl_km',colors,styles, ...
@@ -421,7 +432,7 @@ elseif grounded_rmse_zoom_column
     zoom_axes = [ax_vel_zoom; ax_surf_zoom];
 end
 
-legend(ax_vel,{runs.key},'Location','north','Orientation','horizontal', ...
+legend(ax_vel,{runs.key},'Location','best','Orientation','horizontal', ...
     'Box','off','FontWeight','bold','FontSize',11);
 
 set(map_axes, ...
@@ -536,10 +547,7 @@ function valid = valid_state_columns(state,n)
 end
 
 function time = read_time_vector(root_dir,data_dir,nt,dt)
-    candidates = { ...
-        fullfile(data_dir,'true-wrong-issm.h5'), ...
-        fullfile(data_dir,'results','true-wrong-issm.h5'), ...
-        fullfile(root_dir,'results','true-wrong-issm.h5')};
+    candidates = {fullfile(data_dir,'true-wrong-issm.h5')};
     time = [];
     for i = 1:numel(candidates)
         if ~isfile(candidates{i}), continue, end

@@ -234,7 +234,17 @@ def generate_pseudo_random_field_1d(N=None, Lx=None, rh=None, grid_extension=2, 
     # ------------------------------------------------------------------
     # New optional controls. If none are provided, old behavior is used.
     # ------------------------------------------------------------------
-    method = kwargs.get("method", "auto")
+    method = str(
+        kwargs.get(
+            "random_field_method",
+            kwargs.get("enkf_field_method", kwargs.get("method", "auto")),
+        )
+    ).strip().lower()
+    if method not in {"auto", "fft", "graph"}:
+        raise ValueError(
+            f"Unsupported random-field method {method!r}; "
+            "expected 'auto', 'fft', or 'graph'"
+        )
     coords = kwargs.get("coords", None)
     connectivity = kwargs.get("connectivity", None)
     seed = kwargs.get("seed", 42)
@@ -359,13 +369,19 @@ def generate_pseudo_random_field_1d(N=None, Lx=None, rh=None, grid_extension=2, 
         if connectivity is not None:
             method = "graph"
         elif coords is not None:
-            coords_arr = np.asarray(coords).ravel()
-            if coords_arr.size != N:
-                raise ValueError(f"coords size {coords_arr.size} does not match N={N}")
-            if _is_uniform_1d_coords(coords_arr):
+            coords_arr = np.asarray(coords, dtype=float)
+            if coords_arr.ndim == 1:
+                coords_arr = coords_arr[:, None]
+            if coords_arr.ndim != 2 or coords_arr.shape[0] != N:
+                raise ValueError(
+                    f"coords shape {coords_arr.shape} does not have N={N} rows"
+                )
+            # A multi-dimensional coordinate array describes a physical mesh,
+            # not a scalar uniform line, and must use graph smoothing.
+            if coords_arr.shape[1] == 1 and _is_uniform_1d_coords(coords_arr[:, 0]):
                 method = "fft"
                 if Lx is None:
-                    Lx = float(coords_arr.max() - coords_arr.min()) if N > 1 else 1.0
+                    Lx = float(coords_arr[:, 0].max() - coords_arr[:, 0].min()) if N > 1 else 1.0
                 if rh is None:
                     rh = Lx / 10.0
             else:
@@ -486,7 +502,17 @@ def generate_pseudo_random_field_2D(nx=None, ny=None, Lx=None, Ly=None, rh=None,
     # ------------------------------------------------------------------
     # New optional controls. If none are provided, old behavior is used.
     # ------------------------------------------------------------------
-    method = kwargs.get("method", "auto")
+    method = str(
+        kwargs.get(
+            "random_field_method",
+            kwargs.get("enkf_field_method", kwargs.get("method", "auto")),
+        )
+    ).strip().lower()
+    if method not in {"auto", "fft", "graph"}:
+        raise ValueError(
+            f"Unsupported random-field method {method!r}; "
+            "expected 'auto', 'fft', or 'graph'"
+        )
     coords = kwargs.get("coords", None)
     connectivity = kwargs.get("connectivity", None)
     seed = kwargs.get("seed", None)
@@ -873,7 +899,8 @@ def generate_enkf_field(**kwargs):
     num_vars : int
         Number of variables.
     rh : float, list, ndarray, or None
-        Decorrelation length(s).
+        FFT decorrelation length(s). The public YAML key ``length_scale`` is
+        accepted as an alias. Neither setting is used by graph mode.
     grid_extension : int, optional
         FFT grid extension factor.
     verbose : bool, optional
@@ -898,10 +925,49 @@ def generate_enkf_field(**kwargs):
     Lx = kwargs.get("Lx_dim", None)
     hdim = kwargs.get("noise_dim", None)
     num_vars = kwargs.get("num_vars", None)
+    # ``length_scale`` is the public YAML spelling used by the application
+    # configurations. Keep ``rh`` as the low-level/API spelling, but make the
+    # two names genuine aliases so configured FFT scales reach the generator.
     rh = kwargs.get("rh", None)
+    if rh is None:
+        configured_rh = kwargs.get("length_scale", kwargs.get("len_scale", None))
+        if configured_rh is not None and np.asarray(configured_rh).size:
+            rh = configured_rh
     grid_extension = kwargs.get("grid_extension", 2)
     verbose = kwargs.get("verbose", False)
-    kwargs['method'] = kwargs.get("method", "fft")
+    method = str(
+        kwargs.get(
+            "random_field_method",
+            kwargs.get("enkf_field_method", kwargs.get("method", "fft")),
+        )
+    ).strip().lower()
+    if method not in {"fft", "graph"}:
+        raise ValueError(
+            f"Unsupported random-field method {method!r}; expected 'fft' or 'graph'"
+        )
+    kwargs["method"] = method
+
+    # The run drivers pack registered application coordinates once into
+    # model_kwargs immediately before ensemble initialization.  Retain a lazy
+    # lookup here as well for tests and other direct generator callers.
+    if kwargs.get("coords") is None and kwargs.get("mesh_coords") is not None:
+        kwargs["coords"] = kwargs["mesh_coords"]
+    if (
+        method == "graph"
+        and kwargs.get("coords") is None
+        and kwargs.get("connectivity") is None
+        and kwargs.get("coords_by_var") is None
+        and kwargs.get("connectivity_by_var") is None
+    ):
+        from ICESEE.src.utils.localization import get_mesh_coordinates
+
+        coords = get_mesh_coordinates(kwargs)
+        if coords is None:
+            raise ValueError(
+                "random_field_method='graph' requires registered mesh "
+                "coordinates, explicit coords, or explicit connectivity"
+            )
+        kwargs["coords"] = coords
 
     if Lx == 1:
         Lx = None
@@ -944,7 +1010,7 @@ def generate_enkf_field(**kwargs):
     # Handle trivial case: no spatial dimension
     # preserve existing behavior
     # ------------------------------------------------------------
-    if hdim < 1e2:
+    if hdim < 1e2 and method != "graph":
         if verbose:
             print(f"[ICESEE] hdim={hdim} small — using FFT exp-cov sampling (no dense cov).")
 
@@ -1000,14 +1066,31 @@ def generate_enkf_field(**kwargs):
 
     else:
         if ii_sig is None:
-            q0 = generate_pseudo_random_field_1d(
-                N=hdim * num_vars,
-                Lx=Lx,
-                rh=rh,
-                grid_extension=grid_extension,
-                verbose=verbose,
-                **_local_kwargs(var_index=None)
-            )
+            if method == "graph":
+                # Each variable is defined on the same physical mesh.  Do not
+                # concatenate variables first: that would incorrectly require
+                # num_vars*hdim distinct coordinates and create graph edges
+                # between unrelated state/parameter blocks.
+                q0 = np.concatenate([
+                    generate_pseudo_random_field_1d(
+                        N=hdim,
+                        Lx=Lx,
+                        rh=rh,
+                        grid_extension=grid_extension,
+                        verbose=verbose,
+                        **_local_kwargs(var_index=i)
+                    )
+                    for i in range(num_vars)
+                ])
+            else:
+                q0 = generate_pseudo_random_field_1d(
+                    N=hdim * num_vars,
+                    Lx=Lx,
+                    rh=rh,
+                    grid_extension=grid_extension,
+                    verbose=verbose,
+                    **_local_kwargs(var_index=None)
+                )
         else:
             q0 = generate_pseudo_random_field_1d(
                 N=hdim,

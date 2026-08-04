@@ -971,7 +971,13 @@ def parallel_write_ensemble_scattered_rank_0(timestep, ensemble_mean, params, en
 
     comm.Barrier()
 
-def parallel_write_data_from_root_2D(full_ensemble=None, comm=None, data_name=None, output_file="preliminary_data.h5"):
+def parallel_write_data_from_root_2D(
+    full_ensemble=None,
+    comm=None,
+    data_name=None,
+    output_file="preliminary_data.h5",
+    data_path="_modelrun_datasets",
+):
     """
     Write ensemble data in parallel where full matrix exists on rank 0
     full_ensemble: complete matrix on rank 0 with shape (nd, Nens)
@@ -1012,7 +1018,10 @@ def parallel_write_data_from_root_2D(full_ensemble=None, comm=None, data_name=No
     local_chunk = BM.scatter(chunks, comm)
     
     # comm.barrier() # wait for all processes to reach this point
-    output_file = os.path.join("_modelrun_datasets", output_file)
+    if rank == 0:
+        os.makedirs(data_path, exist_ok=True)
+    comm.Barrier()
+    output_file = os.path.join(data_path, output_file)
 
     # Open file in parallel mode
     # with h5py.File(output_file, 'w', driver='mpio', comm=comm) as f:
@@ -1023,7 +1032,14 @@ def parallel_write_data_from_root_2D(full_ensemble=None, comm=None, data_name=No
         # Each rank writes its chunk
         dset[offset:offset + local_nd, :] = local_chunk
 
-def parallel_write_vector_from_root(full_ensemble=None, comm=None, data_shape=None, data_name=None, output_file="icesee_ensemble_data.h5"):
+def parallel_write_vector_from_root(
+    full_ensemble=None,
+    comm=None,
+    data_shape=None,
+    data_name=None,
+    output_file="icesee_ensemble_data.h5",
+    data_path="_modelrun_datasets",
+):
     """
     Append ensemble data in parallel where the full matrix exists on rank 0.
     Each call appends a new time step, resulting in a dataset of shape (nd, Nens, nt).
@@ -1064,7 +1080,10 @@ def parallel_write_vector_from_root(full_ensemble=None, comm=None, data_shape=No
     local_chunk = BM.scatter(chunks, comm)
 
     # Define output file path
-    output_file = os.path.join("_modelrun_datasets", output_file)
+    if rank == 0:
+        os.makedirs(data_path, exist_ok=True)
+    comm.Barrier()
+    output_file = os.path.join(data_path, output_file)
 
     # Open file in parallel mode
     # with h5py.File(output_file, 'w', driver='mpio', comm=comm) as f:

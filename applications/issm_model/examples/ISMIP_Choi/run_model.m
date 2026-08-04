@@ -58,8 +58,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         coefficient = h5read(prior_file, '/coefficient');
         md.friction.coefficient = mean_friction .* ...
             ones(md.mesh.numberofvertices, 1) + coefficient;
-        md.friction.p = ones(md.mesh.numberofelements, 1);
-        md.friction.q = ones(md.mesh.numberofelements, 1);
+        % Use the same Weertman exponents as the MISMIP reference model.
+        md.friction.p = 3 * ones(md.mesh.numberofelements, 1);
+        md.friction.q = zeros(md.mesh.numberofelements, 1);
         md = apply_configured_initial_geometry(md, bed, kwargs);
 
         % Diagnose the velocity implied by this geometry without advancing
@@ -94,6 +95,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.basalforcings=linearbasalforcings();
         md.basalforcings.deepwater_melting_rate=deepwater_melting_rate;
         md.basalforcings.groundedice_melting_rate=zeros(md.mesh.numberofvertices,1);
+
+        md.friction.p = 3*ones(md.mesh.numberofelements,1);
+        md.friction.q = zeros(md.mesh.numberofelements,1);
 
         % --time stepping
         md.timestepping = timestepping();
@@ -212,8 +216,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         coefficient = h5read(filename, '/coefficient');
 
         md.friction.coefficient = friction_ref + coefficient;
-        md.friction.p = ones(md.mesh.numberofelements,1);
-        md.friction.q = ones(md.mesh.numberofelements,1);
+        % Use the same Weertman exponents as the MISMIP reference model.
+        md.friction.p = 3 * ones(md.mesh.numberofelements,1);
+        md.friction.q = zeros(md.mesh.numberofelements,1);
 
         md = apply_configured_initial_geometry(md, bed, kwargs);
 
@@ -407,8 +412,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             %  update the friction and bed
             md.friction.coefficient = friction_ref + coefficient;
             % md.friction.coefficient = friction_ref;
-            md.friction.p=ones(md.mesh.numberofelements,1);
-            md.friction.q=ones(md.mesh.numberofelements,1);
+            % Use the same Weertman exponents as the MISMIP reference model.
+            md.friction.p = 3 * ones(md.mesh.numberofelements,1);
+            md.friction.q = zeros(md.mesh.numberofelements,1);
 
  
             md = apply_configured_initial_geometry(md, bed, kwargs);
@@ -550,6 +556,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % parameters for bed and friction
             md.geometry.bed = h5read(filename, '/bed');
             md.friction.coefficient = h5read(filename, '/coefficient');
+            % Do not inherit stale p/q values from a cached member model.
+            md.friction.p = 3 * ones(md.mesh.numberofelements,1);
+            md.friction.q = zeros(md.mesh.numberofelements,1);
 
             % Reject a divergent filter member before ISSM's less-informative
             % geometry-consistency check. These limits are deliberately far
@@ -963,6 +972,10 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % md.geometry.bed       = h5read(filename, '/bed');
         % md.geometry.base      = h5read(filename, '/Surface') - h5read(filename, '/Thickness');
         md.friction.coefficient = h5read(filename, '/coefficient');
+        % The inversion must use the same sliding law as both the reference
+        % trajectory and the subsequent transient forecast.
+        md.friction.p = 3 * ones(md.mesh.numberofelements,1);
+        md.friction.q = zeros(md.mesh.numberofelements,1);
         % md.friction.coefficient = mean_friction*ones(md.mesh.numberofvertices,1);
         md.initialization.pressure=md.materials.rho_ice*md.constants.g*h5read(filename, '/Thickness');
 

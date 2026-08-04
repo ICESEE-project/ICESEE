@@ -16,7 +16,8 @@ dt      = 0.2;
 t_jump = (yr_jump+1)/dt;
 
 % ---------------- Load essentials --------------
-results_dir = 'results';
+data_file_paths = '_modelrun_datasets';
+results_dir = data_file_paths;
 filter_type = 'true-wrong';
 file_path   = fullfile(results_dir, sprintf('%s-issm.h5', filter_type));
 t        = h5read(file_path,'/t'); 
@@ -26,7 +27,6 @@ run_mode = h5read(file_path,'/run_mode');
 
 % --------- true / wrong (nurged)
 % data_file_paths = '_modelrun_datasets_0';
-data_file_paths = '_modelrun_datasets';
 file_path          = fullfile(data_file_paths, 'true_nurged_states.h5');
 model_true_state   = h5read(file_path,'/true_state')';
 model_nurged_state = h5read(file_path,'/nurged_state')';
@@ -612,12 +612,12 @@ function plot_gl_on_bed_evolution( ...
     
     assim_field = get_nested_field(md_ens_a, bg_field);
     
-    % zero out friction on floating ice in assimilated state
+    % Basal friction is inactive beneath estimated floating ice.  Mask that
+    % domain explicitly; copying the hidden truth there creates a false
+    % zero-error region with an artificial grounding-line-shaped edge.
     floating = md_ens_a.mask.ocean_levelset < 0;
-    % assim_field(floating) = 0;
-    assim_field(floating) = data_true(floating);
-    
     diff_assim = (assim_field - data_true)./data_true;
+    diff_assim(floating) = NaN;
     maxAbs_global = max(maxAbs_global, safe_absmax(diff_assim));
 
     plotmodel(md_ens_a, 'data', diff_assim, ...
@@ -840,8 +840,7 @@ function plot_gl_on_bed_evolution( ...
     % ------------------------------------------------------------
     % Save figure
     % ------------------------------------------------------------
-    scriptdir = fileparts(mfilename('fullpath'));
-    outdir = fullfile(scriptdir, 'figures');
+    outdir = fullfile(data_file_paths, 'figures');
     if ~exist(outdir, 'dir')
         mkdir(outdir);
     end
@@ -1419,4 +1418,3 @@ function P = extract_gl_points_in_window(md_k, Nx, Ny, minLen, topK, win)
         P = unique(round(P,3),'rows'); % mm-level rounding, helps stability
     end
 end
-

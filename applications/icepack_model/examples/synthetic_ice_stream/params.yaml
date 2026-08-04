@@ -31,9 +31,10 @@ modeling-parameters:
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 40                      # number of ensemble members (now set in the command line)
-  freq_obs: 4              # frequency of observations
+  freq_obs: 8              # frequency used by the known-good experiment
   obs_max_time: 80        # maximum time for observations
   obs_start_time: 8             # start time for observations
+  random_field_method: fft   # graph or fft
 
   num_state_vars: 3       # number of state variables  [h,u,v]
   num_param_vars: 1       # number of parameter variables [smb]
@@ -60,7 +61,11 @@ enkf-parameters:
   # sig_Q: [10,5,4,0.15]
   sig_Q: [10,4,1.75,0.14]    # initial pertubation noise standard deviation
   # sig_Q: [10,4,1.75,0.3] 
-  length_scale: [25, 25, 25, 1030] #[150, 150, 150, 150]   # length scale for the covariance matrix, can be a list
+  # The known-good run predated the length_scale plumbing fix, so its list
+  # above was ignored and FFT used the scalar fallback sqrt(Lx*Ly)/10.
+  # State that effective value explicitly while retaining the corrected API.
+  # A scalar also preserves the legacy combined-field FFT construction.
+  length_scale: 244.9489742783178
 
   Q_rho: 0.95 
 
@@ -90,7 +95,7 @@ enkf-parameters:
   smb_inference_start_time: 15.0
   smb_spinup_hold_factor: 1.0
   smb_blend_ramp_time: 10.0
-  smb_projection_basis: x_linear
+  smb_projection_basis: x_linear   # x_linear
   smb_physical_bounds: null
   mesh_coordinate_scale_to_m: 1.0
 

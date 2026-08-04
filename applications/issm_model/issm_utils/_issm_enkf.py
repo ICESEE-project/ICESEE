@@ -13,6 +13,11 @@ import h5py
 # --- import utility functions ---
 from ICESEE.applications.issm_model.examples.ISMIP._issm_model import *
 from ICESEE.config._utility_imports import icesee_get_index
+from ICESEE.applications.issm_model.issm_utils._coordinates import (
+    register_issm_coordinate_provider,
+)
+
+register_issm_coordinate_provider()
 
 # --- Forecast step ---
 def forecast_step_single(ensemble=None, **kwargs):
@@ -230,4 +235,3 @@ def initialize_ensemble(ens, **kwargs):
         os.chdir(icesee_path)
 
         return updated_state
-        

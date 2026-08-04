@@ -24,6 +24,13 @@ modeling-parameters:
   smb: -0.3
 
 enkf-parameters:
+  # Build EnKF perturbations on the registered physical BAMG vertex graph.
+  # The FFT-only length_scale values below are retained for compatibility.
+  random_field_method: graph
+  k_neighbors: 6
+  num_passes: auto
+  blend: 0.55
+
   Nens: 60
   freq_obs: 1
   obs_start_time: 2
@@ -65,7 +72,7 @@ enkf-parameters:
 
   sig_obs: [15, 10, 7, 5, 8, 0]
   sig_Q: [12, 12, 8, 5, 6, 8]
-  length_scale: [50, 60, 80, 70, 65, 81]
+  length_scale: [50, 60, 80, 70, 65, 81]  # ignored by graph mode
   seed: 42
   base_seed: 42
   inflation_factor: 1.0
