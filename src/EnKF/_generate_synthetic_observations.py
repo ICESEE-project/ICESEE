@@ -36,9 +36,14 @@ def generate_synthetic_observations(**model_kwargs):
                 with h5py.File(_true_nurged, "r") as f:
                     ensemble_true_state = f['true_state'][:]
 
-                utils_funs = UtilsFunctions(params, ensemble_true_state)
+                utils_funs = UtilsFunctions(
+                    params=params,
+                    model_kwargs=model_kwargs,
+                    ensemble=ensemble_true_state
+                )
                 model_kwargs.update({"statevec_true": ensemble_true_state})
-                hu_obs, error_R, model_kwargs['bed_mask_map'], model_kwargs = utils_funs._create_synthetic_observations(**model_kwargs)
+                hu_obs, error_R, bed_masks, model_kwargs = utils_funs._create_synthetic_observations(**model_kwargs)
+                model_kwargs.update({"bed_mask_map": bed_masks})
 
                 # observe or don't observe parameters.
                 vecs, indx_map,_ = icesee_get_index(hu_obs, **model_kwargs)
