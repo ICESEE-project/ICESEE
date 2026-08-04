@@ -141,16 +141,24 @@ def initialize_ensemble(ens, **kwargs):
 
         # update the nurged state with the solution
         h_perturbed = h.dat.data_ro
-        u_perturbed = u0.dat.data_ro[:,0]
-        v_perturbed = u0.dat.data_ro[:,1]
+        # u_perturbed = u0.dat.data_ro[:,0]
+        # v_perturbed = u0.dat.data_ro[:,1]
+        u_perturbed = u.dat.data_ro[:,0]
+        v_perturbed = u.dat.data_ro[:,1]
     else: 
         h_perturbed = h0.dat.data_ro + np.random.normal(0, 0.1, h0.dat.data_ro.size)
         u_perturbed = u0.dat.data_ro[:,0]
         v_perturbed = u0.dat.data_ro[:,1]
 
-    initialized_state = {'h': h_perturbed, 
-                         'u': u.dat.data_ro[:,0], 
-                         'v': u.dat.data_ro[:,1]}
+    # initialized_state = {'h': h_perturbed, 
+    #                      'u': u.dat.data_ro[:,0], 
+    #                      'v': u.dat.data_ro[:,1]}
+
+    initialized_state = {
+        "h": np.asarray(h_perturbed).copy(),
+        "u": np.asarray(u_perturbed).copy(),
+        "v": np.asarray(v_perturbed).copy(),
+    }
     
     # -- for joint estimation --
     if kwargs["joint_estimation"]:

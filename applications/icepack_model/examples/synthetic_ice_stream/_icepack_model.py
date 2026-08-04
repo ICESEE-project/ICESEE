@@ -4,7 +4,7 @@
 # @date: 2024-11-4
 # @author: Brian Kyanjo
 # ==============================================================================
-
+#_icepack_model.py
 # --- python imports ---
 import sys
 import os
@@ -134,8 +134,8 @@ def initialize_model(**kwargs):
 
     # print size h
     # print(f"Size of the function space: {h.dat.data.size} on rank {rank}")
-
-    return nx,ny,Lx,Ly,x,y,h,u,a,a_p,b,b_in,b_out,h0,u0,solver_weertman,A,C,Q,V,
+    kwargs.update({"nx":nx, "ny":ny, "Lx":Lx, "Ly":Ly, "x":x, "y":y, "h":h, "u":u, "a":a, "a_p":a_p, "b":b, "b_in":b_in, "b_out":b_out, "h0":h0, "u0":u0, "solver_weertman":solver_weertman, "A":A, "C":C, "Q":Q, "V":V, "mesh":mesh})
+    return kwargs
 
 # --- icepack model ---
 def Icepack(solver, h, u, a, b, dt, h0, **kwargs):
@@ -241,5 +241,8 @@ def run_model(ensemble, **kwargs):
 
     return updated_state
 
+from ICESEE.applications.icepack_model.icepack_utils._coordinates import (
+    register_icepack_coordinate_provider,
+)
 
-
+register_icepack_coordinate_provider()

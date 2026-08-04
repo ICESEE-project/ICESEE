@@ -18,10 +18,16 @@ from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_field
                               generate_pseudo_random_field_1d, \
                               generate_pseudo_random_field_2D, \
                               generate_enkf_field
-from ICESEE.src.parallelization._parallel_i_o import parallel_write_full_ensemble_from_root,parallel_write_full_ensemble_from_root_full_parallel_run
 
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 # rank_seed, rng = ParallelManager().initialize_seed(MPI.COMM_WORLD)
+
+from ICESEE.src.parallelization._parallel_i_o import (
+    parallel_write_full_ensemble_from_root,
+    parallel_write_full_ensemble_from_root_full_parallel_run,
+    write_ensemble_member_direct,
+    compute_and_apply_inflation_partitioned,
+)
 
 def ensemble_initialization(**model_kwargs):
     """Initialize the ensemble for the ICESEE model.
@@ -49,6 +55,7 @@ def ensemble_initialization(**model_kwargs):
     rank_seed = model_kwargs.get("rank_seed", 0)
     alpha = model_kwargs.get("initial_spread_factor")
 
+    partitioned_io = model_kwargs.get("partitioned_io_flag", False)  # NEW
 
     sub_rank  = subcomm.Get_rank()
     rank_world = comm_world.Get_rank()
@@ -58,184 +65,143 @@ def ensemble_initialization(**model_kwargs):
     time_init_file_writing     = 0.0
     time_init_ensemble_mean_computation = 0.0
 
+    observed_vars = model_kwargs.get("observed_vars", [])
+    observed_params = model_kwargs.get("observed_params", [])
+
+    all_observed = list(observed_vars) + list(observed_params)
+
+    model_kwargs["observed_vars_params"] = all_observed
+    model_kwargs["all_observed"] = all_observed
+    params["all_observed"] = all_observed
+    params["nd_observed"] = len(all_observed) * (params["nd"] // params["total_state_param_vars"])
+
     if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
         if params["default_run"] and size_world <= params["Nens"] and not (model_kwargs.get("sequential_ensemble_initialization", False)):
-        # if False:
             if rank_world == 0:
                 print("[ICESEE] Initializing the ensemble ...")
 
-            # model_kwargs.update({'ens_id': rank_world})
             Nens = params["Nens"]
             model_kwargs.update({'rank': sub_rank, 'color': color, 'comm': subcomm})
-
             model_kwargs.update({"statevec_ens":np.zeros([params["nd"], params["Nens"]])})
 
-            # get the ensemble matrix   
             vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
             ensemble_vec = np.zeros_like(model_kwargs["statevec_ens"])
 
             if model_kwargs["joint_estimation"] or params["localization_flag"]:
-                    hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
+                hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
             else:
                 hdim = ensemble_vec.shape[0] // params["num_state_vars"]
             state_block_size = hdim * params["num_state_vars"]
             
-            if sub_rank == 0:
-                ens_list_init = []
-            else:
-                ens_list_init = []
+            ens_list_init = []
 
             for round_id in range(rounds):
                 ensemble_id = color + (round_id * subcomm_size_min)
                 model_kwargs.update({'ens_id': ensemble_id})
 
                 if ensemble_id < Nens:
-                    # Synchronize the ensemble initialization
                     subcomm.Barrier()
                     ens = ensemble_id
 
-                    # Call the model to initialize the ensemble
                     data = model_module.initialize_ensemble(ens, **model_kwargs)
                     for key, value in data.items():
                         ensemble_vec[indx_map[key], ens] = value
 
-                    # Add process noise in-place to avoid temporary array
                     _time_init_noise_generation = MPI.Wtime()
                     model_kwargs.update({"ii_sig": None, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
                     noise = generate_enkf_field(**model_kwargs)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
-                    # ensemble_vec[:, ens] += alpha*noise
 
-                    # for ii, sig in enumerate(params["sig_Q"]):
-                    #     if ii <=params["num_state_vars"]:
-                    #         start_idx = ii * hdim
-                    #         end_idx = start_idx + hdim
-                    #         # make sure the noise has zero mean
-                    #         noise[start_idx:end_idx] *=sig
-                    # #         noise[start_idx:end_idx] -= np.mean(noise[start_idx:end_idx])
-                    # #         inflated_noise = noise[start_idx:end_idx] / np.max(np.abs(noise[start_idx:end_idx]))
-                    #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx]
-
-                    # for ii, sig in enumerate(params["sig_Q"]):
-                    #     # if ii <=params["num_state_vars"]:
-                    #     start_idx = ii * hdim
-                    #     end_idx = start_idx + hdim
-                    #     ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
-
-                    # k = model_kwargs.get("k", 0)
-                    # if k == 0: --->
                     noise_all = []
                     q0 = []
                     dt = model_kwargs.get("dt", 1.0)
-                    # specified decorrelation length scale, tau,
                     min_tau = 200
                     max_tau = 500
                     dt  = model_kwargs.get("dt",params["dt"])
                     tau = max(max_tau,max(min_tau, dt))
 
-                    # tau = max(model_kwargs.get("dt",params["dt"]),10)
-                    alpha = 1 - dt/tau
-                    # make sure  0=<alpha<1
-                    if alpha <= 0 or alpha > 1:
-                        alpha = 0.5
+                    alpha_ar1 = 1 - dt/tau
+                    if alpha_ar1 <= 0 or alpha_ar1 > 1:
+                        alpha_ar1 = 0.5
 
                     n = model_kwargs.get("nt",params["nt"])
-                    # rho = np.sqrt((1-alpha**2)/(dt*(n - 2*alpha - n*alpha**2 + 2*alpha**(n+1))))
-                    rho = np.sqrt((1/dt)*((1-alpha)**2)*(1/(n - (2*alpha) - (n*alpha**2) + (2*alpha**(n+1)))))
+                    rho = np.sqrt((1/dt)*((1-alpha_ar1)**2)*(1/(n - (2*alpha_ar1) - (n*alpha_ar1**2) + (2*alpha_ar1**(n+1)))))
                     for ii, sig in enumerate(params["sig_Q"]):
-                        # if ii <=params["num_state_vars"]:
                         if ii <= params["total_state_param_vars"]:
-                            # W = np.random.normal(0, 1, hdim)
-                            # W = generate_pseudo_random_field_1d(hdim,np.sqrt(Lx*Ly), len_scale, verbose=0)
                             model_kwargs.update({"ii_sig": ii, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
                             W = generate_enkf_field(**model_kwargs)
-                            noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
+                            noise_ = alpha_ar1*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha_ar1**2)*W
                             q0.append(noise_)
-
                             Z = np.sqrt(dt)*sig*rho*noise_
                             noise_all.append(Z)
                     noise_ = np.concatenate(noise_all, axis=0)
-                    # ensemble_vec[:state_block_size] = ensemble_vec[:state_block_size] + noise_[:state_block_size]
-                    # ensemble_vec[:, ens] += model_kwargs.get("initial_spread_factor")*noise_
 
-                    # ensemble_vec[:, ens] += (model_kwargs.get("initial_spread_factor")*noise_ + noise)
-
-                    # scale the noise with sig_Q and add to the ensemble
                     for ii, sig in enumerate(params["sig_Q"]):
                         if ii <= params["total_state_param_vars"]:
                             start_idx = ii * hdim
                             end_idx = start_idx + hdim
-                            # ensure noise has zero mean
-                            # noise[start_idx:end_idx] *= sig
-                            # noise[start_idx:end_idx] -= np.mean(noise[start_idx:end_idx])
-                            # ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig* np.sqrt(dt)
                             ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
 
+                    model_kwargs.update({"noise": noise})
+                    del noise
 
-                    # noise = np.concatenate(q0, axis=0)
-                    model_kwargs.update({"noise": noise})  # save the noise to the model_kwargs dictionary
+                    # ============================================== NEW BRANCH
+                    if partitioned_io:
+                        member_to_write = ensemble_vec[:, ens] if sub_rank == 0 else None
+                        this_ens_id = ensemble_id if sub_rank == 0 else None
+                        write_ensemble_member_direct(
+                            f"{model_kwargs.get('data_path')}/icesee_ensemble_data.h5",
+                            0, this_ens_id, member_to_write,
+                            params["nd"], Nens, model_kwargs.get("nt", params["nt"]),
+                            comm_world
+                        )
+                    else:
+                        # ---- EXISTING behavior, unchanged ----
+                        gathered_ensemble = subcomm.gather(ensemble_vec[:, ens], root=0)
+                        if sub_rank == 0:
+                            gathered_ensemble = np.concatenate(gathered_ensemble, axis=0)
+                            ens_list_init.append(gathered_ensemble)
+                        del gathered_ensemble
+                    # ============================================== END NEW
 
-                    # clean up memory
-                    # print("clearing memory for noise generation...")
-                    # del noise_all, q0, noise_, W
+                if not partitioned_io:
+                    gathered_ensemble_global = ParallelManager().gather_data(comm_world, ens_list_init, root=0)
 
-                    # <---
-
-                    del noise  # Free memory immediately
-
-                    # Gather ensemble data efficiently
-                    gathered_ensemble = subcomm.gather(ensemble_vec[:, ens], root=0)
-                    
-                    if sub_rank == 0:
-                        # Use np.concatenate with pre-allocated array to avoid np.hstack memory overhead
-                        gathered_ensemble = np.concatenate(gathered_ensemble, axis=0)
-                        ens_list_init.append(gathered_ensemble)
-                    
-                    del gathered_ensemble  # Free memory after appending
-
-                # subcomm.Barrier()
-                # Gather all ensembles from all subcommunicators
-                gathered_ensemble_global = ParallelManager().gather_data(comm_world, ens_list_init, root=0)
-
-            # Final processing on rank 0
-            # subcomm.Barrier()
-            del ens_list_init; gc.collect()
-            if rank_world == 0:
-                # Flatten and filter None values
-                ensemble_vec = [arr for sublist in gathered_ensemble_global for arr in sublist if arr is not None]
-                # Pre-allocate final array to avoid memory spikes during np.column_stack
-                final_shape = (len(ensemble_vec[0]), len(ensemble_vec)) if ensemble_vec else (0, 0)
-                ensemble_vec_final = np.empty(final_shape, dtype=ensemble_vec[0].dtype)
-                for i, arr in enumerate(ensemble_vec):
-                    ensemble_vec_final[:, i] = arr
-                shape_ens = np.array(ensemble_vec_final.shape, dtype=np.int32)
-                ensemble_vec = ensemble_vec_final  # Replace ensemble_vec with final array
-                # ---> multiplicative inflation
-                # time_analysis_mean_generation1  = MPI.Wtime() 
-                # mean_params = np.mean(analysis_vec[state_block_size:,:], axis=1)
-                mean_params = np.mean(ensemble_vec, axis=1)
-                # time_analysis_mean_generation1 = MPI.Wtime() - time_analysis_mean_generation1
-                # time_analysis_mean_generation += time_analysis_mean_generation1
-
-                #  compute parturbations
-                # pertubations = analysis_vec[state_block_size:,:] - mean_params.reshape(-1,1)
-                pertubations = ensemble_vec - mean_params.reshape(-1,1)
-                # apply the inflation factor
-                inflated_pertubations = pertubations * alpha
-
-                # update the analysis vector
-                # analysis_vec[state_block_size:,:] = mean_params.reshape(-1,1) + inflated_pertubations
-                ensemble_vec = mean_params.reshape(-1,1) + inflated_pertubations
-                # only inflate bed topography if it is directly observed
-                # observed_params = model_kwargs.get("observed_params", [])
-                del ensemble_vec_final  # Free memory
+            # ============================================== NEW BRANCH
+            if partitioned_io:
+                del ens_list_init; gc.collect()
+                comm_world.Barrier()
+                compute_and_apply_inflation_partitioned(
+                    f"{model_kwargs.get('data_path')}/icesee_ensemble_data.h5",
+                    params["nd"], Nens, alpha, comm_world, timestep=0
+                )
+                ensemble_vec = None
+                shape_ens = np.array([params["nd"], Nens], dtype=np.int32)
             else:
-                shape_ens = np.empty(2, dtype=np.int32)
+                # ---- EXISTING reassembly + inflation, unchanged ----
+                del ens_list_init; gc.collect()
+                if rank_world == 0:
+                    ensemble_vec = [arr for sublist in gathered_ensemble_global for arr in sublist if arr is not None]
+                    final_shape = (len(ensemble_vec[0]), len(ensemble_vec)) if ensemble_vec else (0, 0)
+                    ensemble_vec_final = np.empty(final_shape, dtype=ensemble_vec[0].dtype)
+                    for i, arr in enumerate(ensemble_vec):
+                        ensemble_vec_final[:, i] = arr
+                    shape_ens = np.array(ensemble_vec_final.shape, dtype=np.int32)
+                    ensemble_vec = ensemble_vec_final
 
-            # Broadcast the shape of the ensemble
-            shape_ens = comm_world.bcast(shape_ens, root=0)
+                    mean_params = np.mean(ensemble_vec, axis=1)
+                    pertubations = ensemble_vec - mean_params.reshape(-1,1)
+                    inflated_pertubations = pertubations * alpha
+                    ensemble_vec = mean_params.reshape(-1,1) + inflated_pertubations
+                    del ensemble_vec_final
+                else:
+                    shape_ens = np.empty(2, dtype=np.int32)
+
+                shape_ens = comm_world.bcast(shape_ens, root=0)
+            # ============================================== END NEW
 
         else:
+            # ---- EXISTING sequential-ensemble-initialization branch, fully unchanged ----
             if rank_world == 0:
                 print("[ICESEE] Initializing the ensemble ...")
                 model_kwargs.update({'ens_id': rank_world})
@@ -245,145 +211,44 @@ def ensemble_initialization(**model_kwargs):
                     model_kwargs.update({'rank': sub_rank, 'color': color, 'comm': subcomm})
 
                 model_kwargs.update({"statevec_ens":np.zeros([params["nd"], params["Nens"]])})
-                
-                # get the ensemble matrix   
                 vecs, indx_map, dim_per_proc = icesee_get_index(model_kwargs["statevec_ens"], **model_kwargs)
                 ensemble_vec = np.zeros_like(model_kwargs["statevec_ens"])
 
                 if model_kwargs["joint_estimation"] or params["localization_flag"]:
-                        hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
+                    hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
                 else:
                     hdim = ensemble_vec.shape[0] // params["num_state_vars"]
                 state_block_size = hdim * params["num_state_vars"]
 
-                # # --- get the process noise ---
-                # pos, gs_model, L_C = compute_Q_err_random_fields(hdim, params["total_state_param_vars"], params["sig_Q"], Q_rho, len_scale)
-
-                # process_noise = []
                 for ens in range(params["Nens"]):
-                    # model_kwargs.update({"ens_id": ens})
                     data = model_module.initialize_ensemble(ens,**model_kwargs)
-                
-                    # iterate over the data and update the ensemble
                     for key, value in data.items():
                         ensemble_vec[indx_map[key],ens] = value
 
-                    # --->
-                    # noise = compute_noise_random_fields(ens, hdim, pos, gs_model, params["total_state_param_vars"], L_C)
-                    # ensemble_vec[:,ens] += noise
-                    #----->
                     _time_init_noise_generation = MPI.Wtime()
                     N_size = params["total_state_param_vars"] * hdim
-                    # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=True)
                     model_kwargs.update({"ii_sig": None, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
                     noise = generate_enkf_field(**model_kwargs)
                     time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
 
-                    # lets inflate the noise to increase the spread
-                    model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
-                    # exclude bed variables from observed variables
-                    all_observed = model_kwargs['observed_vars_params']
-                    model_kwargs['all_observed'] = all_observed; params['all_observed'] = all_observed
-                    nd_new = len(all_observed) * hdim
-                    model_kwargs['nd_observed'] = nd_new
-                    # for ii, key in enumerate(all_observed):
-                    #     # if ii < params["num_state_vars"]:
-                    #     ensemble_vec[indx_map[key], ens] += alpha * noise[indx_map[key]]
-                        # if ii < params["num_state_vars"]:
-                        #     start_idx = ii * hdim
-                        #     end_idx = start_idx + hdim
-                        #     ensemble_vec[start_idx:end_idx, ens] += alpha * noise[start_idx:end_idx]
-                            
-                    # ensemble_vec[:,ens] += alpha*noise
-                    # for ii, sig in enumerate(params["sig_Q"]):
-                    #     if ii <=params["num_state_vars"]:
-                    #         start_idx = ii * hdim
-                    #         end_idx = start_idx + hdim
-                    #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
-                    
-                    # ---->
-                    # noise_all = []
-                    # q0 = []
-                    # dt = model_kwargs.get("dt", 1.0)
-                    # # specified decorrelation length scale, tau,
-                    # min_tau = 200
-                    # max_tau = 500
-                    # dt  = model_kwargs.get("dt",params["dt"])
-                    # tau = max(max_tau,max(min_tau, dt))
-
-                    # # tau = max(model_kwargs.get("dt",params["dt"]),10)
-                    # alpha = 1 - dt/tau
-                    # # make sure  0=<alpha<1
-                    # if alpha <= 0 or alpha > 1:
-                    #     alpha = 0.5
-
-                    # n = model_kwargs.get("nt",params["nt"])
-                    # # rho = np.sqrt((1-alpha**2)/(dt*(n - 2*alpha - n*alpha**2 + 2*alpha**(n+1))))
-                    # rho = np.sqrt((1/dt)*((1-alpha)**2)*(1/(n - (2*alpha) - (n*alpha**2) + (2*alpha**(n+1)))))
-                    # for ii, sig in enumerate(params["sig_Q"]):
-                    #     # if ii <=params["num_state_vars"]:
-                    #     if ii < params["total_state_param_vars"]:
-                    #         # W = np.random.normal(0, 1, hdim)
-                    #         # W = generate_pseudo_random_field_1d(hdim,np.sqrt(Lx*Ly), len_scale, verbose=0)
-                    #         model_kwargs.update({"ii_sig": ii, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
-                    #         W = generate_enkf_field(**model_kwargs)
-                    #         noise_ = alpha*noise[ii*hdim:(ii+1)*hdim] + np.sqrt(1 - alpha**2)*W
-                    #         q0.append(noise_)
-
-                    #         Z = np.sqrt(dt)*sig*rho*noise_
-                    #         noise_all.append(Z)
-                    # noise_ = np.concatenate(noise_all, axis=0)
-                    # # ensemble_vec[:state_block_size] = ensemble_vec[:state_block_size] + noise_[:state_block_size]
-                    # ensemble_vec[:, ens] += (model_kwargs.get("initial_spread_factor")*noise_ + noise)
-                    # ensemble_vec[:, ens] += model_kwargs.get("initial_spread_factor")*noise_
-
-
-                    # scale the noise with sig_Q and add to the ensemble
                     for ii, sig in enumerate(params["sig_Q"]):
                         if ii <= params["total_state_param_vars"]:
                             start_idx = ii * hdim
                             end_idx = start_idx + hdim
-                            # ensure noise has zero mean
-                            # noise[start_idx:end_idx] *= sig
-                            # noise[start_idx:end_idx] -= np.mean(noise[start_idx:end_idx])
-                            # ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig* np.sqrt(dt)
                             ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
 
-
-                    # noise = np.concatenate(q0, axis=0)
-                    model_kwargs.update({"noise": noise})  # save the noise to the model_kwargs dictionary
-
-                    # clean up memory
-                    # print("clearing memory for noise generation...")
-                    # del noise_all, q0, noise_, W
-                    # ---->
+                    model_kwargs.update({"noise": noise})
                     
                 shape_ens = np.array(ensemble_vec.shape,dtype=np.int32)
 
-                # ---> multiplicative inflation
-                # time_analysis_mean_generation1  = MPI.Wtime() 
-                # mean_params = np.mean(analysis_vec[state_block_size:,:], axis=1)
                 mean_params = np.mean(ensemble_vec, axis=1)
-                # time_analysis_mean_generation1 = MPI.Wtime() - time_analysis_mean_generation1
-                # time_analysis_mean_generation += time_analysis_mean_generation1
-
-                #  compute parturbations
-                # pertubations = analysis_vec[state_block_size:,:] - mean_params.reshape(-1,1)
                 pertubations = ensemble_vec - mean_params.reshape(-1,1)
-                # apply the inflation factor
                 inflated_pertubations = pertubations * alpha
-
-                # update the analysis vector
-                # analysis_vec[state_block_size:,:] = mean_params.reshape(-1,1) + inflated_pertubations
                 ensemble_vec = mean_params.reshape(-1,1) + inflated_pertubations
-                # only inflate bed topography if it is directly observed
-                # observed_params = model_kwargs.get("observed_params", [])
                 
-    
             else:
                 ensemble_vec = np.empty((params["nd"],params["Nens"]),dtype=np.float64)
                 shape_ens = np.empty(2,dtype=np.int32)
-                # pos, gs_model, L_C
 
         comm_world.Barrier()
 
@@ -391,7 +256,6 @@ def ensemble_initialization(**model_kwargs):
         if rank_world == 0:
             diff = total_cores - base_total_procs 
             if diff >= 0:
-                # split the diff amaongest all processors
                 min_model_nprocs = max(model_nprocs-1, 1) 
                 if model_kwargs.get('ICESEE_PERFORMANCE_TEST') or env_flag("ICESEE_PERFORMANCE_TEST", default=False):
                     model_nprocs = model_nprocs
@@ -404,7 +268,6 @@ def ensemble_initialization(**model_kwargs):
         model_kwargs.update({'model_nprocs': model_nprocs})
 
         if params["even_distribution"]:
-            # Bcast the ensemble
             comm_world.Bcast(ensemble_vec, root=0)
             ensemble_bg = np.empty((params["nd"],model_kwargs.get("nt",params["nt"])+1),dtype=np.float64)
             ensemble_vec_mean = np.empty((params["nd"],model_kwargs.get("nt",params["nt"])+1),dtype=np.float64)
@@ -413,53 +276,40 @@ def ensemble_initialization(**model_kwargs):
             ensemble_vec_full[:,:,0] = ensemble_vec
             ensemble_bg[:,0] = ensemble_vec_mean[:,0]
         else:
-            # broadcast the shape of the ensemble
-            shape_ens = comm_world.bcast(shape_ens, root=0)
-            # write the ensemble to the file
+            # ============================================== NEW BRANCH
+            if partitioned_io:
+                # ensemble already written directly, mean not needed here
+                # in the same form as parallel_write_full_ensemble_from_root
+                ens_mean = None
+            else:
+                # ---- EXISTING behavior, unchanged ----
+                shape_ens = comm_world.bcast(shape_ens, root=0)
+                _time_init_ensemble_mean_computation = MPI.Wtime()
+                ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
+                time_init_ensemble_mean_computation += MPI.Wtime() - _time_init_ensemble_mean_computation
 
-            # -- time ensemble mean computation ---
-            _time_init_ensemble_mean_computation = MPI.Wtime()
-            ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
-            time_init_ensemble_mean_computation += MPI.Wtime() - _time_init_ensemble_mean_computation
+                _time_init_file_writing = MPI.Wtime()
+                parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
+                time_init_file_writing += MPI.Wtime() - _time_init_file_writing
+            # ============================================== END NEW
 
-            # ---time file writing ---
-            _time_init_file_writing = MPI.Wtime()
-            parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
-            time_init_file_writing += MPI.Wtime() - _time_init_file_writing
-
-        # comm_world.Bcast(ensemble_vec, root=0)
-        # hdim = params["nd"] // params["total_state_param_vars"]
-        # print(f"[ICESEE] Rank: {rank_world}, min ensemble: {np.min(ensemble_vec[hdim,:])}, max ensemble: {np.max(ensemble_vec[hdim,:])}")
-        # exit()
     else:
+        # ---- EXISTING size_world > Nens branch, fully unchanged ----
         if rank_world == 0:
             print("[ICESEE] Initializing the ensemble ...")
         
         if params["default_run"] and size_world > params["Nens"]:
-            # debug
             sub_shape = model_kwargs['dim_list'][sub_rank]
             model_kwargs.update({"statevec_ens":np.zeros((sub_shape, params["Nens"]))})
-
             model_kwargs.update({"ens_id": color, "rank": sub_rank, "color": color, "comm": subcomm})
 
-            # ensemble_vec, shape_ens  = model_module.initialize_ensemble_debug(color,**model_kwargs)
-            # ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
-            # parallel_write_full_ensemble_from_root(0, ens_mean, params,ensemble_vec,comm_world)
-            # -----------------------------------------------------
-
             ens = color
-            # model_kwargs.update({"statevec_ens":np.zeros((model_kwargs['global_shape'], params["Nens"]))})
             initialilaized_state = model_module.initialize_ensemble(ens,**model_kwargs)
-            # ensemble_vec, shape_ens = gather_and_broadcast_data_default_run(initialilaized_state, subcomm, sub_rank, comm_world, rank_world, params)
-            # ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
-            # parallel_write_full_ensemble_from_root(0, ens_mean, params,ensemble_vec,comm_world)
-            # ensemble_vec = BM.bcast(ensemble_vec, comm_world)
             
             initial_data = {key: subcomm.gather(value, root=0) for key, value in initialilaized_state.items()}
             key_list = list(initial_data.keys())
             state_keys = key_list[:params["num_state_vars"]]
             if sub_rank == 0:
-                # for key in initial_data:
                 for key in key_list:
                     initial_data[key] = np.hstack(initial_data[key])
                     if model_kwargs["joint_estimation"] or params["localization_flag"]:
@@ -468,23 +318,15 @@ def ensemble_initialization(**model_kwargs):
                         hdim = initial_data[key].shape[0] // params["num_state_vars"]
                     state_block_size = hdim*params["num_state_vars"]
                     full_block_size = hdim*params["total_state_param_vars"]
-                    # if key in state_keys:
-                        # noise = np.random.normal(0, 0.1, state_block_size)
-                        # Q_err = np.eye(state_block_size) * params["sig_Q"] ** 2
-                        # Q_err = np.eye(state_block_size) * 0.01 ** 2
                     if model_kwargs.get("random_fields",False):
                         Q_err = np.zeros((full_block_size,full_block_size))
                         for i, sig in enumerate(params["sig_Q"]):
                             start_idx = i *hdim
                             end_idx = start_idx + hdim
                             Q_err[start_idx:end_idx,start_idx:end_idx] = np.eye(hdim) * sig ** 2
-
-                        # noise = multivariate_normal.rvs(mean=np.zeros(state_block_size), cov=Q_err)
                         _time_init_noise_generation = MPI.Wtime()
                         noise = compute_noise_random_fields(ens, hdim, pos, gs_model, params["total_state_param_vars"], L_C)
                         time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
-                        # initial_data[key][:state_block_size] += noise[:state_block_size]
-                        # noise = noise / np.max(np.abs(noise))
                         initial_data[key] += noise
                     else:
                         N_size = params["total_state_param_vars"] * hdim
@@ -493,18 +335,12 @@ def ensemble_initialization(**model_kwargs):
                         noise = generate_enkf_field(**model_kwargs)
                         time_init_noise_generation += MPI.Wtime() - _time_init_noise_generation
                         initial_data[key] += noise
-                        # for ii, sig in enumerate(params["sig_Q"]):
-                        #     start_idx = ii *hdim
-                        #     end_idx = start_idx + hdim
-                        #     initial_data[key][start_idx:end_idx] += noise[start_idx:end_idx]*sig
                     
-                # stack all variables together into a single array
                 stacked = np.hstack([initial_data[key] for key in initialilaized_state.keys()])
                 shape_ens = np.array(stacked.shape,dtype=np.int32)
             else:
                 shape_ens = np.empty(2,dtype=np.int32)
 
-            # broadcast the shape of the initialized ensemble
             shape_ens = comm_world.bcast(shape_ens, root=0)
 
             if sub_rank != 0:
@@ -515,7 +351,6 @@ def ensemble_initialization(**model_kwargs):
             if rank_world == 0:
                 all_init = [arr for arr in all_init if isinstance(arr, np.ndarray)]
                 ensemble_vec = np.column_stack(all_init)
-                # print(f"[ICESEE] Shape of the ensemble: {ensemble_vec.shape}")
             else:
                 ensemble_vec = np.empty((model_kwargs["global_shape"],params["Nens"]),dtype=np.float64)
             
@@ -536,11 +371,9 @@ def ensemble_initialization(**model_kwargs):
                                 "statevec_bg":np.zeros([model_kwargs["global_shape"], model_kwargs.get("nt",params["nt"]) + 1])})
             ensemble_bg, ensemble_vec, ensemble_vec_mean, ensemble_vec_full = model_module.initialize_ensemble(**model_kwargs)
 
-            # gather from every rank to rank 0
             gathered_ensemble = comm_world.gather(ensemble_vec[:sub_shape,:], root=0)
             if rank_world == 0:
                 ensemble_vec = np.vstack(gathered_ensemble)
-                print(f"[ICESEE] Shape of the ensemble: {ensemble_vec.shape}")
                 ensemble_vec_mean[:,0] = np.mean(ensemble_vec, axis=1)
                 ensemble_vec_full[:,:,0] = ensemble_vec
             else:
@@ -548,20 +381,9 @@ def ensemble_initialization(**model_kwargs):
                 ensemble_vec_mean = np.empty((model_kwargs["global_shape"],model_kwargs.get("nt",params["nt"])+1),dtype=np.float64)
                 ensemble_vec_full = np.empty((model_kwargs["global_shape"],params["Nens"],model_kwargs.get("nt",params["nt"])+1),dtype=np.float64)
 
-            # else:
-            #     ensemble_bg = np.empty((model_kwargs["global_shape"],model_kwargs.get("nt",params["nt"])+1),dtype=np.float64)
-            #     ensemble_vec = np.empty((model_kwargs["global_shape"],params["Nens"]),dtype=np.float64)
-            #     ensemble_vec_mean = np.empty((model_kwargs["global_shape"],model_kwargs.get("nt",params["nt"])+1),dtype=np.float64)
-            #     ensemble_vec_full = np.empty((model_kwargs["global_shape"],params["Nens"],model_kwargs.get("nt",params["nt"])+1),dtype=np.float64)
-
-            # # Bcast the ensemble
-            # comm_world.Bcast(ensemble_bg, root=0)
             comm_world.Bcast(ensemble_vec, root=0)
             comm_world.Bcast(ensemble_vec_mean, root=0)
             comm_world.Bcast(ensemble_vec_full, root=0)
-
-            # hdim = ensemble_vec.shape[0] // params["total_state_param_vars"]
-            # print(f"[ICESEE] rank: {rank_world}, subrank: {sub_rank}, min ensemble: {np.min(ensemble_vec[hdim,:])}, max ensemble: {np.max(ensemble_vec[hdim,:])}")
 
     if params.get("default_run", False):
         return model_kwargs, ensemble_vec, time_init_noise_generation, \
@@ -571,7 +393,6 @@ def ensemble_initialization(**model_kwargs):
         return model_kwargs, ensemble_vec, time_init_noise_generation, \
                time_init_ensemble_mean_computation, time_init_file_writing, \
                 shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full
-    
 
 
 def ensemble_initialization_full_parallel_run(**model_kwargs):
@@ -609,6 +430,16 @@ def ensemble_initialization_full_parallel_run(**model_kwargs):
     time_init_noise_generation = 0.0
     time_init_file_writing     = 0.0
     time_init_ensemble_mean_computation = 0.0
+
+    observed_vars = model_kwargs.get("observed_vars", [])
+    observed_params = model_kwargs.get("observed_params", [])
+
+    all_observed = list(observed_vars) + list(observed_params)
+
+    model_kwargs["observed_vars_params"] = all_observed
+    model_kwargs["all_observed"] = all_observed
+    params["all_observed"] = all_observed
+    params["nd_observed"] = len(all_observed) * (params["nd"] // params["total_state_param_vars"])
 
     if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
         if params["default_run"] and size_world <= params["Nens"] and not (model_kwargs.get("sequential_ensemble_initialization", False)):

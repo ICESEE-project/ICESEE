@@ -162,5 +162,5 @@ def plot_metrics(df: pd.DataFrame, scaling_type: str):
 
 # Example usage:
 # scaling_type = 'weak_scaling'  # or 'strong_scaling'
-# df = extract_metrics_from_log('icesee_timing.log')
+# df = extract_metrics_from_log('_modelrun_datasets/diagnostics/icesee_timing.log')
 # plot_metrics(df, scaling_type)

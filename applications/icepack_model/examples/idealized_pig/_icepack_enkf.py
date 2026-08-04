@@ -12,6 +12,11 @@ import h5py
 # --- import run_simulation function from the available examples ---
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_model import *
 from ICESEE.config._utility_imports import icesee_get_index
+from ICESEE.applications.icepack_model.icepack_utils._coordinates import (
+    register_icepack_coordinate_provider,
+)
+
+register_icepack_coordinate_provider()
 
 
 # --- Forecast step ---

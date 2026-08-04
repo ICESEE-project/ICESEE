@@ -31,6 +31,7 @@ from ICESEE.src.EnKF._localization_inflation import  LocalizationInflationUtils
 from ICESEE.src.EnKF._generate_synthetic_observations import generate_synthetic_observations
 from ICESEE.src.EnKF._generate_true_wrong_state import generate_true_wrong_state
 from ICESEE.src.EnKF._ensemble_initialization import ensemble_initialization
+from ICESEE.src.utils.localization import prepare_random_field_coordinates
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
                               generate_pseudo_random_field_1d, \
@@ -94,7 +95,8 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
     all_observed = model_kwargs['observed_vars_params']
     model_kwargs['all_observed'] = all_observed; params['all_observed'] = all_observed
 
-    _modelrun_datasets = model_kwargs.get("data_path",None)
+    _modelrun_datasets = model_kwargs.get("data_path") or "_modelrun_datasets"
+    os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
     if rank_world == 0 and not os.path.exists(_modelrun_datasets):
         # cretate the directory
         os.makedirs(_modelrun_datasets, exist_ok=True)
@@ -179,6 +181,7 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
     len_scale = model_kwargs.get("length_scale")
     hdim  = params["nd"] // params["total_state_param_vars"]
     model_kwargs.update({"hdim": hdim, "Q_rho": Q_rho, "len_scale": len_scale})
+    prepare_random_field_coordinates(model_kwargs, expected_nodes=hdim)
 
         # --- get the process noise --->
     if params.get("use_random_fields", False):
@@ -378,7 +381,11 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
        
         # -------------- Analysis step
         # generate Observation schedule
-        obs_t, ind_m, m_obs = UtilsFunctions(params, ensemble_vec).generate_observation_schedule(**model_kwargs)
+        obs_t, ind_m, m_obs = UtilsFunctions(
+            params=params,
+            model_kwargs=model_kwargs,
+            ensemble=ensemble_vec,
+        ).generate_observation_schedule(**model_kwargs)
         params.update({"number_obs_instants": m_obs, 'obs_index': ind_m})
         model_kwargs.update({"m_obs": m_obs, "obs_t": obs_t, "obs_index": ind_m})
         model_kwargs.update({"params": params})
@@ -452,7 +459,11 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
             #                 parallel_flag=   parallel_flag)
 
             # Create default functions object once
-            utils = UtilsFunctions(params, ensemble_vec)
+            utils = UtilsFunctions(
+                params=params,
+                model_kwargs=model_kwargs,
+                ensemble=ensemble_vec,
+            )
 
             if hasattr(model_module, "Cov_Obs_fun") and callable(model_module.Cov_Obs_fun):
                 R = model_module.Cov_Obs_fun(sig_obs=params["sig_obs"][0],  nd=nd, kwargs=model_kwargs)
@@ -559,6 +570,7 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
     # else:
     save_all_data(
         enkf_params=model_kwargs['enkf_params'],
+        data_path=_modelrun_datasets,
         nofilter=True,
         t=model_kwargs["t"], b_io=np.array([b_in,b_out]),
         Lxy=np.array([Lx,Ly]),nxy=np.array([nx,ny]),
@@ -632,5 +644,3 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
     #         display_timing_default(total_elapsed_time, total_wall_time)
     # else:
     #     None
-
-

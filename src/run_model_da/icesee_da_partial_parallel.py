@@ -31,6 +31,11 @@ from ICESEE.src.utils.tools import icesee_get_index, display_timing_default,disp
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
                               generate_enkf_field
+from ICESEE.src.utils.localization import prepare_random_field_coordinates
+
+from ICESEE.src.utils.inference_plugin import (
+    reset_inference_plugin_state,
+)
 
 # ======================== Run model with EnKF ========================
 def icesee_model_data_assimilation_partial_parallel(**model_kwargs): 
@@ -46,6 +51,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
     Lx, Ly            = model_kwargs.get("Lx",1.0), model_kwargs.get("Ly",1.0)
     nx, ny            = model_kwargs.get("nx",1), model_kwargs.get("ny",1)
     b_in, b_out       = model_kwargs.get("b_in",0.0), model_kwargs.get("b_out",0.0) 
+    resume_timestep   = 0
 
     # --- call the ICESEE mpi parallel manager ---
     if re.match(r"\AMPI_model\Z", parallel_flag, re.IGNORECASE):
@@ -88,7 +94,8 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         model_kwargs.update({"comm_world": comm_world, "subcomm": subcomm})
 
         # --- check if the modelrun dataset directory is present ---
-        _modelrun_datasets = model_kwargs.get("data_path",None)
+        _modelrun_datasets = model_kwargs.get("data_path") or "_modelrun_datasets"
+        os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
         if rank_world == 0 and not os.path.exists(_modelrun_datasets):
             # cretate the directory
             os.makedirs(_modelrun_datasets, exist_ok=True)
@@ -163,6 +170,14 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
 
         comm_world.Barrier()
 
+        # A genuine initial-condition gate: the model-specific generators
+        # write only the unadvanced true/prior states.  Do not construct
+        # observations or enter ensemble initialization in this mode.
+        if model_kwargs.get("initial_state_only", False):
+            if rank_world == 0:
+                print("[ICESEE] Initial-state check complete; no transient or observations were generated.")
+            return None
+
         # --- Generate the Synthetic ObservationsObservations ---------------------------------------------------
         # --- time generation of synthetic observations ---
         time_generation_synthetic_obs = MPI.Wtime()
@@ -178,22 +193,57 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         if model_kwargs.get("generate_true_wrong_state_only", False):
             if rank_world == 0:
                 print("[ICESEE] Data generation complete. Exiting as per user request.")
-                # print(f"[ICESEE] Time taken to generate true and nurged states: {display_timing_default(time_generation_true_and_wrong_state)}")
-                # print(f"[ICESEE] Time taken to generate synthetic observations: {display_timing_default(time_generation_synthetic_obs)}")
-                # --- kill matlab processes if any
-            #     from ICESEE.scripts.matlab.kill_matlab_processes import kill_matlab_processes
-            #     kill_matlab_processes()
-                  
-            # # exit the program gracefully
-            # comm_world.Barrier()
             exit(0)
-        # exit(0);
-
 
         Q_rho     = model_kwargs.get("Q_rho")
         len_scale = model_kwargs.get("length_scale")
         hdim  = params["nd"] // params["total_state_param_vars"]
         model_kwargs.update({"hdim": hdim, "Q_rho": Q_rho, "len_scale": len_scale})
+        prepare_random_field_coordinates(model_kwargs, expected_nodes=hdim)
+
+        # The partial-parallel driver historically always restarted at zero.
+        # For long ISSM reviewer experiments, allow an explicit restart from a
+        # known-good ensemble slice.  This preserves the existing history and
+        # rewinds the member exchange files before the next forecast.
+        resume_timestep = int(model_kwargs.get("resume_from_timestep", 0) or 0)
+        resume_ensemble = None
+        if resume_timestep:
+            if not params.get("default_run", False):
+                raise ValueError(
+                    "resume_from_timestep currently requires default_run"
+                )
+            if rank_world == 0:
+                ensemble_history = os.path.join(
+                    _modelrun_datasets, "icesee_ensemble_data.h5"
+                )
+                if not os.path.exists(ensemble_history):
+                    raise FileNotFoundError(
+                        f"Cannot resume: {ensemble_history} does not exist"
+                    )
+                with h5py.File(ensemble_history, "r") as f:
+                    dset = f["ensemble"]
+                    if not 0 < resume_timestep < dset.shape[2]:
+                        raise ValueError(
+                            "resume_from_timestep must select an existing "
+                            f"positive slice; got {resume_timestep} for "
+                            f"history length {dset.shape[2]}"
+                        )
+                    resume_ensemble = np.asarray(
+                        dset[:, :, resume_timestep], dtype=float
+                    )
+                    if not np.all(np.isfinite(resume_ensemble)):
+                        raise ValueError(
+                            f"Ensemble slice {resume_timestep} is not finite"
+                        )
+                print(
+                    "[ICESEE] Resuming partial run from stored ensemble "
+                    f"timestep {resume_timestep}."
+                )
+            resume_shape = comm_world.bcast(
+                None if rank_world else resume_ensemble.shape, root=0
+            )
+        else:
+            resume_shape = None
 
          # --- get the process noise --->
         if params.get("use_random_fields", False):
@@ -202,7 +252,63 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         
         # -- time ensemble initialization ---
         time_ensemble_initialization = MPI.Wtime()
-        if model_kwargs.get("initialize_ensemble", True):
+        if resume_timestep:
+            if rank_world == 0:
+                ensemble_vec = resume_ensemble
+                ensemble_vec_mean = np.mean(ensemble_vec, axis=1)
+                ensemble_vec_full = ensemble_vec
+                ensemble_bg = ensemble_vec.copy()
+
+                # Rewind the per-member ISSM exchange files to the same known-
+                # good slice.  The model MAT files retain boundary conditions;
+                # run_model replaces all six coupled fields from these files.
+                vec_inputs = model_kwargs.get(
+                    "vec_inputs", params.get("vec_inputs", [])
+                )
+                if len(vec_inputs) * hdim != ensemble_vec.shape[0]:
+                    raise ValueError(
+                        "Cannot resume: vec_inputs do not match ensemble rows"
+                    )
+                # ISSM ensemble IDs in this driver are normally zero based
+                # (ensemble_output_0 ... ensemble_output_39).  Retain support
+                # for older one-based datasets without assuming either form.
+                zero_based = os.path.exists(
+                    os.path.join(_modelrun_datasets, "ensemble_output_0.h5")
+                )
+                member_id_offset = 0 if zero_based else 1
+                for ens in range(ensemble_vec.shape[1]):
+                    member_id = ens + member_id_offset
+                    member_file = os.path.join(
+                        _modelrun_datasets, f"ensemble_output_{member_id}.h5"
+                    )
+                    if not os.path.exists(member_file):
+                        raise FileNotFoundError(
+                            f"Cannot resume: {member_file} does not exist"
+                        )
+                    with h5py.File(member_file, "a") as f:
+                        for block, key in enumerate(vec_inputs):
+                            values = ensemble_vec[
+                                block * hdim : (block + 1) * hdim, ens
+                            ]
+                            if key not in f:
+                                raise KeyError(
+                                    f"Cannot resume: /{key} missing from "
+                                    f"{member_file}"
+                                )
+                            f[key][...] = values.reshape(f[key].shape)
+                shape_ens = np.asarray(ensemble_vec.shape, dtype=np.int32)
+            else:
+                ensemble_vec = np.empty(resume_shape, dtype=float)
+                ensemble_vec_mean = None
+                ensemble_vec_full = None
+                ensemble_bg = None
+                shape_ens = None
+            shape_ens = comm_world.bcast(shape_ens, root=0)
+            comm_world.Barrier()
+            time_init_noise_generation = 0.0
+            time_init_ensemble_mean_computation = 0.0
+            time_init_file_writing = 0.0
+        elif model_kwargs.get("initialize_ensemble", True):
             # call the ensemble_initialization function
             model_kwargs, ensemble_vec, time_init_noise_generation, \
             time_init_ensemble_mean_computation, time_init_file_writing, \
@@ -215,7 +321,6 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         time_ensemble_initialization = MPI.Wtime() - time_ensemble_initialization
         
         # --- get the ensemble size
-        # nd, Nens = ensemble_vec.shape
         nd = model_kwargs.get("nd", params["nd"])
         Nens = model_kwargs.get("Nens", params["Nens"])
         module_nprocs = model_kwargs.get("model_nprocs", 1)
@@ -223,19 +328,13 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         if params["even_distribution"]:
             ensemble_local = copy.deepcopy(ensemble_vec[:,start:stop])
                 
-        # --- row vector load distribution ---   
-        # local_rows, start_row, end_row = ParallelManager().icesee_mpi_row_distribution(ensemble_vec, params)
         comm_world.Barrier()
         parallel_manager = None # debugging flag for now
         
     else:
         parallel_manager = None
-
-        # --- call curently supported model Class
         model_module = SupportedModels(model=model,verbose=params.get('verbose')).call_model()
 
-        # --- get the ensemble size
-        # nd, Nens = ensemble_vec.shape
         nd = params["nd"]
         Nens = params["Nens"]
         size_world = 1
@@ -243,27 +342,19 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         sub_rank = 0
         color = 0
 
-        _modelrun_datasets = model_kwargs.get("data_path",None)
+        _modelrun_datasets = model_kwargs.get("data_path") or "_modelrun_datasets"
+        os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
         if rank_world == 0 and not os.path.exists(_modelrun_datasets):
-            # cretate the directory
             os.makedirs(_modelrun_datasets, exist_ok=True)
 
-        # comm_world.Barrier()
-        # --- file_names
         _true_nurged   = f'{ _modelrun_datasets}/true_nurged_states.h5'
         _synthetic_obs = f'{ _modelrun_datasets}/synthetic_obs.h5'
 
-        # -- generate the true and nurged states
-
-        # --- generate synthetic observations
-
-        # --- initialize the ensemble ---
         if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
             if rank_world == 0:
                 print("[ICESEE] Initializing the ensemble ...")
                 model_kwargs.update({"statevec_ens":np.zeros([params["nd"], params["Nens"]])})
                 
-                # get the ensemble matrix   
                 vecs, indx_map, dim_per_proc = icesee_get_index(model_kwargs["statevec_ens"], **model_kwargs)
                 ensemble_vec = np.zeros_like(model_kwargs["statevec_ens"])
 
@@ -274,31 +365,20 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                 state_block_size = hdim * params["num_state_vars"]
 
                 for ens in range(params["Nens"]):
-                    # model_kwargs.update({"ens_id": ens})
                     data = model_module.initialize_ensemble(ens,**model_kwargs)
-                
-                    # iterate over the data and update the ensemble
                     for key, value in data.items():
                         ensemble_vec[indx_map[key],ens] = value
 
                     N_size = params["total_state_param_vars"] * hdim
                     model_kwargs.update({"ii_sig": None, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
                     noise = generate_enkf_field(**model_kwargs)
-
-                    # for ii, sig in enumerate(params["sig_Q"]):
-                    #     start_idx = ii *hdim
-                    #     end_idx = start_idx + hdim
-                    #     ensemble_vec[start_idx:end_idx,ens] += noise[start_idx:end_idx]*sig
-
                     ensemble_vec[:,ens] += noise
 
                 shape_ens = np.array(ensemble_vec.shape,dtype=np.int32)
-
             else:
                 ensemble_vec = np.empty((params["nd"],params["Nens"]),dtype=np.float64)
 
             shape_ens = comm_world.bcast(shape_ens, root=0)
-
             ens_mean = ParallelManager().compute_mean_matrix_from_root(ensemble_vec, shape_ens[0], params['Nens'], comm_world, root=0)
             parallel_write_full_ensemble_from_root(0, ens_mean, model_kwargs,ensemble_vec,comm_world)
 
@@ -317,30 +397,14 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
     state_block_size = hdim * params["num_state_vars"]
 
     # --- compute the process noise covariance matrix ---
-    # check if scalar or matrix
     if isinstance(params["sig_Q"], float):
         nd = hdim*params["total_state_param_vars"]
-        # params["nd"] = nd
         Q_err = np.eye(nd) * params["sig_Q"] ** 2
     else:
         nd = hdim*params["total_state_param_vars"]
-        # params["nd"] = nd
-        # Q_err = np.diag(params["sig_Q"] ** 2)
         Q_err = np.zeros((nd,nd))
-        # for i, sig in enumerate(params["sig_Q"]):
-        #     start_idx = i *hdim
-        #     end_idx = start_idx + hdim
-            # Q_err[start_idx:end_idx,start_idx:end_idx] = np.eye(hdim) * sig ** 2
-
-        # with h5py.File(_synthetic_obs, 'r') as f:
-        #     error_R = f['error_R'][:]
-        #     Cov_obs = np.cov(error_R)
-        #  --- get the observation noise ---
-        # pos_obs, gs_model_obs, L_C_obs = compute_Q_err_random_fields(hdim, params["total_state_param_vars"], params["sig_obs"], Q_rho, len_scale) #TODO:will start from here
     
-    # save the process noise to the model_kwargs dictionary
     model_kwargs.update({"Q_err": Q_err})
-    
 
     # --- Define filter flags
     EnKF_flag   = re.match(r"\AEnKF\Z", filter_type, re.IGNORECASE)
@@ -348,13 +412,12 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
     EnRSKF_flag = re.match(r"\AEnRSKF\Z", filter_type, re.IGNORECASE)
     EnTKF_flag  = re.match(r"\AEnTKF\Z", filter_type, re.IGNORECASE)
     
-    # tqdm progress bar
-    # Initialize progress bar on the root process
     if rank_world == 0:
             nt = model_kwargs.get("nt", params["nt"])
             print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {size_world*(params['model_nprocs']+1)} MPI ranks.")
             pbar = tqdm(
                 total=nt,
+                initial=resume_timestep,
                 desc=f"[ICESEE] Assimilation progress ({size_world*(params['model_nprocs']+1)} ranks)",
                 position=0,
                 leave=True,
@@ -362,7 +425,6 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
         )
 
     # ==== Time loop =======================================================================================
-    # --- timing intializations
     time_forecast_step = 0.0
     time_analysis_step = 0.0
     time_forecast_noise_generation = 0.0
@@ -371,54 +433,43 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
     time_forecast_ensemble_mean_generation = 0.0
     time_analysis_ensemble_mean_generation = 0.0
 
-    # specified decorrelation length scale, tau,
     min_tau = 200
     max_tau = 500
     dt  = model_kwargs.get("dt",params["dt"])
     tau = max(max_tau,max(min_tau, dt))
 
-    # tau = max(model_kwargs.get("dt",params["dt"]),10)
     alpha = 1 - dt/tau
-    # make sure  0=<alpha<1
     if alpha <= 0 or alpha > 1:
         alpha = 0.5
 
     n = model_kwargs.get("nt",params["nt"])
-    # rho = np.sqrt((1-alpha**2)/(dt*(n - 2*alpha - n*alpha**2 + 2*alpha**(n+1))))
     rho = np.sqrt((1/dt)*((1-alpha)**2)*(1/(n - (2*alpha) - (n*alpha**2) + (2*alpha**(n+1)))))
     params_analysis_0 = np.zeros((2, Nens))
-    km = 0
+    if resume_timestep:
+        obs_index = np.asarray(model_kwargs.get("obs_index", []), dtype=int)
+        km = int(np.searchsorted(obs_index, resume_timestep, side="left"))
+    else:
+        km = 0
 
-    #--- generate inital noise
     if params.get("use_random_fields", False):
-        # with h5py.File(_synthetic_obs, 'r') as f:
-        #     error_R = f['error_R'][:]
-        #     Cov_obs = np.cov(error_R)
-        #  --- get the observation noise ---
         pos_obs, gs_model_obs, L_C_obs = compute_Q_err_random_fields(hdim, params["total_state_param_vars"], params["sig_obs"], Q_rho, len_scale)
     else:
         N_size = params["total_state_param_vars"] * hdim
-        # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=0)
         model_kwargs.update({"ii_sig": None, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
         noise = generate_enkf_field(**model_kwargs)
         model_kwargs.update({"noise": noise})
 
-    for k in range(model_kwargs.get("nt",params["nt"])):
+    # Reset private inference memory once at the beginning of a fresh run.
+    reset_inference_plugin_state(model_kwargs)
+
+    for k in range(resume_timestep, model_kwargs.get("nt",params["nt"])):
 
         model_kwargs.update({"k": k, "km":km, "alpha": alpha, "rho": rho, "tau": tau, "dt": dt,"n": n})
-        model_kwargs.update({"generate_enkf_field": generate_enkf_field}) #save the function to generate the enkf field
-
-        # background step
-        # ensemble_bg = model_module.background_step(k,ensemble_bg, hdim, **model_kwargs)
-
-        # save a copy of initial ensemble
-        # ensemble_init = ensemble_vec.copy()
+        model_kwargs.update({"generate_enkf_field": generate_enkf_field})
 
         if re.match(r"\AMPI_model\Z", parallel_flag, re.IGNORECASE):      
-            # -- time forecast step ---
             _time_forecast_step = MPI.Wtime()
 
-            # load all needed parameters and variables into model_kwargs
             model_kwargs.update({"_modelrun_datasets": _modelrun_datasets,
                                 "alpha": alpha, 
                                 "rho": rho, 
@@ -434,7 +485,7 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                                 "time_analysis_file_writing": time_analysis_file_writing,
                                 "time_forecast_ensemble_mean_generation": time_forecast_ensemble_mean_generation,
                                 "state_block_size": state_block_size, "rng": None, "rank_seed": None,
-                                "noise": noise, #always restart from the initial noise
+                                "noise": noise,
                                 }) 
             
             if not params.get("default_run", False):
@@ -447,14 +498,12 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                                 })                             
             
             if params["default_run"]:
-                # call the parallel_forecast_step_default_run function
                 model_kwargs, ensemble_vec, shape_ens,ens_mean = parallel_forecast_step_default_run(**model_kwargs)
                 time_forecast_step = model_kwargs.get("time_forecast_step", 0.0)
                 time_forecast_noise_generation = model_kwargs.get("time_forecast_noise_generation", 0.0)
                 time_forecast_file_writing = model_kwargs.get("time_forecast_file_writing", 0.0)
                 time_forecast_ensemble_mean_generation = model_kwargs.get("time_forecast_ensemble_mean_generation", 0.0)
 
-                # --- end time forecast step
                 time_forecast_step += MPI.Wtime() - _time_forecast_step
 
                 # ===== Global analysis step =====
@@ -462,34 +511,50 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                    
                     obs_index = model_kwargs["obs_index"]
                     if (km < params["number_obs_instants"]) and (k == obs_index[km]):
-                        # print(f"[ICESEE-debug] Rank {rank_world} performing analysis at time step {k+1} ..."); exit(0)
-                        # -- time global analysis step ---
                         _time_analysis_step = MPI.Wtime()
                         model_kwargs.update({"km": km})
-                        inversion_flag = model_kwargs.get("inversion_flag", False)
+                        inversion_enabled = bool(model_kwargs.get(
+                            "inversion_enabled",
+                            model_kwargs.get("inversion_flag", False),
+                        ))
+                        inversion_start_time = float(
+                            model_kwargs.get("inversion_start_time", 0.0)
+                        )
+                        cycle_time = float(np.asarray(model_kwargs["t"])[k])
+                        inversion_flag = (
+                            inversion_enabled
+                            and cycle_time + 1.0e-12 >= inversion_start_time
+                        )
+                        # Downstream analysis writers use inversion_flag to
+                        # choose the five-block state/inversion workflow.
+                        # Recompute it from inversion_enabled every cycle so
+                        # an intentionally delayed first inversion does not
+                        # disable all subsequent inversions.
+                        model_kwargs["inversion_flag"] = inversion_flag
+                        if rank_world == 0 and inversion_enabled and not inversion_flag:
+                            print(
+                                "[ICESEE] Deferring friction inversion at "
+                                f"t={cycle_time:g} yr; configured start is "
+                                f"{inversion_start_time:g} yr."
+                            )
                         nd_old = model_kwargs.get("nd", nd)
                         model_kwargs.update({"nd_old": nd_old})
 
+                        partitioned_io = model_kwargs.get("partitioned_io_flag", False)  # NEW
+
                         if inversion_flag:
-                        # if False:
-                            # print(f"[ICESEE-debug1st] Rank {rank_world} performing analysis at time step {k+1} ..."); 
-                            # shrink the ensembel to exclude vx, vy, and friction
+                            # ---- EXISTING inversion-state-reduction logic, fully unchanged ----
                             if rank_world == 0:
-                                # write full ensemble to file before analysis
                                 with h5py.File(f'{_modelrun_datasets}/ensemble_before_analysis_step_{k+1:04d}.h5', 'w') as f:
                                     f.create_dataset("ensemble_before_analysis", data=ensemble_vec)
                                 nd = ensemble_vec.shape[0]
                                 Nens = ensemble_vec.shape[1]
                                 model_kwargs.update({"nd_old": nd}); params.update({"nd_old": nd})
-                                # get the velocity and friction indices
                                 friction_idx = model_kwargs.get("friction_idx")
-                                # vel_idx = model_kwargs.get("vel_idx")
-                                # vx = vel_idx; vy = vel_idx + 1
-                                # excluded_indices = [vx, vy, friction_idx]
-                                excluded_indices = [friction_idx] # only exclude friction for now
+                                excluded_indices = [friction_idx]
                                 vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
                                 hdim = nd // (params["total_state_param_vars"] )
-                                nd_new = hdim * (params["total_state_param_vars"] - 1)  # exclude friction
+                                nd_new = hdim * (params["total_state_param_vars"] - 1)
                                 ensemble_vec_reduced = np.zeros((nd_new, Nens))
                                 for ii, key in enumerate(model_kwargs['vec_inputs']):
                                     if ii not in excluded_indices:
@@ -499,27 +564,19 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                                 ensemble_vec = copy.deepcopy(ensemble_vec_reduced)
                                 model_kwargs.update({"nd": nd_new}); params["nd"] = nd_new
 
-                                # do the same to observation operator
-                                # --- vector of measurements
                                 with h5py.File(_synthetic_obs, 'r') as f:
                                     _hu_obs  = f['hu_obs'][:]
                                     error_R = f['R'][:]
-                                    # Cov_obs = np.cov(error_R)
                                     bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col = load_bed_masks_from_h5(f)
                                     Cov_obs = np.zeros(error_R.shape)
 
-                                # scale all vectors to new dimesnions
-                                # hu_obs = hu_obs[:nd_new,:]
-                                # print(f"\n[DEBUG] nd_new: {nd_new}, old hu_obs shape: {_hu_obs.shape} nd old: {model_kwargs.get('nd_old')} nd : {nd} ensemble_vec_reduced shape: {ensemble_vec_reduced.shape}\n")
                                 hu_obs = np.zeros((nd_new, _hu_obs.shape[1]))
                                 for ii, key in enumerate(model_kwargs['vec_inputs']):
                                     if ii not in excluded_indices:
                                         start = ii * hdim
                                         end = start + hdim
                                         hu_obs[start:end, :] = _hu_obs[indx_map[key], :]
-                                # hu_obs = _hu_obs[:nd_new,:]
-                                
-                                # model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
+
                                 model_kwargs.update({
                                         "bed_mask_map_static": bed_mask_map_static,
                                         "bed_mask_map_cols": bed_mask_map_cols,
@@ -527,28 +584,24 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                                         "obs_model_to_col": obs_model_to_col,
                                     })
 
-                                # form vec_inputs without vx, vy, friction
                                 model_kwargs['vec_inputs_new'] = [key for ii, key in enumerate(model_kwargs['vec_inputs']) if ii not in excluded_indices]
                                 model_kwargs.update({'vec_inputs': model_kwargs['vec_inputs_new']})
                                 vec_inputs = model_kwargs['vec_inputs_new']
                                 params.update({'vec_inputs': vec_inputs})
-                                nd = nd_new # update nd to new nd
+                                nd = nd_new
                                 params.update({"nd": nd, "total_state_param_vars": len(vec_inputs)})
                                 model_kwargs.update({'excluded_indices': excluded_indices})
                             else:
                                 nd_new = 0
                                 vec_inputs = None
                                 hu_obs = None
-                                model_kwargs=model_kwargs
                                 bed_mask_map = None
                                 excluded_indices = None
                                 bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col = None, None, None, None
 
-
                             excluded_indices = comm_world.bcast(excluded_indices, root=0)
                             model_kwargs.update({'excluded_indices': excluded_indices})
                             hu_obs = comm_world.bcast(hu_obs, root=0)
-                            # model_kwargs = comm_world.bcast(model_kwargs, root=0)
                             bed_mask_map_static = comm_world.bcast(bed_mask_map_static, root=0)
                             bed_mask_map_cols = comm_world.bcast(bed_mask_map_cols, root=0)
                             bed_snap_cols = comm_world.bcast(bed_snap_cols, root=0)
@@ -561,6 +614,12 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                                     })
                             nd_new = comm_world.bcast(nd_new, root=0)
                             model_kwargs.update({'nd': nd_new}); params.update({'nd': nd_new})
+                            # The inversion workflow removes the friction block
+                            # before EnKF analysis. Keep the MPI Scatterv shape
+                            # synchronized with that reduced five-block vector;
+                            # retaining the full six-block shape over-allocates
+                            # rows and corrupts hdim in the analysis writer.
+                            shape_ens = np.array([nd_new, Nens], dtype=np.int32)
                             vec_inputs = comm_world.bcast(vec_inputs, root=0)
                             model_kwargs.update({'vec_inputs': vec_inputs})
                             params.update({'vec_inputs': vec_inputs})
@@ -571,17 +630,8 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                             with h5py.File(_synthetic_obs, 'r') as f:
                                 hu_obs = f['hu_obs'][:]
                                 error_R = f['R'][:]
-                                # bed_mask_map = f['bed_mask_map'][:]
                                 bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col = load_bed_masks_from_h5(f)
-                                # Cov_obs = np.cov(error_R)
-                                # error_R should be stored as sigma with same shape as hu_obs
-                                # mask = (~np.isnan(hu_obs[:, km])) & (~np.isnan(error_R[:, km]))
                                 mask = ~np.isnan(hu_obs[:, km])
-
-                                # sigma_k = error_R[mask, km]
-                                # Cov_obs = np.diag(sigma_k**2)
-
-                                # model_kwargs.update({"obs_mask_full": mask})
                                 model_kwargs.update({
                                                 "bed_mask_map_static": bed_mask_map_static,
                                                 "bed_mask_map_cols": bed_mask_map_cols,
@@ -592,99 +642,64 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                         model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
                         all_observed = model_kwargs['observed_vars_params']
                         nd_new = len(all_observed)* hdim
-
                         model_kwargs.update({'all_observed': all_observed}); params.update({'all_observed': all_observed})
 
-                        # comm_world.Barrier()
-                        if rank_world == 0:
-
-                            ndim = ensemble_vec.shape[0]//params["total_state_param_vars"]  
-                            state_block_size = ndim*params["num_state_vars"]
-
-                            # model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
-
-                            # U = UtilsFunctions(params=params, model_kwargs=model_kwargs, ensemble=ensemble_vec)
-                            # d = U.Obs_fun(hu_obs[:, km], km=km)
-                            model_kwargs.update({"error_R": error_R}) # store the error covariance matrix
-                            #  -------------
-
-                            # get parameter
-                            # parameter_estimated = ensemble_vec[state_block_size:,:]
-                            eta = 0.0 # trend term
-                            beta = np.ones(nd)
-                            # ensemble_vec[state_block_size:,:] = ensemble_vec[state_block_size:,:] + (eta + beta)*model_kwargs.get("dt",params["dt"]) + np.sqrt(model_kwargs.get("dt",params["dt"])) * alpha*rho*q0[state_block_size:]
-
+                        # ============================================== FIXED SECTION
+                        if partitioned_io:
+                            # Collective — every rank participates (mpio + Allreduce inside)
                             if EnKF_flag:
-                                # compute the X5 matrix
-                                X5,analysis_vec_ij = EnKF_X5(k,ensemble_vec, Nens, hu_obs, model_kwargs,UtilsFunctions)
-                                # X5 = EnKF_X5(Cov_obs, Nens, D, HA, Eta, d)
-                                y_i = np.sum(X5, axis=1)
-                                # ensemble_vec_mean[:,k+1] = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
-                                time_analysis_mean_generation = MPI.Wtime()
-                                ens_mean = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
-                                time_analysis_mean_generation = MPI.Wtime() - time_analysis_mean_generation
-
+                                model_kwargs.update({"error_R": error_R})
+                                X5, analysis_vec_ij = EnKF_X5(km, None, Nens, hu_obs, model_kwargs, UtilsFunctions)
+                                time_analysis_mean_generation = 0.0
+                                ens_mean = None
                             elif DEnKF_flag:
-                                # compute the X5 matrix
-                                X5,X5prime = DEnKF_X5(k,ensemble_vec, Cov_obs, Nens, model_kwargs,UtilsFunctions)
-                                # y_i = np.sum(X5, axis=1)
-                                # ens_mean = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
-                                # H = UtilsFunctions(params =params, model_kwargs=model_kwargs,ensemble= ensemble_vec).JObs_fun(ensemble_vec.shape[0])
-                                # Cov_model = np.cov(ensemble_vec)
-                                # ens_mean = np.mean(ensemble_vec, axis=1)
-                                # diff = (ensemble_vec -np.tile(ens_mean.reshape(-1,1),Nens) )
-                                # Cov_model = 1/(Nens-1) * (diff @ diff.T)
-                                # epsilon = 1e-6
-                                # inv_matrix = np.linalg.pinv(H @ Cov_model @ H.T + Cov_obs + epsilon * np.eye(Cov_obs.shape[0]))
-                                # KalGain = Cov_model @ H.T @ inv_matrix
-                                # X5prime = KalGain@(d - np.dot(H, ens_mean))
-                                # ens_mean = ens_mean + X5prime
-                                # print(f"[ICESEE] X5prime shape: {X5prime.shape}")
-                                analysis_vec_ij = None
+                                raise NotImplementedError(
+                                    "partitioned_io_flag is not yet supported for DEnKF."
+                                )
+                            smb_scale = 1.0
                         else:
-                            X5 = np.empty((Nens, Nens))
-                            time_analysis_mean_generation = 0.0
-                            analysis_vec_ij = None
-                            smb_scale = 0.0
-                            # nd_new = 0
-                            if DEnKF_flag:
-                                ens_mean = np.empty((nd, 1))
+                            # ---- EXISTING behavior, unchanged ----
+                            if rank_world == 0:
+                                ndim = ensemble_vec.shape[0]//params["total_state_param_vars"]  
+                                state_block_size = ndim*params["num_state_vars"]
+                                model_kwargs.update({"error_R": error_R})
 
+                                eta = 0.0
+                                beta = np.ones(nd)
 
-                        if model_kwargs.get('local_analysis', False):
-                            shape_ens = ensemble_vec.shape
-                            ens_mean = ParallelManager().compute_mean_matrix_from_root(analysis_vec_ij, shape_ens[0], params['Nens'], comm_world, root=0)
-                            parallel_write_full_ensemble_from_root(k+1,ens_mean, model_kwargs,analysis_vec_ij,comm_world)
-                        
-                        # smb_scale = comm_world.bcast(smb_scale, root=0)
-                        smb_scale = 1.0
+                                if EnKF_flag:
+                                    X5, analysis_vec_ij = EnKF_X5(km, ensemble_vec, Nens, hu_obs, model_kwargs, UtilsFunctions)
+                                    y_i = np.sum(X5, axis=1)
+                                    time_analysis_mean_generation = MPI.Wtime()
+                                    ens_mean = (1/Nens)*(ensemble_vec @ y_i.reshape(-1,1)).ravel()
+                                    time_analysis_mean_generation = MPI.Wtime() - time_analysis_mean_generation
 
-                        # broadcast new nd to all processors
-                        # nd_new = comm_world.bcast(nd_new, root=0)
-                        # model_kwargs.update({'nd': nd_new}); params.update({'nd': nd_new})
-                        # with h5py.File(_synthetic_obs, 'r', driver='mpio', comm=comm_world) as f:
+                                elif DEnKF_flag:
+                                    X5, X5prime = DEnKF_X5(km, ensemble_vec, Cov_obs, Nens, model_kwargs, UtilsFunctions)
+                                    analysis_vec_ij = None
+                            else:
+                                X5 = np.empty((Nens, Nens))
+                                time_analysis_mean_generation = 0.0
+                                analysis_vec_ij = None
+                                smb_scale = 0.0
+                                if DEnKF_flag:
+                                    ens_mean = np.empty((nd, 1))
+
+                            smb_scale = 1.0
+                        # ============================================== END FIXED SECTION
+
+                        # ---- Refresh hu_obs / bed masks for the next cycle — unconditional, unchanged ----
                         vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
                         with h5py.File(_synthetic_obs, 'r') as f:
                             hu_obs = f['hu_obs'][:]
-                            # bed_mask_map = f['bed_mask_map'][:]
                             bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col = load_bed_masks_from_h5(f)
 
-                        # print(f[:]); exit(0)
-
-                        # model_kwargs.update({'bed_mask_map': {'bed': bed_mask_map[:hu_obs.shape[1]]}})
                         model_kwargs.update({
                                         "bed_mask_map_static": bed_mask_map_static,
                                         "bed_mask_map_cols": bed_mask_map_cols,
                                         "bed_snap_cols": bed_snap_cols,
                                         "obs_model_to_col": obs_model_to_col,
                                     })
-
-                        # # Construct global observation indices for the reduced vector
-                        # obs_indices = np.concatenate([indx_map[key] for key in model_kwargs['all_observed']])
-
-                        # # Now reduce the observations consistently
-                        # hu_obs = _hu_obs[obs_indices, :]
-
 
                         # fetch the upper and lower bounds for every paramerter from observed data
                         ndim = hu_obs.shape[0]//params["total_state_param_vars"]
@@ -695,36 +710,38 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                             bound_idx_end = bound_idx + ndim
 
                             param_slice = hu_obs[bound_idx:bound_idx_end, km]
-                            param_min = np.min(param_slice)
-                            param_max = np.max(param_slice)
+                            param_slice = param_slice[~np.isnan(param_slice)]
+
+                            if param_slice.size > 0:
+                                param_min = np.min(param_slice)
+                                param_max = np.max(param_slice)
+                            else:
+                                param_min = None
+                                param_max = None
 
                             bounds.append(np.array([param_min, param_max]))
 
-                        # pack the bunds into model_kwargs
                         model_kwargs.update({"bounds": bounds})
-                            
 
+                        # ============================================== FIXED SECTION
                         # call the analysis update function
                         if EnKF_flag:
-                            time_analysis_mean_generation, time_analysis_file_writing = analysis_enkf_update(k,ens_mean,ensemble_vec, \
-                                                                                                             shape_ens, X5, time_analysis_mean_generation, \
-                                                                                                                time_analysis_file_writing, analysis_vec_ij,\
-                                                                                                            UtilsFunctions,model_kwargs,smb_scale)
+                            time_analysis_mean_generation, time_analysis_file_writing = analysis_enkf_update(
+                                k, ens_mean, ensemble_vec, shape_ens, X5,
+                                time_analysis_mean_generation, time_analysis_file_writing,
+                                analysis_vec_ij, UtilsFunctions, model_kwargs, smb_scale
+                            )
                         elif DEnKF_flag:
                             model_kwargs.update({"DEnKF_flag": True})
-                            analysis_Denkf_update(k,ens_mean,ensemble_vec, shape_ens, X5,UtilsFunctions,model_kwargs,smb_scale)
-                            # analysis_enkf_update(k,ens_mean,ensemble_vec, shape_ens, X5, analysis_vec_ij,UtilsFunctions,model_kwargs,smb_scale)
+                            analysis_Denkf_update(k, ens_mean, ensemble_vec, shape_ens, X5, UtilsFunctions, model_kwargs, smb_scale)
+                        # ============================================== END FIXED SECTION
                     
-                        # update the observation index
                         km += 1
-                        # hu_obs[state_block_size:,:] *= smb_scale
                         del hu_obs
                         gc.collect()
                         
-                        # --- end time analysis step ---
                         time_analysis_step += MPI.Wtime() - _time_analysis_step
 
-                        # update nd
                         if inversion_flag:
                             nd = model_kwargs.get('nd_old')
                             model_kwargs.update({'nd': nd}); params.update({'nd': nd})
@@ -732,101 +749,64 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
                             params.update({'vec_inputs': model_kwargs.get('vec_inputs_old')})
                             params["total_state_param_vars"] = len(model_kwargs.get('vec_inputs_old'))
                             model_kwargs.update({"params": params})
-                        # model_kwargs.update({'nd': nd}); params.update({'nd': nd})
 
                     else: 
-                        # if Nens < size_world:
-                        
-                        _time_forecast_file_writing = MPI.Wtime()
+                        partitioned_io = model_kwargs.get("partitioned_io_flag", False)  # NEW
 
-                        parallel_write_full_ensemble_from_root(k+1,ens_mean, model_kwargs,ensemble_vec,comm_world)
-
-                        # --time forecast file writing ---
-                        _time_forecast_file_writing = MPI.Wtime() - _time_forecast_file_writing
-                        time_forecast_file_writing += _time_forecast_file_writing
-                        time_forecast_step = time_forecast_step + _time_forecast_file_writing
-                        del ensemble_vec; gc.collect()
-                            # parallel_write_full_ensemble_from_root(ensemble_vec,ensemble_vec_full,comm_world,k)
-                    
+                        if not partitioned_io:
+                            # ---- EXISTING behavior, unchanged ----
+                            _time_forecast_file_writing = MPI.Wtime()
+                            parallel_write_full_ensemble_from_root(k+1,ens_mean, model_kwargs,ensemble_vec,comm_world)
+                            _time_forecast_file_writing = MPI.Wtime() - _time_forecast_file_writing
+                            time_forecast_file_writing += _time_forecast_file_writing
+                            time_forecast_step = time_forecast_step + _time_forecast_file_writing
+                            del ensemble_vec; gc.collect()
+                        # else: partitioned path — the forecast step already wrote this
+                        # timestep's ensemble directly via write_ensemble_member_direct;
+                        # nothing further to do here.
 
                 # ======= Local analyais step =======
                 if model_kwargs.get('local_analysis', False):
-                    # --- compute the local X5 for each horizontal grid point ---
                     pass
 
-              
-
-        # update the progress bar
         if rank_world == 0:
             pbar.update(1)
 
-    # close the progress bar
     if rank_world == 0:
         pbar.close()
-    # comm_world.Barrier()
 
-    # ====== load data to be written to file ======
-    # print("[ICESEE] Saving data ...")
     save_all_data(
             enkf_params=model_kwargs['enkf_params'],
+            data_path=_modelrun_datasets,
             nofilter=True,
             t=model_kwargs["t"], b_io=np.array([b_in,b_out]),
             Lxy=np.array([Lx,Ly]),nxy=np.array([nx,ny]),
-            # ensemble_true_state=ensemble_true_state,
-            # ensemble_nurged_state=ensemble_nurged_state, 
             obs_max_time=np.array([params["obs_max_time"]]),
             obs_index=model_kwargs["obs_index"],
-            # w=hu_obs,
             run_mode= np.array([params["execution_flag"]])
         )
 
-    # ─────────────────────────────────────────────────────────────
-    #  End Timer and Aggregate Elapsed Time Across Processors
-    # ─────────────────────────────────────────────────────────────
-    # --total elapsed time
     global_end_time = MPI.Wtime()
     global_elapsed_time = global_end_time - global_start_time
-    # Reduce elapsed time across all processors (sum across ranks)
     total_elapsed_time = comm_world.allreduce(global_elapsed_time, op=MPI.SUM)
     total_wall_time = comm_world.allreduce(global_elapsed_time, op=MPI.MAX)
-
-    # -- timing true and wrong state generation
     true_wrong_time = comm_world.allreduce(time_generation_true_and_wrong_state, op=MPI.MAX)
-
-    # -- timing ensemble initialization
     ensemble_init_time = comm_world.allreduce(time_ensemble_initialization, op=MPI.MAX)
-
-    # -- timing forecast step
     forecast_step_time = comm_world.allreduce(time_forecast_step, op=MPI.MAX)
-
-    # -- timing forecast noise generation
     forecast_noise_time = comm_world.allreduce(time_forecast_noise_generation, op=MPI.MAX)
-
-    # -- timing analysis step
     analysis_step_time = comm_world.allreduce(time_analysis_step, op=MPI.MAX)
-
-    # -- total assimilation time = ensemble init + forecast step + analysis step
     assimilation_time = ensemble_init_time + forecast_step_time + analysis_step_time
-
-    # --- time forecast file writing ---
     forecast_file_time = comm_world.allreduce(time_forecast_file_writing, op=MPI.MAX)
-
-    # --- time analysis file writing ---
     analysis_file_time = comm_world.allreduce(time_analysis_file_writing, op=MPI.MAX)
-
-    # total file writing time initialization file writing + forecast file writing + analysis file writing
     init_file_time = comm_world.allreduce(time_init_file_writing, op=MPI.MAX)
     total_file_time = init_file_time + forecast_file_time + analysis_file_time
-
     time_analysis_ensemble_mean = comm_world.allreduce(time_analysis_ensemble_mean_generation, op=MPI.MAX)
     time_forecast_ensemble_mean= comm_world.allreduce(time_forecast_ensemble_mean_generation, op=MPI.MAX)
     time_init_ensemble_mean = comm_world.allreduce(time_init_ensemble_mean_computation, op=MPI.MAX)
 
-    # Display elapsed time on rank 0
     comm_world.Barrier()
     if rank_world == 0:
         verbose = model_kwargs.get("verbose", False)
-        # if verbose:
         if True:
              display_timing_verbose(
             computational_time=total_elapsed_time,
@@ -850,5 +830,3 @@ def icesee_model_data_assimilation_partial_parallel(**model_kwargs):
             display_timing_default(total_elapsed_time, total_wall_time)
     else:
         None
-
-

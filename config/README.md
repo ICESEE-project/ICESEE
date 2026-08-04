@@ -1,6 +1,15 @@
 <!-- BEGIN: ICESEE-FLAGS -->
 ## All Main Flags Used in ICESEE
 
+### Run-output layout
+
+`data_path` is the single root for the outputs of one experiment. The default is
+`_modelrun_datasets`. State and summary HDF5 files are written directly under
+this root; publication figures are written to `figures/`, timing logs and other
+diagnostics to `diagnostics/`, and resumable state to `_checkpoints/`. Plotting
+and post-processing scripts should read from the same `data_path` rather than
+from separate top-level `results/` or `figures/` directories.
+
 | Name | Description | Type | Default | Required | Choices | Source |
 |------|-------------|------|---------|----------|---------|--------|
 | `--Nens` | ensemble members | int | 1 | No | None | CLI |
@@ -60,7 +69,8 @@
 | `joint_estimated_params` | Variable used for joint estimated params in script logic | Unknown | Computed | No | None | Variable |
 | `joint_estimation` | add joint estimation flag to params | Unknown | Unknown | No | None | Dictionary |
 | `k_start_override` | YAML configuration parameter for k start override | NoneType | None | No | None | YAML |
-| `length_scale` | YAML configuration parameter for length scale | list | [] | No | None | YAML |
+| `length_scale` | FFT decorrelation scale(s), passed to the random-field generator as `rh`; ignored when `random_field_method: graph` | list | [] | No | Positive scalar or one value per field block | YAML |
+| `random_field_method` | Spatial backend for pseudo-random EnKF fields; `graph` uses application-registered physical node coordinates | str | fft | No | fft, graph | YAML |
 | `local_analysis` | YAML configuration parameter for local analysis | bool | False | No | None | YAML |
 | `localization_flag` | --- Ensemble Parameters --- | Unknown | Computed | No | None | Dictionary |
 | `m_obs` | Parameter for m obs in dictionary | Unknown | Computed(num_observations) | No | None | Dictionary |

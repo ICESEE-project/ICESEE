@@ -41,6 +41,7 @@ from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_field
                               generate_pseudo_random_field_1d, \
                               generate_pseudo_random_field_2D, \
                               generate_enkf_field
+from ICESEE.src.utils.localization import prepare_random_field_coordinates
 
 # --- call the ICESEE mpi parallel manager ---
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
@@ -103,7 +104,8 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
     model_kwargs.update({"comm_world": comm_world, "subcomm": subcomm})
 
     # --- check if the modelrun dataset directory is present ---
-    _modelrun_datasets = model_kwargs.get("data_path",None)
+    _modelrun_datasets = model_kwargs.get("data_path") or "_modelrun_datasets"
+    os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
     if rank_world == 0 and not os.path.exists(_modelrun_datasets):
         # cretate the directory
         os.makedirs(_modelrun_datasets, exist_ok=True)
@@ -379,6 +381,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         len_scale = model_kwargs.get("length_scale")
         hdim  = params["nd"] // params["total_state_param_vars"]
         model_kwargs.update({"hdim": hdim, "Q_rho": Q_rho, "len_scale": len_scale})
+        prepare_random_field_coordinates(model_kwargs, expected_nodes=hdim)
 
             # --- get the process noise --->
         if params.get("use_random_fields", False):
@@ -575,7 +578,25 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                             _time_analysis_step = MPI.Wtime()
                             model_kwargs.update({'km': km, 'k': k})
 
-                            inversion_flag = model_kwargs.get("inversion_flag", False)
+                            inversion_enabled = bool(model_kwargs.get(
+                                "inversion_enabled",
+                                model_kwargs.get("inversion_flag", False),
+                            ))
+                            inversion_start_time = float(
+                                model_kwargs.get("inversion_start_time", 0.0)
+                            )
+                            cycle_time = float(np.asarray(model_kwargs["t"])[k])
+                            inversion_flag = (
+                                inversion_enabled
+                                and cycle_time + 1.0e-12 >= inversion_start_time
+                            )
+                            model_kwargs["inversion_flag"] = inversion_flag
+                            if rank_world == 0 and inversion_enabled and not inversion_flag:
+                                print(
+                                    "[ICESEE] Deferring friction inversion at "
+                                    f"t={cycle_time:g} yr; configured start is "
+                                    f"{inversion_start_time:g} yr."
+                                )
                             nd_old = model_kwargs.get("nd", nd)
                             model_kwargs.update({"nd_old": nd_old})
         
@@ -632,6 +653,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
             print("[ICESEE] Saving data ...")
         save_all_data(
             enkf_params=model_kwargs['enkf_params'],
+            data_path=_modelrun_datasets,
             nofilter=True,
             t=model_kwargs["t"], b_io=np.array([b_in,b_out]),
             Lxy=np.array([Lx,Ly]),nxy=np.array([nx,ny]),
@@ -839,7 +861,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
             if rank_world == 0:
                 print("[ICESEE] Creating ensemble dataset...")
                 # Option A: no-copy, instant
-                out_vds = finalize_stack("_modelrun_datasets", mode="vds", dset_name="states")
+                out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
                 print("VDS ready:", out_vds)
                 # Option B: portable single file
                 # out_h5 = finalize_stack("_modelrun_datasets", mode="h5", dset_name="states",
@@ -849,5 +871,3 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
         print(f"Traceback details:\n{tb_str}")
         # comm_world.Abort(1)  # Abort all processes in the communicator
-
-

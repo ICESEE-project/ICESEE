@@ -14,7 +14,37 @@ import gstools as gs
 # --- import utility functions ---
 from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_model import *
 from ICESEE.config._utility_imports import icesee_get_index
+from ICESEE.applications.issm_model.issm_utils._coordinates import (
+    register_issm_coordinate_provider,
+)
 # from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import setup_ensemble_intial_data, MatlabServer
+
+
+register_issm_coordinate_provider()
+
+# --- import kriging functions ---
+def _load_bed_from_kriging_file(bed_kriging_file, fdim, ens=None, use_mean=False):
+    with h5py.File(bed_kriging_file, "r") as f:
+        bed_ens = f["bed_ens"][:]
+
+        # expected Python shape: (npts, Ne), but be safe
+        if bed_ens.shape[0] != fdim and bed_ens.shape[1] == fdim:
+            bed_ens = bed_ens.T
+
+        if bed_ens.shape[0] != fdim:
+            raise ValueError(
+                f"bed_ens node mismatch: got {bed_ens.shape}, expected first dim {fdim}"
+            )
+
+        if use_mean:
+            bed_field = np.mean(bed_ens, axis=1)
+        else:
+            if ens is None:
+                ens = 0
+            ens = int(ens) % bed_ens.shape[1]
+            bed_field = bed_ens[:, ens]
+
+    return np.asarray(bed_field, dtype=float).ravel()
 
 # --- Forecast step ---
 def forecast_step_single(ensemble=None, **kwargs):
@@ -65,7 +95,8 @@ def generate_true_state(**kwargs):
     os.chdir(issm_examples_dir)
 
     # --- filename for data saving
-    fname = 'true_state.mat'
+    initial_state_only = bool(kwargs.get('initial_state_only', False))
+    fname = 'initial_true_state.mat' if initial_state_only else 'true_state.mat'
     kwargs.update({'fname': fname})
     ens_id = kwargs.get('ens_id')
 
@@ -91,7 +122,8 @@ def generate_true_state(**kwargs):
     input_filename = f'{icesee_path}/{data_path}/ensemble_true_state_{ens_id}.h5'
     with h5py.File(input_filename, 'r') as f:
         # -- fetch state variables
-        for k in range(1, kwargs.get('nt') + 1):
+        output_count = 1 if initial_state_only else kwargs.get('nt')
+        for k in range(1, output_count + 1):
             key_Thickness=f'Thickness_{k}'
             # key_base = f'Base_{k}'
             key_surface = f'Surface_{k}'
@@ -135,7 +167,8 @@ def generate_nurged_state(**kwargs):
     rank = comm.Get_rank()
 
     # --- filename for data saving
-    fname = 'nurged_state.mat'
+    initial_state_only = bool(kwargs.get('initial_state_only', False))
+    fname = 'initial_nurged_state.mat' if initial_state_only else 'nurged_state.mat'
     kwargs.update({'fname': fname})
     ens_id = kwargs.get('ens_id')
     params = kwargs.get('params', {})
@@ -197,11 +230,11 @@ def generate_nurged_state(**kwargs):
     nugget_bed = kwargs.get('nugget_bed')
 
     bed_kriging_file = f'{icesee_path}/bed_kriging_results.h5'
-    with h5py.File(bed_kriging_file, 'r') as f:
-        bed_field = f['bed_ens'][...]
-
-    # bed_field = np.mean(bed_field, axis=0)
-    bed_field = bed_field[0, :]
+    bed_field = _load_bed_from_kriging_file(
+        bed_kriging_file,
+        fdim,
+        use_mean=True
+    )
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'
@@ -225,7 +258,8 @@ def generate_nurged_state(**kwargs):
     # with h5py.File(nurged_filename, 'r', driver='mpio', comm=comm) as f:
     with h5py.File(nurged_filename, 'r') as f:
         # -- fetch state variables
-        for k in range(1, kwargs.get('nt') + 1):
+        output_count = 1 if initial_state_only else kwargs.get('nt')
+        for k in range(1, output_count + 1):
             # key_thickness=f'Thickness_{k}'
             key_Thickness=f'Thickness_{k}'
             # key_base = f'Base_{k}'
@@ -277,10 +311,28 @@ def initialize_ensemble(ens, **kwargs):
     ens_id =  ens
     kwargs.update({'ens_id': ens_id})
 
-    #  -- control time stepping
-    kwargs.update({'k':0}) 
-    dt = kwargs.get('dt')
-    kwargs.update({'tinitial': 0, 'tfinal': dt})
+    # -- Optional pre-assimilation dynamic spin-up.  Historical profiles
+    # retain the former one-model-step initialization because the default
+    # duration equals the configured model timestep.  Reviewer smoke profiles
+    # can request a longer, more finely substepped transient without consuming
+    # any observation time: the returned end state is still DA timestep zero.
+    kwargs.update({'k': 0})
+    model_dt = float(kwargs.get('dt', 0.2))
+    spinup_dt = float(kwargs.get('ensemble_spinup_dt', model_dt))
+    spinup_years = float(
+        kwargs.get('ensemble_spinup_years', spinup_dt)
+    )
+    if spinup_dt <= 0.0:
+        raise ValueError("ensemble_spinup_dt must be positive")
+    if spinup_years < spinup_dt:
+        raise ValueError(
+            "ensemble_spinup_years must be at least ensemble_spinup_dt"
+        )
+    kwargs.update({
+        'dt': spinup_dt,
+        'tinitial': 0.0,
+        'tfinal': spinup_years,
+    })
 
 
     # --- filename for data saving
@@ -326,8 +378,12 @@ def initialize_ensemble(ens, **kwargs):
 
 
     bed_kriging_file = f'{icesee_path}/bed_kriging_results.h5'
-    with h5py.File(bed_kriging_file, 'r') as f:
-        bed_field = f['bed_ens'][ens, :]
+    bed_field = _load_bed_from_kriging_file(
+        bed_kriging_file,
+        fdim,
+        ens=ens,
+        use_mean=False
+    )
 
     # write the wrong states to a .h5 file to be read by the ISSM model before nurging
     friction_bed_filename = f'{icesee_path}/{data_path}/friction_bed_{ens_id}.h5'

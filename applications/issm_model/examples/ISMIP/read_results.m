@@ -20,6 +20,7 @@ plotmodel(md_true, 'data', md_true.results.TransientSolution.Vel, 'layer', 5, 'f
 plotmodel(md_nurged, 'data', md_nurged.results.TransientSolution.Vel, 'layer', 5, 'figure', 6);
 
 %% ICESEE results
+data_file_paths = '_modelrun_datasets';
 % Get the Python version
 % pyversion = py.sys.version;
 % 
@@ -30,7 +31,7 @@ plotmodel(md_nurged, 'data', md_nurged.results.TransientSolution.Vel, 'layer', 5
 % utility_imports = py.importlib.import_module('_utility_imports');
 
 % Load the essential data
-results_dir = 'results';
+results_dir = data_file_paths;
 filter_type = 'true-wrong';
 file_path   = fullfile(results_dir, sprintf('%s-issm.h5', filter_type));
 t           = h5read(file_path,'/t');
@@ -39,16 +40,16 @@ tm_m        = h5read(file_path,'/obs_max_time');
 run_mode    = h5read(file_path,'/run_mode');
 
 % load the true and nurged states
-file_path            = '_modelrun_datasets/true_nurged_states.h5';
+file_path            = fullfile(data_file_paths, 'true_nurged_states.h5');
 model_true_state     = h5read(file_path,'/true_state')';
 model_nurged_state   = h5read(file_path, '/nurged_state')';
 
 % load observation data
-file_path  = '_modelrun_datasets/synthetic_obs.h5';
+file_path  = fullfile(data_file_paths, 'synthetic_obs.h5');
 w          = h5read(file_path, '/hu_obs')'; 
 
 % load the ensemble data
-file_path         = '_modelrun_datasets/icesee_ensemble_data.h5';
+file_path         = fullfile(data_file_paths, 'icesee_ensemble_data.h5');
 ensemble_vec_full = h5read(file_path, '/ensemble'); 
 ensemble_vec_mean = h5read(file_path, '/ensemble_mean')';
 

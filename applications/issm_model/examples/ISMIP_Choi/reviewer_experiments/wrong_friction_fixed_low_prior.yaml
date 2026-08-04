@@ -1,0 +1,9 @@
+extends: friction_inversion_hybrid_low_prior.yaml
+
+enkf-parameters:
+  data_path: _reviewer_wrong_friction_fixed_low_prior_v1
+  inversion_flag: 0
+  frozen_analysis_vars: [coefficient]
+  localized_vars: [bed]
+  localization_radius:
+    bed: 15000

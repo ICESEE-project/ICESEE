@@ -15,7 +15,8 @@ import h5py
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LORENZ_DIR = REPO_ROOT / "applications" / "lorenz_model" / "examples" / "lorenz96"
 CI_DIR = REPO_ROOT / "scripts" / "ci"
-FIGURE_DIR = CI_DIR / "figures"
+DATA_DIR = LORENZ_DIR / "_modelrun_datasets"
+FIGURE_DIR = DATA_DIR / "figures"
 
 
 def run_lorenz96_example():
@@ -42,10 +43,9 @@ def read_h5_dataset(file_path):
 
 
 def load_lorenz_outputs():
-    results_dir = LORENZ_DIR / "results"
-    data_dir = LORENZ_DIR / "_modelrun_datasets"
+    data_dir = DATA_DIR
 
-    tw_file = results_dir / "true-wrong-lorenz.h5"
+    tw_file = data_dir / "true-wrong-lorenz.h5"
     ensemble_file = data_dir / "icesee_ensemble_data.h5"
     true_nudged_file = data_dir / "true_nurged_states.h5"
     obs_file = data_dir / "synthetic_obs.h5"
