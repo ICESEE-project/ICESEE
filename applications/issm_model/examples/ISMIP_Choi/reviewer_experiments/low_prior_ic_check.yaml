@@ -1,8 +1,0 @@
-extends: friction_inversion_hybrid_low_prior.yaml
-
-enkf-parameters:
-  # Fast gate before committing to the 40-member experiment.  Generate only
-  # the truth/no-DA trajectories and inspect their signed initial errors and
-  # grounding line.
-  data_path: _reviewer_low_prior_ic_check
-  generate_true_wrong_state_only: true

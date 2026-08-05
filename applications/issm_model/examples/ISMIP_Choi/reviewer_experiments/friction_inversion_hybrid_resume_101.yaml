@@ -1,9 +1,0 @@
-extends: friction_inversion_hybrid.yaml
-
-enkf-parameters:
-  # Resume from the last verified physical analysis state (time 20.2 yr).
-  # Timestep 102 contains the rejected velocity burst and is overwritten.
-  data_path: _reviewer_friction_inversion_hybrid_v5
-  resume_from_timestep: 101
-  restart_enabled: 1
-  force_fresh_start: 0

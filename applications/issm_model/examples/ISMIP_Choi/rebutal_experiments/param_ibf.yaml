@@ -1,9 +1,0 @@
-extends: param.yaml
-
-enkf-parameters:
-  data_path: _modelrun_datasets_ibf_1
-  inversion_flag: 1
-  inversion_start_time: 2.0
-  # Freeze friction only in the EnKF analysis. Member-wise ISSM inversion
-  # updates it after each annual analysis beginning at year 2.
-  frozen_analysis_vars: [coefficient]

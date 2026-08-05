@@ -99,21 +99,6 @@ enkf-parameters:
   smb_physical_bounds: null
   mesh_coordinate_scale_to_m: 1.0
 
-  # Bed plugin remains disabled until a bed-inference experiment is selected.
-  physics_bed_inference: false
-  bed_update_mode: legacy
-  bed_inference_start_time: 0.0
-  bed_spinup_hold_factor: 1.0
-  bed_blend_ramp_time: 0.0
-  bed_update_blend_factor: 0.15
-  bed_spatial_regularization: 40.0
-  bed_graph_neighbors: 12
-  bed_max_update_per_cycle: null
-  bed_projection_basis: none
-  bed_physical_bounds: null
-  bed_enforce_below_surface: true
-  bed_min_surface_separation: 1.0
-
 
   # estimation flags
   joint_estimation: 1 # joint estimation flag: True, False
