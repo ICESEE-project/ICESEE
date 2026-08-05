@@ -1,0 +1,18 @@
+extends: friction_inversion_hybrid_heterogeneous.yaml
+
+enkf-parameters:
+  # Full reviewer run using the heterogeneous prior accepted by the
+  # initial-condition gate. Keep this output separate from both the IC-only
+  # check and the earlier heterogeneous sensitivity.
+  data_path: _reviewer_friction_inversion_hybrid_heterogeneous_validated_v1
+
+  # Disable all short-circuit generation modes: run the complete EnKF/ISSM
+  # experiment through year 50. State observations end at year 30 and the
+  # remaining 20 years are an unassimilated forecast.
+  initial_state_only: false
+  generate_true_wrong_state_only: false
+  generate_synthetic_obs_only: false
+
+  # Never resume an incompatible ensemble produced by an earlier profile.
+  restart_enabled: 0
+  force_fresh_start: 1

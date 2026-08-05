@@ -91,7 +91,7 @@ def generate_nurged_state(**kwargs):
     u0b = kwargs.get('u0b', None)
 
     # call the icesee_get_index function to get the indices of the state variables
-    vecs, indx_map, dim_per_proc = icesee_get_index(statevec_nurged, **kwargs)
+    vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
 
     # Set the initial condition
     statevec_nurged[:, 0] = u0b
@@ -103,10 +103,11 @@ def generate_nurged_state(**kwargs):
         statevec_nurged[indx_map['y'], k + 1] = state['y']
         statevec_nurged[indx_map['z'], k + 1] = state['z']
 
-    # updated_state = {'x' : statevec_nurged[indx_map['x'],:],
-    #                  'y' : statevec_nurged[indx_map['y'],:],
-    #                 'z' : statevec_nurged[indx_map['z'],:]}
-    return statevec_nurged
+    updated_state = {'x' : statevec_nurged[indx_map['x'],:],
+                     'y' : statevec_nurged[indx_map['y'],:],
+                    'z' : statevec_nurged[indx_map['z'],:]}
+    
+    return updated_state
     
 # --- initialize the ensemble members ---
 def initialize_ensemble(ens, **kwargs):
@@ -133,6 +134,6 @@ def JObs_fun(nd=None):
     H_jac = np.eye(nd)
     return H_jac
 
-def Cov_Obs_fun(sig_obs=None,nd=None):
+def Cov_Obs_fun(sig_obs=None,nd=None, kwargs=None):
     R_cov = np.eye(nd) * (sig_obs ** 2)
     return R_cov

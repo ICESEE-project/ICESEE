@@ -9,6 +9,6 @@ authors:
   orcid: "https://orcid.org/0000-0003-4520-0105"
 title: "ICESEE: A state-of-the-art data assimilation software package for coupling ice sheet models."
 version: 1.0.0
-#doi: 10.5281/zenodo.1234
-date-released: 2025-07-18
+doi: 10.5281/zenodo.21796612
+date-released: 02/20/2026
 url: "https://github.com/ICESEE-project/ICESEE"

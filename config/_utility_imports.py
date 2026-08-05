@@ -151,6 +151,9 @@ if not flag_jupyter:
         'num_param_vars': int(float(enkf_params.get('num_param_vars', 0))),
         'number_obs_instants': int(int(float(enkf_params.get('obs_max_time', 1))) / float(enkf_params.get('freq_obs', 1))),
         'inflation_factor': float(enkf_params.get('inflation_factor', 1.0)),
+        'state_inflation_factor': float(enkf_params.get('state_inflation_factor', float(enkf_params.get('inflation_factor', 1.0)))),
+        'param_inflation_factor': float(enkf_params.get('param_inflation_factor', float(enkf_params.get('inflation_factor', 1.0)))),
+        'bed_inflation_factor': float(enkf_params.get('bed_inflation_factor', int(float(enkf_params.get('inflation_factor', 1.0))))),
         'freq_obs': float(enkf_params.get('freq_obs', 1)),
         'obs_max_time': int(float(enkf_params.get('obs_max_time', 1))),
         'obs_start_time': float(enkf_params.get('obs_start_time', 1)),
@@ -167,8 +170,25 @@ if not flag_jupyter:
         'coupled_model_datasets_dir': enkf_params.get('coupled_model_datasets', 'data'),
         'vec_inputs': enkf_params['vec_inputs'],
         'collective_threshold': int(enkf_params.get('collective_threshold', 16)), # threshold for switching to collective I/O
-        'batch_size': int(enkf_params.get('batch_size', 1)), # number of time steps to process in each batch
     })
+
+    params.update({'batch_size': min(int(enkf_params.get('batch_size', 50)), params['nt'])})  # number of time steps to process in each batch
+
+    # Spatial random-field backend.  Keep FFT as the backward-compatible
+    # default; graph mode is selected explicitly and consumes the physical
+    # node coordinates registered by each model application.
+    random_field_method = str(
+        enkf_params.get(
+            'random_field_method',
+            enkf_params.get('enkf_field_method', 'fft'),
+        )
+    ).strip().lower()
+    if random_field_method not in {'fft', 'graph'}:
+        raise ValueError(
+            "enkf-parameters.random_field_method must be either 'fft' or 'graph'; "
+            f"got {random_field_method!r}"
+        )
+    params['random_field_method'] = random_field_method
     
     # --- incase CL args not provided ---
     if Nens == 1:
@@ -232,12 +252,17 @@ if not flag_jupyter:
         'joint_estimated_params': enkf_params.get('joint_estimated_params', []),
         'global_analysis': bool(enkf_params.get('global_analysis', True)),
         'local_analysis': bool(enkf_params.get('local_analysis', False)),
+        'enkf_observation_error_mode': str(enkf_params.get(
+            'enkf_observation_error_mode',
+            'legacy_prior_anomalies' if enkf_params.get('use_ensemble_pertubations', True) else 'generated_R'
+        )),
         'observed_params':enkf_params.get('observed_params', []),
         'verbose':_verbose,
         'param_ens_spread': enkf_params.get('param_ens_spread', []),
         'data_path': params['data_path'],
         'example_name': modeling_params.get('example_name', params.get('model_name')),
         'length_scale': enkf_params.get('length_scale', []),
+        'random_field_method': random_field_method,
         'Q_rho': enkf_params.get('Q_rho', 1.0),
         'generate_synthetic_obs': enkf_params.get('generate_synthetic_obs', True),
         'generate_true_state': enkf_params.get('generate_true_state', True),
@@ -258,9 +283,11 @@ if not flag_jupyter:
         'h5_file_chunk_size': int(enkf_params.get('h5_file_chunk_size', 1000)),
         'bed_obs_snapshot':enkf_params.get('bed_obs_snapshot', []),# list of time snapshots to observe bed variables
         'bed_obs_stride':enkf_params.get('bed_obs_stride',None ), # spatial stride in km for bed observations
+        'bed_obs_track_half_width_m': float(enkf_params.get('bed_obs_track_half_width_m', 1000.0)), # half-width of cross-flow radar-track sampling band
         'bed_obs_spacing':enkf_params.get('bed_obs_spacing', None), # observation spacing every n grid points {int}
         'bed_obs_indices':enkf_params.get('bed_obs_indices', None), # specific indices to observe {list} (bed subvector indices)
         'bed_obs_mask':enkf_params.get('bed_obs_mask', None), # boolean mask array for bed observations {np.array}
+        'bed_update_domain': str(enkf_params.get('bed_update_domain', 'all')),
         'initialize_ensemble':enkf_params.get('initialize_ensemble', True),
         'initial_spread_factor': enkf_params.get('initial_spread_factor', 1.0),
         'observed_vars': enkf_params.get('observed_vars', []),
@@ -272,6 +299,55 @@ if not flag_jupyter:
         'abs_vel_weight': float(enkf_params.get('abs_vel_weight', 1.0)), # weight for absolute velocity in inversion
         'rel_vel_weight': float(enkf_params.get('rel_vel_weight', 1.0)), # weight for relative velocity in inversion
         'tikhonov_regularization_weight': float(enkf_params.get('tikhonov_regularization_weight', 1e-13)), # Tikhonov regularization weight for inversion
+        'var_nd': enkf_params.get('var_nd', None), # variable state dimension for each state variable in vec_inputs. Used when state variables have different dimensions
+        'scalar_inputs': enkf_params.get('scalar_inputs', []), # list of scalar input variables
+        'generate_true_wrong_state_only': enkf_params.get('generate_true_wrong_state_only', False), # flag to only generate true and wrong state without running the assimilation
+        'initial_state_only': enkf_params.get('initial_state_only', False),
+        'generate_synthetic_obs_only': bool(enkf_params.get('generate_synthetic_obs_only', False)), # flag to only generate synthetic observations without running the assimilation
+        'localized_vars': enkf_params.get('localized_vars', []), # list of variables to localize (only used if localization_flag is True)
+        'frozen_analysis_vars': enkf_params.get('frozen_analysis_vars', []), # state-vector blocks held fixed during the analysis update
+        'localization_radius': enkf_params.get('localization_radius', None), # localization radius (float or dict {var_name: radius})
+        'node_coords': enkf_params.get('node_coords', {}), # dict {var_name: (n_i,2) node coordinates}
+        'obs_node_coords': enkf_params.get('obs_node_coords', {}), # dict {var_name: (m_i,2) active obs-node coords, static/union across the run}
+        'taper_type': enkf_params.get('taper_type', 'gaspari_cohn'), # 'gaspari_cohn' (default) or 'gaussian'
+        'partitioned_io_flag': enkf_params.get('partitioned_io_flag', False), # when true: no rank ever holds the full (nd, Nens) ensemble
+        'adaptive_radius': enkf_params.get('adaptive_radius', 1), # adaptive radius flag: True, False
+        # Feature-flagged parameter-inference plugin
+        'inference_plugin_enabled': bool(enkf_params.get('inference_plugin_enabled', False)),
+
+        # SMB: observed parameters use the EnKF posterior; unobserved SMB in
+        # vec_inputs automatically uses the continuity-based inference branch.
+        'physics_smb_inference': bool(enkf_params.get('physics_smb_inference', False)),
+        'smb_history_length': int(enkf_params.get('smb_history_length', 5)),
+        'smb_divergence_neighbors': int(enkf_params.get('smb_divergence_neighbors', 24)),
+        'smb_graph_neighbors': int(enkf_params.get('smb_graph_neighbors', 12)),
+        'smb_spatial_regularization': float(enkf_params.get('smb_spatial_regularization', 25.0)),
+        'smb_temporal_regularization': float(enkf_params.get('smb_temporal_regularization', 4.0)),
+        'smb_blend_factor': float(enkf_params.get('smb_blend_factor', 0.35)),
+        'smb_inference_start_time': float(enkf_params.get('smb_inference_start_time', 0.0)),
+        'smb_spinup_hold_factor': float(enkf_params.get('smb_spinup_hold_factor', 0.0)),
+        'smb_blend_ramp_time': float(enkf_params.get('smb_blend_ramp_time', 0.0)),
+        'smb_projection_basis': str(enkf_params.get('smb_projection_basis', 'none')),
+        'smb_physical_bounds': enkf_params.get('smb_physical_bounds', None),
+        'mesh_coordinate_scale_to_m': float(enkf_params.get('mesh_coordinate_scale_to_m', 1.0)),
+
+        # Bed: the EnKF supplies a raw increment and the plugin applies the
+        # declared increment prior/constraints when this feature is enabled.
+        'physics_bed_inference': bool(enkf_params.get('physics_bed_inference', False)),
+        'bed_update_mode': str(enkf_params.get('bed_update_mode', 'legacy')),
+        'bed_inference_start_time': float(enkf_params.get('bed_inference_start_time', 0.0)),
+        'bed_spinup_hold_factor': float(enkf_params.get('bed_spinup_hold_factor', 1.0)),
+        'bed_blend_ramp_time': float(enkf_params.get('bed_blend_ramp_time', 0.0)),
+        'bed_update_blend_factor': float(enkf_params.get('bed_update_blend_factor', 0.15)),
+        'bed_spatial_regularization': float(enkf_params.get('bed_spatial_regularization', 40.0)),
+        'bed_graph_neighbors': int(enkf_params.get('bed_graph_neighbors', 12)),
+        'bed_max_update_per_cycle': enkf_params.get('bed_max_update_per_cycle', None),
+        'bed_projection_basis': str(enkf_params.get('bed_projection_basis', 'none')),
+        'bed_physical_bounds': enkf_params.get('bed_physical_bounds', None),
+        'bed_enforce_below_surface': bool(enkf_params.get('bed_enforce_below_surface', True)),
+        'bed_min_surface_separation': float(enkf_params.get('bed_min_surface_separation', 1.0)),
+        'bed_update_mask': enkf_params.get('bed_update_mask', None),
+
     }
 
 
@@ -285,11 +361,15 @@ if not flag_jupyter:
     kwargs.update(modeling_params)
     kwargs.update(enkf_params)
 
+    # Re-apply the normalized value after the raw YAML update so the canonical
+    # spelling is what every downstream random-field path receives.
+    kwargs['random_field_method'] = random_field_method
+
     joint_estimated_params = len(kwargs.get('joint_estimated_params', []))
     if kwargs['joint_estimation']:
-        params['total_state_param_vars'] = params['num_state_vars'] + joint_estimated_params
+        params['total_state_param_vars'] = params['num_state_vars'] + params['num_param_vars']
     else:
-        params['total_state_param_vars'] = params['num_state_vars']
+        params['total_state_param_vars'] = params['num_state_vars'] + params['num_param_vars'] - joint_estimated_params
 
     # add joint estimation flag to params
     params['joint_estimation'] = kwargs['joint_estimation']
@@ -326,6 +406,7 @@ if not flag_jupyter:
         obs_t, obs_idx, num_observations = UtilsFunctions(params).generate_observation_schedule(**kwargs)
         kwargs['obs_index'] = obs_idx
         params['number_obs_instants'] = num_observations
+        kwargs['m_obs'] = num_observations
 
     kwargs['parallel_flag']       = enkf_params.get('parallel_flag', 'serial')
     kwargs['commandlinerun']      = enkf_params.get('commandlinerun', False)
@@ -366,5 +447,3 @@ if not flag_jupyter:
         _modelrun_datasets = kwargs.get('data_path',None)
         if not os.path.exists(_modelrun_datasets):
             os.makedirs(_modelrun_datasets, exist_ok=True)
-
-

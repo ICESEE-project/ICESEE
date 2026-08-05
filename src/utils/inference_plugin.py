@@ -1,0 +1,348 @@
+"""Feature-flagged integration hooks for SMB and bed inference.
+
+Copy this module together with ``stable_smb_inference.py`` and
+``stable_bed_inference.py`` into the package containing the analysis/writer
+code. With ``inference_plugin_enabled=False`` (the default), the local bed gate
+reproduces the legacy freeze behavior and the global hook is a no-op.
+"""
+
+import numpy as np
+
+from .stable_bed_inference import apply_bed_regularized_correction
+from .stable_smb_inference import apply_smb_physics_correction
+
+
+_LEGACY_BED_ALIASES = {
+    "bed",
+    "bedrock",
+    "bedtopography",
+    "bed_topography",
+}
+
+_BED_ALIASES = {
+    *_LEGACY_BED_ALIASES,
+    "bed_elevation",
+}
+
+
+def _local_block_mask(global_rows, block_index, hdim):
+    start = block_index * hdim
+    end = start + hdim
+    return (global_rows >= start) & (global_rows < end)
+
+
+def apply_bed_update_gate_local(
+    analysis_vec,
+    forecast_vec,
+    global_rows,
+    vec_inputs,
+    hdim,
+    model_kwargs,
+):
+    """Gate distributed bed analysis updates without changing other fields.
+
+    Modes
+    -----
+    legacy:
+        Reproduce the original behavior exactly: when ``km`` is defined, bed
+        is restored from the forecast unless ``km`` is in ``bed_snap_cols``.
+    snapshots:
+        Explicit snapshot-only inference. A nonempty ``bed_snap_cols`` is
+        required, preventing accidental permanent freezing.
+    continuous:
+        Retain EnKF cross-covariance updates from H/u/v every analysis cycle.
+
+    If the plugin itself is disabled, ``legacy`` is forced regardless of the
+    configured new mode.
+    """
+    enabled = bool(model_kwargs.get("inference_plugin_enabled", False))
+    mode = str(model_kwargs.get("bed_update_mode", "legacy")).lower()
+    if not enabled:
+        mode = "legacy"
+
+    if mode not in {"legacy", "snapshots", "continuous"}:
+        raise ValueError(
+            "bed_update_mode must be 'legacy', 'snapshots', or 'continuous'"
+        )
+
+    km = model_kwargs.get("km")
+    snapshot_columns = {
+        int(value) for value in model_kwargs.get("bed_snap_cols", [])
+    }
+    is_snapshot = km is not None and int(km) in snapshot_columns
+
+    if mode == "legacy":
+        freeze_bed = km is not None and not is_snapshot
+    elif mode == "snapshots":
+        if not snapshot_columns:
+            raise ValueError(
+                "bed_update_mode='snapshots' requires nonempty bed_snap_cols"
+            )
+        freeze_bed = not is_snapshot
+    else:
+        freeze_bed = False
+
+    model_kwargs["_bed_update_active"] = not freeze_bed
+    model_kwargs["_bed_is_snapshot"] = is_snapshot
+
+    if not freeze_bed:
+        return analysis_vec
+
+    aliases = _LEGACY_BED_ALIASES if mode == "legacy" else _BED_ALIASES
+    for block_index, key in enumerate(vec_inputs):
+        if str(key).lower() not in aliases:
+            continue
+        local_mask = _local_block_mask(global_rows, block_index, hdim)
+        if np.any(local_mask):
+            analysis_vec[local_mask, :] = forecast_vec[local_mask, :]
+    return analysis_vec
+
+
+def apply_bed_domain_gate_global(
+    analysis_vec,
+    forecast_vec,
+    vec_inputs,
+    hdim,
+    model_kwargs,
+):
+    """Restrict bed increments to the configured physical/support domain.
+
+    ``grounded_only`` diagnoses grounding independently for each forecast
+    member. ``observed_only`` is stricter: it uses the truth-supported bed mask
+    stored with the synthetic observations and therefore cannot leak an update
+    beneath unobserved floating ice through a misclassified ensemble member.
+    """
+    domain = str(model_kwargs.get("bed_update_domain", "all")).lower()
+    if domain == "all":
+        return analysis_vec
+    if domain not in {"grounded_only", "observed_only"}:
+        raise ValueError(
+            "bed_update_domain must be 'all', 'grounded_only', or "
+            "'observed_only'"
+        )
+
+    km = model_kwargs.get("km")
+    snapshot_columns = {
+        int(value) for value in model_kwargs.get("bed_snap_cols", [])
+    }
+    if km is None or int(km) not in snapshot_columns:
+        return analysis_vec
+
+    thickness_block = None
+    bed_block = None
+    for block, key in enumerate(vec_inputs):
+        key_l = str(key).lower()
+        if key_l in {"thickness", "ice_thickness", "h"}:
+            thickness_block = block
+        elif key_l in _BED_ALIASES:
+            bed_block = block
+    if bed_block is None or (domain == "grounded_only" and thickness_block is None):
+        raise ValueError(
+            f"{domain} bed updates require the necessary state blocks"
+        )
+
+    thickness_slice = None
+    if thickness_block is not None:
+        thickness_slice = slice(
+            thickness_block * hdim, (thickness_block + 1) * hdim
+        )
+    bed_slice = slice(bed_block * hdim, (bed_block + 1) * hdim)
+    forecast_bed = np.asarray(forecast_vec[bed_slice, :], dtype=float)
+
+    bed_analysis = np.asarray(analysis_vec[bed_slice, :], dtype=float).copy()
+    if domain == "grounded_only":
+        forecast_thickness = np.asarray(
+            forecast_vec[thickness_slice, :], dtype=float
+        )
+        density_ratio = float(model_kwargs.get("di", 0.8930))
+        allowed = forecast_thickness + forecast_bed / density_ratio > 0.0
+    else:
+        masks_by_key = model_kwargs.get("bed_mask_map_cols", {})
+        support = None
+        for key in vec_inputs:
+            if str(key).lower() not in _BED_ALIASES:
+                continue
+            mask_columns = masks_by_key.get(key)
+            if mask_columns is None:
+                # HDF5 keys and configured aliases may differ only by case.
+                for stored_key, stored_value in masks_by_key.items():
+                    if str(stored_key).lower() == str(key).lower():
+                        mask_columns = stored_value
+                        break
+            if mask_columns is not None:
+                mask_columns = np.asarray(mask_columns, dtype=bool)
+                if (
+                    mask_columns.ndim == 2
+                    and mask_columns.shape[1] == hdim
+                    and mask_columns.shape[0] != hdim
+                ):
+                    mask_columns = mask_columns.T
+                if mask_columns.shape[0] != hdim or int(km) >= mask_columns.shape[1]:
+                    raise ValueError(
+                        "bed observation-support mask has an incompatible "
+                        f"shape: mask={mask_columns.shape}, hdim={hdim}, "
+                        f"obs_column={km}"
+                    )
+                support = mask_columns[:, int(km)]
+                break
+        if support is None:
+            raise ValueError(
+                "bed_update_domain='observed_only' requires bed_mask_map_cols"
+            )
+        allowed = support[:, None]
+
+    bed_analysis[~np.broadcast_to(allowed, bed_analysis.shape)] = (
+        forecast_bed[~np.broadcast_to(allowed, forecast_bed.shape)]
+    )
+    analysis_vec[bed_slice, :] = bed_analysis
+    return analysis_vec
+
+
+def apply_bed_observation_anchor_global(
+    analysis_vec,
+    vec_inputs,
+    hdim,
+    model_kwargs,
+    stage="pre",
+):
+    """Anchor surveyed bed nodes directly to their active observations.
+
+    The augmented EnKF still supplies spatial cross-covariances, while this
+    scalar relaxation guarantees that a direct bed observation cannot increase
+    its own innovation.  Unobserved nodes are untouched here and are handled by
+    the regularized/localized increment plus the physical domain gate.
+    """
+    if not bool(model_kwargs.get("_bed_update_active", False)):
+        return analysis_vec
+
+    stage = str(stage).lower()
+    if stage not in {"pre", "post"}:
+        raise ValueError("bed observation anchor stage must be 'pre' or 'post'")
+    factor_key = (
+        "bed_observation_nudge_factor"
+        if stage == "pre"
+        else "bed_observation_post_anchor_factor"
+    )
+    factor = float(model_kwargs.get(factor_key, 0.0))
+    if factor == 0.0:
+        return analysis_vec
+    if not 0.0 <= factor <= 1.0:
+        raise ValueError(f"{factor_key} must be in [0, 1]")
+
+    km = model_kwargs.get("km")
+    observations = model_kwargs.get("hu_obs_loaded")
+    if km is None or observations is None:
+        return analysis_vec
+    observations = np.asarray(observations, dtype=float)
+    if observations.ndim != 2 or int(km) >= observations.shape[1]:
+        raise ValueError("bed observation array has an incompatible shape")
+
+    bed_block = None
+    for block_index, key in enumerate(vec_inputs):
+        if str(key).lower() in _BED_ALIASES:
+            bed_block = block_index
+            break
+    if bed_block is None:
+        return analysis_vec
+
+    bed_slice = slice(bed_block * hdim, (bed_block + 1) * hdim)
+    if bed_slice.stop > observations.shape[0]:
+        raise ValueError("bed observation block is outside hu_obs_loaded")
+    target = observations[bed_slice, int(km)]
+    active = np.isfinite(target)
+    if not np.any(active):
+        return analysis_vec
+
+    bed = np.asarray(analysis_vec[bed_slice, :], dtype=float).copy()
+    mean_before = np.mean(bed[active, :], axis=1)
+    bed[active, :] += factor * (target[active, None] - bed[active, :])
+    if bool(model_kwargs.get("bed_observation_diagnostics", False)):
+        mean_after = np.mean(bed[active, :], axis=1)
+        rmse_before = np.sqrt(np.mean((mean_before - target[active]) ** 2))
+        rmse_after = np.sqrt(np.mean((mean_after - target[active]) ** 2))
+        print(
+            "[ICESEE][bed_anchor] "
+            f"stage={stage} obs_column={int(km)} n={int(np.sum(active))} "
+            f"innovation_RMSE={rmse_before:.3f}->{rmse_after:.3f} m"
+        )
+    analysis_vec[bed_slice, :] = bed
+    return analysis_vec
+
+
+def apply_global_inference_hook(
+    analysis_vec,
+    vec_inputs,
+    hdim,
+    params,
+    model_kwargs,
+    timestep,
+    model_time=None,
+    stage="all",
+):
+    """Apply enabled inference components to the gathered global ensemble.
+
+    The hook is deliberately a no-op unless ``inference_plugin_enabled=True``.
+    Use ``stage='pre_geometry'`` for bed before model-native geometry fixes and
+    ``stage='post_geometry'`` for SMB after those fixes. ``stage='all'`` is
+    retained for backward compatibility but should not be used for ISSM.
+    """
+    if not model_kwargs.get("inference_plugin_enabled", False):
+        return analysis_vec
+
+    stage = str(stage).lower()
+    if stage not in {"pre_geometry", "post_geometry", "all"}:
+        raise ValueError(
+            "stage must be 'pre_geometry', 'post_geometry', or 'all'"
+        )
+
+    if model_time is None:
+        dt = float(model_kwargs.get("dt", params.get("dt", 1.0)))
+        model_time = float(timestep) * dt
+
+    if stage in {"pre_geometry", "all"} and model_kwargs.get(
+        "physics_bed_inference", False
+    ):
+        # In snapshot mode, do not repeatedly post-process a frozen forecast.
+        bed_active = bool(model_kwargs.get("_bed_update_active", True))
+        if bed_active:
+            analysis_vec = apply_bed_regularized_correction(
+                analysis_vec,
+                vec_inputs,
+                hdim,
+                model_kwargs,
+                timestep=timestep,
+                model_time=model_time,
+            )
+
+    if stage in {"post_geometry", "all"} and model_kwargs.get(
+        "physics_smb_inference", False
+    ):
+        analysis_vec = apply_smb_physics_correction(
+            analysis_vec,
+            vec_inputs,
+            hdim,
+            model_kwargs,
+            timestep=timestep,
+            model_time=model_time,
+        )
+
+    return analysis_vec
+
+
+def reset_inference_plugin_state(model_kwargs):
+    """Remove only private runtime state created by the inference plugin."""
+    keys = (
+        "_bed_update_active",
+        "_bed_is_snapshot",
+        "_bed_initial_reference",
+        "_bed_previous_applied",
+        "_bed_regularization_cache",
+        "_bed_inference_call_count",
+        "_smb_inference_history",
+        "_smb_regularized_previous",
+        "_smb_spinup_reference",
+        "_smb_regularization_cache",
+        "_smb_inference_call_count",
+    )
+    for key in keys:
+        model_kwargs.pop(key, None)

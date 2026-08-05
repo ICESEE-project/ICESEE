@@ -12,6 +12,10 @@ import shutil
 import socket
 import numpy as np
 import scipy.io as sio
+from pathlib import Path
+
+# --- Set up paths ---
+os.chdir(Path(__file__).resolve().parent)
 
 # --- ICESEE imports ---
 # from ICESEE.config._utility_imports import *
@@ -74,12 +78,123 @@ model_kwargs = {
                 'smb': float(modeling_params.get('smb', 0.0)),
                 'vel_idx': int(float(enkf_params.get('vel_idx', 2))),
                 'inversion_flag': enkf_params.get('inversion_flag', False),
+                # Keep the requested inversion mode separate from its
+                # cycle-dependent activation.  This permits a geometry-only
+                # spin-up before friction inversion without losing the fact
+                # that inversion must turn on at a later observation time.
+                'inversion_enabled': enkf_params.get('inversion_flag', False),
+                'inversion_start_time': float(
+                    enkf_params.get('inversion_start_time', 0.0)
+                ),
+                # Optional pre-assimilation ensemble equilibration.  The
+                # defaults reproduce the historical single-step initializer.
+                'ensemble_spinup_dt': float(
+                    enkf_params.get(
+                        'ensemble_spinup_dt',
+                        modeling_params.get('timesteps_per_year'),
+                    )
+                ),
+                'ensemble_spinup_years': float(
+                    enkf_params.get(
+                        'ensemble_spinup_years',
+                        modeling_params.get('timesteps_per_year'),
+                    )
+                ),
                 'friction_idx': int(float(enkf_params.get('friction_idx', 5))),
                 'min_friction': float(enkf_params.get('min_friction', 2000)),
                 'max_friction': float(enkf_params.get('max_friction', 4000)),
                 'Nens': int(float(params.get('Nens'))),
                 'bed_relaxation_factor': float(enkf_params.get('bed_relaxation_factor', 0.05)),
                 'initial_bed_bias': float(enkf_params.get('initial_bed_bias', 0.0015)),
+                # Optional synthetic-experiment prior controls.  These are
+                # applied by run_model.m before the no-DA and ensemble
+                # transients, with geometry rebuilt so S = B + H and the
+                # floating shelf remains hydrostatic.
+                'initial_thickness_scale': float(enkf_params.get('initial_thickness_scale', 1.0)),
+                'initial_bed_offset_m': float(enkf_params.get('initial_bed_offset_m', 0.0)),
+                'initial_bed_background_domain': str(
+                    enkf_params.get('initial_bed_background_domain', 'all')
+                ),
+                'initial_bed_gl_buffer_m': float(
+                    enkf_params.get('initial_bed_gl_buffer_m', 0.0)
+                ),
+                'initial_floating_bed_anomaly_factor': float(
+                    enkf_params.get('initial_floating_bed_anomaly_factor', 0.0)
+                ),
+                'initial_floating_bed_max_error_m': float(
+                    enkf_params.get('initial_floating_bed_max_error_m', 100.0)
+                ),
+                'initial_floating_bed_transition_m': float(
+                    enkf_params.get('initial_floating_bed_transition_m', 25000.0)
+                ),
+                'initial_floating_bed_flotation_margin_m': float(
+                    enkf_params.get(
+                        'initial_floating_bed_flotation_margin_m', 5.0
+                    )
+                ),
+                'initial_bed_smoothing_iterations': int(
+                    enkf_params.get('initial_bed_smoothing_iterations', 35)
+                ),
+                'initial_bed_smoothing_strength': float(
+                    enkf_params.get('initial_bed_smoothing_strength', 0.65)
+                ),
+                'initial_bed_seed_max_x_m': float(
+                    enkf_params.get('initial_bed_seed_max_x_m', 300000.0)
+                ),
+                'initial_bed_downstream_anomaly_factor': float(
+                    enkf_params.get(
+                        'initial_bed_downstream_anomaly_factor', 0.60
+                    )
+                ),
+                # Optional deterministic, sign-changing prior modes.  These
+                # perturb the model background (never the hidden truth), and
+                # run_model.m subsequently rebuilds a consistent S = B + H
+                # geometry.  Zero amplitudes retain the historical prior.
+                'initial_thickness_anomaly_fraction': float(
+                    enkf_params.get('initial_thickness_anomaly_fraction', 0.0)
+                ),
+                'initial_thickness_anomaly_m': float(
+                    enkf_params.get('initial_thickness_anomaly_m', 0.0)
+                ),
+                'initial_thickness_delta_min_m': float(
+                    enkf_params.get('initial_thickness_delta_min_m', -500.0)
+                ),
+                'initial_thickness_delta_max_m': float(
+                    enkf_params.get('initial_thickness_delta_max_m', 500.0)
+                ),
+                'initial_floating_thickness_anomaly_factor': float(
+                    enkf_params.get('initial_floating_thickness_anomaly_factor', 1.0)
+                ),
+                'initial_gl_seaward_thickness_m': float(
+                    enkf_params.get('initial_gl_seaward_thickness_m', 0.0)
+                ),
+                'initial_gl_seaward_width_m': float(
+                    enkf_params.get('initial_gl_seaward_width_m', 50000.0)
+                ),
+                'initial_bed_anomaly_m': float(
+                    enkf_params.get('initial_bed_anomaly_m', 0.0)
+                ),
+                'initial_bed_delta_min_m': float(
+                    enkf_params.get('initial_bed_delta_min_m', -500.0)
+                ),
+                'initial_bed_delta_max_m': float(
+                    enkf_params.get('initial_bed_delta_max_m', 500.0)
+                ),
+                'initial_prior_length_x_m': float(
+                    enkf_params.get('initial_prior_length_x_m', 120000.0)
+                ),
+                'initial_prior_length_y_m': float(
+                    enkf_params.get('initial_prior_length_y_m', 40000.0)
+                ),
+                'initial_prior_pattern_phase': float(
+                    enkf_params.get('initial_prior_pattern_phase', 0.0)
+                ),
+                'initial_thickness_factor_min': float(
+                    enkf_params.get('initial_thickness_factor_min', 0.60)
+                ),
+                'initial_thickness_factor_max': float(
+                    enkf_params.get('initial_thickness_factor_max', 1.25)
+                ),
                 'abs_vel_weight': float(enkf_params.get('abs_vel_weight', 1.0)),
                 'rel_vel_weight': float(enkf_params.get('rel_vel_weight', 1.0)),
                 'tikhonov_regularization_weight': float(enkf_params.get('tikhonov_regularization_weight', 1e-13)),
@@ -131,6 +246,7 @@ os.chdir(icesee_cwd)
 
 # --- run the model ---
 kwargs.update({'params': params, 
+               'nd': params.get('nd'),
                'server': server})
 
 try:

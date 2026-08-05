@@ -1,0 +1,182 @@
+# Canonical configuration for the synchronized WBF / EBF / IBF rebuttal
+# experiments. This file is intentionally self-contained: it is the flattened
+# result of the accepted heterogeneous hybrid configuration and does not
+# extend another YAML file.
+
+physical-parameters:
+  Lx: 640e3
+  Ly: 80e3
+  nx: 444
+  ny: 112
+
+modeling-parameters:
+  num_years: 100
+  tinitial: 0.0
+  timesteps_per_year: 0.2
+  example_name: ISMIP_Choi
+  ParamFile: Mismip2.par
+  use_reference_data: true
+  reference_data_dir: data
+  reference_data: ISMIP.reference_simulation_0.mat
+  steps: 55
+  verbose: true
+  deepwater_melting_rate: 150
+  smb: -0.3
+
+enkf-parameters:
+  # Build EnKF perturbations on the registered physical BAMG vertex graph.
+  # The FFT-only length_scale values below are retained for compatibility.
+  random_field_method: graph
+  k_neighbors: 6
+  num_passes: auto
+  blend: 0.55
+
+  Nens: 60
+  freq_obs: 1
+  obs_start_time: 2
+  obs_max_time: 55
+  generate_synthetic_obs: true
+  generate_true_state: true
+  generate_nurged_state: true
+  initialize_ensemble: true
+  initial_spread_factor: 1.0
+  sequential_ensemble_initialization: false
+  use_ensemble_pertubations: true
+  enkf_observation_error_mode: legacy_prior_anomalies
+
+  num_state_vars: 4
+  num_param_vars: 2
+  vec_inputs: [Thickness, Surface, Vx, Vy, bed, coefficient]
+  observed_vars: [Surface, Vx, Vy]
+  observed_params: [bed]
+  vel_idx: 2
+  friction_idx: 5
+
+  # Friction-method-specific flags are overridden by each child profile.
+  inversion_flag: 0
+  inversion_start_time: 2.0
+  frozen_analysis_vars: []
+  min_friction: 1900
+  max_friction: 4200
+  abs_vel_weight: 1.0
+  rel_vel_weight: 1.0
+  tikhonov_regularization_weight: 1e-13
+
+  # Annual state observations, with sparse bed-survey campaigns.
+  bed_obs_snapshot: [2, 8, 14, 20, 24, 30, 36, 40, 46, 50]
+  bed_obs_stride: 10
+  bed_obs_track_half_width_m: 2500
+  bed_update_domain: grounded_only
+  bed_relaxation_factor: 1
+  initial_bed_bias: 0.0015
+
+  sig_obs: [15, 10, 7, 5, 8, 0]
+  sig_Q: [12, 12, 8, 5, 6, 8]
+  length_scale: [50, 60, 80, 70, 65, 81]  # ignored by graph mode
+  seed: 42
+  base_seed: 42
+  inflation_factor: 1.0
+  state_inflation_factor: 1.0
+  param_inflation_factor: 1.0
+  bed_inflation_factor: 1.0
+
+  joint_estimation: true
+  parameter_estimation: true
+  joint_estimated_params: [bed, coefficient]
+  localization_flag: true
+  global_analysis: true
+  local_analysis: true
+  localized_vars: [bed]
+  localization_radius:
+    bed: 15000
+
+  sill_friction: 10000
+  range_friction: 500
+  mean_friction: 2500
+  nugget_friction: 0.15
+  sill_bed: 4000
+  range_bed: 50000
+  nugget_bed: 200
+  b_nurge: 0
+  s_nurge: 0
+
+  model_name: issm
+  filter_type: EnKF
+  parallel_flag: MPI_model
+  n_modeltasks: 4
+  commandlinerun: "True"
+  execution_flag: 0
+  model_nprocs: 2
+  execution_mode: 1
+  create_ensemble_dataset: true
+  data_path: _modelrun_datasets_rebuttal_base
+  ICESEE_PERFORMANCE_TEST: false
+
+  h5_file_compression: None
+  h5_file_compression_level: 4
+  h5_file_chunk_size: 1000
+  serial_file_creation: true
+  collective_threshold: 4
+  batch_size: 50
+  restart_enabled: 0
+  force_fresh_start: 1
+  checkpoint_every: 5
+  k_start_override: 40
+
+  inference_plugin_enabled: true
+  bed_update_mode: snapshots
+  physics_bed_inference: true
+  bed_observation_nudge_factor: 0.75
+  bed_observation_post_anchor_factor: 0.0
+  bed_observation_diagnostics: true
+  bed_update_blend_factor: 1.0
+  bed_spatial_regularization: 8.0
+  bed_graph_neighbors: 12
+  bed_max_update_per_cycle: 20.0
+  bed_enforce_below_surface: true
+
+  geometry_projection_mode: preserve_surface
+  analysis_relaxation_factor: 0.7
+  analysis_relaxation_factors:
+    bed: 1.0
+  analysis_increment_limits:
+    Thickness: 300.0
+    Surface: 300.0
+    Vx: 2500.0
+    Vy: 2500.0
+    bed: 20.0
+
+  # Validated spatially heterogeneous initial condition.
+  initial_thickness_scale: 1.05
+  initial_thickness_anomaly_fraction: 0.1
+  initial_thickness_anomaly_m: 120.0
+  initial_thickness_delta_min_m: -180.0
+  initial_thickness_delta_max_m: 180.0
+  initial_floating_thickness_anomaly_factor: 0.25
+  initial_thickness_factor_min: 0.9
+  initial_thickness_factor_max: 1.1
+
+  initial_bed_offset_m: -80.0
+  initial_bed_anomaly_m: 120.0
+  initial_bed_delta_min_m: -250.0
+  initial_bed_delta_max_m: 150.0
+  # Stretch the survey-supported upstream kriging-error structure continuously
+  # across the domain. Preserve its texture while reducing variability
+  # downstream and beneath floating ice.
+  initial_bed_background_domain: grounded_plus_tapered_floating
+  initial_bed_gl_buffer_m: 40000.0
+  initial_floating_bed_anomaly_factor: 0.95
+  initial_floating_bed_max_error_m: 100.0
+  initial_floating_bed_transition_m: 10000.0
+  initial_floating_bed_flotation_margin_m: 5.0
+  initial_bed_smoothing_iterations: 35
+  initial_bed_smoothing_strength: 0.65
+  initial_bed_seed_max_x_m: 300000.0
+  initial_bed_downstream_anomaly_factor: 0.98
+  initial_prior_length_x_m: 120000.0
+  initial_prior_length_y_m: 40000.0
+  initial_prior_pattern_phase: 0.5
+
+  initial_state_only: false
+  generate_true_wrong_state_only: false
+  generate_synthetic_obs_only: false

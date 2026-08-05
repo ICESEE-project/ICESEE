@@ -47,15 +47,20 @@ def generate_true_wrong_state(**model_kwargs):
         # print(f"[ICESEE] Dim list: {dim_list}")
         # save model_nprocs before update if rank_world == 0
         # model_nprocs = params.get("model_nprocs", 1)
+        nd   = int(model_kwargs.get("nd", params["nd"]))
+        ntp1 = 1 if model_kwargs.get("initial_state_only", False) else int(
+            model_kwargs.get("nt", params["nt"]) + 1
+        )
 
-        
+
         if rank_world == 0:
             
             model_kwargs.update({'ens_id': rank_world})
+            model_kwargs.update({"global_shape": model_kwargs.get("nd", params["nd"]), "dim_list": dim_list})
             # model_kwargs.update({'model_nprocs': (model_nprocs * size_world) - size_world}) # update the model_nprocs to include all processors for the external model run
             # Define shape and dtype
             nd = model_kwargs.get("nd", params["nd"])
-            nt = model_kwargs.get("nt", params["nt"]) + 1   # +1 as in your np.zeros
+            npt1 = model_kwargs.get("nt", params["nt"]) + 1   # +1 as in your np.zeros
 
             if model_kwargs["joint_estimation"] or params["localization_flag"]:
                 hdim = nd // params["total_state_param_vars"]
@@ -65,68 +70,75 @@ def generate_true_wrong_state(**model_kwargs):
             chunk_size = (hdim, 1)  # row-wise chunks, 1 time slice per chunk
             # chunk_size = (nd,1)
 
-            if model_kwargs.get("generate_true_state", True):
-                print("[ICESEE] Generating true state (partial parallel) ...")
-                # dim_list = np.tile(model_kwargs.get("nd", params["nd"]),size_world) # all processors have the same dimension
-                model_kwargs.update({"global_shape": model_kwargs.get("nd", params["nd"]), "dim_list": dim_list})
-                # statevec_true = np.zeros([model_kwargs.get("nd", params["nd"]), model_kwargs.get("nt",params["nt"]) + 1])
+            gen_true   = bool(model_kwargs.get("generate_true_state", True))
+            gen_nurged = bool(model_kwargs.get("generate_nurged_state", True))
 
-                # (Optional) remove old store if shape/chunks might have changed
-                store_path = f"{icesee_path}/{data_path}/statevec_true.zarr"
-                if os.path.exists(store_path):
-                    shutil.rmtree(store_path)
+            if not gen_true and not os.path.exists(_true_nurged):
+                raise FileNotFoundError(f"{_true_nurged} not found, but generation is disabled.")
 
-                statevec_true = zarr.zeros(
-                    shape=(nd, nt),
-                    chunks=chunk_size,   # row-wise chunks, 1 time slice per chunk
-                    dtype="f8", 
-                    store=store_path,
+            # If neither is requested, do nothing (assume existing file/datasets are already there)
+            if not (gen_true or gen_nurged):
+                if model_kwargs.get("verbose", False):
+                    print(f"[ICESEE] true/nurged generation disabled — reusing existing: {_true_nurged}")
+            else:
+                # A fresh run must not append to a stale or partially written
+                # initialization file.  In particular, an interrupted HDF5
+                # create may leave only the user block/header on disk, which
+                # exists but cannot be opened in append mode.
+                force_fresh = bool(
+                    model_kwargs.get(
+                        "force_fresh_start",
+                        params.get("force_fresh_start", False),
+                    )
                 )
+                mode = "w" if force_fresh or not os.path.exists(_true_nurged) else "a"
+                with h5py.File(_true_nurged, mode) as f:
+                    # Helper: create or replace dataset safely if shape mismatch
+                    def require_dataset(name: str, shape, dtype="f8", chunks=None):
+                        if name in f:
+                            d = f[name]
+                            if d.shape != tuple(shape) or d.dtype != np.dtype(dtype):
+                                # Replace only this dataset, not the whole file
+                                del f[name]
+                                d = f.create_dataset(name, shape=shape, dtype=dtype, chunks=chunks)
+                        else:
+                            d = f.create_dataset(name, shape=shape, dtype=dtype, chunks=chunks)
+                        return d
 
-                model_kwargs.update({"statevec_true": statevec_true})
-                # updated_true_state = model_module.generate_true_state(**model_kwargs)
-                model_module.generate_true_state(**model_kwargs)
+                    # ---------- TRUE STATE ----------
+                    if gen_true:
+                        print("[ICESEE] Generating true state ...")
+                        d_true = require_dataset("true_state", shape=(nd, ntp1), dtype="f8", chunks=chunk_size)
+                        model_kwargs["statevec_true"] = d_true  # write target
 
-                # unpack the dictionaery
-                # vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
-                # ensemble_true_state = np.zeros_like(statevec_true)
-                # for key, value in updated_true_state.items():
-                #     ensemble_true_state[indx_map[key], :] = value
+                        out_true = model_module.generate_true_state(**model_kwargs)
 
-            if model_kwargs.get("generate_nurged_state",True):
-                print("[ICESEE] Generating nurged state ...")
-                # statevec_nurged = zarr.create_array(store=f"{data_path}/statevec_nurged.zarr", shape=(model_kwargs.get("nd", params["nd"]), model_kwargs.get("nt",params["nt"]) + 1), chunks=chunk_size, dtype='f8', overwrite=True)
-                store_path = f"{icesee_path}/{data_path}/statevec_nurged.zarr"
-                if os.path.exists(store_path):
-                    shutil.rmtree(store_path)
+                        # If function returns data, write it (else assume in-place write)
+                        if out_true is not None:
+                            vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                            if isinstance(out_true, dict):
+                                for key, value in out_true.items():
+                                    d_true[indx_map[key], :] = value
+                            else:
+                                d_true[:, :] = out_true
 
-                statevec_nurged = zarr.zeros(
-                    shape=(nd, nt),
-                    chunks=chunk_size,   # row-wise chunks, 1 time slice per chunk
-                    dtype="f8", 
-                    store=store_path,
-                )
-                model_kwargs.update({"statevec_nurged": statevec_nurged})
-                # ensemble_nurged_state = model_module.generate_nurged_state(**model_kwargs)
-                model_module.generate_nurged_state(**model_kwargs)
+                    # ---------- NURGED STATE ----------
+                    if gen_nurged:
+                        print("[ICESEE] Generating nurged state ...")
+                        d_nurged = require_dataset("nurged_state", shape=(nd, ntp1), dtype="f8", chunks=chunk_size)
+                        model_kwargs["statevec_nurged"] = d_nurged  # write target
 
-            # Write data to file
-            if model_kwargs.get("generate_true_state",True) or model_kwargs.get("generate_nurged_state",True):
-                with h5py.File(_true_nurged, "w") as f:
-                    if model_kwargs.get("generate_true_state"):
-                        # f.create_dataset("true_state", data=ensemble_true_state)
-                        f.create_dataset("true_state", data=statevec_true, chunks=chunk_size)
-                    if model_kwargs.get("generate_nurged_state"):
-                        # f.create_dataset("nurged_state", data=ensemble_nurged_state)
-                        f.create_dataset("nurged_state", data=statevec_nurged, chunks=chunk_size)
+                        out_nurged = model_module.generate_nurged_state(**model_kwargs)
 
-            # clean memory 
-            # if model_kwargs.get("generate_true_state",True):
-            #     del updated_true_state
-            # if model_kwargs.get("generate_nurged_state",True):
-            #     del ensemble_nurged_state
-            # gc.collect()
-
+                        # If function returns data, write it (else assume in-place write)
+                        if out_nurged is not None:
+                            vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                            if isinstance(out_nurged, dict):
+                                for key, value in out_nurged.items():
+                                    d_nurged[indx_map[key], :] = value
+                            else:
+                                d_nurged[:, :] = out_nurged
+            
         else:
             pass
             
@@ -237,7 +249,6 @@ def generate_true_wrong_state(**model_kwargs):
     # model_kwargs.update({"dim_list": dim_list, "global_shape": global_shape})
 
     return model_kwargs
-        
 
 def generate_true_wrong_state_full_parallel(**model_kwargs):
     """"Generate true and nurged states for the ICESEE model.
@@ -268,56 +279,82 @@ def generate_true_wrong_state_full_parallel(**model_kwargs):
         # save model_nprocs before update if rank_world == 0
         # model_nprocs = params.get("model_nprocs", 1)
 
+        chunk_size = (hdim, 1)  # row-wise chunks, 1 time slice per chunk
+        # chunk_size = (nd,1)
+        nd   = int(model_kwargs.get("nd", params["nd"]))
+        ntp1 = int(model_kwargs.get("nt", params["nt"]) + 1)
+
         
         if rank_world == 0:
             
             model_kwargs.update({'ens_id': rank_world})
-            # model_kwargs.update({'model_nprocs': (model_nprocs * size_world) - size_world}) # update the model_nprocs to include all processors for the external model run
+            model_kwargs.update({"global_shape": model_kwargs.get("nd", params["nd"]), "dim_list": dim_list})
 
-            if model_kwargs.get("generate_true_state", True):
-                print("[ICESEE] Generating true state (Full parallel run)...")
-                # dim_list = np.tile(model_kwargs.get("nd", params["nd"]),size_world) # all processors have the same dimension
-                model_kwargs.update({"global_shape": model_kwargs.get("nd", params["nd"]), "dim_list": dim_list})
-                # statevec_true = np.zeros([model_kwargs.get("nd", params["nd"]), model_kwargs.get("nt",params["nt"]) + 1])
-                store_path = f"{icesee_path}/{data_path}/statevec_nurged.zarr"
-                if os.path.exists(store_path):
-                    shutil.rmtree(store_path)
+            gen_true   = bool(model_kwargs.get("generate_true_state", True))
+            gen_nurged = bool(model_kwargs.get("generate_nurged_state", True))
 
-                statevec_nurged = zarr.zeros(
-                    shape=(nd, nt),
-                    chunks=chunk_size,   # row-wise chunks, 1 time slice per chunk
-                    dtype="f8", 
-                    store=store_path,
+            if not gen_true and not os.path.exists(_true_nurged):
+                raise FileNotFoundError(f"{_true_nurged} not found, but generation is disabled.")
+
+            # If neither is requested, do nothing (assume existing file/datasets are already there)
+            if not (gen_true or gen_nurged):
+                if model_kwargs.get("verbose", False):
+                    print(f"[ICESEE] true/nurged generation disabled — reusing existing: {_true_nurged}")
+            else:
+                # Open existing file if present; otherwise create it.
+                force_fresh = bool(
+                    model_kwargs.get(
+                        "force_fresh_start",
+                        params.get("force_fresh_start", False),
+                    )
                 )
-                model_kwargs.update({"statevec_true": statevec_true})
-                # updated_true_state = model_module.generate_true_state(**model_kwargs)
-                model_module.generate_true_state(**model_kwargs)
+                mode = "w" if force_fresh or not os.path.exists(_true_nurged) else "a"
+                with h5py.File(_true_nurged, mode) as f:
+                    # Helper: create or replace dataset safely if shape mismatch
+                    def require_dataset(name: str, shape, dtype="f8", chunks=None):
+                        if name in f:
+                            d = f[name]
+                            if d.shape != tuple(shape) or d.dtype != np.dtype(dtype):
+                                # Replace only this dataset, not the whole file
+                                del f[name]
+                                d = f.create_dataset(name, shape=shape, dtype=dtype, chunks=chunks)
+                        else:
+                            d = f.create_dataset(name, shape=shape, dtype=dtype, chunks=chunks)
+                        return d
 
-                # unpack the dictionaery
-                # vecs, indx_map, dim_per_proc = icesee_get_index(statevec_true, **model_kwargs)
-                # ensemble_true_state = np.zeros_like(statevec_true)
-                # for key, value in updated_true_state.items():
-                #     ensemble_true_state[indx_map[key], :] = value
+                    # ---------- TRUE STATE ----------
+                    if gen_true:
+                        print("[ICESEE] Generating true state ...")
+                        d_true = require_dataset("true_state", shape=(nd, ntp1), dtype="f8", chunks=chunk_size)
+                        model_kwargs["statevec_true"] = d_true  # write target
 
-            if model_kwargs.get("generate_nurged_state",True):
-                print("[ICESEE] Generating nurged state ...")
-                model_kwargs.update({"statevec_nurged": np.zeros([model_kwargs.get("nd", params["nd"]), model_kwargs.get("nt",params["nt"]) + 1])})
-                ensemble_nurged_state = model_module.generate_nurged_state(**model_kwargs)
+                        out_true = model_module.generate_true_state(**model_kwargs)
 
-            # Write data to file
-            if model_kwargs.get("generate_true_state",True) or model_kwargs.get("generate_nurged_state",True):
-                with h5py.File(_true_nurged, "w") as f:
-                    if model_kwargs.get("generate_true_state"):
-                        f.create_dataset("true_state", data=ensemble_true_state)
-                    if model_kwargs.get("generate_nurged_state"):
-                        f.create_dataset("nurged_state", data=ensemble_nurged_state)
+                        # If function returns data, write it (else assume in-place write)
+                        if out_true is not None:
+                            vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                            if isinstance(out_true, dict):
+                                for key, value in out_true.items():
+                                    d_true[indx_map[key], :] = value
+                            else:
+                                d_true[:, :] = out_true
 
-            # clean memory 
-            # if model_kwargs.get("generate_true_state",True):
-            #     del updated_true_state
-            # if model_kwargs.get("generate_nurged_state",True):
-            #     del ensemble_nurged_state
-            # gc.collect()
+                    # ---------- NURGED STATE ----------
+                    if gen_nurged:
+                        print("[ICESEE] Generating nurged state ...")
+                        d_nurged = require_dataset("nurged_state", shape=(nd, ntp1), dtype="f8", chunks=chunk_size)
+                        model_kwargs["statevec_nurged"] = d_nurged  # write target
+
+                        out_nurged = model_module.generate_nurged_state(**model_kwargs)
+
+                        # If function returns data, write it (else assume in-place write)
+                        if out_nurged is not None:
+                            vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                            if isinstance(out_nurged, dict):
+                                for key, value in out_nurged.items():
+                                    d_nurged[indx_map[key], :] = value
+                            else:
+                                d_nurged[:, :] = out_nurged
 
         else:
             pass
@@ -429,4 +466,3 @@ def generate_true_wrong_state_full_parallel(**model_kwargs):
     # model_kwargs.update({"dim_list": dim_list, "global_shape": global_shape})
 
     return model_kwargs
-        

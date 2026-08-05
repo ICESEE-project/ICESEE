@@ -1,3 +1,79 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "ICESEE"
+version = "0.1.9"
+description = "A state-of-the-art data assimilation software package for coupling seemlessly with ice sheet models."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+  {name = "Brian Kyanjo", email = "briankyanjo@u.boisestate.edu"},
+]
+urls = {Homepage = "https://github.com/ICESEE-project/ICESEE"}
+
+# ---- USER RUNTIME DEPENDENCIES (soft-pinned) ----
+dependencies = [
+  "numpy",
+  "scipy",
+  "h5py",
+  "zarr<3.0.0",
+  "dask",
+  "psutil",
+  "tqdm",
+  "pyyaml",
+  "numcodecs",
+  "gstools",
+  "jax",
+  "jaxlib",
+]
+
+[project.optional-dependencies]
+
+# ---- MPI SUPPORT ----
+mpi = [
+  "mpi4py",
+  "bigmpi4py",
+]
+
+# ---- VISUALIZATION / NOTEBOOKS ----
+viz = [
+  "matplotlib",
+  "pandas",
+  "jupyter",
+]
+
+# ---- DEVELOPMENT / CI ----
+dev = [
+  "pytest",
+  "pytest-cov",
+  "ruff",
+  "black",
+  "mypy",
+  "build",
+  "pip-tools",
+  "cython",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ICESEE", "ICESEE.*"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+ICESEE = [
+  "**/*.yaml",
+  "**/*.yml",
+  "**/*.json",
+]
+
+# ---- To update the dev/ci requirements file ----
+# important comands to regenerate the requirements/ci.txt file
+# rm -f requirements/ci.txt
+# python -m pip install -U pip pip-tools
+# pip-compile pyproject.toml --extra dev --extra mpi --extra viz -o requirements/ci.txt
+# --- To update the main requirements file ----

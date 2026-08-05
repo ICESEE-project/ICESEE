@@ -39,12 +39,16 @@ def generate_synthetic_observations(**model_kwargs):
                 with h5py.File(_true_nurged, "r") as f:
                     ensemble_true_state = f['true_state'][:]
 
-                utils_funs = UtilsFunctions(params, ensemble_true_state)
+                utils_funs = UtilsFunctions(
+                    params=params,
+                    model_kwargs=model_kwargs,
+                    ensemble=ensemble_true_state
+                )
                 model_kwargs.update({"statevec_true": ensemble_true_state})
-                hu_obs, error_R, bed_mask_map = utils_funs._create_synthetic_observations(**model_kwargs)
+                hu_obs, error_R, bed_masks, kwargs = utils_funs._create_synthetic_observations(**model_kwargs)
 
                 # check if the best_mask_map is generated
-                model_kwargs.update({"bed_mask_map": bed_mask_map})
+                model_kwargs.update({"bed_mask_map": bed_masks})
                 
                 # observe or don't observe parameters.
                 vecs, indx_map,_ = icesee_get_index(hu_obs, **model_kwargs)
@@ -60,10 +64,53 @@ def generate_synthetic_observations(**model_kwargs):
                             error_R[:,indx_map[key]] = 0.0
 
                 # -- write data to file
-                with h5py.File(_synthetic_obs, 'w') as f:
+                with h5py.File(_synthetic_obs, "w") as f:
                     f.create_dataset("hu_obs", data=hu_obs)
                     f.create_dataset("R", data=error_R)
-                    f.create_dataset("bed_mask_map", data=np.array(list(bed_mask_map.values())))
+
+                    # ---- bed masks ----
+                    g_masks = f.create_group("bed_masks")
+
+                    g_static = g_masks.create_group("static")
+                    for key, mask in bed_masks["static"].items():
+                        g_static.create_dataset(
+                            key,
+                            data=np.asarray(mask, dtype=np.uint8),
+                            compression="gzip",
+                            compression_opts=4,
+                        )
+
+                    g_cols = g_masks.create_group("cols")
+                    for key, mask_cols in bed_masks["cols"].items():
+                        g_cols.create_dataset(
+                            key,
+                            data=np.asarray(mask_cols, dtype=np.uint8),
+                            compression="gzip",
+                            compression_opts=4,
+                        )
+
+                    # ---- metadata needed to rebuild H consistently ----
+                    f.create_dataset("bed_snap_cols", data=np.asarray(kwargs["bed_snap_cols"], dtype=int))
+                    obs_index = np.asarray(kwargs["ind_m"], dtype=int)
+                    obs_t = np.asarray(kwargs["obs_t"], dtype=float)
+                    f.create_dataset("ind_m", data=obs_index)
+                    f.create_dataset("obs_t", data=obs_t)
+                    # Plotting-facing aliases keep all observation data and
+                    # metadata together in synthetic_obs.h5.  The original
+                    # names remain for backward compatibility with existing
+                    # analysis and restart code.
+                    f.create_dataset("obs_index", data=obs_index)
+                    f.create_dataset(
+                        "obs_max_time",
+                        data=np.asarray([np.max(obs_t)], dtype=float),
+                    )
+
+                    # obs_model_to_col is a dict -> store as parallel arrays
+                    m = kwargs.get("obs_model_to_col", {})
+                    keys = np.asarray(list(m.keys()), dtype=int)
+                    vals = np.asarray([m[k] for k in keys], dtype=int)
+                    f.create_dataset("obs_model_to_col_keys", data=keys)
+                    f.create_dataset("obs_model_to_col_vals", data=vals)
 
                 # --- clear memory
                 del hu_obs
@@ -93,9 +140,13 @@ def generate_synthetic_observations(**model_kwargs):
                 subcomm.Barrier()
                 # comm_world.Bcast(hu_obs, root=0)
                 if sub_rank == 0:
-                    utils_funs = UtilsFunctions(params, ensemble_true_state)
+                    utils_funs = UtilsFunctions(
+                        params=params,
+                        model_kwargs=model_kwargs,
+                        ensemble=ensemble_true_state
+                    )
                     model_kwargs.update({"statevec_true": ensemble_true_state})
-                    hu_obs, error_R, bed_mask_map = utils_funs._create_synthetic_observations(**model_kwargs)
+                    hu_obs, error_R, bed_mask_map, kwargs = utils_funs._create_synthetic_observations(**model_kwargs)
                     model_kwargs.update({"bed_mask_map": bed_mask_map})
 
                     # observe or don't observe parameters.
@@ -156,9 +207,14 @@ def generate_synthetic_observations(**model_kwargs):
                 
                 # comm_world.Bcast(hu_obs, root=0)
                 if rank_world == 0:
-                    utils_funs = UtilsFunctions(params, ensemble_true_state)
+                    utils_funs = UtilsFunctions(
+                        params=params,
+                        model_kwargs=model_kwargs,
+                        ensemble=ensemble_true_state
+                    )
                     model_kwargs.update({"statevec_true": ensemble_true_state})
-                    hu_obs, error_R, bed_mask_map = utils_funs._create_synthetic_observations(**model_kwargs)
+                    hu_obs, error_R, bed_mask_map, kwargs = utils_funs._create_synthetic_observations(**model_kwargs)
+                    model_kwargs.update(kwargs)
                     model_kwargs.update({"bed_mask_map": bed_mask_map})
                     shape_ = np.array(hu_obs.shape,dtype=np.int32)
                     shape_R = np.array(error_R.shape,dtype=np.int32)

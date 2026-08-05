@@ -1,0 +1,74 @@
+extends: ../params.yaml
+
+enkf-parameters:
+  # Hybrid estimator: EnKF updates thickness, surface, velocity, and bed;
+  # member-wise ISSM velocity inversion then recovers basal friction.
+  data_path: _reviewer_friction_inversion_hybrid_v5
+  obs_max_time: 24
+  # Match the reviewer experiment: infer thickness rather than observing it.
+  observed_vars: [Surface, Vx, Vy]
+  # Dense grounded-bed survey sensitivity: repeat the survey during the
+  # assimilation period and reduce the cross-flow track spacing from 30 km to
+  # 10 km.  A 2.5 km corridor captures several mesh columns around each track
+  # instead of the isolated grey points produced by the former 1 km corridor.
+  bed_obs_snapshot: [2, 8, 14, 20, 24]
+  bed_obs_stride: 10
+  bed_obs_track_half_width_m: 2500
+  bed_update_domain: grounded_only
+  inversion_flag: 1
+  frozen_analysis_vars: []
+  global_analysis: true
+  local_analysis: true
+  localized_vars: [bed]
+  localization_radius:
+    # Let neighbouring 10 km survey corridors overlap while keeping the bed
+    # analysis local to the well-observed grounded region.
+    bed: 15000
+
+  # Apply bed increments only when a direct grounded-bed survey is present.
+  # Between surveys the bed remains fixed, preventing velocity/surface
+  # cross-covariance noise from undoing the observation-driven correction.
+  inference_plugin_enabled: true
+  bed_update_mode: snapshots
+  physics_bed_inference: true
+  # Anchor before graph smoothing only.  Re-anchoring individual track nodes
+  # afterwards recreated sharp mesh-scale steps and triggered isolated ISSM
+  # velocity bursts at the year-20 survey.  A 30 m cycle cap is still more
+  # than twice the observed survey innovation while protecting the transient.
+  bed_observation_nudge_factor: 0.75
+  bed_observation_post_anchor_factor: 0.0
+  bed_observation_diagnostics: true
+  bed_update_blend_factor: 1.00
+  bed_spatial_regularization: 8.0
+  bed_graph_neighbors: 12
+  bed_max_update_per_cycle: 30.0
+  bed_enforce_below_surface: true
+
+  # Surface is observed but thickness is inferred in this experiment.  During
+  # the ISSM geometry-consistency projection, preserve the analyzed surface and
+  # diagnose a consistent thickness (S-b on grounded ice; flotation offshore).
+  geometry_projection_mode: preserve_surface
+
+  # The previous 16% state/bed and 12% parameter inflation amplified every
+  # analysis-cycle jump.  Friction is recovered by the member-wise inversion,
+  # so it does not need aggressive EnKF anomaly inflation here.
+  # The stochastic-R sensitivity produced a catastrophic member outlier in this
+  # small (N=40), high-dimensional local analysis.  Retain the stable reviewer
+  # baseline for the deadline run and bound each cycle's state increment.  This
+  # still uses the forecast anomalies in the gain; the explicit stochastic-R
+  # formulation should be reported as a separate sensitivity experiment.
+  enkf_observation_error_mode: legacy_prior_anomalies
+  analysis_relaxation_factor: 0.70
+  analysis_relaxation_factors:
+    bed: 1.00
+  analysis_increment_limits:
+    Thickness: 300.0
+    Surface: 300.0
+    Vx: 2500.0
+    Vy: 2500.0
+    bed: 30.0
+  state_inflation_factor: 1.00
+  bed_inflation_factor: 1.00
+  param_inflation_factor: 1.00
+  restart_enabled: 0
+  force_fresh_start: 1

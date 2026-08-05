@@ -1,0 +1,8 @@
+extends: param.yaml
+
+enkf-parameters:
+  # This is the profile that produced the accepted IBF comparison dataset.
+  data_path: _modelrun_datasets_ibf_2
+  inversion_flag: 1
+  inversion_start_time: 2.0
+  frozen_analysis_vars: [coefficient]

@@ -41,6 +41,7 @@ from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_field
                               generate_pseudo_random_field_1d, \
                               generate_pseudo_random_field_2D, \
                               generate_enkf_field
+from ICESEE.src.utils.localization import prepare_random_field_coordinates
 
 # --- call the ICESEE mpi parallel manager ---
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
@@ -90,13 +91,21 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                             "rounds": rounds, "color": color,
                             "start": start, "stop": stop,
                             "subcomm_size_min": subcomm_size_min,
-                            "model_module": model_module})
+                            "model_module": model_module,
+                            'vec_inputs_old': model_kwargs.get('vec_inputs', params.get('vec_inputs', None)),})
+    
+    model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
+    all_observed = model_kwargs['observed_vars_params']
+
+    model_kwargs.update({'all_observed': all_observed}); params.update({'all_observed': all_observed})
+    model_kwargs.update({'params': params})
 
     # pack the global communicator and the subcommunicator
     model_kwargs.update({"comm_world": comm_world, "subcomm": subcomm})
 
     # --- check if the modelrun dataset directory is present ---
-    _modelrun_datasets = model_kwargs.get("data_path",None)
+    _modelrun_datasets = model_kwargs.get("data_path") or "_modelrun_datasets"
+    os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
     if rank_world == 0 and not os.path.exists(_modelrun_datasets):
         # cretate the directory
         os.makedirs(_modelrun_datasets, exist_ok=True)
@@ -349,26 +358,30 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         #  --- generate the H file
         # ---- H matrix (skip if present & matching) ----
         H_matrix_zarr_path = f"{_modelrun_datasets}/H_matrix.zarr"
-        if rank_world == 0:
-            need_H = True
-            meta_h5 = f"{_modelrun_datasets}/H_matrix_meta.h5"
-            if reuse_allowed and os.path.isdir(H_matrix_zarr_path) and tools.h5_attr_equals(meta_h5, "icesee_fingerprint", fp):
-                need_H = False
-                print("[ICESEE][RESTART] Using existing H matrix.")
-            if need_H:
-                print("[ICESEE] Generating H matrix and saving to Zarr...")
-                model_kwargs.update({'H_matrix_zarr_path': H_matrix_zarr_path})
-                enkf_parallel_io.H_matrix(**model_kwargs)
-                # record a tiny meta tag
-                with h5py.File(meta_h5, "w") as f:
-                    f.attrs["icesee_fingerprint"] = fp
-        comm_world.Barrier()
+        # if rank_world == 0:
+        #     need_H = True
+        #     meta_h5 = f"{_modelrun_datasets}/H_matrix_meta.h5"
+        #     if reuse_allowed and os.path.isdir(H_matrix_zarr_path) and tools.h5_attr_equals(meta_h5, "icesee_fingerprint", fp):
+        #         need_H = False
+        #         print("[ICESEE][RESTART] Using existing H matrix.")
+        #     if need_H:
+        #         print("[ICESEE] Generating H matrix and saving to Zarr...")
+        #         model_kwargs.update({'H_matrix_zarr_path': H_matrix_zarr_path})
+        #         enkf_parallel_io.H_matrix(**model_kwargs)
+        #         # record a tiny meta tag
+        #         with h5py.File(meta_h5, "w") as f:
+        #             f.attrs["icesee_fingerprint"] = fp
+            
+        model_kwargs.update({'H_matrix_zarr_path': H_matrix_zarr_path})
+        enkf_parallel_io.H_matrix(**model_kwargs)
+        # comm_world.Barrier()
                     
         # --- Initialize the ensemble ---------------------------------------------------
         Q_rho     = model_kwargs.get("Q_rho")
         len_scale = model_kwargs.get("length_scale")
         hdim  = params["nd"] // params["total_state_param_vars"]
         model_kwargs.update({"hdim": hdim, "Q_rho": Q_rho, "len_scale": len_scale})
+        prepare_random_field_coordinates(model_kwargs, expected_nodes=hdim)
 
             # --- get the process noise --->
         if params.get("use_random_fields", False):
@@ -404,9 +417,21 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
             time_init_ensemble_mean_computation = 0.0
         else:
             # call the ensemble_initialization function
-            model_kwargs, ensemble_vec, time_init_noise_generation, \
-            time_init_ensemble_mean_computation, time_init_file_writing, \
-            shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full = ensemble_initialization_full_parallel_run(**model_kwargs)
+            if model_kwargs.get("initialize_ensemble", True):
+                model_kwargs, ensemble_vec, time_init_noise_generation, \
+                time_init_ensemble_mean_computation, time_init_file_writing, \
+                shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full = ensemble_initialization_full_parallel_run(**model_kwargs)
+            else:
+                # If ensemble initialization is disabled, set default values
+                ensemble_vec = None
+                time_init_noise_generation = 0.0
+                time_init_ensemble_mean_computation = 0.0
+                time_init_file_writing = 0.0
+                shape_ens = (params["nd"], params["nd"])
+                ensemble_bg = np.zeros(shape_ens)
+                ensemble_vec_mean = np.zeros((params["nd"], 1))
+                ensemble_vec_full = np.zeros(shape_ens)
+
         # --- time ensemble initialization ---
         time_ensemble_initialization = MPI.Wtime() - time_ensemble_initialization
 
@@ -474,9 +499,8 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         else:
             N_size = params["total_state_param_vars"] * hdim
             # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=0)
-            model_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
-            # noise = generate_enkf_field(**model_kwargs)
-            noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+            model_kwargs.update({"ii_sig": None, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
+            noise = generate_enkf_field(**model_kwargs)
         
         # synchronize all processes before starting the time loop
         comm_world.Barrier()
@@ -547,10 +571,34 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
                         tobserve = model_kwargs.get("tobserve")
                         m_obs = model_kwargs.get("m_obs", params["number_obs_instants"])
                         # if (km < m_obs) and (k+1 == tobserve[km]):
-                        if (km < m_obs) and (k == tobserve[km]):
+                        # if (km < m_obs) and (k == tobserve[km]):
+                        obs_index = model_kwargs["obs_index"]
+                        if (km < params["number_obs_instants"]) and (k == obs_index[km]):
                             # -- time global analysis step ---
                             _time_analysis_step = MPI.Wtime()
                             model_kwargs.update({'km': km, 'k': k})
+
+                            inversion_enabled = bool(model_kwargs.get(
+                                "inversion_enabled",
+                                model_kwargs.get("inversion_flag", False),
+                            ))
+                            inversion_start_time = float(
+                                model_kwargs.get("inversion_start_time", 0.0)
+                            )
+                            cycle_time = float(np.asarray(model_kwargs["t"])[k])
+                            inversion_flag = (
+                                inversion_enabled
+                                and cycle_time + 1.0e-12 >= inversion_start_time
+                            )
+                            model_kwargs["inversion_flag"] = inversion_flag
+                            if rank_world == 0 and inversion_enabled and not inversion_flag:
+                                print(
+                                    "[ICESEE] Deferring friction inversion at "
+                                    f"t={cycle_time:g} yr; configured start is "
+                                    f"{inversion_start_time:g} yr."
+                                )
+                            nd_old = model_kwargs.get("nd", nd)
+                            model_kwargs.update({"nd_old": nd_old})
         
                             # call the analysis update function
                             if EnKF_flag:
@@ -605,6 +653,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
             print("[ICESEE] Saving data ...")
         save_all_data(
             enkf_params=model_kwargs['enkf_params'],
+            data_path=_modelrun_datasets,
             nofilter=True,
             t=model_kwargs["t"], b_io=np.array([b_in,b_out]),
             Lxy=np.array([Lx,Ly]),nxy=np.array([nx,ny]),
@@ -812,7 +861,7 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
             if rank_world == 0:
                 print("[ICESEE] Creating ensemble dataset...")
                 # Option A: no-copy, instant
-                out_vds = finalize_stack("_modelrun_datasets", mode="vds", dset_name="states")
+                out_vds = finalize_stack(_modelrun_datasets, mode="vds", dset_name="states")
                 print("VDS ready:", out_vds)
                 # Option B: portable single file
                 # out_h5 = finalize_stack("_modelrun_datasets", mode="h5", dset_name="states",
@@ -822,5 +871,3 @@ def icesee_model_data_assimilation_full_parallel(**model_kwargs):
         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
         print(f"Traceback details:\n{tb_str}")
         # comm_world.Abort(1)  # Abort all processes in the communicator
-
-

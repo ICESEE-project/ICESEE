@@ -16,6 +16,7 @@ import logging
 import traceback
 from mpi4py import MPI
 import json, glob, tempfile, hashlib
+from pathlib import Path
 
 CKPT_DIRNAME = "_checkpoints"
 CKPT_BASENAME = "icesee_ckpt.json"
@@ -45,6 +46,9 @@ def _infer_dataset_name(h5path: str, prefer="states") -> str:
             f"Could not infer dataset name in {h5path}. "
             f"Found: {keys}. Pass dset_name explicitly."
         )
+
+def h5py_has_mpi():
+    return bool(getattr(h5py.get_config(), "mpi", False))
 
 # ---------- Option A: VDS (no data copy) ----------
 def build_vds(input_dir: str,
@@ -217,7 +221,14 @@ def install_requirements(force_install=False, verbose=False):
         raise RuntimeError("Failed to install dependencies from requirements.txt. Please check the file and try again.")
 
 # ==== saves arrays to h5 file
-def save_arrays_to_h5(filter_type=None, model=None, parallel_flag=None, commandlinerun=None, **datasets):
+def save_arrays_to_h5(
+    filter_type=None,
+    model=None,
+    parallel_flag=None,
+    commandlinerun=None,
+    data_path=None,
+    **datasets,
+):
     """
     Save multiple arrays to an HDF5 file, optionally in a parallel environment (MPI).
 
@@ -226,23 +237,25 @@ def save_arrays_to_h5(filter_type=None, model=None, parallel_flag=None, commandl
         model (str): Name of the model (e.g., 'icepack').
         parallel_flag (str): Flag to indicate if MPI parallelism is enabled. Default is 'MPI'.
         commandlinerun (bool): Indicates if the function is triggered by a command-line run. Default is False.
+        data_path (str or os.PathLike): Run-output directory. Defaults to
+            ``_modelrun_datasets``.
         **datasets (dict): Keyword arguments where keys are dataset names and values are arrays to save.
 
     Returns:
         dict: The datasets if not running in parallel, else None.
     """
-    output_dir = "results"
-    output_file = f"{output_dir}/{filter_type}-{model}.h5"
+    output_dir = Path(data_path or "_modelrun_datasets")
+    output_file = output_dir / f"{filter_type}-{model}.h5"
 
     if parallel_flag == "MPI" or commandlinerun:
-        # Create the results folder if it doesn't exist
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-            print("[ICESEE] Creating results folder")
+        # Create the configured run-output folder if it does not exist.
+        if not output_dir.exists():
+            output_dir.mkdir(parents=True, exist_ok=True)
+            print(f"[ICESEE] Creating run-output folder {output_dir}")
 
         # Remove the existing file, if any
-        if os.path.exists(output_file):
-            os.remove(output_file)
+        if output_file.exists():
+            output_file.unlink()
             print(f"[ICESEE] Existing file {output_file} removed.")
 
         print(f"[ICESEE] Writing data to {output_file}")
@@ -291,10 +304,13 @@ def extract_datasets_from_h5(file_path):
     return datasets
 
 # --- best for saving all data to h5 file in parallel environment
-def save_all_data(enkf_params=None, nofilter=None, **kwargs):
+def save_all_data(enkf_params=None, nofilter=None, data_path=None, **kwargs):
     """
     General function to save datasets based on the provided parameters.
     """
+    # Keep summary metadata beside the ensemble/state files for this run.
+    data_path = data_path or enkf_params.get("data_path") or "_modelrun_datasets"
+
     # Update filter_type only if nofilter is provided
     filter_type = "true-wrong" if nofilter else enkf_params["filter_type"]
 
@@ -312,6 +328,7 @@ def save_all_data(enkf_params=None, nofilter=None, **kwargs):
                 model=enkf_params["model_name"],
                 parallel_flag=enkf_params["parallel_flag"],
                 commandlinerun=enkf_params["commandlinerun"],
+                data_path=data_path,
                 **kwargs
             )
         else:
@@ -322,54 +339,135 @@ def save_all_data(enkf_params=None, nofilter=None, **kwargs):
             model=enkf_params["model_name"],
             parallel_flag=enkf_params["parallel_flag"],
             commandlinerun=enkf_params["commandlinerun"],
+            data_path=data_path,
             **kwargs
         )
 
 # ---- function to get the index of the variables in the vector dynamically
 def icesee_get_index(vec=None, **kwargs):
-    try:
-        vec_inputs = kwargs.get("vec_inputs", None)
-        params = kwargs.get("params", None)
-        nd = kwargs.get("nd", params.get("nd", None))
-        # print(f"[ICESEE-debug] vec_inputs: {vec_inputs}, nd: {nd}, params: {params}\n")
-        if params["default_run"]:
-            comm = kwargs.get("subcomm", None)
-        else:
-            comm = kwargs.get("comm_world", None)
-        
-        # len_vec = params["total_state_param_vars"]
-        len_vec = len(vec_inputs)
-        dim_list_param = np.array(kwargs.get('dim_list', None)) // len(kwargs.get('vec_inputs_old', None))
-        dim_list_param = dim_list_param[:len_vec]
-        hdim = nd // len_vec
-        # print(f"[ICESEE-debug] len_vec: {len_vec}, dim_list_param: {dim_list_param}, hdim: {hdim}\n")
+    """
+    If var_nd is provided: variables in vec_inputs may have different global sizes.
+    In this branch we DO NOT use dim_list, because dim_list is typically packed under
+    equal-size assumptions elsewhere in the codebase.
 
-        if comm is None:
-            rank = 0
-            dim = dim_list_param[rank]
-            offsets = [0]
+    We compute a deterministic block distribution per variable across ranks:
+      - each variable is split (almost) evenly across nranks
+      - rank-local ownership is contiguous within each variable
+    """
+    try:
+        var_nd = kwargs.get('var_nd', None)
+
+        if var_nd is not None:
+            vec_inputs = kwargs.get("vec_inputs", None)
+            params = kwargs.get("params", None)
+            if vec_inputs is None or params is None:
+                raise ValueError("vec_inputs and params must be provided")
+
+            # communicator selection
+            if params["default_run"]:
+                comm = kwargs.get("subcomm", None)
+            else:
+                comm = kwargs.get("comm_world", None)
+
+            # rank/size
+            if comm is None or params.get("even_distribution", False):
+                rank = 0
+                nranks = 1
+            else:
+                rank = comm.Get_rank()
+                nranks = comm.Get_size()
+
+            # var_nd: dict or list aligned with vec_inputs
+            if isinstance(var_nd, dict):
+                nd_vars = np.array([int(var_nd[v]) for v in vec_inputs], dtype=int)
+            else:
+                nd_vars = np.asarray(var_nd, dtype=int)
+                if nd_vars.shape[0] != len(vec_inputs):
+                    raise ValueError("var_nd must be dict keyed by vec_inputs or list aligned with vec_inputs")
+
+            if np.any(nd_vars < 0):
+                raise ValueError("var_nd contains negative sizes")
+
+            # base offsets in concatenated global vector
+            base_offsets = np.cumsum(np.insert(nd_vars, 0, 0))[:-1]
+
+            def block_decomp(n, p, r):
+                """
+                Split n items into p contiguous blocks.
+                Returns (start, count) for rank r.
+                """
+                q, rem = divmod(n, p)
+                # first 'rem' ranks get q+1
+                if r < rem:
+                    count = q + 1
+                    start = r * (q + 1)
+                else:
+                    count = q
+                    start = rem * (q + 1) + (r - rem) * q
+                return start, count
+
+            index_map = {}
+            local_size_total = 0
+
+            for i, var in enumerate(vec_inputs):
+                n = int(nd_vars[i])
+                start_in_var, local_n = block_decomp(n, nranks, rank)
+
+                g0 = int(base_offsets[i] + start_in_var)
+                g1 = g0 + int(local_n)
+
+                index_map[var] = np.arange(g0, g1, dtype=int) if local_n > 0 else np.array([], dtype=int)
+                local_size_total += int(local_n)
+
+            # Keep return signature compatible:
+            # third return is "local size on this rank" (for this new branch, sum of locals)
+            return None, index_map, local_size_total
+
+        # ============================
+        # Case 2: original equal-size logic (unchanged)
+        # ============================
         else:
-            if params["even_distribution"]:
+            vec_inputs = kwargs.get("vec_inputs", None)
+            nd = kwargs.get("nd")
+            # print(f"[ICESEE-debug] vec_inputs: {vec_inputs}, nd: {nd}, kwargs: {kwargs}\n")
+            if kwargs["default_run"]:
+                comm = kwargs.get("subcomm", None)
+            else:
+                comm = kwargs.get("comm_world", None)
+            
+            # len_vec = kwargs["total_state_param_vars"]
+            len_vec = len(vec_inputs)
+            dim_list_param = np.array(kwargs.get('dim_list', None)) // len(kwargs.get('vec_inputs_old', None))
+            dim_list_param = dim_list_param[:len_vec]
+            hdim = nd // len_vec
+            # print(f"[ICESEE-debug] len_vec: {len_vec}, dim_list_param: {dim_list_param}, hdim: {hdim}\n")
+
+            if comm is None:
                 rank = 0
                 dim = dim_list_param[rank]
                 offsets = [0]
             else:
-                rank = comm.Get_rank()
-                dim = dim_list_param[rank]
-                offsets = np.cumsum(np.insert(dim_list_param, 0, 0))
+                if kwargs["even_distribution"]:
+                    rank = 0
+                    dim = dim_list_param[rank]
+                    offsets = [0]
+                else:
+                    rank = comm.Get_rank()
+                    dim = dim_list_param[rank]
+                    offsets = np.cumsum(np.insert(dim_list_param, 0, 0))
 
-        start_idx = offsets[rank]
-        index_map = {}
-        var_start = 0
+            start_idx = offsets[rank]
+            index_map = {}
+            var_start = 0
 
-        for var in vec_inputs:
-            start = var_start + start_idx
-            end = start + dim
-            index_map[var] = np.arange(start, end)
-            var_start += hdim
+            for var in vec_inputs:
+                start = var_start + start_idx
+                end = start + dim
+                index_map[var] = np.arange(start, end)
+                var_start += hdim
 
-        local_size_per_rank = kwargs.get('dim_list', None)
-        return None, index_map, local_size_per_rank[rank]
+            local_size_per_rank = kwargs.get('dim_list', None)
+            return None, index_map, local_size_per_rank[rank]
     except Exception as e:
         print(f"Error occurred in icesee_get_index: {e}")
         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
@@ -378,49 +476,143 @@ def icesee_get_index(vec=None, **kwargs):
     
 # ==============================================================================
 
+# # Refined ANSI color codes
+# COLORS = {
+#     "GRAY": "\033[90m",    # Subtle gray for borders
+#     "CYAN": "\033[36m",    # Calm cyan for title
+#     "GREEN": "\033[32m",   # Muted green for computational time
+#     "MAGENTA": "\033[35m", # Soft magenta for wall-clock time
+#     "RESET": "\033[0m"
+# }
+
+# def format_time_(seconds: float) -> str:
+#     """Convert seconds to a formatted HR:MIN:SEC string with milliseconds."""
+#     hours = int(seconds // 3600)
+#     minutes = int((seconds % 3600) // 60)
+#     secs = int(seconds % 60)
+#     millis = int((seconds % 1) * 1000)
+#     return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+
+# def format_time(seconds: float) -> str:
+#     """Convert seconds to a formatted DAY:HR:MIN:SEC string with milliseconds."""
+#     days = int(seconds // 86400)  # 86400 seconds in a day
+#     hours = int((seconds % 86400) // 3600)
+#     minutes = int((seconds % 3600) // 60)
+#     secs = int(seconds % 60)
+#     millis = int((seconds % 1) * 1000)
+#     return f"{days:02d}:{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+
+# def setup_logger(log_file: str = "icesee_timing.log"):
+#     """Set up a logger for timing output."""
+#     logger = logging.getLogger("ICESEE_Timing")
+#     logger.setLevel(logging.INFO)
+    
+#     # Avoid duplicate handlers
+#     if not logger.handlers:
+#         # File handler for logging to a file
+#         file_handler = logging.FileHandler(log_file)
+#         file_handler.setFormatter(logging.Formatter("%(message)s"))
+#         logger.addHandler(file_handler)
+        
+#         # Optional: Stream handler for console output (only for root process)
+#         comm = MPI.COMM_WORLD
+#         rank = comm.Get_rank()
+#         if rank == 0:
+#             stream_handler = logging.StreamHandler(sys.stderr)  # Use stderr to avoid stdout issues
+#             stream_handler.setFormatter(logging.Formatter("%(message)s"))
+#             logger.addHandler(stream_handler)
+    
+#     return logger
+
+# def display_timing(computational_time: float, wallclock_time: float) -> None:
+#     """Display computational and wall-clock times with perfectly aligned formatting using logging."""
+#     # Set up logger
+#     logger = setup_logger()
+    
+#     # Only log from the root MPI process
+#     comm = MPI.COMM_WORLD
+#     rank = comm.Get_rank()
+#     if rank != 0:
+#         return  # Non-root processes exit silently
+
+#     # Formatted time strings
+#     comp_time_str = format_time(computational_time)
+#     wall_time_str = format_time(wallclock_time)
+    
+#     # Content lines (no trailing spaces after emojis)
+#     title = "[ICESEE] Performance Metrics"
+#     comp_line = f"Computational Time (Σ): {comp_time_str} (DAY:HR:MIN:SEC.ms) ⏱️"
+#     wall_line = f"Wall-Clock Time (max):  {wall_time_str} (DAY:HR:MIN:SEC.ms) 🕒"
+    
+#     # Calculate max width based on plain text length (excluding ANSI codes)
+#     max_content_width = max(len(title), len(comp_line), len(wall_line))
+#     box_width = max_content_width + 12  # 2 for '║' on each side + 2 for padding
+    
+#     # Box drawing
+#     header = f"{COLORS['GRAY']}╔{'═' * box_width}╗{COLORS['RESET']}"
+#     footer = f"{COLORS['GRAY']}╚{'═' * box_width}╝{COLORS['RESET']}"
+    
+#     # Pad lines to exact width, ensuring no extra spaces
+#     def pad_line(text: str) -> str:
+#         padding = " " * (max_content_width - len(text) + 6 + 4)
+#         return f"{COLORS['GRAY']}║ {text}{padding} ║{COLORS['RESET']}"
+    
+#     def pad_line_comp(text: str) -> str:
+#         padding = " " * (max_content_width - len(text) + 7 + 4)
+#         return f"{COLORS['GRAY']}║ {text}{padding} ║{COLORS['RESET']}"
+    
+#     def pad_line_wall(text: str) -> str:
+#         padding = " " * (max_content_width - len(text) + 5 + 4)
+#         return f"{COLORS['GRAY']}║ {text}{padding} ║{COLORS['RESET']}"
+    
+#     # Log with strict alignment
+#     logger.info(f"\n{header}")
+#     logger.info(f"{COLORS['CYAN']}{pad_line(title)}{COLORS['RESET']}")
+#     logger.info(f"{COLORS['GREEN']}{pad_line_comp(comp_line)}{COLORS['RESET']}")
+#     logger.info(f"{COLORS['MAGENTA']}{pad_line_wall(wall_line)}{COLORS['RESET']}")
+#     logger.info(footer)
+
+
 # Refined ANSI color codes
 COLORS = {
-    "GRAY": "\033[90m",    # Subtle gray for borders
-    "CYAN": "\033[36m",    # Calm cyan for title
-    "GREEN": "\033[32m",   # Muted green for computational time
-    "MAGENTA": "\033[35m", # Soft magenta for wall-clock time
+    "GRAY": "\033[10m",    # Uniform gray for all text and borders
     "RESET": "\033[0m"
 }
 
-def format_time_(seconds: float) -> str:
-    """Convert seconds to a formatted HR:MIN:SEC string with milliseconds."""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    millis = int((seconds % 1) * 1000)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
-
 def format_time(seconds: float) -> str:
     """Convert seconds to a formatted DAY:HR:MIN:SEC string with milliseconds."""
-    days = int(seconds // 86400)  # 86400 seconds in a day
+    days = int(seconds // 86400)
     hours = int((seconds % 86400) // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
     millis = int((seconds % 1) * 1000)
     return f"{days:02d}:{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
 
-def setup_logger(log_file: str = "icesee_timing.log"):
+def setup_logger(log_file: str = None):
     """Set up a logger for timing output."""
+    import logging
+    import sys
+    from mpi4py import MPI
+    
+    if log_file is None:
+        diagnostics_dir = Path(
+            os.environ.get("ICESEE_RESULTS_DIR", "_modelrun_datasets")
+        ) / "diagnostics"
+        diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        log_file = diagnostics_dir / "icesee_timing.log"
+
     logger = logging.getLogger("ICESEE_Timing")
     logger.setLevel(logging.INFO)
     
-    # Avoid duplicate handlers
     if not logger.handlers:
-        # File handler for logging to a file
         file_handler = logging.FileHandler(log_file)
         file_handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(file_handler)
         
-        # Optional: Stream handler for console output (only for root process)
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         if rank == 0:
-            stream_handler = logging.StreamHandler(sys.stderr)  # Use stderr to avoid stdout issues
+            stream_handler = logging.StreamHandler(sys.stderr)
             stream_handler.setFormatter(logging.Formatter("%(message)s"))
             logger.addHandler(stream_handler)
     
@@ -432,10 +624,10 @@ def display_timing_default(computational_time: float, wallclock_time: float) -> 
     logger = setup_logger()
     
     # Only log from the root MPI process
-    comm = MPI.COMM_WORLD
+    # comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     if rank != 0:
-        return  # Non-root processes exit silently
+        return
 
     # Formatted time strings
     comp_time_str = format_time(computational_time)
@@ -447,32 +639,32 @@ def display_timing_default(computational_time: float, wallclock_time: float) -> 
     comp_line = f"Computational Time (Σ): {comp_time_str} (DAY:HR:MIN:SEC.ms) ⏱️"
     wall_line = f"Wall-Clock Time (max):  {wall_time_str} (DAY:HR:MIN:SEC.ms) 🕒"
     
-    # Calculate max width based on plain text length (excluding ANSI codes)
-    max_content_width = max(len(title), len(comp_line), len(wall_line))
-    box_width = max_content_width + 12  # 2 for '║' on each side + 2 for padding
+    # Calculate max width based on the longest metric label and value
+    max_label_width = max(len(entry[0]) for entry in time_entries)
+    max_value_width = max(len(entry[1]) for entry in time_entries[1:])  # Skip header for value width
+    total_width = max_label_width + max_value_width - 14  # 2 for '║' + 2 for padding
     
     # Box drawing
-    header = f"{COLORS['GRAY']}╔{'═' * box_width}╗{COLORS['RESET']}"
-    footer = f"{COLORS['GRAY']}╚{'═' * box_width}╝{COLORS['RESET']}"
+    header = f"{COLORS['GRAY']}╔{'═' * total_width}╗{COLORS['RESET']}"
+    footer = f"{COLORS['GRAY']}╚{'═' * total_width}╝{COLORS['RESET']}"
     
-    # Pad lines to exact width, ensuring no extra spaces
-    def pad_line(text: str) -> str:
-        padding = " " * (max_content_width - len(text) + 6 + 4)
-        return f"{COLORS['GRAY']}║ {text}{padding} ║{COLORS['RESET']}"
-    
-    def pad_line_comp(text: str) -> str:
-        padding = " " * (max_content_width - len(text) + 7 + 4)
-        return f"{COLORS['GRAY']}║ {text}{padding} ║{COLORS['RESET']}"
-    
-    def pad_line_wall(text: str) -> str:
-        padding = " " * (max_content_width - len(text) + 5 + 4)
-        return f"{COLORS['GRAY']}║ {text}{padding} ║{COLORS['RESET']}"
+    # Pad lines to exact width with strict alignment
+    def pad_line(label: str, value: str = "") -> str:
+        if not value:  # Header
+            padding = " " * (total_width -10 - len(label))
+            return f"{COLORS['GRAY']}║ \033[1m{label}{COLORS['RESET']}{padding}{COLORS['GRAY']}║{COLORS['RESET']}"
+        else:  # Metric with value
+            label_padding = " " * (max_label_width -17 - len(label))  # +1 for space
+            value_padding = " " * (max_value_width -17 - len(value))  # +1 for space
+            return f"{COLORS['GRAY']}║ {label}{label_padding}{value}{value_padding}{COLORS['RESET']}{COLORS['GRAY']}  ║{COLORS['RESET']}"
     
     # Log with strict alignment
-    logger.info(f"\n{header}")
-    logger.info(f"{COLORS['CYAN']}{pad_line(title)}{COLORS['RESET']}")
-    logger.info(f"{COLORS['GREEN']}{pad_line_comp(comp_line)}{COLORS['RESET']}")
-    logger.info(f"{COLORS['MAGENTA']}{pad_line_wall(wall_line)}{COLORS['RESET']}")
+    logger.info(f"{header}")
+    for entry in time_entries:
+        if len(entry) == 1:  # Header
+            logger.info(pad_line(entry[0]))
+        else:  # Metric with value
+            logger.info(pad_line(entry[0], entry[1]))
     logger.info(footer)
 
 
@@ -491,12 +683,19 @@ def format_time(seconds: float) -> str:
     millis = int((seconds % 1) * 1000)
     return f"{days:02d}:{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
 
-def setup_logger(log_file: str = "icesee_timing.log"):
+def setup_logger(log_file: str = None):
     """Set up a logger for timing output."""
     import logging
     import sys
     from mpi4py import MPI
     
+    if log_file is None:
+        diagnostics_dir = Path(
+            os.environ.get("ICESEE_RESULTS_DIR", "_modelrun_datasets")
+        ) / "diagnostics"
+        diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        log_file = diagnostics_dir / "icesee_timing.log"
+
     logger = logging.getLogger("ICESEE_Timing")
     logger.setLevel(logging.INFO)
     
@@ -731,7 +930,8 @@ def compute_km_from_tobserve(tobserve, k_start, m_obs=None):
     m_obs_i = max(0, min(m_obs_i, tobserve.size))
 
     # count how many obs times have occurred at start (remember your check uses k+1)
-    k1 = int(k_start) + 1
+    # k1 = int(k_start) + 1
+    k1 = int(k_start)
     return int(np.count_nonzero(tobserve[:m_obs_i] <= k1))
 
 def step_already_done(base_dir: str, k: int) -> bool:
@@ -819,3 +1019,133 @@ def env_flag(name: str, default: bool = False) -> bool:
         return False
     # fallback: any non-empty string means True
     return True
+
+
+def load_bed_masks_from_h5(f):
+    """
+    Supports BOTH:
+      - new format: /bed_masks/static/* and /bed_masks/cols/*
+      - old format: /bed_mask_map (legacy)
+
+    Returns:
+      bed_mask_map_static: dict[str, np.ndarray(bool)]  shape (n_bed,)
+      bed_mask_map_cols:   dict[str, np.ndarray(bool)]  shape (n_bed, m_obs)
+      bed_snap_cols:       list[int]
+      obs_model_to_col:    dict[int,int]
+    """
+    bed_mask_map_static = {}
+    bed_mask_map_cols = {}
+    bed_snap_cols = []
+    obs_model_to_col = {}
+
+    # ---------- NEW FORMAT ----------
+    if "bed_masks" in f:
+        # static masks
+        if "static" in f["bed_masks"]:
+            for k in f["bed_masks/static"].keys():
+                bed_mask_map_static[k] = f["bed_masks/static"][k][:].astype(bool)
+
+        # column/time-dependent masks
+        if "cols" in f["bed_masks"]:
+            for k in f["bed_masks/cols"].keys():
+                bed_mask_map_cols[k] = f["bed_masks/cols"][k][:].astype(bool)
+
+        if "bed_snap_cols" in f:
+            bed_snap_cols = f["bed_snap_cols"][:].astype(int).tolist()
+
+        # mapping model step -> obs column
+        if "obs_model_to_col_keys" in f and "obs_model_to_col_vals" in f:
+            keys = f["obs_model_to_col_keys"][:].astype(int)
+            vals = f["obs_model_to_col_vals"][:].astype(int)
+            obs_model_to_col = {int(k): int(v) for k, v in zip(keys, vals)}
+
+        return bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col
+
+    # ---------- LEGACY FORMAT ----------
+    if "bed_mask_map" in f:
+        legacy = f["bed_mask_map"][:]
+        # We can only interpret legacy as "static" (no per-km gating available)
+        # If legacy stored (m_obs,) or something else, this is inherently ambiguous.
+        bed_mask_map_static["bed"] = np.asarray(legacy, dtype=bool)
+        # no cols gating
+        bed_mask_map_cols = {}
+        bed_snap_cols = []
+        obs_model_to_col = {}
+
+    return bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col
+
+
+
+def icesee_savefig(
+    fig,
+    name="results.png",
+    dpi=300,
+    show=True,
+    data_path=None,
+    subdir="figures",
+):
+    """
+    ICESEE-OnLINE helper:
+    Save plots beneath the configured run-output directory so data and
+    diagnostics remain self-contained.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        Figure object to save.
+    name : str
+        Output filename inside figures/.
+    dpi : int
+        Resolution.
+    show : bool
+        Whether to call plt.show() after saving.
+    data_path : str or pathlib.Path, optional
+        Run-output directory. If omitted, ``ICESEE_RESULTS_DIR`` is used when
+        set, otherwise ``_modelrun_datasets``.
+    subdir : str
+        Figure subdirectory within ``data_path``.
+    """
+
+    from pathlib import Path
+    import matplotlib.pyplot as plt
+    run_dir = Path(data_path or os.environ.get("ICESEE_RESULTS_DIR", "_modelrun_datasets"))
+    out_dir = run_dir / subdir
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Full output path
+    out_path = out_dir / name
+
+    # Save figure
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+
+    print(f"[ICESEE] Figure saved: {out_path}")
+
+    # Optionally display inline
+    if show:
+        plt.show()
+
+
+def read_scalar_timeseries(file_path, scalar_names):
+    import re
+    scalars = {k: [] for k in scalar_names}
+    times   = {k: [] for k in scalar_names}
+
+    with h5py.File(file_path, "r") as f:
+        for name in f.keys():
+
+            for key in scalar_names:
+                if name.startswith(key + "_"):
+
+                    # extract time index
+                    k = int(re.findall(r"\d+", name)[0])
+
+                    scalars[key].append(f[name][()])
+                    times[key].append(k)
+
+    # convert to numpy arrays and sort
+    for key in scalar_names:
+        order = np.argsort(times[key])
+        scalars[key] = np.array(scalars[key])[order]
+        times[key]   = np.array(times[key])[order]
+
+    return times, scalars

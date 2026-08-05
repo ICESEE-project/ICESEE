@@ -1,0 +1,8 @@
+extends: param.yaml
+
+enkf-parameters:
+  # Cheap preflight: generate and save only the true and wrong initial states.
+  # Inspect the bed/thickness/surface/friction maps before launching Nens=40.
+  data_path: _modelrun_datasets_rebuttal_ic_stretched_seed_bed_v6
+  initial_state_only: true
+  generate_true_wrong_state_only: false

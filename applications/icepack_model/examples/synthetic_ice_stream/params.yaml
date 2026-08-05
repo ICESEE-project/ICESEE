@@ -1,9 +1,9 @@
 physical-parameters:
   # Domain parameters
-  Lx: 50e2        # (m)
-  Ly: 12e2        # (m)
-  nx: 12         # number of elements in the x-direction
-  ny: 8      # number of elements in the y-direction
+  Lx:  50e2 #50e2        # (m)
+  Ly:  12e2 #12e2        # (m)
+  nx: 24         # number of elements in the x-direction
+  ny: 16      # number of elements in the y-direction
   degree: 2       # degree of the polynomial basis functions
 
   # Bedrock slopes 
@@ -23,43 +23,97 @@ modeling-parameters:
   T: 255.0                # (K) temperature
   a_in: 1.7               # accumulation rate at the inflow
   da:   -2.7              # change of accumulation rate
-  a_in_p: 0.17            # nurged accumulation rate at the inflow
-  da_p: -0.27           # nurged change of accumulation rate
-  num_years: 100          # number of years to run the model
+  a_in_p: 0.9 #0.17            # nurged accumulation rate at the inflow
+  da_p: -1.35 #-0.27           # nurged change of accumulation rate
+  num_years: 120          # number of years to run the model
   timesteps_per_year: 2   # number of timesteps per year
 
 enkf-parameters:
   # Ensemble Kalman Filter parameters
   Nens: 40                      # number of ensemble members (now set in the command line)
-  freq_obs: 8              # frequency of observations
-  obs_max_time: 80         # maximum time for observations
-  obs_start_time: 4             # start time for observations
+  freq_obs: 8              # frequency used by the known-good experiment
+  obs_max_time: 80        # maximum time for observations
+  obs_start_time: 8             # start time for observations
+  random_field_method: fft   # graph or fft
 
   num_state_vars: 3       # number of state variables  [h,u,v]
   num_param_vars: 1       # number of parameter variables [smb]
   vec_inputs: ['h','u','v','smb']
   observed_vars: ['h','u','v']   #['h','u','v']
-  observed_params: ['smb']  #['smb']
+  # When present here, SMB uses the observation-constrained EnKF branch.
+  # Set [] to switch automatically to continuity inference from h, u, and v.
+  observed_params: ['smb']
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
-  generate_true_state:    0  # Generate true state for synthetic observations
-  generate_nurged_state:  0  # Generate nudged state for synthetic observations
+  generate_true_state:    1  # Generate true state for synthetic observations
+  generate_nurged_state:  1  # Generate nudged state for synthetic observations
   initialize_ensemble: 1
   use_ensemble_pertubations: 1 # Use ensemble perturbations for ensemble state
-  initial_spread_factor: 1.25
-  sequential_ensemble_initialization: 1  # Sequential ensemble initialization (True for sequential, False for parallel)
+  initial_spread_factor: 1.01 #1.08
+  sequential_ensemble_initialization: 0  # Sequential ensemble initialization (True for sequential, False for parallel)
+
 
   # Statistical parameters (based on the number of state variables)
   sig_model: [0.1,0.1,0.1] # model error standard deviation
-  sig_obs: [10,4,2,0.1]   # observation error standard deviation
-  sig_Q: [0.8,0.4,0.01,0.08]    # process noise standard deviation
-  length_scale: [128,128,125,130] #[150, 150, 150, 150]   # length scale for the covariance matrix, can be a list
+  sig_obs: [7,1.5,0.4,0.08]   # observation error standard deviation
+  # sig_Q: [20,2.5,1.5,0.4]    # process noise standard deviation
+  # length_scale: [500,450,670,400] #[150, 150, 150, 150]   # length scale for the covariance matrix, can be a list
+  # sig_Q: [10,5,4,0.15]
+  sig_Q: [10,4,1.75,0.14]    # initial pertubation noise standard deviation
+  # sig_Q: [10,4,1.75,0.3] 
+  # The known-good run predated the length_scale plumbing fix, so its list
+  # above was ignored and FFT used the scalar fallback sqrt(Lx*Ly)/10.
+  # State that effective value explicitly while retaining the corrected API.
+  # A scalar also preserves the legacy combined-field FFT construction.
+  length_scale: 244.9489742783178
 
   Q_rho: 0.95 
 
   seed: 1                 # seed for random number generator
-  inflation_factor: 1.15          # inflation factor
-  localization_flag: False      # localization flag: True, False
+  inflation_factor: 1.0          # inflation factor
+  state_inflation_factor: 1.2
+  param_inflation_factor: 1.08 #1.08
+  localization_flag: 1      # localization flag: True, False
+  localized_vars: ['smb']  # list of variables to localize (only used if localization_flag is True)
+  adaptive_radius: false    # adaptive radius flag: True, False
+  localization_radius: 900  # localization radius (float or dict {var_name: radius})
+  taper_type: 'gaspari_cohn'  # 'gaspari_cohn' (default) or 'gaussian'
+  partitioned_io_flag: 0   # when true: no rank ever holds the full (nd, Nens) ensemble
+  # Feature-flagged SMB/bed inference plugin
+  inference_plugin_enabled: true
+  physics_smb_inference: true
+
+  # SMB inference settings. If 'smb' is in observed_params, the plugin keeps
+  # the observation-constrained EnKF posterior. Otherwise, because SMB remains
+  # in vec_inputs, it switches automatically to continuity inference.
+  smb_history_length: 5
+  smb_divergence_neighbors: 24
+  smb_graph_neighbors: 12
+  smb_spatial_regularization: 40.0
+  smb_temporal_regularization: 4.0
+  smb_blend_factor: 0.35
+  smb_inference_start_time: 15.0
+  smb_spinup_hold_factor: 1.0
+  smb_blend_ramp_time: 10.0
+  smb_projection_basis: x_linear   # x_linear
+  smb_physical_bounds: null
+  mesh_coordinate_scale_to_m: 1.0
+
+  # Bed plugin remains disabled until a bed-inference experiment is selected.
+  physics_bed_inference: false
+  bed_update_mode: legacy
+  bed_inference_start_time: 0.0
+  bed_spinup_hold_factor: 1.0
+  bed_blend_ramp_time: 0.0
+  bed_update_blend_factor: 0.15
+  bed_spatial_regularization: 40.0
+  bed_graph_neighbors: 12
+  bed_max_update_per_cycle: null
+  bed_projection_basis: none
+  bed_physical_bounds: null
+  bed_enforce_below_surface: true
+  bed_min_surface_separation: 1.0
+
 
   # estimation flags
   joint_estimation: 1 # joint estimation flag: True, False
@@ -67,7 +121,8 @@ enkf-parameters:
   joint_estimated_params: ['smb']  # parameters to be jointly estimated
 
   # nurged parameters
-  h_nurge_ic: 350         # nurged increment for initial thickness
+  # h_nurge_ic: 350         # nurged increment for initial thickness
+  h_nurge_ic: 350 
   u_nurge_ic: 0         # nurged increment for initial velocity
   nurged_entries_percentage: 0.25 #%     # percentage of nurged entries in the state vector
 
@@ -75,16 +130,26 @@ enkf-parameters:
   model_name: "icepack"               # name of the model
   model_solver: "solver_weertman"     # name of the solver
   filter_type: "EnKF"               # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
-  local_analysis: False           # local analysis flag: True, False, global analysis is default
+  local_analysis: false           # local analysis flag: True, False, global analysis is default
   parallel_flag: "MPI_model"             # parallel flag: Serial, MPI, MPI_model
   n_modeltasks: 1                     # number of model tasks (for MPI)
   commandlinerun: "True"              # command line run flag: True, False
   execution_flag: 0                  #`execution flag: 0 ->default, 1 -> sequntial, 2 -> even_distribution_of_problem size, 3 -> even_distribution_of_problem size with load balancing
-  execution_mode: 1                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
+  execution_mode: 1                 # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
   data_path: _modelrun_datasets
- 
-  # restart parameters (only suppoertd for fully parallel runs)
-  restart_enabled: 1        # Enable restart functionality
-  force_fresh_start: 1     # Force fresh start even if checkpoints exist
+  ICESEE_PERFORMANCE_TEST: False
+
+  # HDF5 file parameters for the full parallel runs
+  h5_file_compression: None    # None, "gzip" or "lzf" 
+  h5_file_compression_level: 4   # Compression level (1-9 for gzip only)
+  h5_file_chunk_size: 1000       # Chunk size for HDF5
+  serial_file_creation: True  # Create HDF5 files in serial (True) or parallel (False)
+  collective_threshold: 4
+  batch_size: 200            # Batch size for writing HDF5 files
+
+  # restart parameters (only available for fully parallel runs)
+  restart_enabled: 1         # Enable restart functionality
+  force_fresh_start: 1       # Force fresh start even if checkpoints exist
   checkpoint_every: 5           # Frequency of checkpoints (every 5 assimilation cycles)
-  base_seed: 42 
+  base_seed: 42                 # Base seed for reproducibility
+  k_start_override: 40       # Start overwrite from this assimilation cycle

@@ -31,6 +31,7 @@ from ICESEE.src.EnKF._localization_inflation import  LocalizationInflationUtils
 from ICESEE.src.EnKF._generate_synthetic_observations import generate_synthetic_observations
 from ICESEE.src.EnKF._generate_true_wrong_state import generate_true_wrong_state
 from ICESEE.src.EnKF._ensemble_initialization import ensemble_initialization
+from ICESEE.src.utils.localization import prepare_random_field_coordinates
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
                               generate_pseudo_random_field_1d, \
@@ -87,8 +88,15 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
                             "start": start, "stop": stop,
                             "subcomm_size_min": subcomm_size_min, "dim_list": [nd],
                             "model_module": model_module})
+    
+    # observed variables
+    model_kwargs['observed_vars_params'] = (model_kwargs['observed_vars'] + model_kwargs['observed_params'])
+    # exclude bed variables from observed variables
+    all_observed = model_kwargs['observed_vars_params']
+    model_kwargs['all_observed'] = all_observed; params['all_observed'] = all_observed
 
-    _modelrun_datasets = model_kwargs.get("data_path",None)
+    _modelrun_datasets = model_kwargs.get("data_path") or "_modelrun_datasets"
+    os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
     if rank_world == 0 and not os.path.exists(_modelrun_datasets):
         # cretate the directory
         os.makedirs(_modelrun_datasets, exist_ok=True)
@@ -145,8 +153,10 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
 
     # update model_kwargs with the effective model_nprocs
     model_kwargs.update({'model_nprocs': effective_model_nprocs,
-                            "total_cores": total_cores,
-                            "base_total_procs": base_total_procs,
+                         'total_cores': total_cores,
+                         'base_total_procs': base_total_procs,
+                         'model_module': model_module,
+                         'vec_inputs_old': model_kwargs.get('vec_inputs', params.get('vec_inputs', None)),
                         })
 
     #  --- Generate True and Nurged States -------------------------------------------------------------------
@@ -171,6 +181,7 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
     len_scale = model_kwargs.get("length_scale")
     hdim  = params["nd"] // params["total_state_param_vars"]
     model_kwargs.update({"hdim": hdim, "Q_rho": Q_rho, "len_scale": len_scale})
+    prepare_random_field_coordinates(model_kwargs, expected_nodes=hdim)
 
         # --- get the process noise --->
     if params.get("use_random_fields", False):
@@ -180,9 +191,16 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
     # -- time ensemble initialization ---
     time_ensemble_initialization = time.time()
     # call the ensemble_initialization function
-    model_kwargs, ensemble_vec, time_init_noise_generation, \
-    time_init_ensemble_mean_computation, time_init_file_writing, \
-    shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full = ensemble_initialization(**model_kwargs)
+    if model_kwargs.get("initialize_ensemble", True):
+        model_kwargs, ensemble_vec, time_init_noise_generation, \
+        time_init_ensemble_mean_computation, time_init_file_writing, \
+        shape_ens,ensemble_bg,  ensemble_vec_mean, ensemble_vec_full = ensemble_initialization(**model_kwargs)
+    else:
+        time_init_noise_generation = 0.0
+        time_init_ensemble_mean_computation = 0.0
+        time_init_file_writing = 0.0
+        with h5py.File(_modelrun_datasets + '/icesee_ensemble_data.h5', 'r') as f:
+            ensemble_vec = f['ensemble'][:, :, 0]
     # --- time ensemble initialization ---
     time_ensemble_initialization = time.time() - time_ensemble_initialization
     
@@ -329,44 +347,49 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
     else:
         N_size = params["total_state_param_vars"] * hdim
         # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=0)
-        model_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":params["total_state_param_vars"]})
-        # noise = generate_enkf_field(**model_kwargs)
-        noise = generate_enkf_field(None, np.sqrt(Lx*Ly), hdim, params["total_state_param_vars"], rh=len_scale, verbose=False)
+        model_kwargs.update({"ii_sig": None, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":params["total_state_param_vars"]})
+
+        if (len(model_kwargs.get("scalar_inputs", [])) > 0) or (model_kwargs.get("var_nd", None) is not None):
+                noise_1 = generate_enkf_field(**model_kwargs)
+                ndim = 1 if len(model_kwargs.get("scalar_inputs", [])) > 0 else (model_kwargs["var_nd"][model_kwargs["scalar_inputs"][0]])
+                model_kwargs.update({ "noise_dim": ndim})
+                noise_2 = generate_enkf_field(**model_kwargs)
+                # concatenate noise_1 and noise_2 
+                noise = np.concatenate((noise_1, noise_2))[:-1]
+
+        else:
+            noise = generate_enkf_field(**model_kwargs)
 
     for k in range(model_kwargs.get("nt",params["nt"])):
 
-        model_kwargs.update({"k": k, "km":km, "alpha": alpha, "rho": rho, "tau": tau, "dt": dt,"n": n})
+        model_kwargs.update({"k": k, "km":km, "alpha": alpha, "rho": rho, "tau": tau, "dt": dt,"n": n, "noise": noise})
         model_kwargs.update({"generate_enkf_field": generate_enkf_field}) #save the function to generate the enkf field
-
-        # background step
-        # ensemble_bg = model_module.background_step(k,ensemble_bg, hdim, **model_kwargs)
-
-        # save a copy of initial ensemble
-        # ensemble_init = ensemble_vec.copy()
 
         input_file = f"{_modelrun_datasets}/icesee_ensemble_data.h5"
         with h5py.File(input_file, "r") as f:
             ensemble_vec = f["ensemble"][:,:,k]
 
-        # print(ensemble_vec)   
-
+        # -------------- Forecast step
         ensemble_vec = EnKFclass.forecast_step(ensemble_vec, \
                                             model_module.forecast_step_single, \
                                              **model_kwargs)
-        
+       
         #  compute the ensemble mean
-        # ensemble_vec_mean[:,k+1] = np.mean(ensemble_vec, axis=1)
         with h5py.File(input_file, "a") as f:
             f["ensemble"][:,:,k+1] = ensemble_vec
             f["ensemble_mean"][:,k+1] = np.mean(ensemble_vec, axis=1)
-
+       
         # -------------- Analysis step
         # generate Observation schedule
-        obs_t, ind_m, m_obs = UtilsFunctions(params, ensemble_vec).generate_observation_schedule(**model_kwargs)
+        obs_t, ind_m, m_obs = UtilsFunctions(
+            params=params,
+            model_kwargs=model_kwargs,
+            ensemble=ensemble_vec,
+        ).generate_observation_schedule(**model_kwargs)
         params.update({"number_obs_instants": m_obs, 'obs_index': ind_m})
         model_kwargs.update({"m_obs": m_obs, "obs_t": obs_t, "obs_index": ind_m})
         model_kwargs.update({"params": params})
-        if (km < m_obs) and (k+1 == ind_m[km]):
+        if (km < m_obs) and (k == ind_m[km]):
 
             # read the ensemble mean from file
             with h5py.File(input_file, "r") as f:
@@ -382,18 +405,21 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
             # --- localization ---
             if params["localization_flag"]:
                 if not adaptive_localization:
-                    # call the gahpari-cohn localization function
-                    loc_matrix_spatial = gaspari_cohn(r_matrix)
+                    if hasattr(model_module, "localization_function") and callable(model_module.localization_function):
+                        loc_matrix = model_module.localization_function(**model_kwargs)
+                    else:
+                        # call the gahpari-cohn localization function
+                        loc_matrix_spatial = gaspari_cohn(r_matrix)
 
-                    # expand to full state space
-                    loc_matrix = np.empty_like(Cov_model)
-                    for var_i in range(params["total_state_param_vars"]):
-                        for var_j in range(params["total_state_param_vars"]):
-                            start_i, start_j = var_i * hdim, var_j * hdim
-                            loc_matrix[start_i:start_i+hdim, start_j:start_j+hdim] = loc_matrix_spatial
-                    
-                    # apply the localization matrix
-                    # Cov_model = loc_matrix * Cov_model
+                        # expand to full state space
+                        loc_matrix = np.empty_like(Cov_model)
+                        for var_i in range(params["total_state_param_vars"]):
+                            for var_j in range(params["total_state_param_vars"]):
+                                start_i, start_j = var_i * hdim, var_j * hdim
+                                loc_matrix[start_i:start_i+hdim, start_j:start_j+hdim] = loc_matrix_spatial
+                        
+                        # apply the localization matrix
+                        # Cov_model = loc_matrix * Cov_model
                     
                 Cov_model = loc_matrix * Cov_model
 
@@ -418,19 +444,8 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
             # get synthetic observations if they exist
             with h5py.File(_synthetic_obs, 'r') as f:
                 hu_obs  = f['hu_obs'][:]
-                # eR   = f['R'][:]
-                # Cov_obs = np.cov(eR)
+      
 
-            # Call the EnKF class for the analysis step
-            # m_obs = hu_obs.shape[1]
-            # R = params["sig_obs"][k+1]**2 * np.eye(2*m_obs+1)
-            # R = np.eye(2*m_obs+1)* params["sig_obs"][0]**2
-            # R = params["sig_obs"][0]**2 * np.eye(nd)
-            R = np.eye(2*m_obs+1)
-            for ii, sig in enumerate(params["sig_obs"]):
-                start_idx = ii *2
-                end_idx = start_idx +2
-                R[start_idx:end_idx,start_idx:end_idx] = np.eye(2) * sig ** 2
             # print(f"R matrix: {R.shape},  cov shape: {Cov_model.shape}")
             # choose between user-defined functions or default functions
             # Obs = model_module.Obs_fun(hu_obs[:,km]) or UtilsFunctions(params, ensemble_vec).Obs_fun(hu_obs[:,km])
@@ -444,11 +459,21 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
             #                 parallel_flag=   parallel_flag)
 
             # Create default functions object once
-            utils = UtilsFunctions(params, ensemble_vec)
+            utils = UtilsFunctions(
+                params=params,
+                model_kwargs=model_kwargs,
+                ensemble=ensemble_vec,
+            )
 
             if hasattr(model_module, "Cov_Obs_fun") and callable(model_module.Cov_Obs_fun):
-                R = model_module.Cov_Obs_fun(sig_obs=params["sig_obs"][0],  nd=nd)
+                R = model_module.Cov_Obs_fun(sig_obs=params["sig_obs"][0],  nd=nd, kwargs=model_kwargs)
                 # print(f"R.shape from model module: {R.shape}")
+            else:
+                R = np.eye(m_obs)
+                for ii, sig in enumerate(params["sig_obs"]):
+                    start_idx = ii *2
+                    end_idx = start_idx +2
+                    R[start_idx:end_idx,start_idx:end_idx] = np.eye(2) * sig ** 2
 
             # --- Select Obs_fun ---
             if hasattr(model_module, "Obs_fun") and callable(model_module.Obs_fun):
@@ -476,21 +501,27 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
                 parallel_flag        = parallel_flag
             )
 
-            # # Compute the analysis ensemble
-            # if EnKF_flag:
-            #     ensemble_vec, Cov_model = analysis.EnKF_Analysis(ensemble_vec)
-            # elif DEnKF_flag:
-            #     ensemble_vec, Cov_model = analysis.DEnKF_Analysis(ensemble_vec)
-            # elif EnRSKF_flag:
-            #     ensemble_vec, Cov_model = analysis.EnRSKF_Analysis(ensemble_vec)
-            # elif EnTKF_flag:
-            #     ensemble_vec, Cov_model = analysis.EnTKF_Analysis(ensemble_vec)
-            # else:
-            #     raise ValueError("Filter type not supported")
+            # Compute the analysis ensemble
+            if EnKF_flag:
+                ensemble_vec = analysis.EnKF_Analysis(ensemble_vec)
+            elif DEnKF_flag:
+                ensemble_vec = analysis.DEnKF_Analysis(ensemble_vec)
+            elif EnRSKF_flag:
+                ensemble_vec = analysis.EnRSKF_Analysis(ensemble_vec)
+            elif EnTKF_flag:
+                ensemble_vec = analysis.EnTKF_Analysis(ensemble_vec)
+            else:
+                raise ValueError("Filter type not supported")
+            
+            # model updates after analysis if any
+            if hasattr(model_module, "post_analysis_update") and callable(model_module.post_analysis_update):
+                model_kwargs, ensemble_vec = model_module.post_analysis_update(ensemble_vec, **model_kwargs)
+            else:
+                pass # no post analysis updates present
 
-            # ensemble_vec_mean[:,k+1] = np.mean(ensemble_vec, axis=1)
-            # with h5py.File(input_file, "a") as f:
-            #     f["ensemble_mean"][:,k+1] = np.mean(ensemble_vec, axis=1)
+            # save the ensemble mean after analysis
+            with h5py.File(input_file, "a") as f:
+                f["ensemble_mean"][:,k+1] = np.mean(ensemble_vec, axis=1)
             
             # update the ensemble with observations instants
             km += 1
@@ -499,11 +530,8 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
             # ensemble_vec = UtilsFunctions(params, ensemble_vec).inflate_ensemble(in_place=True)
             # ensemble_vec = LocalizationInflationUtils(params, ensemble_vec).inflate_ensemble(in_place=True)
             # ensemble_vec = UtilsFunctions(params, ensemble_vec)._inflate_ensemble()
-        
-            # ensemble_vec_mean[:,k+1] = np.mean(ensemble_vec, axis=1)
            
         # Save the ensemble
-        # ensemble_vec_full[:,:,k+1] = ensemble_vec
         with h5py.File(input_file, "a") as f:
             f["ensemble"][:,:,k+1] = ensemble_vec
 
@@ -542,6 +570,7 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
     # else:
     save_all_data(
         enkf_params=model_kwargs['enkf_params'],
+        data_path=_modelrun_datasets,
         nofilter=True,
         t=model_kwargs["t"], b_io=np.array([b_in,b_out]),
         Lxy=np.array([Lx,Ly]),nxy=np.array([nx,ny]),
@@ -615,5 +644,3 @@ def icesee_model_data_assimilation_serial(**model_kwargs):
     #         display_timing_default(total_elapsed_time, total_wall_time)
     # else:
     #     None
-
-

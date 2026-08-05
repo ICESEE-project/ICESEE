@@ -8,6 +8,10 @@
 import sys
 import os
 import numpy as np
+from pathlib import Path
+
+# --- Set up paths ---
+os.chdir(Path(__file__).resolve().parent)
 
 # --- Configuration ---
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -36,24 +40,30 @@ params.update({
 
 # --- Model intialization --- 
 PETSc.Sys.Print("Initializing icepack model ...")
-kwargs.update({'comm':comm})
-nx,ny,Lx,Ly,x,y,h,u,a,a_p,b,b_in,b_out,h0,u0,solver_weertman,A,C,Q,V = initialize_model(**kwargs)
+kwargs.update({'comm': comm})
+kwargs = initialize_model(**kwargs)   # kwargs now already has nx,ny,Lx,Ly,x,y,h,u,a,a_p,b,b_in,b_out,
+                                       # h0,u0,solver_weertman,A,C,Q,V,mesh
 
-# update the parameters
-params["nd"] = h0.dat.data.size * params["total_state_param_vars"] # get the size of the entire vector
-kwargs.update({"a":a, "h0":h0, "u0":u0, "C":C, "A":A,"Q":Q,"V":V, "da":float(modeling_params["da"]),
-        "b":b, "dt":params["dt"], "seed":float(enkf_params["seed"]), "x":x, "y":y,
-        "Lx":Lx, "Ly":Ly, "nx":nx, "ny":ny, "h_nurge_ic":float(enkf_params["h_nurge_ic"]), 
-        "u_nurge_ic":float(enkf_params["u_nurge_ic"]),"nurged_entries_percentage":float(enkf_params["nurged_entries_percentage"]),
-        "a_in_p":float(modeling_params["a_in_p"]), "da_p":float(modeling_params["da_p"]),
-        "solver":solver_weertman,
-        "a_p":a_p, "b_in":b_in, "b_out":b_out,
+params["nd"] = kwargs["h0"].dat.data.size * params["total_state_param_vars"]
+
+# only genuinely new additions remain:
+kwargs.update({
+    "da": float(modeling_params["da"]),
+    "dt": params["dt"],
+    "seed": float(enkf_params["seed"]),
+    "h_nurge_ic": float(enkf_params["h_nurge_ic"]),
+    "u_nurge_ic": float(enkf_params["u_nurge_ic"]),
+    "nurged_entries_percentage": float(enkf_params["nurged_entries_percentage"]),
+    "a_in_p": float(modeling_params["a_in_p"]),
+    "da_p": float(modeling_params["da_p"]),
+    "solver": kwargs["solver_weertman"],   
+    "nd": params["nd"],
 })
 
 # --- nurged smb
 a_in = firedrake.Constant(kwargs["a_in_p"])
 da_p = firedrake.Constant(kwargs["da_p"])
-a_nuged = firedrake.interpolate(a_in + da_p*kwargs["x"]/kwargs["Lx"], kwargs["Q"])
+a_nuged = firedrake.Function(kwargs["Q"]).interpolate(a_in + da_p*kwargs["x"]/kwargs["Lx"])
 kwargs.update({"a_nuged":a_nuged})
 
 # --- Run Data Assimilation ---

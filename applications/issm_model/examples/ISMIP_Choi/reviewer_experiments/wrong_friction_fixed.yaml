@@ -1,0 +1,11 @@
+extends: friction_inversion_hybrid.yaml
+
+enkf-parameters:
+  # Control: assimilate the observed state and bed, but hold the deliberately
+  # wrong friction ensemble fixed during every EnKF analysis.
+  data_path: _reviewer_wrong_friction_fixed_v5
+  inversion_flag: 0
+  frozen_analysis_vars: [coefficient]
+  localized_vars: [bed]
+  localization_radius:
+    bed: 15000

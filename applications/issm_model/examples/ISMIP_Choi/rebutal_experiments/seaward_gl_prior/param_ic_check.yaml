@@ -1,0 +1,9 @@
+extends: param.yaml
+
+enkf-parameters:
+  data_path: _modelrun_datasets_rebuttal_ic_seaward_gl_v1
+  initial_state_only: true
+  generate_true_state: true
+  generate_nurged_state: true
+  generate_true_wrong_state_only: false
+  generate_synthetic_obs_only: false

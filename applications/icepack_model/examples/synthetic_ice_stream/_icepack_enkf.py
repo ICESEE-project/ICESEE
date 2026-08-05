@@ -22,52 +22,6 @@ def forecast_step_single(ensemble=None, **kwargs):
     #  call the run_model fun to push the state forward in time
     return run_model(ensemble, **kwargs)
 
-# --- Background step ---
-def background_step(**kwargs):
-    """ computes the background state of the model
-    Args:
-        k: time step index
-        background_vec: background state of the model
-        hdim: dimension of the state variables
-    Returns:
-        background_vec: updated background state of the model
-    """
-    # unpack the **kwargs
-    # a = kwargs.get('a', None)
-    b = kwargs.get('b', None)
-    dt = kwargs.get('dt', None)
-    h0 = kwargs.get('h0', None)
-    A = kwargs.get('A', None)
-    C = kwargs.get('C', None)
-    Q = kwargs.get('Q', None)
-    V = kwargs.get('V', None)
-    a_nuged = kwargs.get('a_nuged', None)
-    solver = kwargs.get('solver', None)
-    background_vec = kwargs.get('background_vec', None)
-
-    # call the icesee_get_index function to get the indices of the state variables
-    vecs, indx_map, dim_per_proc = icesee_get_index(background_vec, **kwargs)
-
-    # fetch the state variables
-    hb = Function(Q)
-    hb.dat.data[:]   = background_vec[indx_map["h"]]
-    ub = Function(V)
-    ub.dat.data[:,0] = background_vec[indx_map["u"]]
-    ub.dat.data[:,1] = background_vec[indx_map["v"]]
-
-    # call the ice stream model to update the state variables
-    hb, ub = Icepack(solver, hb, ub,  a_nuged, b, dt, h0, fluidity = A, friction = C)
-
-    # update the background state at the next time step
-    updated_state = {'h': hb.dat.data_ro,
-                    'u': ub.dat.data_ro[:,0],
-                    'v': ub.dat.data_ro[:,1]}
-
-    if kwargs["joint_estimation"]:
-        updated_state['smb'] = a_nuged.dat.data_ro
-
-    return updated_state
-
 # --- generate true state ---
 def generate_true_state(**kwargs):
     """generate the true state of the model"""
@@ -112,13 +66,13 @@ def generate_true_state(**kwargs):
         if kwargs["joint_estimation"]:
             statevec_true[indx_map["smb"],k+1] = a.dat.data_ro
 
-    # update_state = {'h': statevec_true[indx_map["h"],:], 
-    #                 'u': statevec_true[indx_map["u"],:], 
-    #                 'v': statevec_true[indx_map["v"],:]}
-    # # -- for joint estimation --
-    # if kwargs["joint_estimation"]:
-    #     update_state['smb'] = statevec_true[indx_map["smb"],:]
-    # return update_state
+    update_state = {'h': statevec_true[indx_map["h"],:], 
+                    'u': statevec_true[indx_map["u"],:], 
+                    'v': statevec_true[indx_map["v"],:]}
+    # -- for joint estimation --
+    if kwargs["joint_estimation"]:
+        update_state['smb'] = statevec_true[indx_map["smb"],:]
+    return update_state
 
 # --- initialize the ensemble members ---
 def initialize_ensemble(ens, **kwargs):
@@ -187,16 +141,24 @@ def initialize_ensemble(ens, **kwargs):
 
         # update the nurged state with the solution
         h_perturbed = h.dat.data_ro
-        u_perturbed = u0.dat.data_ro[:,0]
-        v_perturbed = u0.dat.data_ro[:,1]
+        # u_perturbed = u0.dat.data_ro[:,0]
+        # v_perturbed = u0.dat.data_ro[:,1]
+        u_perturbed = u.dat.data_ro[:,0]
+        v_perturbed = u.dat.data_ro[:,1]
     else: 
         h_perturbed = h0.dat.data_ro + np.random.normal(0, 0.1, h0.dat.data_ro.size)
         u_perturbed = u0.dat.data_ro[:,0]
         v_perturbed = u0.dat.data_ro[:,1]
 
-    initialized_state = {'h': h_perturbed, 
-                         'u': u.dat.data_ro[:,0], 
-                         'v': u.dat.data_ro[:,1]}
+    # initialized_state = {'h': h_perturbed, 
+    #                      'u': u.dat.data_ro[:,0], 
+    #                      'v': u.dat.data_ro[:,1]}
+
+    initialized_state = {
+        "h": np.asarray(h_perturbed).copy(),
+        "u": np.asarray(u_perturbed).copy(),
+        "v": np.asarray(v_perturbed).copy(),
+    }
     
     # -- for joint estimation --
     if kwargs["joint_estimation"]:
@@ -255,7 +217,7 @@ def generate_nurged_state(**kwargs):
         daa = da_p
         a_in = firedrake.Constant(aa)
         da_  = firedrake.Constant(daa)
-        a    = firedrake.interpolate(a_in + da_ * x / Lx, Q)
+        a    = firedrake.Function(Q).interpolate(a_in + da_ * x / Lx)
         statevec_nurged[indx_map["smb"],0] = a.dat.data_ro
 
     # if velocity is nurged, then run to get a solution to be used as am initial guess for velocity.
@@ -324,7 +286,13 @@ def generate_nurged_state(**kwargs):
             # daa = da_p
             a_in = firedrake.Constant(aa)
             da_  = firedrake.Constant(daa)
-            a    = firedrake.interpolate(a_in + da_ * x / Lx, Q)
+            a    = firedrake.Function(Q).interpolate(a_in + da_ * x / Lx)
             statevec_nurged[indx_map["smb"],k+1] = a.dat.data_ro
 
-    # return statevec_nurged
+    updated_state = {'h': statevec_nurged[indx_map["h"],:], 
+                    'u': statevec_nurged[indx_map["u"],:], 
+                    'v': statevec_nurged[indx_map["v"],:]}
+    # -- for joint estimation --
+    if kwargs["joint_estimation"]:
+        updated_state['smb'] = statevec_nurged[indx_map["smb"],:]
+    return updated_state

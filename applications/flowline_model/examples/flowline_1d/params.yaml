@@ -1,0 +1,71 @@
+physical-parameters:
+  # Lorenz96 Model parameters
+  A: 4e-12
+  n: 3       # Glen's flow law exponent
+  C: 3e6
+  rho_ice: 900.0  # (kg/m^3) Density of ice
+  rho_water: 1000.0  # (kg/m^3) Density of seawater
+  g: 9.81        # (m/s^2) Acceleration due to gravity
+  accum: 0.65    # surface accunulation (m)
+  facemelt: 5
+  hscale: 1000.0
+  N1: 40
+  N2: 10
+  sigGZ: 0.97
+  transient: 0
+  tcurrent: 1
+  xsill: 50e3
+  sillamp: 500
+  sillsmooth: 1e-5
+
+modeling-parameters:
+  # Modeling parameters            
+  num_years: 150        # number of years to run the model
+  timesteps_per_year: 2   # number of timesteps per year
+  year: 31536000        # number of seconds in a year
+
+  example_name: "flowline_1d"  # example name
+
+enkf-parameters:
+  # Ensemble Kalman Filter parameters
+  Nens: 30                   # number of ensemble members
+  freq_obs: 10               # frequency of observations
+  obs_max_time: 140             # maximum time for observations
+  obs_start_time: 10 
+
+  num_state_vars: 3         # number of state variables 
+  num_param_vars: 0 
+  vec_inputs: ['h','u','xg'] # state variables
+  observed_vars: ['h','u','xg'] # observed variables
+  # observed_params: ['xg']   # observed parameters
+  scalar_inputs: ['xg']        # scalar inputs
+
+  # Statistical parameters
+  sig_obs: [0.01, 0.01, 0.01]     # observation error standard deviation
+  sig_Q: [0.01, 0.01, 0.01]          # process noise standard deviation
+  length_scale: [2, 2, 2]   # length scale for the covariance matrix
+
+  generate_synthetic_obs: "True"  # Generate synthetic observations for testing
+  generate_true_state:    "True"   # Generate true state for synthetic observations
+  generate_nurged_state:  "True"   # Generate nudged state for synthetic observations
+  initialize_ensemble: "True"
+  sequential_ensemble_initialization: "False"
+  use_ensemble_pertubations: "True"
+
+  # estimation flags
+  joint_estimation: "False"  # joint estimation flag: True, False
+  state_estimation: "True"   # state estimation flag: True, False
+  parameter_estimation: "False" # parameter estimation flag: True, False
+
+  seed: 1                 # seed for random number generator
+  inflation_factor: 1.0          # inflation factor
+  localization_flag: "False"      # localization flag: True, False
+
+  # enkf model parameters
+  model_name: "flowline"         # name of the model
+  filter_type: "EnKF"           # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
+  parallel_flag: "serial"             # parallel flag: Serial, MPI, MPI_model
+  execution_mode: 0                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
+  commandlinerun: "True"         # command line run flag: True, False
+  data_path: _modelrun_datasets
+ 

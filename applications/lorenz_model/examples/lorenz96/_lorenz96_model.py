@@ -23,9 +23,9 @@ def Lorenz96(state, **kwargs):
        outputs: f - the derivative of the state vector
     """
     # Unpack the arguments
-    sigma = kwargs.get('sigma', None)
-    beta  = kwargs.get('beta', None)
-    rho   = kwargs.get('rho', None)
+    sigma = kwargs.get('sigma_96', None)
+    beta  = kwargs.get('beta_96', None)
+    rho   = kwargs.get('rho_96', None)
 
     x,y,z = state # Unpack the state vector
     f = np.zeros(3) # Create an empty vector to store the derivatives
@@ -65,8 +65,6 @@ def run_model(ensemble, **kwargs):
      
     # Call the RK4 function to push the state forward in time
     state = RK4(Lorenz96, ensemble, **kwargs)
-
-    # return the updated state
     updated_state = {'x' : state[indx_map['x']],
                      'y' : state[indx_map['y']],
                      'z' : state[indx_map['z']]}
