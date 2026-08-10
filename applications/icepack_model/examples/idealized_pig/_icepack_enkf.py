@@ -51,6 +51,11 @@ def generate_true_state(**kwargs):
     # # call the icesee_get_index function to get the indices of the state variables
     vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
 
+    ### DEBUGGING ###
+    print(f"shape of thickness: {np.shape(h0.dat.data_ro)}")
+    print(f"shape of sfc elevation: {np.shape(s0.dat.data_ro)}")
+    print(f"dimension of state vector for thickness: {np.shape(statevec_true[indx_map["h"],0])}")
+
     
     # # --- fetch the state variables ---
     statevec_true[indx_map["h"],0] = h0.dat.data_ro
@@ -72,7 +77,7 @@ def generate_true_state(**kwargs):
 
     # --- step numbers at which to extract flowline profiles during the simulation -- 
     flowline_profile_steps = [t/dt for t in kwargs["save_steps"]]
-    print(flowline_profile_steps)
+    print(f"\n steps where profiles are sampled = {flowline_profile_steps} \n")
 
     hs_files = f"_modelrun_datasets/hs_profiles_true"
     
@@ -92,67 +97,66 @@ def generate_true_state(**kwargs):
     for k in range(nt):
 
         #step = k * dt
-        step = k
-        
+        step = k        
 
         ### Conditionals for depth-dependent basal melt rate function
         ### Select forcing scenario between 1935 - 2017 
         if step < (6/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1935 - 1941
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "true") # 1935 - 1941
    
         elif (6 / dt) <= step < (15/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1941 - 1950
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "true") # 1941 - 1950
     
         elif (15 / dt) <= step < (18/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1950 - 1953
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "true") # 1950 - 1953
     
         elif (18/ dt) <= step < (20/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1953 - 1955
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "true") # 1953 - 1955
         
         elif (20/ dt) <= step < (25/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1955 - 1960
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "true") # 1955 - 1960
         
         elif (25/ dt) <= step < (27/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1960 - 1962
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "true") # 1960 - 1962
         
         elif (27/ dt) <= step < (31/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1962 - 1966
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "true") # 1962 - 1966
         
         elif (31/ dt) <= step < (40/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1966 - 1975
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "true") # 1966 - 1975
         
         elif (40/ dt) <= step < (48/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1975 - 1983
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "true") # 1975 - 1983
         
         elif (48/dt) <= step < (50/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1983 - 1985
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "true") # 1983 - 1985
         
         elif (50/ dt) <= step < (59/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1985 - 1994
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "true") # 1985 - 1994
         
         elif (59/ dt) <= step < (64/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1994 - 2000
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "true") # 1994 - 2000
         
         elif (64/ dt) <= step < (69/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 2000 - 2005
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "true") # 2000 - 2005
         
         elif (69/ dt) <= step < (76/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 2005 - 2012
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "true") # 2005 - 2012
         
         elif (76/ dt) <= step:
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 2012 - 2017
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "true") # 2012 - 2017
         
-        print(f"maximum_bmr=",{melt_max})
+        #print(f"maximum_bmr=",{melt_max})
         #print("basal melt field=",{np.mean(basal_melt_field.dat.data_ro)})
         #print("floating", {np.mean(floating.dat.data_ro)})
         #print("thickness", {np.mean(h.dat.data_ro)})
         #print("sfc elevation", {np.mean(s.dat.data_ro)})
-        # print(f"\ninside true state s_mean = {np.mean(s.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
-        # exit(1)
+        #print(f"\n time step = {step}, average thickness = {np.mean(h.dat.data_ro)}, average sfc elevation = {np.mean(s.dat.data_ro)}, average u = {np.mean(u.dat.data_ro[:,0])}, average v = {np.mean(u.dat.data_ro[:,1])} \n")
 
 
         # call the ice stream model to update the state variables
-        h, u, s = Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, kwargs)
+        h, u, s, floating, grounded = Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, kwargs)
+
         
 
         statevec_true[indx_map["h"],k+1] = h.dat.data_ro
@@ -173,6 +177,7 @@ def generate_true_state(**kwargs):
                 
                 h_profiles, s_profiles = flowline_profile(h, s, valid_points)
                 print(s_profiles.shape,h_profiles.shape,"\n")
+                print(f"n\ average thickness = {np.mean(h.dat.data_ro)} and average BMR = {np.mean(basal_melt_field.dat.data_ro)} \n")
                 
                 
                 with h5py.File(hs_files, "a") as F:
@@ -299,103 +304,84 @@ def generate_nurged_state(**kwargs):
     solver = kwargs.get('solver', None)
     save_steps = kwargs.get('save_steps', None)
      
-    wrong_basal_melt_field = kwargs.get('wrong_basal_melt_field', None)
- 
 
     statevec_nurged = kwargs["statevec_nurged"]
 
-     # --- define the state variables list ---
+    # --- define the state variables list ---
     vec_inputs = kwargs["vec_inputs"]
 
     # call the icesee_get_index function to get the indices of the state variables
-    vecs, indx_map, dim_per_proc = icesee_get_index(statevec_nurged, **kwargs)
+    #vecs, indx_map, dim_per_proc = icesee_get_index(statevec_nurged, **kwargs)
+    vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
 
-    #  create a bump -100 to 0
-    # h_indx = int(np.ceil(nurged_entries+1))
-    # hdim = vecs['h'].shape[0]
-    #h_index_map = indx_map["h"]
-    #hdim = indx_map["h"].shape[0]
-
-
-    # if velocity is nurged, then run to get a solution to be used as am initial guess for velocity.
-    # if u_nurge_ic != 0.0 or h_nurge_ic != 0.0:
-    #     h_indx = int(np.ceil(nurged_entries_percentage*hdim+1))
-   
-    #     # u_indx = int(np.ceil(u_nurge_ic+1))
-    #     u_indx = 1
-    #     h_bump = np.linspace(-h_nurge_ic,0,h_indx)
-    #     u_bump = np.linspace(-u_nurge_ic,0,h_indx)
-    #     # h_bump = np.random.uniform(-h_nurge_ic,0,h_indx)
-    #     # u_bump = np.random.uniform(-u_nurge_ic,0,h_indx)
-    #     # print(f"hdim: {hdim}, h_indx: {h_indx}")
-    #     # print(f"[Debug]: h_bump shape: {h_bump.shape} h0_index: {h0.dat.data_ro[:h_indx].shape}")
-    #     h_with_bump = h_bump + h0.dat.data_ro[:h_indx]
-    #     u_with_bump = u_bump + u0.dat.data_ro[:h_indx,0]
-    #     v_with_bump = u_bump + u0.dat.data_ro[:h_indx,1]
-
-    #     h_perturbed = np.concatenate((h_with_bump, h0.dat.data_ro[h_indx:]))
-    #     u_perturbed = np.concatenate((u_with_bump, u0.dat.data_ro[h_indx:,0]))
-    #     v_perturbed = np.concatenate((v_with_bump, u0.dat.data_ro[h_indx:,1]))
-
-    #     h = Function(Q)
-    #     u = Function(V)
-    #     h.dat.data[:]   = h_perturbed
-    #     u.dat.data[:,0] = u_perturbed
-    #     u.dat.data[:,1] = v_perturbed
-    #     h0 = h.copy(deepcopy=True)
-    #     # call the solver
-    #     h, u = Icepack(kwargs, solver, h, u, a, b, dt, h0)
-
-    #     # update the nurged state with the solution
-    #     h_perturbed = h.dat.data_ro
-    #     u_perturbed = u.dat.data_ro[:,0]
-    #     v_perturbed = u.dat.data_ro[:,1]
-    # else: 
-    #     h_perturbed = h0.dat.data_ro + np.random.normal(0, 0.1, h0.dat.data_ro.size)
-    #     u_perturbed = u0.dat.data_ro[:,0]
-    #     v_perturbed = u0.dat.data_ro[:,1]
-
+    # perturb the initial thickness field
     h_perturbed = h0.dat.data_ro + (15 * np.random.normal(0, 1, h0.dat.data_ro.size))
-
     h_p = Function(Q)
     h_p.dat.data[:] = h_perturbed
 
-    
-    s0 = icepack.compute_surface(thickness = h_p, bed = bed)
 
+    # recompute the surface elevation
+    s0 = icepack.compute_surface(thickness = h_p, bed = bed)
     s_perturbed = s0.dat.data_ro
+
+
+    # recompute flotation height for perturbed thickness field
+    zF = mf.flotationHeight(bed, Q)
+    floating, grounded = mf.flotationMask(s0, zF, Q) 
+
+
+    # recompute the basal melt field with the new floating mask
+    init_basal_melt_field, melt_max = BasalMeltRate(kwargs, 0, floating, Q, s0, h_p, scenario='control', experiment = "false") 
+    initial_bmr = init_basal_melt_field.dat.data_ro
+
+
+    # recompute velocity for the pertured thickness field
+    u0_perturbed = solver.diagnostic_solve(
+        velocity = u0,
+        thickness = h_p,
+        surface = s0,
+        beta = beta0,
+        fluidity = A0,
+        uThresh = kwargs["uThresh"],
+        floating = floating,
+        grounded = grounded,
+    )
     
-    u_perturbed = u0.dat.data_ro[:,0]
-    v_perturbed = u0.dat.data_ro[:,1]
+    u_perturbed = u0_perturbed.dat.data_ro[:,0]
+    v_perturbed = u0_perturbed.dat.data_ro[:,1]
+
+    ### DEBUGGING ###
+    print(f"shape of thickness: {np.shape(h_perturbed)}")
+    print(f"shape of sfc elevation: {np.shape(s_perturbed)}")
+    print(f"shape of velocity: {np.shape(u_perturbed)}")
+    print(f"shape of bmr: {np.shape(initial_bmr)}")
+    print(f"dimension of nudged state vector for thickness: {np.shape(statevec_nurged[indx_map["h"],0])}")
+    exit(1)
 
     statevec_nurged[indx_map["h"],0]   = h_perturbed
     statevec_nurged[indx_map["u"],0]   = u_perturbed
     statevec_nurged[indx_map["v"],0]   = v_perturbed
     statevec_nurged[indx_map["s"],0]   = s_perturbed
-
-    # # --  initialize the basal melt rate field if joint estimation is enabled at the initial time step
-    # if kwargs["joint_estimation"]:
-        
-    #    basal_melt_field = basal_melt_field.dat.data_ro
-    #    basal_melt_field_nudged = basal_melt_field + kwargs["wrong_basal_melt_field"]
-    #    statevec_nurged[indx_map["basal_melt_field"],0] = basal_melt_field_nudged
-
-    # # -- update parameter if joint estimation is enabled
-    if kwargs["joint_estimation"]:
-        basal_melt_field_nudged = basal_melt_field.dat.data_ro + kwargs["wrong_basal_melt_field"]
-        basal_melt_field = Function(Q)
-        basal_melt_field.dat.data[:] = basal_melt_field_nudged
-        
-        statevec_nurged[indx_map["basal_melt_field"],0] = basal_melt_field_nudged
+    statevec_nurged[indx_map["basal_melt_field"],0] = initial_bmr
 
     h = Function(Q)
     s = Function(Q)
-    u = Function(V)
     h.dat.data[:] = h_perturbed
+    s.dat.data[:] = s_perturbed
+    u = Function(V)   
     u.dat.data[:,0] = u_perturbed
     u.dat.data[:,1] = v_perturbed
-    s.dat.data[:] = s_perturbed
+
+
+    # # -- update parameter if joint estimation is enabled
+    if kwargs["joint_estimation"]:
+        basal_melt_field_nudged = basal_melt_field.dat.data_ro * kwargs["wrong_basal_melt_field"]
+        initial_perturbed_basal_melt_field = Function(Q)
+        initial_perturbed_basal_melt_field.dat.data[:] = basal_melt_field_nudged
+        
+        statevec_nurged[indx_map["basal_melt_field"],0] = basal_melt_field_nudged
     
+        
 
     # --- extract a profile of the flowline at the initial state ---
     h_profiles, s_profiles, valid_points, distances, bed_values = initial_flowline_profile(kwargs)
@@ -425,71 +411,79 @@ def generate_nurged_state(**kwargs):
         ### Conditionals for depth-dependent basal melt rate function
         ### Select forcing scenario between 1935 - 2017 
         if step < (6/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1935 - 1941
+
+            if step == 0:
+                basal_melt_field = init_basal_melt_field
+            
+            else:
+                basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 1935 - 1941
    
         elif (6 / dt) <= step < (15/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1941 - 1950
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "false") # 1941 - 1950
     
         elif (15 / dt) <= step < (18/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1950 - 1953
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 1950 - 1953
     
         elif (18/ dt) <= step < (20/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1953 - 1955
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "false") # 1953 - 1955
         
         elif (20/ dt) <= step < (25/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1955 - 1960
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 1955 - 1960
         
         elif (25/ dt) <= step < (27/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1960 - 1962
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "false") # 1960 - 1962
         
         elif (27/ dt) <= step < (31/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1962 - 1966
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 1962 - 1966
         
         elif (31/ dt) <= step < (40/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1966 - 1975
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "false") # 1966 - 1975
         
         elif (40/ dt) <= step < (48/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1975 - 1983
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 1975 - 1983
         
         elif (48/dt) <= step < (50/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1983 - 1985
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "false") # 1983 - 1985
         
         elif (50/ dt) <= step < (59/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1985 - 1994
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 1985 - 1994
         
         elif (59/ dt) <= step < (64/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1994 - 2000
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "false") # 1994 - 2000
         
         elif (64/ dt) <= step < (69/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 2000 - 2005
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 2000 - 2005
         
         elif (69/ dt) <= step < (76/dt):
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 2005 - 2012
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "false") # 2005 - 2012
         
         elif (76/ dt) <= step:
-            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 2012 - 2017
-        
-        # # -- DEBUGGING
-        #print(f"maximum_bmr=",{melt_max})
+            basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 2012 - 2017
 
         
+        # DEBUGGING
+        print(f" \n at time step {step} maximum basal melt is {melt_max} \n ")
         
+    
         
         # call the ice stream model to update the state variables
-        h, u, s = Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, kwargs)
+        h, u, s, floating, grounded = Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, kwargs)
 
         statevec_nurged[indx_map["h"],k+1] = h.dat.data_ro
         statevec_nurged[indx_map["u"],k+1] = u.dat.data_ro[:,0]
         statevec_nurged[indx_map["v"],k+1] = u.dat.data_ro[:,1]
         statevec_nurged[indx_map["s"],k+1] = s.dat.data_ro
+        statevec_nurged[indx_map["basal_melt_field"],k+1] = basal_melt_field.dat.data_ro
+
 
         # # -- update parameter if joint estimation is enabled
         if kwargs["joint_estimation"]:
-            basal_melt_field_nudged = basal_melt_field.dat.data_ro + kwargs["wrong_basal_melt_field"]
+            basal_melt_field_nudged = basal_melt_field.dat.data_ro * kwargs["wrong_basal_melt_field"]
             basal_melt_field = Function(Q)
             basal_melt_field.dat.data[:] = basal_melt_field_nudged
-            
+
             statevec_nurged[indx_map["basal_melt_field"],k+1] = basal_melt_field_nudged
+        
         
        # # -- saving flowline profile at certain steps
         if (kk <= len(flowline_profile_steps)-1):
@@ -497,6 +491,7 @@ def generate_nurged_state(**kwargs):
                 
                 h_profiles, s_profiles = flowline_profile(h, s, valid_points)
                 print(s_profiles.shape,h_profiles.shape,"\n")
+                #print(f"n\ average thickness = {np.mean(h.dat.data_ro)} and average BMR = {np.mean(basal_melt_field.dat.data_ro)} \n")
                 
                 
                 with h5py.File(hs_nudged_files, "a") as F:

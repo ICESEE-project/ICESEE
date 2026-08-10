@@ -164,7 +164,7 @@ def readSMB(kwargs, Q):
 
 # --- Basal melt rate field --- 
 
-def BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control'):
+def BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = 'true'):
 
 
     # Draft depth (negative below sea level): z = s - h
@@ -176,14 +176,18 @@ def BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control'):
     final_bmr = 100 #from Dutriex, 2013
 
     ####### TIMING OF LINEAR INCREASE IN BMR 
-    if (step * kwargs['dt']) < kwargs["bmr_increase_time"]:
+
+    if experiment == 'true':
+        if (step * kwargs['dt']) < kwargs["bmr_increase_time"]:
+            melt_max = beginning_bmr
+    
+        # The period over which BMR increases shortens by 'x' years
+        else:
+            melt_max = ((final_bmr - beginning_bmr)/(kwargs["num_years"] - kwargs["bmr_increase_time"])) * ((step - (kwargs["bmr_increase_time"]/kwargs["dt"])) * kwargs["dt"]) + beginning_bmr
+    
+    # "wrong" model where basal melt rate does not change over the entire simulation
+    if experiment == 'false':
         melt_max = beginning_bmr
-    
-    # The period over which BMR increases shortens by 'x' years
-    else:
-        melt_max = ((final_bmr - beginning_bmr)/(kwargs["num_years"] - kwargs["bmr_increase_time"])) * ((step - (kwargs["bmr_increase_time"]/kwargs["dt"])) * kwargs["dt"]) + beginning_bmr
-    
-    
 
     ##########################################
     
@@ -294,7 +298,7 @@ def initialize_model(**kwargs):
 
     # ---- Initial basal melt  ----
     k = 0 # time step (ICESEE uses 'k' as the time-stepping index)
-    basal_melt_field, melt_max0 = BasalMeltRate(kwargs, step=k, floating=floating, Q=Q, s=s0, h=h0, scenario="control")
+    basal_melt_field, melt_max0 = BasalMeltRate(kwargs, step=k, floating=floating, Q=Q, s=s0, h=h0, scenario="control", experiment = 'true')
     
 
 
@@ -385,6 +389,7 @@ def Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, kwargs):
      # ---- net accumulation used by prognostic step ------
     a = icepack.interpolate((smb - basal_melt_field) * w2i, kwargs["Q"])
 
+    print(f"\n Inside Icepack: mean BMR field = {np.mean(basal_melt_field.dat.data_ro)} \n")
 
     h = solver.prognostic_solve(
         dt = dt,
@@ -394,8 +399,6 @@ def Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, kwargs):
         thickness_inflow = h0,
     )
     
-    #print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}, Mean_net_accumlation_field:{np.mean(a.dat.data_ro)}\n")
-    #exit(1)
 
     kwargs["h"] = h
     h = checkThickness(kwargs)
@@ -421,7 +424,8 @@ def Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, kwargs):
         grounded = grounded,
     )
 
-    return h, u, s
+
+    return h, u, s, floating, grounded
 
 
 
@@ -489,57 +493,57 @@ def run_model(ensemble, **kwargs):
     s.dat.data[:] = s_vec
     basal_melt_field.dat.data[:] = basal_melt_vec
 
-    print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
+    #print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
 
     ### Conditionals for depth-dependent basal melt rate function
     ### Select forcing scenario between 1935 - 2017 
     if step < (6/dt):
-        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1935 - 1941
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 1935 - 1941
    
     elif (6 / dt) <= step < (15/dt):
-        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1941 - 1950
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "false") # 1941 - 1950
     
     elif (15 / dt) <= step < (18/dt):
-        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1950 - 1953
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 1950 - 1953
     
     elif (18/ dt) <= step < (20/dt):
-        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1953 - 1955
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "false") # 1953 - 1955
         
     elif (20/ dt) <= step < (25/dt):
-        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1955 - 1960
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 1955 - 1960
         
     elif (25/ dt) <= step < (27/dt):
-        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1960 - 1962
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "false") # 1960 - 1962
         
     elif (27/ dt) <= step < (31/dt):
-        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1962 - 1966
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 1962 - 1966
         
     elif (31/ dt) <= step < (40/dt):
-        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1966 - 1975
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "false") # 1966 - 1975
         
     elif (40/ dt) <= step < (48/dt):
-        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1975 - 1983
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 1975 - 1983
         
     elif (48/dt) <= step < (50/dt):
-        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1983 - 1985
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "false") # 1983 - 1985
         
     elif (50/ dt) <= step < (59/dt):
-        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 1985 - 1994
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 1985 - 1994
         
     elif (59/ dt) <= step < (64/dt):
-        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 1994 - 2000
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "false") # 1994 - 2000
         
     elif (64/ dt) <= step < (69/dt):
-        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 2000 - 2005
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 2000 - 2005
         
     elif (69/ dt) <= step < (76/dt):
-        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm') # 2005 - 2012
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='warm', experiment = "false") # 2005 - 2012
         
     elif (76/ dt) <= step:
-        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control') # 2012 - 2017
+        basal_melt_field, melt_max = BasalMeltRate(kwargs, step, floating, Q, s, h, scenario='control', experiment = "false") # 2012 - 2017
 
     
-    #print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
+    #print(f"\n dt = {dt}, maximum basal melt rate = {melt_max} \n")
      
     h, u, s = Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, kwargs)
 

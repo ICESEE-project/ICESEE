@@ -1,14 +1,3 @@
-#physical-parameters:
-  # Domain parameters
-  # Lx: 761180       # (m)
-  # Ly: 26000        # (m)
-  # nx: 600          # number of elements in the x-direction
-  # ny: 200          # number of elements in the y-direction
-
-  #Lx: 50e2        # (m)
-  #Ly: 12e2        # (m)
-  #nx: 12         # number of elements in the x-direction
-  #ny: 8      # number of elements in the y-direction
 
 modeling-parameters:
   # Model parameters
@@ -18,7 +7,8 @@ modeling-parameters:
   paramsFile: 'data/extended_beta1000yrs.yaml' # parameter file
   meshFile: 'data/PigFull2017GeomFull.exp' # mesh file
   SMBFile: 'data/OLS_Trend_plus_Resid_9b9.tif' # SMB file
-  water_to_ice: 1.087241003            # density ratio of water to ice
+  #water_to_ice: 1.087241003            # density ratio of water to ice
+  water_to_ice: 1.0872410032715376 
   water_density: 1028
   GLThresh: 41
   uThresh: 300
@@ -36,16 +26,16 @@ enkf-parameters:
   obs_max_time: 4         # maximum time for observations
   obs_start_time: 2        # start time for observations
 
-  num_state_vars: 4      # number of state variables  [h,u,v]
-  num_param_vars: 1       # number of parameter variables [bmr]
+  num_state_vars: 5      # number of state variables  [h ,u, v, s, bmr]
+  num_param_vars: 0       # number of parameter variables [bmr]
   vec_inputs: ['h','u','v', 's', 'basal_melt_field']
   observed_params: ['s']  # surface elevation
 
-  generate_synthetic_obs: 1  # Generate synthetic observations for testing
+  generate_synthetic_obs: 0  # Generate synthetic observations for testing
   generate_true_state:    1  # Generate true state for synthetic observations
   generate_nurged_state:  1  # Generate nudged state for synthetic observations
-  initialize_ensemble: 1
-  use_ensemble_pertubations: 1 # Use ensemble perturbations for ensemble state
+  initialize_ensemble: 0
+  use_ensemble_pertubations: 0 # Use ensemble perturbations for ensemble state
   sequential_ensemble_initialization: 0  # Sequential ensemble initialization (True for sequential, False for parallel)
 
   # Statistical parameters (based on the number of state variables)
@@ -59,12 +49,12 @@ enkf-parameters:
   localization_flag: False      # localization flag: True, False
 
   # estimation flags
-  joint_estimation: 1 # joint estimation flag: True, False
-  parameter_estimation: True # parameter estimation flag: True, False
+  joint_estimation: 0 # joint estimation flag: True, False
+  parameter_estimation: False # parameter estimation flag: True, False
   joint_estimated_params: ['basal_melt_field']  # parameter(s) to be jointly estimated
 
   # nudged parameters
-  wrong_basal_melt_field: 2         # scalar factor to "nudge" the basal melt rate field
+  wrong_basal_melt_field: 5         # scalar factor to "nudge" the basal melt rate field
 
   # enkf model parameters
   model_name: "icepack"               # name of the model
