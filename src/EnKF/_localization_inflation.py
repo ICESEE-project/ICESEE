@@ -1,7 +1,7 @@
 # =============================================================================
 # @Author: Brian Kyanjo
 # @Date: 2024-09-24
-# @Description: This script includes localization and inflation functions used 
+# @Description: This script includes localization and inflation functions used
 #               in the EnKF data assimilation scheme.
 # =============================================================================
 
@@ -34,21 +34,21 @@ class LocalizationInflationUtils:
     A class containing utility functions for localization and inflation in the
     Ensemble Kalman Filter (EnKF) data assimilation scheme.
     """
-    def __init__(self, params,ensemble=None):
+    def __init__(self, icesee_kwargs,ensemble=None):
         """
         Initialize the utility functions with model parameters.
-        
+
         Parameters:
-        params (dict): Model parameters, including those used for bed topography.
+        icesee_kwargs (dict): Model parameters, including those used for bed topography.
         """
-        self.params   = params
+        self.icesee_kwargs   = icesee_kwargs
         self.ensemble = ensemble
 
     def inflate_ensemble(self,in_place=True):
         """
         Inflate ensemble members by a given factor.
-        
-        Args: 
+
+        Args:
             ensemble: ndarray (n x N) - The ensemble matrix of model states (n is state size, N is ensemble size).
             inflation_factor: float - scalar or iterable length equal to model states
             in_place: bool - whether to update the ensemble in place
@@ -56,16 +56,16 @@ class LocalizationInflationUtils:
             inflated_ensemble: ndarray (n x N) - The inflated ensemble.
         """
         # check if the inflation factor is scalar
-        if np.isscalar(self.params['inflation_factor']):
+        if np.isscalar(self.icesee_kwargs['inflation_factor']):
             _scalar = True
-            _inflation_factor = float(self.params['inflation_factor'])
-        elif isiterable(self.params['inflation_factor']):
-            if len(self.params['inflation_factor']) == self.ensemble.shape[0]:
-                _inflation_factor[:] = self.params['inflation_factor'][:]
+            _inflation_factor = float(self.icesee_kwargs['inflation_factor'])
+        elif isiterable(self.icesee_kwargs['inflation_factor']):
+            if len(self.icesee_kwargs['inflation_factor']) == self.ensemble.shape[0]:
+                _inflation_factor[:] = self.icesee_kwargs['inflation_factor'][:]
                 _scalar = False
             else:
                 raise ValueError("Inflation factor length must be equal to the state size")
-        
+
         # check if we need inflation
         if _scalar:
             if _inflation_factor == 1.0:
@@ -80,7 +80,7 @@ class LocalizationInflationUtils:
                     break
             if not _inf:
                 return self.ensemble
-        
+
         ens_size = self.ensemble.shape[1]
         mean_vec = np.mean(self.ensemble, axis=1)
         if in_place:
@@ -103,13 +103,13 @@ class LocalizationInflationUtils:
                     state = (state - mean_vec) * _inflation_factor
 
                 inflated_ensemble[:, ens_idx] = state + mean_vec
-        
+
         return inflated_ensemble
-    
+
     def _inflate_ensemble(self,rescale=False):
         """inflate ensemble members by a given factor"""
 
-        _inflation_factor = float(self.params['inflation_factor'])
+        _inflation_factor = float(self.icesee_kwargs['inflation_factor'])
         x = np.mean(self.ensemble, axis=0, keepdims=True)
         X = self.ensemble - x
 
@@ -124,7 +124,7 @@ class LocalizationInflationUtils:
             return self.ensemble
         else:
             return x + _inflation_factor * X
-        
+
     def gaspari_cohn(self, r):
         """
         Gaspari-Cohn taper function for localization in EnKF.
@@ -132,7 +132,7 @@ class LocalizationInflationUtils:
         """
         r = np.abs(r)
         taper = np.zeros_like(r)
-    
+
         mask1 = (r >= 0) & (r <= 1)
         mask2 = (r > 1) & (r <= 2)
 
@@ -166,25 +166,25 @@ class LocalizationInflationUtils:
         def compute_spatial_L(ensemble, grid_points, threshold=0.1, min_L=0, max_L=max_distance):
             """
             Compute spatially varying localization length scale L for each point or region.
-            
+
             Parameters:
             - ensemble: Ensemble matrix (state_size × n_ens)
             - grid_points: Grid point coordinates (n_points × 2)
             - threshold: Correlation threshold below which to define L
             - min_L, max_L: Bounds for L
-            
+
             Returns:
             - L_array: Array of L values for each point (n_points,)
             """
             n_points = grid_points.shape[0]
             n_ens = ensemble.shape[1]
             n_vars = state_size // n_points
-            
+
             # Compute ensemble mean and anomalies for the first variable block
             ens_mean = np.mean(ensemble, axis=1)
             ens_anom = ensemble - ens_mean[:, np.newaxis]  # Anomalies (state_size × n_ens)
             ens_block = ens_anom[:n_points, :]  # 425 × 24 (first variable block)
-            
+
             # Compute correlations for each point with all others
             L_array = np.zeros(n_points)
             for i in range(n_points):
@@ -195,29 +195,29 @@ class LocalizationInflationUtils:
                         correlations[j] = corr if not np.isnan(corr) else 0
                     else:
                         correlations[j] = 1.0
-                
+
                 # Take absolute correlations
                 correlations = np.abs(correlations)
-                
+
                 # Sort distances and correlations for point i
                 distances = dist_matrix[i, :n_points]
                 mask = distances > 0
                 dists = distances[mask]
                 corrs = correlations[mask]
-                
+
                 sorted_pairs = sorted(zip(dists, corrs))
                 dists, corrs = zip(*sorted_pairs)
                 dists, corrs = np.array(dists), np.array(corrs)
-                
+
                 # Find distance where correlation drops below threshold
                 if np.max(corrs) <= threshold:
                     L = min_L
                 else:
                     L = dists[np.where(corrs <= threshold)[0][0]] if threshold in corrs else dists[-1]
                     L = max(min_L, min(max_L, L))  # Clip to reasonable range
-                
+
                 L_array[i] = L
-            
+
             # Optionally smooth L_array spatially (e.g., using a moving average)
             L_array = np.clip(L_array, min_L, max_L)  # Ensure bounds
             return L_array
@@ -256,16 +256,16 @@ class LocalizationInflationUtils:
         # loc_matrix = csr_matrix(loc_matrix)
         return loc_matrix
 
-    def _localization_matrix(self,euclidean_distance, localization_radius, loc_type='Gaspari-Cohn'):     
+    def _localization_matrix(self,euclidean_distance, localization_radius, loc_type='Gaspari-Cohn'):
         """
         Calculate the localization matrix based on the localization type, euclean_distance and radius
         of influence.
-        
+
         Parameters:
         euclidean_distance (numpy array): The Euclidean distance between the observation and state
         localization_radius (float or numpy array): Distance beyond which the localization matrix is tapered to zero.
         method (str): The localization method.
-        
+
         Returns:
         numpy array: The localization matrix (same size as the Euclidean distance).
         """
@@ -304,11 +304,11 @@ class LocalizationInflationUtils:
     def compute_sample_correlations_vectorized(self, shuffled_ens, forward_ens):
         """
         Compute sample correlations between shuffled_ens and forward_ens in a vectorized manner.
-        
+
         Parameters:
             shuffled_ens (np.ndarray): Array of shape (n_members, n_variables) representing the shuffled ensemble.
             forward_ens (np.ndarray): Array of shape (n_members, n_variables) representing the forward ensemble.
-        
+
         Returns:
             np.ndarray: An array of correlation coefficients (one per variable).
         """
@@ -335,8 +335,8 @@ class LocalizationInflationUtils:
 
         return correlations
 
-    
-    def _adaptive_localization(self, euclidean_distance=None, 
+
+    def _adaptive_localization(self, euclidean_distance=None,
                               localization_radius=None, ensemble_init=None, loc_type='Gaspari-Cohn'):
         """Adaptively calculates the radius of influence for each observation density
            which is then used to dynamically compute the localization matrix.
@@ -360,8 +360,8 @@ class LocalizationInflationUtils:
                 # sample_ind
                 # sample_correlations = self.compute_sample_correlations_vectorized(shuffled_ens, forward_ens)
                 sample_correlations = np.corrcoef(ensemble_init, forward_ens, rowvar=False)
-                
-                # # subsitute noise field of sample_correlations 
+
+                # # subsitute noise field of sample_correlations
                 # sample_correlations[np.isnan(sample_correlations)] = 0
 
                 # use the MAD rule to estimate noise levels; sig_gs = median(abs(eta_gs))/0.6745
@@ -370,21 +370,21 @@ class LocalizationInflationUtils:
                 # use the universal rule to subsitute noise fields; theta_gs = sqrt(2*ln(number of rho_gs))*sig_gs
                 theta_gs = np.sqrt(2 * np.log(Nens)) * sig_gs
 
-                # construct the tapering matrix by applying the the estimated noise levels 
+                # construct the tapering matrix by applying the the estimated noise levels
                 # to the sample correlations
                 tapering_matrix = np.exp(-0.5 * (sample_correlations / theta_gs)**2)
 
             # distance based localization
             else:
                 # if the dist between the model variable and the observation is zero, then the weight is 1
-                if np.any(euclidean_distance == 0): 
+                if np.any(euclidean_distance == 0):
                     localization_matrix = np.ones(self.ensemble.shape[0])
                     return localization_matrix
 
-                # use a type based on variance  
+                # use a type based on variance
                 var = np.var(self.ensemble,axis=0)
                 avg_var = np.mean(var)
-                localization_radius = self.params['base_radius'] * np.sqrt(1 + self.params['scaling_factor'] * np.sqrt(avg_var))
+                localization_radius = self.icesee_kwargs['base_radius'] * np.sqrt(1 + self.icesee_kwargs['scaling_factor'] * np.sqrt(avg_var))
 
                 # call the localization matrix function
                 localization_matrix = self._localization_matrix(euclidean_distance, localization_radius)
@@ -418,7 +418,7 @@ class LocalizationInflationUtils:
 
         # Get the first (i, j) index where R[i, j] < rad_flag
         indices = np.argwhere(mask)  # Get all (i, j) pairs that satisfy the condition
-        
+
         if indices.size > 0:
             first_i = indices[0, 0]  # First valid row index
             radius = cutoff_distance[first_i]  # Assign corresponding cutoff distance
@@ -433,11 +433,11 @@ class LocalizationInflationUtils:
     def rmse(self,truth, estimate):
         """
         Calculate the Root Mean Squared Error (RMSE) between the true and estimated values.
-        
+
         Parameters:
         truth (numpy array): The true values.
         estimate (numpy array): The estimated values.
-        
+
         Returns:
         float: The RMSE value.
         """
@@ -461,15 +461,15 @@ class LocalizationInflationUtils:
         distance_matrix = cdist(grid_points, grid_points, metric='euclidean')
 
         return distance_matrix
-    
+
     def gaspari_cohn_v0(self,r):
         """
         Compute the Gaspari-Cohn localization function.
-        
+
         Parameters:
-        r (numpy array): Normalized distance (d / r0), where d is the Euclidean distance 
+        r (numpy array): Normalized distance (d / r0), where d is the Euclidean distance
                         and r0 is the localization radius.
-        
+
         Returns:
         numpy array: Localization weights corresponding to r.
         """
@@ -485,7 +485,7 @@ class LocalizationInflationUtils:
 
         # Case r >= 2 (default to 0)
         return gc
-    
+
     def create_tapering_matrix(self,grid_x, grid_y, localization_radius):
         """
         Create a tapering matrix using the Gaspari-Cohn localization function.
@@ -510,7 +510,7 @@ class LocalizationInflationUtils:
             if localization_radius.shape[0] == distance_matrix.shape[0]:
                 r = distance_matrix / 0.5*localization_radius[:, None]
                 # r = np.ones_like(distance_matrix)*localization_radius[:, None]
-            elif localization_radius.shape[0] > distance_matrix.shape[0]:  
+            elif localization_radius.shape[0] > distance_matrix.shape[0]:
                 obs_indices = np.arange(distance_matrix.shape[0])  # Select only the required points
                 r = distance_matrix / 0.5*localization_radius[obs_indices, None]
                 # r = np.ones_like(distance_matrix)*localization_radius[obs_indices, None]

@@ -9,7 +9,7 @@ import numpy as np
 import h5py
 import gc
 import zarr
-import os   
+import os
 import shutil
 import psutil
 def rss_gb():
@@ -17,57 +17,56 @@ def rss_gb():
 
 from ICESEE.src.utils.tools import icesee_get_index
 
-def generate_true_wrong_state(**model_kwargs):
+def generate_true_wrong_state(**icesee_kwargs):
     """"Generate true and nurged states for the ICESEE model.
     """
 
-    # unpack model_kwargs
-    params         = model_kwargs.get("params", {})
-    model_module   = model_kwargs.get("model_module", None)
-    _true_nurged   = model_kwargs.get("true_nurged_file")
-    color          = model_kwargs.get("color", 0)
-    subcomm        = model_kwargs.get("subcomm", None)
-    sub_rank       = model_kwargs.get("sub_rank", 0)
-    data_path      = model_kwargs.get("data_path", "output/")
-    chunk_size      = model_kwargs.get("chunk_size", 5000)
-    icesee_path         = model_kwargs.get('icesee_path')
+    # unpack icesee_kwargs
+    model_module   = icesee_kwargs.get("model_module", None)
+    _true_nurged   = icesee_kwargs.get("true_nurged_file")
+    color          = icesee_kwargs.get("color", 0)
+    subcomm        = icesee_kwargs.get("subcomm", None)
+    sub_rank       = icesee_kwargs.get("sub_rank", 0)
+    data_path      = icesee_kwargs.get("data_path", "output/")
+    chunk_size      = icesee_kwargs.get("chunk_size", 5000)
+    icesee_path         = icesee_kwargs.get('icesee_path')
 
     # Set up serial MPI parameters
     rank_world = 0
     size_world = 1
-    
-        
-    dim_list = [model_kwargs.get("nd", params["nd"])] * size_world
-        
+
+
+    dim_list = [icesee_kwargs.get("nd", icesee_kwargs["nd"])] * size_world
+
     if rank_world == 0:
-        
-        model_kwargs.update({'ens_id': rank_world})
-        # model_kwargs.update({'model_nprocs': (model_nprocs * size_world) - size_world}) # update the model_nprocs to include all processors for the external model run
+
+        icesee_kwargs.update({'ens_id': rank_world})
+        # icesee_kwargs.update({'model_nprocs': (model_nprocs * size_world) - size_world}) # update the model_nprocs to include all processors for the external model run
         # Define shape and dtype
-        nd = model_kwargs.get("nd", params["nd"])
-        nt = model_kwargs.get("nt", params["nt"]) + 1   # +1 as in your np.zeros
+        nd = icesee_kwargs.get("nd", icesee_kwargs["nd"])
+        nt = icesee_kwargs.get("nt", icesee_kwargs["nt"]) + 1   # +1 as in your np.zeros
         # print(f"[ICESEE] Generating true and nurged states with shape ({nd}, {nt}) ...")
 
-        if model_kwargs["joint_estimation"] or params["localization_flag"]:
-            hdim = nd // params["total_state_param_vars"]
+        if icesee_kwargs["joint_estimation"] or icesee_kwargs["localization_flag"]:
+            hdim = nd // icesee_kwargs["total_state_param_vars"]
         else:
-            hdim = nd // params["num_state_vars"]
+            hdim = nd // icesee_kwargs["num_state_vars"]
 
         chunk_size = (hdim, 1)  # row-wise chunks, 1 time slice per chunk
         # chunk_size = (nd,1)
-        nd   = int(model_kwargs.get("nd", params["nd"]))
-        ntp1 = int(model_kwargs.get("nt", params["nt"]) + 1)
-        model_kwargs.update({"global_shape": model_kwargs.get("nd", params["nd"]), "dim_list": dim_list})
+        nd   = int(icesee_kwargs.get("nd", icesee_kwargs["nd"]))
+        ntp1 = int(icesee_kwargs.get("nt", icesee_kwargs["nt"]) + 1)
+        icesee_kwargs.update({"global_shape": icesee_kwargs.get("nd", icesee_kwargs["nd"]), "dim_list": dim_list})
 
-        gen_true   = bool(model_kwargs.get("generate_true_state", True))
-        gen_nurged = bool(model_kwargs.get("generate_nurged_state", True))
+        gen_true   = bool(icesee_kwargs.get("generate_true_state", True))
+        gen_nurged = bool(icesee_kwargs.get("generate_nurged_state", True))
 
         if not gen_true and not os.path.exists(_true_nurged):
             raise FileNotFoundError(f"{_true_nurged} not found, but generation is disabled.")
 
         # If neither is requested, do nothing (assume existing file/datasets are already there)
         if not (gen_true or gen_nurged):
-            if model_kwargs.get("verbose", False):
+            if icesee_kwargs.get("verbose", False):
                 print(f"[ICESEE] true/nurged generation disabled — reusing existing: {_true_nurged}")
         else:
             # Open existing file if present; otherwise create it.
@@ -89,13 +88,13 @@ def generate_true_wrong_state(**model_kwargs):
                 if gen_true:
                     print("[ICESEE] Generating true state ...")
                     d_true = require_dataset("true_state", shape=(nd, ntp1), dtype="f8", chunks=chunk_size)
-                    model_kwargs["statevec_true"] = d_true  # write target
+                    icesee_kwargs["statevec_true"] = d_true  # write target
 
-                    out_true = model_module.generate_true_state(**model_kwargs)
+                    out_true = model_module.generate_true_state(**icesee_kwargs)
 
                     # If function returns data, write it (else assume in-place write)
                     if out_true is not None:
-                        vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                        vecs, indx_map, dim_per_proc = icesee_get_index(**icesee_kwargs)
                         if isinstance(out_true, dict):
                             for key, value in out_true.items():
                                 d_true[indx_map[key], :] = value
@@ -106,19 +105,19 @@ def generate_true_wrong_state(**model_kwargs):
                 if gen_nurged:
                     print("[ICESEE] Generating nurged state ...")
                     d_nurged = require_dataset("nurged_state", shape=(nd, ntp1), dtype="f8", chunks=chunk_size)
-                    model_kwargs["statevec_nurged"] = d_nurged  # write target
+                    icesee_kwargs["statevec_nurged"] = d_nurged  # write target
 
-                    out_nurged = model_module.generate_nurged_state(**model_kwargs)
+                    out_nurged = model_module.generate_nurged_state(**icesee_kwargs)
 
                     # If function returns data, write it (else assume in-place write)
                     if out_nurged is not None:
-                        vecs, indx_map, dim_per_proc = icesee_get_index(**model_kwargs)
+                        vecs, indx_map, dim_per_proc = icesee_get_index(**icesee_kwargs)
                         if isinstance(out_nurged, dict):
                             for key, value in out_nurged.items():
                                 d_nurged[indx_map[key], :] = value
                         else:
                             d_nurged[:, :] = out_nurged
 
-            model_kwargs.update({"dim_list": dim_list})
+            icesee_kwargs.update({"dim_list": dim_list})
 
-    return model_kwargs
+    return icesee_kwargs

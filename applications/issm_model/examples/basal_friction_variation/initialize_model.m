@@ -2,17 +2,17 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
     % Initialize ISSM model for MISMIP-like experiment
     % Inputs: rank, nprocs (MPI settings), ens_id (ensemble ID)
 
-    % Read kwargs from .mat file
-    model_kwargs = sprintf('model_kwargs_%d.mat', ens_id);
-    kwargs       = load(model_kwargs);
-    ParamFile    = char(kwargs.ParamFile);
-    Lx           = double(kwargs.Lx); % 640000 m
-    Ly           = double(kwargs.Ly); % 80000 m
-    cluster_name = char(kwargs.cluster_name);
-    steps        = double(kwargs.steps);
-    icesee_path  = char(kwargs.icesee_path);
-    data_path    = char(kwargs.data_path);
-    devmode      = logical(kwargs.devmode); % Development mode flag
+    % Read icesee_kwargs from .mat file
+    icesee_kwargs_file = sprintf('icesee_kwargs_%d.mat', ens_id);
+    icesee_kwargs       = load(icesee_kwargs_file);
+    ParamFile    = char(icesee_kwargs.ParamFile);
+    Lx           = double(icesee_kwargs.Lx); % 640000 m
+    Ly           = double(icesee_kwargs.Ly); % 80000 m
+    cluster_name = char(icesee_kwargs.cluster_name);
+    steps        = double(icesee_kwargs.steps);
+    icesee_path  = char(icesee_kwargs.icesee_path);
+    data_path    = char(icesee_kwargs.data_path);
+    devmode      = logical(icesee_kwargs.devmode); % Development mode flag
 
     % get the current working directory
     cwd = pwd;
@@ -23,14 +23,14 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
         devpath;
     end
 
-    if iscell(kwargs.vec_inputs)
-        vec_inputs = kwargs.vec_inputs;
-    elseif isstring(kwargs.vec_inputs)
-        vec_inputs = cellstr(kwargs.vec_inputs(:));
-    elseif ischar(kwargs.vec_inputs)
-        vec_inputs = cellstr(kwargs.vec_inputs);
+    if iscell(icesee_kwargs.vec_inputs)
+        vec_inputs = icesee_kwargs.vec_inputs;
+    elseif isstring(icesee_kwargs.vec_inputs)
+        vec_inputs = cellstr(icesee_kwargs.vec_inputs(:));
+    elseif ischar(icesee_kwargs.vec_inputs)
+        vec_inputs = cellstr(icesee_kwargs.vec_inputs);
     else
-        error('Unsupported type for kwargs.vec_inputs');
+        error('Unsupported type for icesee_kwargs.vec_inputs');
     end
 
     vec_inputs = reshape(vec_inputs, 1, []);
@@ -615,7 +615,7 @@ function variable_size = initialize_model(rank, nprocs, ens_id)
     use_reference_data = true; % Flag to use reference data
     if any(steps == 55)
     % if use_reference_data
-        reference_data = char(kwargs.reference_data); % Path to reference data
+        reference_data = char(icesee_kwargs.reference_data); % Path to reference data
         ens_id_init = 0;
         folder = sprintf('./Models/ens_id_%d',  ens_id_init);
         if ~exist(folder, 'dir')

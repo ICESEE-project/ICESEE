@@ -10,7 +10,7 @@ import h5py
 from firedrake.petsc import PETSc
 
 # import mpi4py
-# Deactivate MPI auto-initialization and finalization 
+# Deactivate MPI auto-initialization and finalization
 # mpi4py.rc.initialize = False
 # mpi4py.rc.finalize = False
 # init_MPI = False
@@ -26,7 +26,7 @@ s_in, s_out = 850, 50
 
 def intialize(nx,ny,Lx,Ly,b_in,b_out,s_in,s_out,rank,comm,size):
     # --- to only be ran on rank 0 and made available to all ranks ---
-    # os.environ["MPIEXEC"] = " " 
+    # os.environ["MPIEXEC"] = " "
     # mesh = firedrake.RectangleMesh(nx, ny, Lx, Ly)
 
     # comm = COMM_WORLD.Split(COMM_WORLD.rank % 2)
@@ -83,11 +83,11 @@ def intialize(nx,ny,Lx,Ly,b_in,b_out,s_in,s_out,rank,comm,size):
     ϕ = 1 - p_W / p_I
 
 
-    def weertman_friction_with_ramp(**kwargs):
-        u = kwargs["velocity"]
-        h = kwargs["thickness"]
-        s = kwargs["surface"]
-        C = kwargs["friction"]
+    def weertman_friction_with_ramp(**icesee_kwargs):
+        u = icesee_kwargs["velocity"]
+        h = icesee_kwargs["thickness"]
+        s = icesee_kwargs["surface"]
+        C = icesee_kwargs["friction"]
 
         p_W = ρ_W * g * firedrake.max_value(0, h - s)
         p_I = ρ_I * g * h
@@ -122,8 +122,8 @@ def forecast_step_single(t, ens, ensemble_local, a, b, h0, u0, solver_weertman, 
 
     # hdim = h.dat.data.size
     # hdim_loc = ensemble_local.shape[0]
-    
-    # extract h 
+
+    # extract h
     h = firedrake.Function(Q)
     u = firedrake.Function(V)
 
@@ -131,7 +131,7 @@ def forecast_step_single(t, ens, ensemble_local, a, b, h0, u0, solver_weertman, 
         hdim_loc = hvec.size
     # hdim_loc = h.dat.data.size
     # print (f"[DEBUG_in] Rank {rank} - hdim: {hdim_loc} loc ens size: {ensemble_local.shape} ens: {ens}")
-   
+
     if t==0:
         hvec = h0.dat.data_ro.copy()
         uvec = u0.dat.data_ro[:,0].copy()
@@ -146,7 +146,7 @@ def forecast_step_single(t, ens, ensemble_local, a, b, h0, u0, solver_weertman, 
     u.dat.data[:,1] = vvec.copy()
 
     # print (f"[DEBUG] Rank {rank} - hdim_: {h_.dat.data.size}")
-    
+
     h = solver_weertman.prognostic_solve(
         δt,
         thickness=h,
@@ -183,7 +183,7 @@ def forecat_step(step ,global_shape, Nens, ensemble_local, a, b, h0, u0,solver_w
 
     for ens in range(ensemble_local.shape[1]):
         ensemble_local[:,ens] = forecast_step_single(step , ens, ensemble_local, a, b, h0, u0,solver_weertman, δt,A,C,Q,V)
-    
+
     if parallel_manager.memory_usage(global_shape, Nens,8) > 8: # 8 GB; consider using a parallelization strategy
         # compute the local ensemble mean
         local_mean = np.mean(ensemble_local, axis=1)  # Compute local mean
@@ -228,27 +228,27 @@ def synthetic_ice_stream(parallel_manager,rank,size,comm,Nens):
     # --- Initialize the ensemble ---
     ensemble = np.zeros((3*h.dat.data.size, Nens))
     global_shape = ensemble.shape[0]
-    
+
     # start, stop = parallel_manager.load_balancing(Nens, rank, size)
     ensemble_local = parallel_manager.load_balancing(ensemble,comm)
-    
+
     # -- loop over the timesteps --
     for step in tqdm.trange(num_timesteps):
         # use comm_filter for the background step
         # --- make sure the background_step function takes in a communicator ---
-        
+
         # ---- call the forecast step
         ensemble, ensemble_mean= forecat_step(step ,global_shape, Nens, ensemble_local, a, b, h0, u0,solver_weertman, δt,A,C,Q,V)
 
         # ---- call the analysis step
-        # the analysis step should take in the ensemble and ensemble_mean and return the updated ensemble. 
+        # the analysis step should take in the ensemble and ensemble_mean and return the updated ensemble.
         #  the cov is only computed when we make an observation. This step should wait for the forecast step to complete
         #  before it can be called. Since we are using another communicator for the analysis step, we have to make sure
         #  that all ranks are in sync before we can call the analysis step.
         comm.Barrier()
         if rank == 0:
             print(f"Analysis step for timestep {step +1} completed.")
-        # 
+        #
     return ensemble
 
 
@@ -258,7 +258,7 @@ if __name__ == "__main__":
     # import mpi4py.MPI as MPI
     from firedrake import *
     # import mpi4py
-    # Deactivate MPI auto-initialization and finalization 
+    # Deactivate MPI auto-initialization and finalization
     # mpi4py.rc.initialize = False
     import warnings
     warnings.filterwarnings("ignore")

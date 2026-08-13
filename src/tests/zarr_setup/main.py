@@ -20,7 +20,7 @@ def forecast(state):
     state += np.random.normal(0, 1, state.shape)
     return state  # Placeholder: modify state as needed
 
-def analyze(state, H, d, ens_idx, enkf_io, params=None):
+def analyze(state, H, d, ens_idx, enkf_io, icesee_kwargs=None):
     return None
 
 # Example parameters
@@ -31,7 +31,7 @@ dt = 1.0
 comm = MPI.COMM_WORLD
 serial_file_creation = True
 
-params = {
+icesee_kwargs = {
     "joint_estimation": False,
     "total_state_param_vars": 2,
     'inflation_factor': 1.05,
@@ -45,13 +45,12 @@ params = {
 
 }
 
-kwargs = {'nd': nd, 'nens': nens, 'nt': nt, 
-          'comm': comm, 'comm_world': comm, 'params': params,
+icesee_kwargs.update({'nd': nd, 'nens': nens, 'nt': nt,
+          'comm': comm, 'comm_world': comm,
          'serial_file_creation': serial_file_creation,
          't': np.linspace(0, nt, int(nt/dt)+1),
          'dim_list': [nd for _ in range(comm.Get_size())],
-         'vec_inputs': ['h', 'v']}
-kwargs.update(params)
+         'vec_inputs': ['h', 'v']})
 
 start_time = MPI.Wtime()
 
@@ -66,8 +65,8 @@ else:
     rounds = 1
 
 subcomm = comm.Split(color, key)
-enkf_io = EnKFIO('enkf', nd, nens, nt, subcomm, comm, params, serial_file_creation, batch_size=100)
-# enkf_io = EnKFIO_zarr('enkf', nd, nens, nt, tobserve, subcomm, comm, params, serial_file_creation, base_path="enkf_data", batch_size=100)
+enkf_io = EnKFIO('enkf', nd, nens, nt, subcomm, comm, icesee_kwargs, serial_file_creation, batch_size=100)
+# enkf_io = EnKFIO_zarr('enkf', nd, nens, nt, tobserve, subcomm, comm, icesee_kwargs, serial_file_creation, base_path="enkf_data", batch_size=100)
 
 # Generate dummy statevec_true
 statevec_true_chunk_size = (min(1000, nd//10), 1)
@@ -84,7 +83,7 @@ statevec_true = zarr.open(store_path, mode='r+')
 size = comm.Get_size()
 
 # # Distribute time steps (columns) across processes
-# nt_per_process = nt // size 
+# nt_per_process = nt // size
 # start_t = rank * nt_per_process
 # end_t = start_t + nt_per_process if rank < size - 1 else nt
 
@@ -149,17 +148,17 @@ comm.Barrier()
 # generate synthetic observations to get d = H \in (mxnd) @synthetic_obs \in (ndxkm)
 synthetic_obs_zarr_path="output/synthetic_observations.zarr"
 error_R_zarr_path="output/error_R.zarr"
-kwargs.update({'synthetic_obs_zarr_path': synthetic_obs_zarr_path, 'error_R_zarr_path': error_R_zarr_path})
-tobserve, m_obs = enkf_io._create_synthetic_observations(**kwargs)
-kwargs.update({'tobserve': tobserve, 'm_obs': m_obs})
+icesee_kwargs.update({'synthetic_obs_zarr_path': synthetic_obs_zarr_path, 'error_R_zarr_path': error_R_zarr_path})
+tobserve, m_obs = enkf_io._create_synthetic_observations(**icesee_kwargs)
+icesee_kwargs.update({'tobserve': tobserve, 'm_obs': m_obs})
 
 # generate the H file
 rank = comm.Get_rank()
 if rank == 0:
     print("Generating H matrix and saving to Zarr...")
     H_matrix_zarr_path = "output/H_matrix.zarr"
-    kwargs.update({'H_matrix_zarr_path': H_matrix_zarr_path})
-    enkf_io.H_matrix(**kwargs)
+    icesee_kwargs.update({'H_matrix_zarr_path': H_matrix_zarr_path})
+    enkf_io.H_matrix(**icesee_kwargs)
 comm.Barrier()
 
 time_mean = 0.0
@@ -194,16 +193,16 @@ for k in range(nt):
 
     if km < m_obs and k+1 == tobserve[km]:
     #     # compute Eta for @ ens_idx
-    #     # kwargs.update({'Eta_matrix_zarr_path': "output/Eta_matrix.zarr"})
+    #     # icesee_kwargs.update({'Eta_matrix_zarr_path': "output/Eta_matrix.zarr"})
     #     # ens_idx = 1
-    #     # enkf_io.Eta_matrix(km, ens_idx, **kwargs)
+    #     # enkf_io.Eta_matrix(km, ens_idx, **icesee_kwargs)
 
     #     # compute d for @ ens_idx
-    #     kwargs.update({'d_matrix_zarr_path': "output/d_matrix.zarr"})
-        # X5 = enkf_io.compute_X5(km, **kwargs)
+    #     icesee_kwargs.update({'d_matrix_zarr_path': "output/d_matrix.zarr"})
+        # X5 = enkf_io.compute_X5(km, **icesee_kwargs)
     #     # comm.Barrier()
         analysis_time_start = MPI.Wtime()
-        enkf_io.compute_analysis_update(km,**kwargs)
+        enkf_io.compute_analysis_update(km,**icesee_kwargs)
         analysis_time += MPI.Wtime() - analysis_time_start
         # comm.Barrier()
 

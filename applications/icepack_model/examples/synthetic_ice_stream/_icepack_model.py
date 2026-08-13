@@ -31,10 +31,10 @@ from icepack.constants import (
 from ICESEE.config._utility_imports import icesee_get_index
 
 # --- model initialization ---
-def initialize_model(**kwargs):
+def initialize_model(**icesee_kwargs):
     """des: initialize the icepack model"""
-    # --- get the communicator from kwargs
-    comm = kwargs.get('comm')
+    # --- get the communicator from icesee_kwargs
+    comm = icesee_kwargs.get('comm')
 
     # get size and rank of the communicator
     size = comm.Get_size()
@@ -42,22 +42,22 @@ def initialize_model(**kwargs):
 
     # --- Geometry and Mesh ---
     PETSc.Sys.Print('Setting up mesh across %d processes' % size)
-    Lx, Ly = int(float(kwargs["Lx"])), int(float(kwargs["Ly"]))
-    nx, ny = int(float(kwargs["nx"])), int(float(kwargs["ny"]))
+    Lx, Ly = int(float(icesee_kwargs["Lx"])), int(float(icesee_kwargs["Ly"]))
+    nx, ny = int(float(icesee_kwargs["nx"])), int(float(icesee_kwargs["ny"]))
     PETSc.Sys.Print(f"Mesh dimensions: {Lx} x {Ly} with {nx} x {ny} elements")
 
     # --- make the comm object available to the mesh function
     mesh = firedrake.RectangleMesh(nx, ny, Lx, Ly, quadrilateral=True, comm=comm)
 
     # -- get the degree of the finite element space
-    degree = int(float(kwargs["degree"]))
+    degree = int(float(icesee_kwargs["degree"]))
     Q = firedrake.FunctionSpace(mesh, "CG",degree)
     V = firedrake.VectorFunctionSpace(mesh, "CG", degree)
     x,y = firedrake.SpatialCoordinate(mesh)
 
     # --- Bedrock and Surface Elevations ---
-    b_in, b_out = (float(kwargs["b_in"])), (float(kwargs["b_out"]))
-    s_in, s_out = (float(kwargs["s_in"])), (float(kwargs["s_out"]))
+    b_in, b_out = (float(icesee_kwargs["b_in"])), (float(icesee_kwargs["b_out"]))
+    s_in, s_out = (float(icesee_kwargs["s_in"])), (float(icesee_kwargs["s_out"]))
 
     b = firedrake.Function(Q).interpolate(b_in - (b_in - b_out) * x / Lx)
     s0 = firedrake.Function(Q).interpolate(s_in - (s_in - s_out) * x / Lx)
@@ -70,13 +70,13 @@ def initialize_model(**kwargs):
     PETSc.Sys.Print(f"Driving stress = {1000*tau_D} kPa")
 
     # --- Initial Velocity ---
-    u_in, u_out = float(kwargs["u_in"]), float(kwargs["u_out"])
+    u_in, u_out = float(icesee_kwargs["u_in"]), float(icesee_kwargs["u_out"])
     velocity_x = u_in + (u_out - u_in) * (x / Lx) ** 2
     u0 = firedrake.Function(V).interpolate(firedrake.as_vector((velocity_x, 0)))
 
     # --- Friction Coefficient ---
     PETSc.Sys.Print("Importing icepack ...")
-    T = firedrake.Constant(float(kwargs["T"]))
+    T = firedrake.Constant(float(icesee_kwargs["T"]))
     A = icepack.rate_factor(T)
 
     expr = (0.95 - 0.05 * x / Lx) * tau_D / u_in**(1 / m)
@@ -87,11 +87,11 @@ def initialize_model(**kwargs):
     phi = 1 - p_W / p_I
 
     # --- Friction Law ---
-    def weertman_friction_with_ramp(**kwargs):
-        u = kwargs["velocity"]
-        h = kwargs["thickness"]
-        s = kwargs["surface"]
-        C = kwargs["friction"]
+    def weertman_friction_with_ramp(**icesee_kwargs):
+        u = icesee_kwargs["velocity"]
+        h = icesee_kwargs["thickness"]
+        s = icesee_kwargs["surface"]
+        C = icesee_kwargs["friction"]
 
         p_W = rho_W * g * firedrake.max_value(0, h - s)
         p_I = rho_I * g * h
@@ -100,7 +100,7 @@ def initialize_model(**kwargs):
             velocity=u,
             friction=C * phi,
         )
-    
+
     # --- Ice Stream Model ---
     model_weertman = icepack.models.IceStream(friction=weertman_friction_with_ramp)
 
@@ -119,13 +119,13 @@ def initialize_model(**kwargs):
     tau_b = firedrake.Function(V).interpolate(expr)
 
     # --- Accumulation ---
-    a_in = firedrake.Constant(float(kwargs["a_in"]))
-    da   = firedrake.Constant(float(kwargs["da"]))
+    a_in = firedrake.Constant(float(icesee_kwargs["a_in"]))
+    da   = firedrake.Constant(float(icesee_kwargs["da"]))
     a    = firedrake.Function(Q).interpolate(a_in + da * x / Lx)
 
     # nurged accumulation
-    a_in_p  = firedrake.Constant(float(kwargs["a_in_p"]))
-    da_p    = firedrake.Constant(float(kwargs["da_p"]))
+    a_in_p  = firedrake.Constant(float(icesee_kwargs["a_in_p"]))
+    da_p    = firedrake.Constant(float(icesee_kwargs["da_p"]))
     a_p     = firedrake.Function(Q).interpolate(a_in_p + da_p * x / Lx)
 
     # --- Update h and u ---
@@ -134,11 +134,11 @@ def initialize_model(**kwargs):
 
     # print size h
     # print(f"Size of the function space: {h.dat.data.size} on rank {rank}")
-    kwargs.update({"nx":nx, "ny":ny, "Lx":Lx, "Ly":Ly, "x":x, "y":y, "h":h, "u":u, "a":a, "a_p":a_p, "b":b, "b_in":b_in, "b_out":b_out, "h0":h0, "u0":u0, "solver_weertman":solver_weertman, "A":A, "C":C, "Q":Q, "V":V, "mesh":mesh})
-    return kwargs
+    icesee_kwargs.update({"nx":nx, "ny":ny, "Lx":Lx, "Ly":Ly, "x":x, "y":y, "h":h, "u":u, "a":a, "a_p":a_p, "b":b, "b_in":b_in, "b_out":b_out, "h0":h0, "u0":u0, "solver_weertman":solver_weertman, "A":A, "C":C, "Q":Q, "V":V, "mesh":mesh})
+    return icesee_kwargs
 
 # --- icepack model ---
-def Icepack(solver, h, u, a, b, dt, h0, **kwargs):
+def Icepack(solver, h, u, a, b, dt, h0, **icesee_kwargs):
     """inputs: solver - icepack solver
                 h - ice thickness
                 u - ice velocity
@@ -164,39 +164,38 @@ def Icepack(solver, h, u, a, b, dt, h0, **kwargs):
         velocity = u,
         thickness = h,
         surface = s,
-        **kwargs
+        **icesee_kwargs
     )
 
     return h, u
 
 # --- Run model for the icepack model ---
-def run_model(ensemble, **kwargs):
+def run_model(ensemble, **icesee_kwargs):
     """des: icepack model function
         inputs: ensemble - current state of the model
-                **kwargs - additional arguments for the model
+                **icesee_kwargs - additional arguments for the model
         outputs: model run
     """
 
-    # unpack the **kwargs
-    # a = kwargs.get('a', None)
-    b  = kwargs.get('b', None)
-    dt = kwargs.get('dt', None)
-    h0 = kwargs.get('h0', None)
-    A  = kwargs.get('A', None)
-    C  = kwargs.get('C', None)
-    Q  = kwargs.get('Q', None)
-    V  = kwargs.get('V', None)
-    params = kwargs.get('params', None)
-    solver = kwargs.get('solver', None)
+    # unpack the **icesee_kwargs
+    # a = icesee_kwargs.get('a', None)
+    b  = icesee_kwargs.get('b', None)
+    dt = icesee_kwargs.get('dt', None)
+    h0 = icesee_kwargs.get('h0', None)
+    A  = icesee_kwargs.get('A', None)
+    C  = icesee_kwargs.get('C', None)
+    Q  = icesee_kwargs.get('Q', None)
+    V  = icesee_kwargs.get('V', None)
+    solver = icesee_kwargs.get('solver', None)
 
     # --- define the state variables list ---
-    global vec_inputs 
+    global vec_inputs
 
     # call the icesee_get_index function to get the indices of the state variables
-    vecs, indx_map, dim_per_proc = icesee_get_index(ensemble,**kwargs)
+    vecs, indx_map, dim_per_proc = icesee_get_index(ensemble,**icesee_kwargs)
 
     # joint estimation
-    if kwargs["joint_estimation"]:
+    if icesee_kwargs["joint_estimation"]:
         # Use analysis step to update the accumulation rate
         # - pack accumulation rate with the state variables to
         #   get ensemble = [h,u,v,a]
@@ -208,7 +207,7 @@ def run_model(ensemble, **kwargs):
         a.dat.data[:] = a_vec.copy()
     else:
         # don't update the accumulation rate (updates smb)
-        a = kwargs.get('a', None)
+        a = icesee_kwargs.get('a', None)
 
     # create firedrake functions from the ensemble members
     h = Function(Q)
@@ -233,8 +232,8 @@ def run_model(ensemble, **kwargs):
     updated_state = {'h': copy.deepcopy(h.dat.data_ro),
                      'u': u.dat.data_ro[:,0],
                      'v': u.dat.data_ro[:,1]}
-    
-    if kwargs["joint_estimation"]:
+
+    if icesee_kwargs["joint_estimation"]:
         updated_state['smb'] = a_vec
     # else:
     #     updated_state['smb'] = a.dat.data_ro

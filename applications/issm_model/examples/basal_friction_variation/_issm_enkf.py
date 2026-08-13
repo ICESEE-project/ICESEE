@@ -25,113 +25,111 @@ os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 register_issm_coordinate_provider()
 
 # --- Forecast step ---
-def forecast_step_single(ensemble=None, **kwargs):
+def forecast_step_single(ensemble=None, **icesee_kwargs):
     """ensemble: packs the state variables and parameters of a single ensemble member
     Returns: ensemble: updated ensemble member
     """
-    #  -- control time stepping   
-    time = kwargs.get('t')
-    k    = kwargs.get('k')
-    
-    kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
+    #  -- control time stepping
+    time = icesee_kwargs.get('t')
+    k    = icesee_kwargs.get('k')
+
+    icesee_kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
 
     #  call the run_model fun to push the state forward in time
-    return run_model(ensemble, **kwargs)
+    return run_model(ensemble, **icesee_kwargs)
 
 # --- inverse model after or before analysis for friction or velocity ---
-def inverse_step_single(ensemble=None, **kwargs):
+def inverse_step_single(ensemble=None, **icesee_kwargs):
     """ensemble: packs the state variables and parameters of a single ensemble member
     Returns: ensemble: updated ensemble member
     """
-    #  -- control time stepping   
-    time = kwargs.get('t')
-    km    = kwargs.get('km')
-    # k   = kwargs.get('ik')
-    # km   = kwargs.get('km')  # km is the time step for inverse model (can be before or after analysis)
-    
-    # kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
+    #  -- control time stepping
+    time = icesee_kwargs.get('t')
+    km    = icesee_kwargs.get('km')
+    # k   = icesee_kwargs.get('ik')
+    # km   = icesee_kwargs.get('km')  # km is the time step for inverse model (can be before or after analysis)
+
+    # icesee_kwargs.update({'tinitial': time[k], 'tfinal': time[k+1]})
 
     #  call the run_model fun to push the state forward in time
-    return run_model_inverse(ensemble, **kwargs)
+    return run_model_inverse(ensemble, **icesee_kwargs)
 
 # --- generate true state ---
-def generate_true_state(**kwargs):
+def generate_true_state(**icesee_kwargs):
     """des: generate the true state of the model
     Returns: true_state: the true state of the model
     """
-    params = kwargs.get('params')
-    time   = kwargs.get('t')
-    server = kwargs.get('server')
-    
-    issm_examples_dir   = kwargs.get('issm_examples_dir')
-    icesee_path         = kwargs.get('icesee_path')
-    data_path           = kwargs.get('data_path')
-    comm                = kwargs.get('comm')
-    vec_inputs          = kwargs.get('vec_inputs')
+    time   = icesee_kwargs.get('t')
+    server = icesee_kwargs.get('server')
+
+    issm_examples_dir   = icesee_kwargs.get('issm_examples_dir')
+    icesee_path         = icesee_kwargs.get('icesee_path')
+    data_path           = icesee_kwargs.get('data_path')
+    comm                = icesee_kwargs.get('comm')
+    vec_inputs          = icesee_kwargs.get('vec_inputs')
 
     #  --- change directory to the issm directory ---
     os.chdir(issm_examples_dir)
 
     # --- filename for data saving
     fname = 'true_state.mat'
-    kwargs.update({'fname': fname})
-    ens_id = kwargs.get('ens_id')
+    icesee_kwargs.update({'fname': fname})
+    ens_id = icesee_kwargs.get('ens_id')
 
     # Do the true state run on the matlab side and only read the output on the python side once matlab is done with the simulation
     # --- call the issm model to generate the true state
     try:
         # -- call the run_model function to generate the true state
-        kwargs.update({'k': 0})  # Set the initial time step
-        ISSM_model(**kwargs)
+        icesee_kwargs.update({'k': 0})  # Set the initial time step
+        ISSM_model(**icesee_kwargs)
     except Exception as e:
         print(f"[ICESEE Generate-True-State] Error generating true state: {e}")
         server.kill_matlab_processes()
         return None
-    
+
     # On completion now fetch the true state from the Matlab output file to the ICESEE side (.h5 file)
     # -- fetch the true state vector
-    statevec_true = kwargs.get('statevec_true')
+    statevec_true = icesee_kwargs.get('statevec_true')
 
     # -- call the icesee_get_index function to get the index of the state vector
-    vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
+    vecs, indx_map, dim_per_proc = icesee_get_index(**icesee_kwargs)
 
     # get the data extracted from the matlab output file
     input_filename = f'{icesee_path}/{data_path}/ensemble_true_state_{ens_id}.h5'
     with h5py.File(input_filename, 'r') as f:
         # -- fetch state variables
-        for k in range(1, kwargs.get('nt') + 1):
-            for key in kwargs.get('vec_inputs'):
+        for k in range(1, icesee_kwargs.get('nt') + 1):
+            for key in icesee_kwargs.get('vec_inputs'):
                 key_name = f'{key}_{k}'
                 statevec_true[indx_map[key], k-1] = f[key_name][0]
-            
-            # for key in kwargs.get('scalar_inputs', []):
+
+            # for key in icesee_kwargs.get('scalar_inputs', []):
             #     if key in f:
             #         statevec_true[indx_map[key], k-1] = f[key][:].reshape(-1, order='F')[0]
 
     updated_state = {}
     for key in vec_inputs:
         updated_state[key] = statevec_true[indx_map[key],:]
-    
-    # scalar_inputs = kwargs.get('scalar_inputs', [])
+
+    # scalar_inputs = icesee_kwargs.get('scalar_inputs', [])
     # file_path = f'{icesee_path}/{data_path}/ensemble_true_state_scalar_{ens_id}.h5'
     # times, scalars = read_scalar_timeseries(file_path, scalar_inputs)
 
     #  --- change directory back to the original directory ---
     os.chdir(icesee_path)
-    
+
     return updated_state
 
 
-def generate_nurged_state(**kwargs):
+def generate_nurged_state(**icesee_kwargs):
     """generate the nurged state of the model"""
-    params = kwargs.get('params')
-    time   = kwargs.get('t')
-    server = kwargs.get('server')
-    issm_examples_dir   = kwargs.get('issm_examples_dir')
-    icesee_path         = kwargs.get('icesee_path')
-    data_path           = kwargs.get('data_path')
-    comm                = kwargs.get('comm')
-    vec_inputs          = kwargs.get('vec_inputs')       
+    time   = icesee_kwargs.get('t')
+    server = icesee_kwargs.get('server')
+    issm_examples_dir   = icesee_kwargs.get('issm_examples_dir')
+    icesee_path         = icesee_kwargs.get('icesee_path')
+    data_path           = icesee_kwargs.get('data_path')
+    comm                = icesee_kwargs.get('comm')
+    vec_inputs          = icesee_kwargs.get('vec_inputs')
 
     #  --- change directory to the issm directory ---
     os.chdir(issm_examples_dir)
@@ -141,32 +139,31 @@ def generate_nurged_state(**kwargs):
 
     # --- filename for data saving
     fname = 'nurged_state.mat'
-    kwargs.update({'fname': fname})
-    ens_id = kwargs.get('ens_id')
-    params = kwargs.get('params', {})
+    icesee_kwargs.update({'fname': fname})
+    ens_id = icesee_kwargs.get('ens_id')
 
-    nd = params.get('nd', 0)
+    nd = icesee_kwargs.get('nd', 0)
 
     # --- fetch treu state vector
-    statevec_nurged = kwargs.get('statevec_nurged')
+    statevec_nurged = icesee_kwargs.get('statevec_nurged')
 
     # -- call the icesee_get_index function to get the index of the state vector
-    vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
+    vecs, indx_map, dim_per_proc = icesee_get_index(**icesee_kwargs)
 
-    Lx = kwargs.get('Lx',params.get('Lx', 640e3))
-    Ly = kwargs.get('Ly',params.get('Ly', 80e3))
-    nx = kwargs.get('nx', params.get('nx', 32))
-    ny = kwargs.get('ny', params.get('ny', 4))
-    fdim = nd//params.get('total_state_param_vars', 1)
+    Lx = icesee_kwargs.get('Lx', 640e3)
+    Ly = icesee_kwargs.get('Ly', 80e3)
+    nx = icesee_kwargs.get('nx', 32)
+    ny = icesee_kwargs.get('ny', 4)
+    fdim = nd//icesee_kwargs.get('total_state_param_vars', 1)
     x = np.linspace(0, Lx, nx)
     y = np.linspace(0, Ly, ny)
-    seed_base = kwargs.get('seed_base', 42)
+    seed_base = icesee_kwargs.get('seed_base', 42)
 
     #  # -- friction
-    sill_friction = kwargs.get('sill_friction')
-    range_friction = kwargs.get('range_friction')
-    mean_friction  = kwargs.get('mean_friction')
-    nugget_friction = kwargs.get('nugget_friction')
+    sill_friction = icesee_kwargs.get('sill_friction')
+    range_friction = icesee_kwargs.get('range_friction')
+    mean_friction  = icesee_kwargs.get('mean_friction')
+    nugget_friction = icesee_kwargs.get('nugget_friction')
     # xx = np.linspace(0, range_friction, fdim)
     # # var_fric = max(sill_friction - nugget_friction, 0.0)
     # friction_model = gs.Gaussian(dim=1, var=sill_friction, len_scale=range_friction, nugget=nugget_friction)
@@ -197,9 +194,9 @@ def generate_nurged_state(**kwargs):
     friction_field = np.asarray(srf((x_param, y_param)))  # (fdim,)
 
     # # --bed
-    # sill_bed = kwargs.get('sill_bed')
-    # range_bed = kwargs.get('range_bed')
-    # nugget_bed = kwargs.get('nugget_bed')
+    # sill_bed = icesee_kwargs.get('sill_bed')
+    # range_bed = icesee_kwargs.get('range_bed')
+    # nugget_bed = icesee_kwargs.get('nugget_bed')
 
     # bed_kriging_file = f'{icesee_path}/bed_kriging_results.h5'
     # with h5py.File(bed_kriging_file, 'r') as f:
@@ -219,8 +216,8 @@ def generate_nurged_state(**kwargs):
 
     # -- call the run_model function to generate the nurged state
     try:
-        kwargs.update({'k': 0})  # Set the initial time step
-        ISSM_model(**kwargs)
+        icesee_kwargs.update({'k': 0})  # Set the initial time step
+        ISSM_model(**icesee_kwargs)
     except Exception as e:
         print(f"[ICESEE Generate-Nurged-State] Error generating nurged state: {e}")
         server.kill_matlab_processes()
@@ -230,69 +227,68 @@ def generate_nurged_state(**kwargs):
     # with h5py.File(nurged_filename, 'r', driver='mpio', comm=comm) as f:
     with h5py.File(nurged_filename, 'r') as f:
         # -- fetch state variables
-        for k in range(1, kwargs.get('nt') + 1):
-            for key in kwargs.get('vec_inputs'):
+        for k in range(1, icesee_kwargs.get('nt') + 1):
+            for key in icesee_kwargs.get('vec_inputs'):
                 key_name = f'{key}_{k}'
                 statevec_nurged[indx_map[key], k-1] = f[key_name][0]
 
     updated_state = {}
     for key in vec_inputs:
-        updated_state[key] = statevec_nurged[indx_map[key], :]    
+        updated_state[key] = statevec_nurged[indx_map[key], :]
 
     #  --- change directory back to the original directory ---
     os.chdir(icesee_path)
-    
+
     return updated_state
 
-        
+
 #  --- initialize ensemble members ---
-def initialize_ensemble(ens, **kwargs):
+def initialize_ensemble(ens, **icesee_kwargs):
     """des: initialize the ensemble members
     Returns: ensemble: the ensemble members
     """
     import h5py
     import os, sys
 
-    server              = kwargs.get('server')
-    issm_examples_dir   = kwargs.get('issm_examples_dir')
-    icesee_path         = kwargs.get('icesee_path')
-    data_path           = kwargs.get('data_path')
-    comm                = kwargs.get('comm')
-    vec_inputs          = kwargs.get('vec_inputs')
-    params              = kwargs.get('params', {})
-    nd                  = params.get('nd', 0)
+    server              = icesee_kwargs.get('server')
+    issm_examples_dir   = icesee_kwargs.get('issm_examples_dir')
+    icesee_path         = icesee_kwargs.get('icesee_path')
+    data_path           = icesee_kwargs.get('data_path')
+    comm                = icesee_kwargs.get('comm')
+    vec_inputs          = icesee_kwargs.get('vec_inputs')
+    nd                  = icesee_kwargs.get('nd', 0)
 
     #  --- change directory to the issm directory ---
     os.chdir(issm_examples_dir)
-    # ens_id = kwargs.get('ens_id')
+    # ens_id = icesee_kwargs.get('ens_id')
     ens_id =  ens
-    kwargs.update({'ens_id': ens_id})
+    icesee_kwargs.update({'ens_id': ens_id})
 
     #  -- control time stepping
-    kwargs.update({'k':0}) 
-    dt = kwargs.get('dt')
-    kwargs.update({'tinitial': 0, 'tfinal': dt})
+    icesee_kwargs.update({'k':0})
+    dt = icesee_kwargs.get('dt')
+    icesee_kwargs.update({'tinitial': 0, 'tfinal': dt})
 
 
     # --- filename for data saving
     fname = 'initialize_ensemble.mat'
-    kwargs.update({'fname': fname})
+    icesee_kwargs.update({'fname': fname})
 
     #*-----------------------
-    Lx = kwargs.get('Lx',params.get('Lx', 640e3))
-    Ly = kwargs.get('Ly',params.get('Ly', 80e3))
-    fdim = nd//params.get('total_state_param_vars', 1)
-    nx = kwargs.get('nx', params.get('nx', 32))
-    ny = kwargs.get('ny', params.get('ny', 4))
+    Lx = icesee_kwargs.get('Lx', 640e3)
+    Ly = icesee_kwargs.get('Ly', 80e3)
+    fdim = nd//icesee_kwargs.get('total_state_param_vars', 1)
+    nx = icesee_kwargs.get('nx', 32)
+    ny = icesee_kwargs.get('ny', 4)
     x = np.linspace(0, Lx, nx)
     y = np.linspace(0, Ly, ny)
-    seed_base = kwargs.get('seed_base', 42)
+    seed_base = icesee_kwargs.get('seed_base', 42)
 
     #  # -- friction
-    sill_friction = kwargs.get('sill_friction')
-    range_friction = kwargs.get('range_friction')
-    mean_friction  = kwargs.get('mean_friction')
-    nugget_friction = kwargs.get('nugget_friction')
+    sill_friction = icesee_kwargs.get('sill_friction')
+    range_friction = icesee_kwargs.get('range_friction')
+    mean_friction  = icesee_kwargs.get('mean_friction')
+    nugget_friction = icesee_kwargs.get('nugget_friction')
 
     file_path = f'{icesee_path}/{data_path}/mesh_idxy_{0}.h5'
     with h5py.File(file_path, 'r') as f:
@@ -334,27 +330,27 @@ def initialize_ensemble(ens, **kwargs):
     if os.path.exists(enkf_scalar_file):
         os.remove(enkf_scalar_file)
     with h5py.File(enkf_scalar_file, 'w') as f:
-        nt = kwargs.get('nt')
-        for key in kwargs.get('scalar_inputs', []):
+        nt = icesee_kwargs.get('nt')
+        for key in icesee_kwargs.get('scalar_inputs', []):
             f.create_dataset(key, shape=(nt,), dtype=np.float64)
             f[key][:] = np.nan
 
     try:
         # -- call the run_model function to initialize the ensemble members
-        ISSM_model(**kwargs)
+        ISSM_model(**icesee_kwargs)
     except Exception as e:
         print(f"[ICESEE Initialize ensemble]] Error initializing ensemble: {e}")
         server.kill_matlab_processes()
 
-    
+
     #  -- Read data from the ISSM side to be accessed by ICESEE on the python side
     output_filename = f'{icesee_path}/{data_path}/ensemble_out_{ens_id}.h5'
     updated_state = {}
     # with h5py.File(output_filename, 'r', driver='mpio', comm=comm) as f:
     with h5py.File(output_filename, 'r') as f:
-        for key in kwargs.get('vec_inputs'):
-            if key in kwargs.get('joint_estimated_params') and not kwargs.get('joint_estimation'):
-                print(f"[ICESEE run_model Warning] Skipping joint estimated parameter '{key}' in output file since joint_estimation is set to False.\n"); 
+        for key in icesee_kwargs.get('vec_inputs'):
+            if key in icesee_kwargs.get('joint_estimated_params') and not icesee_kwargs.get('joint_estimation'):
+                print(f"[ICESEE run_model Warning] Skipping joint estimated parameter '{key}' in output file since joint_estimation is set to False.\n");
                 continue # skip the joint estimated parameters if we are not doing joint estimation
             if key in f:
                 updated_state[key] = f[key][:].reshape(-1, order='F')
@@ -363,25 +359,25 @@ def initialize_ensemble(ens, **kwargs):
 
     # --- compute the mean of the scalar inputs across all ensemble members and save in a separate file
     # first check if all Nens scalar output files are available before trying to read and compute the mean
-    expected_scalar_files = [f'{icesee_path}/{data_path}/ensemble_out_scalar_{i}.h5' for i in range(kwargs.get('Nens', 1))]
+    expected_scalar_files = [f'{icesee_path}/{data_path}/ensemble_out_scalar_{i}.h5' for i in range(icesee_kwargs.get('Nens', 1))]
     actual_scalar_files = [f for f in expected_scalar_files if os.path.exists(f)]
-    if len(actual_scalar_files) == kwargs.get('Nens', 1):
+    if len(actual_scalar_files) == icesee_kwargs.get('Nens', 1):
         comm = MPI.COMM_WORLD
         comm.Barrier()
         k = 0  # initial time step index
         if comm.Get_rank() == 0:
-            nt = kwargs.get('nt')
-            nens = kwargs.get('Nens', 1)
-            scalar_inputs = kwargs.get('scalar_inputs', [])
+            nt = icesee_kwargs.get('nt')
+            nens = icesee_kwargs.get('Nens', 1)
+            scalar_inputs = icesee_kwargs.get('scalar_inputs', [])
             scalar_means_file = f'{icesee_path}/{data_path}/ensemble_scalar_output.h5'
 
             if os.path.exists(scalar_means_file):
                 os.remove(scalar_means_file)
 
             with h5py.File(scalar_means_file, 'w') as f_out:
-                for key in kwargs.get('scalar_inputs', []):
+                for key in icesee_kwargs.get('scalar_inputs', []):
                     f_out.create_dataset(key, shape=(nt,), dtype=np.float64)
-                    
+
                     vals = []
                     for i in range(nens):
                         enkf_scalar_file = f'{icesee_path}/{data_path}/ensemble_out_scalar_{i}.h5'
@@ -401,7 +397,7 @@ def initialize_ensemble(ens, **kwargs):
                     f_out[key][k] = np.nanmean(vals)
 
         comm.Barrier()
-       
+
     os.chdir(icesee_path)
-    
+
     return updated_state

@@ -1,8 +1,8 @@
 # =============================================================================
 # @author: Brian Kyanjo
 # @date: 2025-02-10
-# @description: Initializes model communicators: size, rank, and variables for 
-#               MPI parallelization to be shared by all modules and the ICESS 
+# @description: Initializes model communicators: size, rank, and variables for
+#               MPI parallelization to be shared by all modules and the ICESS
 #               package.
 # =============================================================================
 
@@ -14,7 +14,7 @@ import gc
 
 class ParallelManager:
     """
-    This class provides variables for MPI parallelization to be shared 
+    This class provides variables for MPI parallelization to be shared
     between model-related routines.
 
     Implements Singleton pattern to ensure a single instance is used.
@@ -111,19 +111,19 @@ class ParallelManager:
 
         #  return the initialized parallel manager
         return self
-    
+
     def initialize_seed(self, comm_world, base_seed=None):
         """
         Initialize the random seed across all MPI processes.
-        
+
         Parameters:
         - comm_world (MPI communicator): Global MPI communicator.
         - base_seed (int or None): Base seed value. If None, generate from rank 0.
-        
+
         Returns:
         - seed (int): The synchronized seed for this process.
         """
-       
+
         rank_world = comm_world.Get_rank()
 
         # # Generate or use base seed on rank 0
@@ -137,10 +137,10 @@ class ParallelManager:
         #         seed = 12345  # Replace with experiment-specific value if needed
         # else:
         #     seed = None
-            
+
         # # Broadcast the seed to all ranks
         # seed = comm_world.bcast(seed, root=0)
-        
+
         # # Set the seed for NumPy's RNG
         # # Create a rank-specific RNG using SeedSequence
         # seed_seq = np.random.SeedSequence(seed)
@@ -176,7 +176,7 @@ class ParallelManager:
 
         return rank_seed, None
 
-    def icesee_mpi_init(self, params):
+    def icesee_mpi_init(self, icesee_kwargs):
         """
         Initializes MPI in an ICESEE application.
         Ensures MPI is initialized safely and retrieves essential communication parameters.
@@ -193,58 +193,58 @@ class ParallelManager:
         self.rank_world = self.COMM_WORLD.Get_rank()
 
         # if self.model_nprocs is None: use model_nprocs = size_world or subcomm_size_min
-        self.model_nprocs = params.get("model_nprocs")
+        self.model_nprocs = icesee_kwargs.get("model_nprocs")
 
         # remove data file
         import re
-        if re.match(r"\AMPI_model\Z", params.get('parallel_flag'), re.IGNORECASE):
-            _modelrun_datasets = params.get("data_path",None)
+        if re.match(r"\AMPI_model\Z", icesee_kwargs.get('parallel_flag'), re.IGNORECASE):
+            _modelrun_datasets = icesee_kwargs.get("data_path",None)
             if self.rank_world == 0 and not os.path.exists(_modelrun_datasets):
                  os.makedirs(_modelrun_datasets, exist_ok=True)
 
-        #     if os.path.exists(params.get("data_path")):
-        #         if os.path.isdir(params.get("data_path")):
-        #             shutil.rmtree(params.get("data_path"))
+        #     if os.path.exists(icesee_kwargs.get("data_path")):
+        #         if os.path.isdir(icesee_kwargs.get("data_path")):
+        #             shutil.rmtree(icesee_kwargs.get("data_path"))
         #             # create the directory again
-        #             os.makedirs(params.get("data_path"))
+        #             os.makedirs(icesee_kwargs.get("data_path"))
         #         else:
-        #             os.remove(params.get("data_path"))
+        #             os.remove(icesee_kwargs.get("data_path"))
         #             # create the directory again
-        #             os.makedirs(params.get("data_path"))
+        #             os.makedirs(icesee_kwargs.get("data_path"))
 
         # Synchronize all ranks
         self.COMM_WORLD.Barrier()
 
-        Nens = params.get("Nens", 1)  # Number of ensemble members
+        Nens = icesee_kwargs.get("Nens", 1)  # Number of ensemble members
 
-        if params.get("sequential_run", False):
+        if icesee_kwargs.get("sequential_run", False):
             if self.rank_world == 0: print("[ICESEE] Running sequential mode")
             self.ens_id = None
             return self.rank_world, self.size_world, self.COMM_WORLD, self.ens_id
-        
-        if params.get("default_run", False):
+
+        if icesee_kwargs.get("default_run", False):
             if self.rank_world == 0: print("[ICESEE] Running default parallel mode")
-            if Nens >= self.size_world: 
+            if Nens >= self.size_world:
                 # Divide ranks into `size` subcommunicators
                 subcomm_size_min = min(self.size_world, Nens)  # Use at most `Nens` groups
                 self.color = self.rank_world % subcomm_size_min  # Group ranks into `subcomm_size_min` subcommunicators
                 self.key = self.rank_world // subcomm_size_min  # Ordering within each subcommunicator
-                
+
                 #  here ens_id = number
                 self.ens_id = self.color # only needed for initializations as we will only have color ranks available either way
             else:
                 # More processes than ensembles, map processes to ensembles efficiently
-                self.color = self.rank_world % Nens  
+                self.color = self.rank_world % Nens
                 self.key = self.rank_world // Nens
                 self.ens_id = self.color
-            
+
             self.comm_sub = self.COMM_WORLD.Split(self.color, self.key)
             self.rank_sub = self.comm_sub.Get_rank()
             self.size_sub = self.comm_sub.Get_size()
 
             return self.rank_sub, self.size_sub, self.comm_sub, self.ens_id
-        
-        if params.get("even_distribution", False):
+
+        if icesee_kwargs.get("even_distribution", False):
             if self.rank_world == 0: print("[ICESEE] Running even distribution mode")
             # split the global communicator into size subcommunicators
             self.color = self.rank_world % self.size_world
@@ -254,17 +254,17 @@ class ParallelManager:
             self.ens_id = self.color
 
             return self.rank_sub, self.size_sub, self.comm_sub, self.ens_id
-        
-    def icesee_mpi_ens_distribution(self, params):
+
+    def icesee_mpi_ens_distribution(self, icesee_kwargs):
         """
         Runs multiple ensemble members in parallel using `Nens` subcommunicators.
-        
+
         Each subcommunicator runs in parallel, and its ranks work together.
         The results are gathered within each subcommunicator and returned.
 
         Parameters:
             Nens: Number of ensemble members (subcommunicators)
-            params: Dictionary of parameters for the ICESEE application
+            icesee_kwargs: Dictionary of parameters for the ICESEE application
 
         Returns:
             A tuple containing:
@@ -279,42 +279,42 @@ class ParallelManager:
                 - start: Start index for assigned ensembles (only if even_distribution is enabled)
                 - stop: Stop index for assigned ensembles (only if even_distribution is enabled)
         """
-        Nens = params.get("Nens", 1)  # Number of ensemble members
+        Nens = icesee_kwargs.get("Nens", 1)  # Number of ensemble members
 
         comm_world = MPI.COMM_WORLD        # Global communicator
         size_world = comm_world.Get_size() # Number of MPI processes
         rank_world = comm_world.Get_rank() # Rank of this MPI process
 
-        if params.get("sequential_run", False):
+        if icesee_kwargs.get("sequential_run", False):
             return None, None, None, None, None, None, rank_world, size_world, comm_world, None, None
 
-        if params.get("default_run", False):
+        if icesee_kwargs.get("default_run", False):
 
-            if Nens >= size_world: 
+            if Nens >= size_world:
                 # Divide ranks into `size` subcommunicators
                 subcomm_size_min = min(size_world, Nens)  # Use at most `Nens` groups
                 color = rank_world % subcomm_size_min  # Group ranks into `subcomm_size_min` subcommunicators
                 key = rank_world // subcomm_size_min  # Ordering within each subcommunicator
-                
+
                 # Determine how many rounds of processing are needed
                 rounds = (Nens + subcomm_size_min - 1) // subcomm_size_min  # Ceiling division
-               
+
             else:
                 # More processes than ensembles, map processes to ensembles efficiently
-                color = rank_world % Nens  
-                key = rank_world // Nens   
-                
+                color = rank_world % Nens
+                key = rank_world // Nens
+
                 rounds = 1  # Only one round of processing needed
                 subcomm_size_min = None
-            
+
             subcomm = comm_world.Split(color, key)
             # get rank and size for each subcommunicator
             sub_rank = subcomm.Get_rank() # Rank within the subcommunicator
             sub_size = subcomm.Get_size() # Size of the subcommunicator
 
             return rounds, color, sub_rank, sub_size, subcomm, subcomm_size_min, rank_world, size_world, comm_world, None, None
-        
-        if params.get("even_distribution", False):
+
+        if icesee_kwargs.get("even_distribution", False):
             # --- Properly Distribute Tasks for All Cases ---
             if Nens >= self.size_world:
                 if Nens > size_world:
@@ -404,7 +404,7 @@ class ParallelManager:
                 else:
                     # Extra ranks do nothing
                     start, stop = 0, 0
-                
+
                 # workflow design
                 # 1. Split the global communicator (comm) into Nens subcommunicators (subcomm), so each ensemble member has a dedicated group of processes.
                 # 2. Each subcommunicator collectively updates its assigned ensemble member (one column of ensemble_state).
@@ -418,7 +418,7 @@ class ParallelManager:
         ensemble_local = ensemble[:global_shape,start:stop]
         # for memory issues return a deepcopy of the ensemble_local
         return copy.deepcopy(ensemble_local), start, stop, subcomm
-    
+
     # --- state vector load distribution ---
     def state_vector_load_distribution(self, state_vector,comm):
         """
@@ -444,11 +444,11 @@ class ParallelManager:
             else:
                 # Extra ranks do nothing
                 start, stop = 0, 0
-        
+
         state_vector_local = copy.deepcopy(state_vector[start:stop,:])
-        
+
         return state_vector_local, start, stop
-    
+
     # row vector load distribution
     def icesee_mpi_row_distribution(self, comm, num_rows):
         """ Distribute row vector among MPI processes based on rank and size.
@@ -486,7 +486,7 @@ class ParallelManager:
 
         return rows_per_rank, extra, local_rows, start_row, end_row
 
-    
+
     # --- memory formulation ---
     def memory_usage(self, global_shape, Nens, bytes_per_element=8):
         """
@@ -513,7 +513,7 @@ class ParallelManager:
         comm.Allgather([data, MPI.DOUBLE], [gathered_data, MPI.DOUBLE])
 
         return gathered_data
-    
+
     # -- method to gather data from all ranks (many to one)
     def gather_data(self, comm, data, root=0):
         """
@@ -539,7 +539,7 @@ class ParallelManager:
         comm.Allreduce([data, MPI.DOUBLE], [reduced_data, MPI.DOUBLE], op=MPI.SUM)
 
         return reduced_data
-    
+
     # -- method to scatter data to all ranks
     def scatter_data(self,comm, data):
         """
@@ -557,7 +557,7 @@ class ParallelManager:
 
         return recv_data
 
-    
+
     # -- method to Bcast data to all ranks
     def broadcast_data(self, comm, data, root=0):
         """
@@ -565,7 +565,7 @@ class ParallelManager:
         data = np.asarray(data)  # Ensure it's an array
         comm.Bcast([data, MPI.DOUBLE], root=root)
         return data
-    
+
     # -- method to exchange data between all ranks
     def alltoall_exchange(self, comm, data):
         """
@@ -601,7 +601,7 @@ class ParallelManager:
             comm.Recv([recv_data, MPI.DOUBLE], source=source)
             print(f"[Rank {rank}] Received data from Rank {source}")
             return recv_data
-        
+
     # ==== Analysis parallel computations ====
     # -- method to compute the ensemble mean
     def compute_covariance(self,ensemble, mean, node_comm):
@@ -616,7 +616,7 @@ class ParallelManager:
         global_cov = np.zeros_like(local_cov)
         node_comm.Allreduce([local_cov, MPI.DOUBLE], [global_cov, MPI.DOUBLE], op=MPI.SUM)
         return global_cov
-    
+
     # -- method to compute the ensemble mean
     def compute_mean_from_local_matrix(self,ensemble, node_comm):
         """
@@ -627,7 +627,7 @@ class ParallelManager:
         node_comm.Allreduce([local_mean, MPI.DOUBLE], [global_mean, MPI.DOUBLE], op=MPI.SUM)
         global_mean /= node_comm.size  # Compute the final mean
         return global_mean
-    
+
     # --- method for matrix-vector multiplication
     def matvec_product(self, matrix, vector, node_comm):
         """
@@ -637,7 +637,7 @@ class ParallelManager:
         global_product = np.zeros_like(local_product)
         node_comm.Allreduce([local_product, MPI.DOUBLE], [global_product, MPI.DOUBLE], op=MPI.SUM)
         return global_product
-    
+
     # --- method for matrix-matrix multiplication
     def matmat_product(self, matrix1, matrix2, node_comm):
         """
@@ -647,7 +647,7 @@ class ParallelManager:
         global_product = np.zeros_like(local_product)
         node_comm.Allreduce([local_product, MPI.DOUBLE], [global_product, MPI.DOUBLE], op=MPI.SUM)
         return global_product
-    
+
     # --- method for Kalamn gain computation
     def compute_kalman_gain(self, ensemble, obs_cov, obs_op, state_dim, node_comm):
         """
@@ -707,7 +707,7 @@ class ParallelManager:
         del local_X, local_mean; gc.collect()
 
         return all_means
-    
+
     def gatherV(self, comm, data, root=0):
         """
         Gathers data from all ranks using collective communication."""
@@ -744,7 +744,7 @@ def icesee_mpi_parallelization(Nens, global_shape=1024, n_modeltasks=None, scree
     parallel_manager.size_world = COMM_WORLD.Get_size()
     parallel_manager.rank_world = COMM_WORLD.Get_rank()
 
-    # --- check if size_world is divisible by Nens for Nens > size_world ---    
+    # --- check if size_world is divisible by Nens for Nens > size_world ---
     # if Nens > parallel_manager.size_world:
     #     if parallel_manager.size_world < 6:
     #         n_modeltasks = 1
@@ -791,11 +791,11 @@ def icesee_mpi_parallelization(Nens, global_shape=1024, n_modeltasks=None, scree
         # n_modeltasks = parallel_manager.size_world/(np.log2(parallel_manager.size_world+1))
         # n_modeltasks = int(parallel_manager.size_world / max(1, int(np.ceil(Nens / parallel_manager.size_world))))
         n_modeltasks = math.gcd(Nens, parallel_manager.size_world)
-        
+
         # Ensure `n_modeltasks` is at least 1
         n_modeltasks = max(1, n_modeltasks)
 
-    
+
     # else:
         # Ensure `n_modeltasks` does not exceed available resources
         # parallel_manager.n_modeltasks = min(n_modeltasks, parallel_manager.size_world, Nens)
@@ -806,7 +806,7 @@ def icesee_mpi_parallelization(Nens, global_shape=1024, n_modeltasks=None, scree
     # --- Check number of parallel ensemble tasks ---
     if parallel_manager.n_modeltasks > parallel_manager.size_world:
         parallel_manager.n_modeltasks = parallel_manager.size_world
-    
+
     # Adjust `n_modeltasks` to ensemble size
     if Nens > 0 and parallel_manager.n_modeltasks > Nens:
         parallel_manager.n_modeltasks = Nens
@@ -852,7 +852,7 @@ def icesee_mpi_parallelization(Nens, global_shape=1024, n_modeltasks=None, scree
     # Create COMM_FILTER communicator
     my_color = parallel_manager.task_id if parallel_manager.filterpe else MPI.UNDEFINED
     parallel_manager.COMM_filter = COMM_WORLD.Split(color=my_color, key=parallel_manager.rank_world)
-    
+
     if parallel_manager.filterpe:
         parallel_manager.size_filter = parallel_manager.COMM_filter.Get_size()
         parallel_manager.rank_filter = parallel_manager.COMM_filter.Get_rank()
@@ -863,10 +863,10 @@ def icesee_mpi_parallelization(Nens, global_shape=1024, n_modeltasks=None, scree
     parallel_manager.rank_couple = parallel_manager.COMM_couple.Get_rank()
     parallel_manager.size_couple = parallel_manager.COMM_couple.Get_size()
 
-    # --- split COMM_WORLD into sub-communicators able to use shared memory. 
-    # - [node_comm = MPI.COMM_WORLD.Split_type(MPI.COMM_TYPE_SHARED)] 
+    # --- split COMM_WORLD into sub-communicators able to use shared memory.
+    # - [node_comm = MPI.COMM_WORLD.Split_type(MPI.COMM_TYPE_SHARED)]
     # - and then use MPI.Win.Allocate_shared() within each node-local sub-communicator to easily access shared memory. (ranks can efficiently communicate with each othercwithout excessive communication overhead)
-    
+
     # define the size of the shared memory (number of elements)
     # get the ensemble size
     parallel_manager.mem_size = Nens * global_shape
@@ -881,9 +881,9 @@ def icesee_mpi_parallelization(Nens, global_shape=1024, n_modeltasks=None, scree
     if False:
         parallel_manager.win = MPI.Win.Allocate_shared(
             parallel_manager.mem_size * disp_unit if parallel_manager.node_comm.rank == 0 else 0,
-            disp_unit, 
+            disp_unit,
             comm = parallel_manager.node_comm)
-        
+
         # querying shared memory buffer
         parallel_manager.mem_buf, itemsize = parallel_manager.win.Shared_query(0)
         assert itemsize == MPI.DOUBLE.Get_size()
@@ -945,7 +945,7 @@ def display_pe_configuration(parallel_manager):
 def find_largest_divisor(Nens, size_world):
     """
     Finds the largest divisor of `Nens` that is less than or equal to `size_world`.
-    
+
     Parameters:
         - Nens (int): Number of ensemble members.
         - size_world (int): Total number of MPI processes.

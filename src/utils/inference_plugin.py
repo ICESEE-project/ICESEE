@@ -37,7 +37,7 @@ def apply_bed_update_gate_local(
     global_rows,
     vec_inputs,
     hdim,
-    model_kwargs,
+    icesee_kwargs,
 ):
     """Gate distributed bed analysis updates without changing other fields.
 
@@ -55,8 +55,8 @@ def apply_bed_update_gate_local(
     If the plugin itself is disabled, ``legacy`` is forced regardless of the
     configured new mode.
     """
-    enabled = bool(model_kwargs.get("inference_plugin_enabled", False))
-    mode = str(model_kwargs.get("bed_update_mode", "legacy")).lower()
+    enabled = bool(icesee_kwargs.get("inference_plugin_enabled", False))
+    mode = str(icesee_kwargs.get("bed_update_mode", "legacy")).lower()
     if not enabled:
         mode = "legacy"
 
@@ -65,9 +65,9 @@ def apply_bed_update_gate_local(
             "bed_update_mode must be 'legacy', 'snapshots', or 'continuous'"
         )
 
-    km = model_kwargs.get("km")
+    km = icesee_kwargs.get("km")
     snapshot_columns = {
-        int(value) for value in model_kwargs.get("bed_snap_cols", [])
+        int(value) for value in icesee_kwargs.get("bed_snap_cols", [])
     }
     is_snapshot = km is not None and int(km) in snapshot_columns
 
@@ -82,8 +82,8 @@ def apply_bed_update_gate_local(
     else:
         freeze_bed = False
 
-    model_kwargs["_bed_update_active"] = not freeze_bed
-    model_kwargs["_bed_is_snapshot"] = is_snapshot
+    icesee_kwargs["_bed_update_active"] = not freeze_bed
+    icesee_kwargs["_bed_is_snapshot"] = is_snapshot
 
     if not freeze_bed:
         return analysis_vec
@@ -103,7 +103,7 @@ def apply_bed_domain_gate_global(
     forecast_vec,
     vec_inputs,
     hdim,
-    model_kwargs,
+    icesee_kwargs,
 ):
     """Restrict bed increments to the configured physical/support domain.
 
@@ -112,7 +112,7 @@ def apply_bed_domain_gate_global(
     stored with the synthetic observations and therefore cannot leak an update
     beneath unobserved floating ice through a misclassified ensemble member.
     """
-    domain = str(model_kwargs.get("bed_update_domain", "all")).lower()
+    domain = str(icesee_kwargs.get("bed_update_domain", "all")).lower()
     if domain == "all":
         return analysis_vec
     if domain not in {"grounded_only", "observed_only"}:
@@ -121,9 +121,9 @@ def apply_bed_domain_gate_global(
             "'observed_only'"
         )
 
-    km = model_kwargs.get("km")
+    km = icesee_kwargs.get("km")
     snapshot_columns = {
-        int(value) for value in model_kwargs.get("bed_snap_cols", [])
+        int(value) for value in icesee_kwargs.get("bed_snap_cols", [])
     }
     if km is None or int(km) not in snapshot_columns:
         return analysis_vec
@@ -154,10 +154,10 @@ def apply_bed_domain_gate_global(
         forecast_thickness = np.asarray(
             forecast_vec[thickness_slice, :], dtype=float
         )
-        density_ratio = float(model_kwargs.get("di", 0.8930))
+        density_ratio = float(icesee_kwargs.get("di", 0.8930))
         allowed = forecast_thickness + forecast_bed / density_ratio > 0.0
     else:
-        masks_by_key = model_kwargs.get("bed_mask_map_cols", {})
+        masks_by_key = icesee_kwargs.get("bed_mask_map_cols", {})
         support = None
         for key in vec_inputs:
             if str(key).lower() not in _BED_ALIASES:
@@ -202,7 +202,7 @@ def apply_bed_observation_anchor_global(
     analysis_vec,
     vec_inputs,
     hdim,
-    model_kwargs,
+    icesee_kwargs,
     stage="pre",
 ):
     """Anchor surveyed bed nodes directly to their active observations.
@@ -212,7 +212,7 @@ def apply_bed_observation_anchor_global(
     its own innovation.  Unobserved nodes are untouched here and are handled by
     the regularized/localized increment plus the physical domain gate.
     """
-    if not bool(model_kwargs.get("_bed_update_active", False)):
+    if not bool(icesee_kwargs.get("_bed_update_active", False)):
         return analysis_vec
 
     stage = str(stage).lower()
@@ -223,14 +223,14 @@ def apply_bed_observation_anchor_global(
         if stage == "pre"
         else "bed_observation_post_anchor_factor"
     )
-    factor = float(model_kwargs.get(factor_key, 0.0))
+    factor = float(icesee_kwargs.get(factor_key, 0.0))
     if factor == 0.0:
         return analysis_vec
     if not 0.0 <= factor <= 1.0:
         raise ValueError(f"{factor_key} must be in [0, 1]")
 
-    km = model_kwargs.get("km")
-    observations = model_kwargs.get("hu_obs_loaded")
+    km = icesee_kwargs.get("km")
+    observations = icesee_kwargs.get("hu_obs_loaded")
     if km is None or observations is None:
         return analysis_vec
     observations = np.asarray(observations, dtype=float)
@@ -256,7 +256,7 @@ def apply_bed_observation_anchor_global(
     bed = np.asarray(analysis_vec[bed_slice, :], dtype=float).copy()
     mean_before = np.mean(bed[active, :], axis=1)
     bed[active, :] += factor * (target[active, None] - bed[active, :])
-    if bool(model_kwargs.get("bed_observation_diagnostics", False)):
+    if bool(icesee_kwargs.get("bed_observation_diagnostics", False)):
         mean_after = np.mean(bed[active, :], axis=1)
         rmse_before = np.sqrt(np.mean((mean_before - target[active]) ** 2))
         rmse_after = np.sqrt(np.mean((mean_after - target[active]) ** 2))
@@ -273,8 +273,7 @@ def apply_global_inference_hook(
     analysis_vec,
     vec_inputs,
     hdim,
-    params,
-    model_kwargs,
+    icesee_kwargs,
     timestep,
     model_time=None,
     stage="all",
@@ -286,7 +285,7 @@ def apply_global_inference_hook(
     ``stage='post_geometry'`` for SMB after those fixes. ``stage='all'`` is
     retained for backward compatibility but should not be used for ISSM.
     """
-    if not model_kwargs.get("inference_plugin_enabled", False):
+    if not icesee_kwargs.get("inference_plugin_enabled", False):
         return analysis_vec
 
     stage = str(stage).lower()
@@ -296,32 +295,32 @@ def apply_global_inference_hook(
         )
 
     if model_time is None:
-        dt = float(model_kwargs.get("dt", params.get("dt", 1.0)))
+        dt = float(icesee_kwargs.get("dt", 1.0))
         model_time = float(timestep) * dt
 
-    if stage in {"pre_geometry", "all"} and model_kwargs.get(
+    if stage in {"pre_geometry", "all"} and icesee_kwargs.get(
         "physics_bed_inference", False
     ):
         # In snapshot mode, do not repeatedly post-process a frozen forecast.
-        bed_active = bool(model_kwargs.get("_bed_update_active", True))
+        bed_active = bool(icesee_kwargs.get("_bed_update_active", True))
         if bed_active:
             analysis_vec = apply_bed_regularized_correction(
                 analysis_vec,
                 vec_inputs,
                 hdim,
-                model_kwargs,
+                icesee_kwargs,
                 timestep=timestep,
                 model_time=model_time,
             )
 
-    if stage in {"post_geometry", "all"} and model_kwargs.get(
+    if stage in {"post_geometry", "all"} and icesee_kwargs.get(
         "physics_smb_inference", False
     ):
         analysis_vec = apply_smb_physics_correction(
             analysis_vec,
             vec_inputs,
             hdim,
-            model_kwargs,
+            icesee_kwargs,
             timestep=timestep,
             model_time=model_time,
         )
@@ -329,7 +328,7 @@ def apply_global_inference_hook(
     return analysis_vec
 
 
-def reset_inference_plugin_state(model_kwargs):
+def reset_inference_plugin_state(icesee_kwargs):
     """Remove only private runtime state created by the inference plugin."""
     keys = (
         "_bed_update_active",
@@ -345,4 +344,4 @@ def reset_inference_plugin_state(model_kwargs):
         "_smb_inference_call_count",
     )
     for key in keys:
-        model_kwargs.pop(key, None)
+        icesee_kwargs.pop(key, None)

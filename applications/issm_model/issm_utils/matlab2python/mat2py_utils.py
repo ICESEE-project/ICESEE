@@ -72,13 +72,13 @@ class _MatlabServer:
                 if 'matlab' in proc.info['name'].lower() or 'MATLAB' in proc.info['name']:
                     # if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
                     #     print(f"Found MATLAB process: {proc.info['name']} (PID: {proc.info['pid']})")
-                    
+
                     # Determine if the process is a GUI instance
                     cmdline = proc.info['cmdline']
                     is_gui = True  # Assume GUI unless non-GUI flags are present
                     if cmdline and any(flag in cmdline for flag in ['-nodisplay', '-nodesktop']):
                         is_gui = False
-                    
+
                     # Each MPI rank owns one server distinguished by its
                     # cmdfile/statusfile suffix.  Never kill every headless
                     # MATLAB process here: concurrent launchers would terminate
@@ -101,10 +101,10 @@ class _MatlabServer:
                         if self.comm is None or self.comm.Get_rank() == 0 and self.verbose:
                             # print(f"Skipped GUI MATLAB process (PID: {proc.info['pid']})")
                             pass
-                        
+
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue  # Skip processes that cannot be accessed or are invalid
-    
+
         # if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
         #     if matlab_count == 0:
         #         print("No non-GUI MATLAB processes found to terminate.")
@@ -267,23 +267,23 @@ class _MatlabServer:
         except Exception as e:
             if self.comm is None or self.comm.Get_rank() == 0:
                 print(f"An error occurred: {e}")
-            
+
         # if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
         #     print("[ICESEE::Launcher] Starting MATLAB server...")
         #     print(f"[ICESEE::Launcher] Command file: {self.cmdfile}")
         #     print(f"[ICESEE::Launcher] Status file: {self.statusfile}")
-            
+
         # Clean up old command and status files
         for f in [self.cmdfile, self.statusfile]:
             if os.path.exists(f):
                 os.remove(f)
-        
+
         try:
             # Launch MATLAB with non-GUI flags and redirect I/O
             # matlab_cmd = f"{self.matlab_path} -nodesktop -nodisplay -nosplash -nojvm -r \"matlab_server('{self.cmdfile}', '{self.statusfile}')\""
 
             # -- source all the necessary paths for ISSM
-            
+
             self.issm_hpc_wrapper()
 
             if not self.matlab_path:
@@ -299,7 +299,7 @@ class _MatlabServer:
                 stdin=subprocess.PIPE,   # Redirect stdin
                 preexec_fn=os.setsid    # Create new process group for signal handling
             )
-            
+
             # %-->
             print(f"[DEBUG] launched MATLAB pid={self.process.pid}")
             # %-->
@@ -318,7 +318,7 @@ class _MatlabServer:
             stdout_thread.start()
             stderr_thread.start()
             output_thread.start()
-            
+
             # Wait for server to signal readiness via status file.  File
             # creation and content publication are not one operation on every
             # filesystem, so tolerate a transient missing/empty status.
@@ -357,7 +357,7 @@ class _MatlabServer:
                 if int(time.time() - start_time) % 10 == 0:
                     print(f"[ICESEE::Launcher] still waiting for {self.statusfile} after {int(time.time() - start_time)} s")
                 #%--->
-            
+
             if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
                 print("[ICESEE::Launcher] MATLAB server is ready.")
         except Exception as e:
@@ -391,7 +391,7 @@ class _MatlabServer:
 
         if self.verbose and (self.comm is None or self.comm.Get_rank() == 0):
             print(f"[ICESEE::Launcher] Sending command: {command}")
-        
+
         try:
             # Mark the command in progress and publish both files atomically;
             # this prevents MATLAB from reading a partially-written command.
@@ -408,7 +408,7 @@ class _MatlabServer:
             if self.comm is None or self.comm.Get_rank() == 0:
                 print(f"[ICESEE::Launcher] Error: Failed to write command file: {e}")
             return False
-        
+
         # Wait for command to be processed (file deleted)
         start_time = time.time()
         sleep_time = 1.0  # Initial sleep interval
@@ -418,40 +418,40 @@ class _MatlabServer:
         warning_threshold = timeout * 0.5  # Warn at 50% of timeout
         warning_issued = False
         last_loop_start = start_time  # Track start of the current loop iteration
-        
+
         while os.path.exists(self.cmdfile):
             elapsed_time = time.time() - start_time
             if elapsed_time > timeout:
                 if self.comm is None or self.comm.Get_rank() == 0:
                     print(f"[ICESEE::Launcher] Error: Command execution timed out after {timeout} seconds.")
                 return False
-            
+
             # Issue warning if approaching timeout
             if not warning_issued and elapsed_time > warning_threshold:
                 if self.comm is None or self.comm.Get_rank() == 0:
                     print(f"[ICESEE::Launcher] Warning: Command has been running for {elapsed_time:.1f}s, approaching timeout of {timeout}s.")
                 warning_issued = True
-            
+
             # Print periodic status if verbose
             if self.verbose and (self.comm is None or self.comm.Get_rank() == 0) and (time.time() - last_verbose_time) >= verbose_interval:
                 print(f"[ICESEE::Launcher] Waiting for command to be processed... ({elapsed_time:.1f}s elapsed)")
                 last_verbose_time = time.time()
-            
+
             # Measure the time taken by the previous loop iteration
             current_time = time.time()
             loop_duration = current_time - last_loop_start
             last_loop_start = current_time  # Update for the next iteration
-            
+
             # Set sleep_time to the previous loop's duration, bounded by min_sleep and max_sleep
             sleep_time = min(max(loop_duration, min_sleep), max_sleep)
-            
+
             time.sleep(sleep_time)
-            
+
             # Issue warning if sleep_time reaches max_sleep
             if sleep_time == max_sleep and not warning_issued:
                 if self.comm is None or self.comm.Get_rank() == 0:
                     print("[ICESEE::Launcher] Warning: Slow command processing detected.")
-        
+
         # MATLAB publishes done/error before deleting the command file.  Check
         # the status explicitly so a MATLAB exception cannot masquerade as a
         # successful forecast that merely reuses stale HDF5 data.
@@ -630,7 +630,7 @@ def subprocess_cmd_run(issm_cmd, nprocs: int, verbose: bool = True):
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
 
-        
+
 #  --- Add ISSM_DIR to sys.path ---
 def add_issm_dir_to_sys_path(issm_dir=None):
     """
@@ -727,7 +727,7 @@ def find_matlab_root():
             capture_output=True,
             check=True
         )
-        
+
         # Extract and clean the output
         matlab_root = result.stdout.strip()
         print(f"MATLAB root directory: {matlab_root}")
@@ -788,7 +788,7 @@ def install_matlab_engine(matlab_root):
         os.chdir(current_dir)
 
 
-def setup_ensemble_data(Nens, base_data_dir='./Models/ens_id_0', base_kwargs_file='model_kwargs_0.mat', kwargs=None):
+def setup_ensemble_data(Nens, base_data_dir='./Models/ens_id_0', base_icesee_file='icesee_kwargs_0.mat', icesee_kwargs=None):
     import os
     import shutil
     from mpi4py import MPI
@@ -796,30 +796,30 @@ def setup_ensemble_data(Nens, base_data_dir='./Models/ens_id_0', base_kwargs_fil
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
 
-    generate_true_state = kwargs.get('generate_true_state', 0)
-    generate_nurged_state = kwargs.get('generate_nurged_state', 0)
-    generate_synthetic_obs = kwargs.get('generate_synthetic_obs', 0)
+    generate_true_state = icesee_kwargs.get('generate_true_state', 0)
+    generate_nurged_state = icesee_kwargs.get('generate_nurged_state', 0)
+    generate_synthetic_obs = icesee_kwargs.get('generate_synthetic_obs', 0)
 
     flag = generate_true_state and generate_nurged_state and generate_synthetic_obs
-    
+
     base_data_dir = os.path.abspath(base_data_dir)
-    base_kwargs_file = os.path.abspath(base_kwargs_file)
-    
+    base_icesee_file = os.path.abspath(base_icesee_file)
+
     if rank == 0:
         if not os.path.isdir(base_data_dir):
             raise FileNotFoundError(f"[Rank {rank}] Base directory {base_data_dir} not found")
-        if not os.path.isfile(base_kwargs_file):
-            raise FileNotFoundError(f"[Rank {rank}] Base kwargs file {base_kwargs_file} not found")
-            
+        if not os.path.isfile(base_icesee_file):
+            raise FileNotFoundError(f"[Rank {rank}] Base icesee_kwargs file {base_icesee_file} not found")
+
         for ens in range(Nens):
             ens_dir = os.path.abspath(f'./Models/ens_id_{ens}')
-            kwargs_file = f'model_kwargs_{ens}.mat'
-            
+            icesee_file = f'icesee_kwargs_{ens}.mat'
+
             if ens != 0:  # Skip ens_id_0 (base directory)
                 if os.path.exists(ens_dir) and flag:
                     shutil.rmtree(ens_dir)
                 os.makedirs(ens_dir, exist_ok=True)
-                
+
             #     for root, _, files in os.walk(base_data_dir):
             #         rel_path = os.path.relpath(root, base_data_dir)
             #         os.makedirs(os.path.join(ens_dir, rel_path), exist_ok=True)
@@ -834,31 +834,29 @@ def setup_ensemble_data(Nens, base_data_dir='./Models/ens_id_0', base_kwargs_fil
             #                 shutil.copy2(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
             #             except Exception as e:
             #                 shutil.copy(os.path.join(root, file_name), os.path.join(ens_dir, rel_path, file_name))
-                
-                if os.path.exists(kwargs_file):
-                    os.remove(kwargs_file)
-                # os.link(base_kwargs_file, kwargs_file)
-                # os.symlink(base_kwargs_file, kwargs_file)  # Use symlink for better compatibility
-                shutil.copy2(base_kwargs_file, kwargs_file)
-    
+
+                if os.path.exists(icesee_file):
+                    os.remove(icesee_file)
+                shutil.copy2(base_icesee_file, icesee_file)
+
     comm.Barrier()
-    
+
     ens_id = rank
     if ens_id < Nens:
         ensemble_dir = os.path.abspath(f'./Models/ens_id_{ens_id}')
-        ensemble_kwargs = f'model_kwargs_{ens_id}.mat'
-        if not os.path.isdir(ensemble_dir) or not os.path.isfile(ensemble_kwargs):
-            raise FileNotFoundError(f"[Rank {rank}] Cannot access {ensemble_dir} or {ensemble_kwargs}")
-        return ensemble_dir, ensemble_kwargs
+        ensemble_icesee_file = f'icesee_kwargs_{ens_id}.mat'
+        if not os.path.isdir(ensemble_dir) or not os.path.isfile(ensemble_icesee_file):
+            raise FileNotFoundError(f"[Rank {rank}] Cannot access {ensemble_dir} or {ensemble_icesee_file}")
+        return ensemble_dir, ensemble_icesee_file
     return None, None
 
-def setup_reference_data(reference_data_dir, reference_data, use_reference_data, kwargs):
+def setup_reference_data(reference_data_dir, reference_data, use_reference_data, icesee_kwargs):
     """
     Parameters:
     - reference_data_dir: Directory containing the reference data file.
     - reference_data: Name of the reference data file.
     - use_reference_data: Flag to enable/disable reference data setup.
-    
+
     Returns:
     - rank_data_dir: Path to the rank's ensemble directory (e.g., './Models/ens_id_X').
     - rank_data_file: Path to the rank's reference data file.
@@ -871,9 +869,9 @@ def setup_reference_data(reference_data_dir, reference_data, use_reference_data,
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
 
-    generate_true_state = kwargs.get('generate_true_state', 0)
-    generate_nurged_state = kwargs.get('generate_nurged_state', 0)
-    generate_synthetic_obs = kwargs.get('generate_synthetic_obs', 0)
+    generate_true_state = icesee_kwargs.get('generate_true_state', 0)
+    generate_nurged_state = icesee_kwargs.get('generate_nurged_state', 0)
+    generate_synthetic_obs = icesee_kwargs.get('generate_synthetic_obs', 0)
 
     flag = generate_true_state and generate_nurged_state and generate_synthetic_obs
 
@@ -918,7 +916,7 @@ def setup_reference_data(reference_data_dir, reference_data, use_reference_data,
                     print(f"[Rank {rank}] Successfully copied {initial_data} to {link_path} using shutil.")
                 except Exception as copy_error:
                     raise RuntimeError(f"[Rank {rank}] Failed to copy {initial_data} to {link_path} using shutil: {copy_error}")
-            
+
 
     comm.Barrier()  # Synchronize all ranks
     return rank_data_dir, rank_data_file
@@ -928,12 +926,12 @@ def setup_reference_data(reference_data_dir, reference_data, use_reference_data,
 def setup_ensemble_intial_data(Nens, reference_data_dir, reference_data):
     """
     Create ensemble directories with hard-linked reference data file for read-only access.
-    
+
     Parameters:
     - reference_data_dir: Directory containing the reference data file.
     - reference_data: Name of the reference data file.
     - use_reference_data: Flag to enable/disable reference data setup.
-    
+
     Returns:
     - rank_data_dir: Path to the rank's ensemble directory (e.g., './Models/ens_id_X').
     - rank_data_file: Path to the rank's reference data file.
@@ -981,7 +979,7 @@ def setup_ensemble_intial_data(Nens, reference_data_dir, reference_data):
                             shutil.copy(initial_data, link_path)
                         except OSError as e:
                             raise RuntimeError(f"[Rank {rank}] Failed to create hard link {link_path} -> {initial_data}: {e}")
-                        
+
 
 # -- Setup ISSM Example Directory in Parallel Environment --
 def setup_example_directory(issm_dir, example_name):
@@ -989,14 +987,14 @@ def setup_example_directory(issm_dir, example_name):
     Set up the ISSM example directory in a parallel environment using an absolute path.
     Only rank 0 creates the directory if it doesn't exist, and all processes synchronize.
     Ensures the path is a directory and not a file.
-    
+
     Args:
         issm_dir (str): Base directory for ISSM (relative or absolute).
         example_name (str): Name of the example (e.g., 'ISMIP_Choi').
-    
+
     Returns:
         str: Absolute path to the example directory.
-    
+
     Raises:
         OSError: If the path exists but is not a directory, or if directory creation fails.
     """
@@ -1007,7 +1005,7 @@ def setup_example_directory(issm_dir, example_name):
     rank = comm.Get_rank()
     # Construct the absolute path
     issm_examples_dir = os.path.abspath(os.path.join(issm_dir, 'examples', example_name))
-    
+
     if rank == 0:
         try:
             if os.path.exists(issm_examples_dir):
@@ -1019,19 +1017,19 @@ def setup_example_directory(issm_dir, example_name):
                 print(f"Created directory: {issm_examples_dir}")
                 # make the Models directory
                 os.makedirs(os.path.join(issm_examples_dir, 'Models'), exist_ok=True)
-                
+
             # Verify directory is accessible
             if not os.access(issm_examples_dir, os.R_OK | os.X_OK):
                 raise OSError(f"Directory not accessible: {issm_examples_dir}")
         except OSError as e:
             print(f"Error setting up directory {issm_examples_dir}: {e}")
             raise
-    
+
     # Synchronize all processes
     comm.Barrier()
-    
+
     # All processes verify the directory
     if not os.path.isdir(issm_examples_dir):
         raise OSError(f"Rank {rank}: Path is not a directory: {issm_examples_dir}")
-    
+
     return issm_examples_dir

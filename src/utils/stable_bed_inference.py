@@ -99,14 +99,14 @@ def _project_bed_increment(increment, coords_m, mode="none"):
     return basis @ coefficients
 
 
-def _bed_coordinates(model_kwargs, hdim):
-    coordinates = model_kwargs.get("mesh_coordinates")
+def _bed_coordinates(icesee_kwargs, hdim):
+    coordinates = icesee_kwargs.get("mesh_coordinates")
     if coordinates is None:
-        getter = model_kwargs.get("mesh_coordinate_getter")
+        getter = icesee_kwargs.get("mesh_coordinate_getter")
         if getter is None:
             getter = _registry_coordinates
         if callable(getter):
-            coordinates = getter(model_kwargs)
+            coordinates = getter(icesee_kwargs)
     if coordinates is None:
         return None
 
@@ -116,7 +116,7 @@ def _bed_coordinates(model_kwargs, hdim):
             f"Expected mesh coordinates with shape {(hdim, 2)}, "
             f"got {coordinates.shape}"
         )
-    scale = float(model_kwargs.get("mesh_coordinate_scale_to_m", 1.0))
+    scale = float(icesee_kwargs.get("mesh_coordinate_scale_to_m", 1.0))
     return coordinates * scale
 
 
@@ -124,7 +124,7 @@ def apply_bed_regularized_correction(
     analysis_vec,
     vec_inputs,
     hdim,
-    model_kwargs,
+    icesee_kwargs,
     timestep=None,
     model_time=None,
 ):
@@ -146,7 +146,7 @@ def apply_bed_regularized_correction(
     bed_min_surface_separation     float, default 1 metre
     bed_update_mask                optional (hdim,) weights in [0, 1]
     """
-    if not model_kwargs.get("physics_bed_inference", False):
+    if not icesee_kwargs.get("physics_bed_inference", False):
         return analysis_vec
 
     bed_slice = _bed_state_slice(
@@ -164,40 +164,39 @@ def apply_bed_regularized_correction(
         {"surface", "ice_surface", "s", "surface_elevation"},
         hdim,
     )
-    coords_m = _bed_coordinates(model_kwargs, hdim)
+    coords_m = _bed_coordinates(icesee_kwargs, hdim)
     if coords_m is None:
         return analysis_vec
 
     bed_analysis = np.asarray(analysis_vec[bed_slice, :], dtype=float)
 
-    initial_reference = model_kwargs.get("_bed_initial_reference")
+    initial_reference = icesee_kwargs.get("_bed_initial_reference")
     if initial_reference is None or np.shape(initial_reference) != np.shape(bed_analysis):
         initial_reference = bed_analysis.copy()
-        model_kwargs["_bed_initial_reference"] = initial_reference
+        icesee_kwargs["_bed_initial_reference"] = initial_reference
 
-    previous = model_kwargs.get("_bed_previous_applied")
+    previous = icesee_kwargs.get("_bed_previous_applied")
     if previous is None or np.shape(previous) != np.shape(bed_analysis):
-        forecast_reference = model_kwargs.get("_bed_forecast_reference")
+        forecast_reference = icesee_kwargs.get("_bed_forecast_reference")
         if np.shape(forecast_reference) == np.shape(bed_analysis):
             previous = np.asarray(forecast_reference, dtype=float).copy()
         else:
             previous = initial_reference.copy()
 
-    params = model_kwargs.get("params", {})
-    dt = float(model_kwargs.get("dt", params.get("dt", 1.0)))
+    dt = float(icesee_kwargs.get("dt", 1.0))
     if model_time is not None:
         time_now = float(model_time)
     elif timestep is not None:
         time_now = float(timestep) * dt
     else:
-        call = int(model_kwargs.get("_bed_inference_call_count", 0))
+        call = int(icesee_kwargs.get("_bed_inference_call_count", 0))
         time_now = call * dt
-        model_kwargs["_bed_inference_call_count"] = call + 1
+        icesee_kwargs["_bed_inference_call_count"] = call + 1
 
-    start_time = float(model_kwargs.get("bed_inference_start_time", 0.0))
+    start_time = float(icesee_kwargs.get("bed_inference_start_time", 0.0))
     if time_now <= start_time:
         hold = np.clip(
-            float(model_kwargs.get("bed_spinup_hold_factor", 1.0)), 0.0, 1.0
+            float(icesee_kwargs.get("bed_spinup_hold_factor", 1.0)), 0.0, 1.0
         )
         corrected = (1.0 - hold) * bed_analysis + hold * initial_reference
     else:
@@ -205,15 +204,15 @@ def apply_bed_regularized_correction(
 
         # An optional sensitivity/localization mask can completely suppress bed
         # updates where H/u/v provide little information.
-        update_mask = model_kwargs.get("bed_update_mask")
+        update_mask = icesee_kwargs.get("bed_update_mask")
         if update_mask is not None:
             update_mask = np.asarray(update_mask, dtype=float).reshape(hdim, 1)
             raw_increment *= np.clip(update_mask, 0.0, 1.0)
 
         spatial_strength = max(
-            float(model_kwargs.get("bed_spatial_regularization", 40.0)), 0.0
+            float(icesee_kwargs.get("bed_spatial_regularization", 40.0)), 0.0
         )
-        graph_neighbors = int(model_kwargs.get("bed_graph_neighbors", 12))
+        graph_neighbors = int(icesee_kwargs.get("bed_graph_neighbors", 12))
         cache_key = (
             hdim,
             float(np.sum(coords_m)),
@@ -221,12 +220,12 @@ def apply_bed_regularized_correction(
             spatial_strength,
             graph_neighbors,
         )
-        cache = model_kwargs.get("_bed_regularization_cache")
+        cache = icesee_kwargs.get("_bed_regularization_cache")
         if cache is None or cache[0] != cache_key:
             solver = _bed_increment_solver(
                 coords_m, spatial_strength, graph_neighbors
             )
-            model_kwargs["_bed_regularization_cache"] = (cache_key, solver)
+            icesee_kwargs["_bed_regularization_cache"] = (cache_key, solver)
         else:
             solver = cache[1]
 
@@ -236,10 +235,10 @@ def apply_bed_regularized_correction(
         smooth_increment = _project_bed_increment(
             smooth_increment,
             coords_m,
-            model_kwargs.get("bed_projection_basis", "none"),
+            icesee_kwargs.get("bed_projection_basis", "none"),
         )
 
-        maximum_update = model_kwargs.get("bed_max_update_per_cycle")
+        maximum_update = icesee_kwargs.get("bed_max_update_per_cycle")
         if maximum_update is not None:
             maximum_update = float(maximum_update)
             if maximum_update <= 0.0:
@@ -249,14 +248,14 @@ def apply_bed_regularized_correction(
             )
 
         blend = np.clip(
-            float(model_kwargs.get("bed_update_blend_factor", 0.15)), 0.0, 1.0
+            float(icesee_kwargs.get("bed_update_blend_factor", 0.15)), 0.0, 1.0
         )
-        ramp_time = max(float(model_kwargs.get("bed_blend_ramp_time", 0.0)), 0.0)
+        ramp_time = max(float(icesee_kwargs.get("bed_blend_ramp_time", 0.0)), 0.0)
         if ramp_time > 0.0:
             blend *= np.clip((time_now - start_time) / ramp_time, 0.0, 1.0)
         corrected = previous + blend * smooth_increment
 
-    bounds = model_kwargs.get("bed_physical_bounds")
+    bounds = icesee_kwargs.get("bed_physical_bounds")
     if bounds is not None:
         lower, upper = map(float, bounds)
         if lower >= upper:
@@ -265,14 +264,14 @@ def apply_bed_regularized_correction(
 
     if (
         surface_slice is not None
-        and model_kwargs.get("bed_enforce_below_surface", True)
+        and icesee_kwargs.get("bed_enforce_below_surface", True)
     ):
         surface = np.asarray(analysis_vec[surface_slice, :], dtype=float)
         separation = max(
-            float(model_kwargs.get("bed_min_surface_separation", 1.0)), 0.0
+            float(icesee_kwargs.get("bed_min_surface_separation", 1.0)), 0.0
         )
         corrected = np.minimum(corrected, surface - separation)
 
     analysis_vec[bed_slice, :] = corrected
-    model_kwargs["_bed_previous_applied"] = corrected.copy()
+    icesee_kwargs["_bed_previous_applied"] = corrected.copy()
     return analysis_vec

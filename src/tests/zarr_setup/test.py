@@ -11,7 +11,7 @@ from forcast_class import EnKFIO  # Import the class above
 def forecast(state):
     return state  # Placeholder: modify state as needed
 
-def analyze(state, H, d, ens_idx, enkf_io, params=None):
+def analyze(state, H, d, ens_idx, enkf_io, icesee_kwargs=None):
     # Step 1: Compute important matrices
     start = MPI.Wtime()
     ens_perturbations_local = state - np.mean(state, axis=0)  # (nd_local, 1)
@@ -102,19 +102,19 @@ def analyze(state, H, d, ens_idx, enkf_io, params=None):
     # enkf_io.write_analysis(t, analysis_vec_local, ens_idx)
 
     # # Apply inflation if provided
-    # if params and 'inflation_factor' in params:
+    # if icesee_kwargs and 'inflation_factor' in icesee_kwargs:
     #     mean_params = np.mean(analysis_vec_local, axis=1)
     #     perturbations = analysis_vec_local - mean_params.reshape(-1, 1)
-    #     inflated_perturbations = perturbations * params['inflation_factor']
+    #     inflated_perturbations = perturbations * icesee_kwargs['inflation_factor']
     #     analysis_vec_local = mean_params.reshape(-1, 1) + inflated_perturbations
     #     enkf_io.write_analysis(t, analysis_vec_local, ens_idx)
 
     # # Check for negative thickness if 'h' is in vec_inputs
-    # if params and 'vec_inputs' in params:
-    #     for i, var in enumerate(params.get('vec_inputs', [])):
+    # if icesee_kwargs and 'vec_inputs' in icesee_kwargs:
+    #     for i, var in enumerate(icesee_kwargs.get('vec_inputs', [])):
     #         if var == 'h':
-    #             start = i * (enkf_io.nd_local // params.get('num_state_vars', 1))
-    #             end = start + (enkf_io.nd_local // params.get('num_state_vars', 1))
+    #             start = i * (enkf_io.nd_local // icesee_kwargs.get('num_state_vars', 1))
+    #             end = start + (enkf_io.nd_local // icesee_kwargs.get('num_state_vars', 1))
     #             analysis_vec_local[start:end, :] = np.maximum(analysis_vec_local[start:end, :], 1e-2)
     #             enkf_io.write_analysis(t, analysis_vec_local, ens_idx)
 
@@ -126,7 +126,7 @@ def analyze(state, H, d, ens_idx, enkf_io, params=None):
 
 class Model:
     def __init__(self):
-        self.params = {
+        self.icesee_kwargs = {
             "number_obs_instants": 10,
             "joint_estimation": True,
             "total_state_param_vars": 5,
@@ -146,22 +146,22 @@ class Model:
         n = n_model
 
         # Initialize the H matrix
-        H = np.zeros((self.params["number_obs_instants"] * 2 + 1, n))
+        H = np.zeros((self.icesee_kwargs["number_obs_instants"] * 2 + 1, n))
 
         # Calculate distance between measurements
-        di = int((n - 2) / (2 * self.params["number_obs_instants"]))
+        di = int((n - 2) / (2 * self.icesee_kwargs["number_obs_instants"]))
 
         # Fill the H matrix
-        for i in range(1, self.params["number_obs_instants"] + 1):
+        for i in range(1, self.icesee_kwargs["number_obs_instants"] + 1):
             H[i - 1, i * di - 1] = 1
-            H[self.params["number_obs_instants"] + i - 1, int((n - 2) / 2) + i * di - 1] = 1
+            H[self.icesee_kwargs["number_obs_instants"] + i - 1, int((n - 2) / 2) + i * di - 1] = 1
 
-        H[self.params["number_obs_instants"] * 2, n - 2] = 1  # Final element
+        H[self.icesee_kwargs["number_obs_instants"] * 2, n - 2] = 1  # Final element
 
         # Check if we have parameter estimation
-        if self.params.get('joint_estimation', False):
-            ndim = n // self.params["total_state_param_vars"]
-            state_variables_size = ndim * self.params["num_state_vars"]
+        if self.icesee_kwargs.get('joint_estimation', False):
+            ndim = n // self.icesee_kwargs["total_state_param_vars"]
+            state_variables_size = ndim * self.icesee_kwargs["num_state_vars"]
             num_params_size = n - state_variables_size
             H_param = np.zeros(num_params_size)
             H[:, state_variables_size:] = H_param
@@ -179,7 +179,7 @@ class Model:
         try:
             # Define chunk size for efficient storage (adjust based on matrix size)
             chunk_size = (min(1000, H.shape[0]), min(1000, H.shape[1]))
-            
+
             # Create a Zarr array with compression, using Zarr format 2
             zarr_array = zarr.open(
                 zarr_path,
@@ -190,13 +190,13 @@ class Model:
                 zarr_format=2,  # Explicitly use Zarr format 2
                 compressor=numcodecs.Blosc(cname='zstd', clevel=5, shuffle=numcodecs.Blosc.SHUFFLE)
             )
-            
+
             # Write the H matrix to the Zarr array
             zarr_array[:] = H
 
             # clean up H matrix from memory
             del H; gc.collect()
-            
+
         except Exception as e:
             print(f"Error saving H matrix to Zarr file: {e}")
             raise
@@ -241,11 +241,11 @@ model = Model()
 
 # Dummy observation operator and data
 # m_obs = 100  # Example observation dimension
-m_obs = len(tobserve) 
+m_obs = len(tobserve)
 # H = np.random.rand(m_obs, nd)  # Example observation operator
 d = np.random.rand(m_obs, 1)  # Example observation vector
 # d = np.random.rand(m_obs,)
-params = {
+icesee_kwargs = {
     'inflation_factor': 1.05,
     'vec_inputs': ['h'],
     'num_state_vars': 1
@@ -259,7 +259,7 @@ for t in range(nt):
             # print(f"Rank {subcomm.Get_rank()}, time {t}, ens_id {ens_id}, state shape: {state.shape}")
             state = forecast(state)
             enkf_io.write_forecast(t + 1 if t < nt - 1 else t, state, ens_id)
-            
+
     if t in tobserve:
 
         # generate the H file
@@ -275,12 +275,12 @@ for t in range(nt):
                 if ens_id < nens:
                     state = enkf_io.read_analysis(t, ens_id)
                     print(f"Rank {subcomm.Get_rank()}, Analysis read at time {t}, ens_id {ens_id}, state shape: {state.shape}")
-                    # state = analyze(state, H, d, ens_id, enkf_io, params)
+                    # state = analyze(state, H, d, ens_id, enkf_io, icesee_kwargs)
                     # enkf_io.write_analysis(t, state, ens_id)
         # state = enkf_io.read_analysis(t, ens_id)
         # print(f"Rank {subcomm.Get_rank()}, Analysis read at time {t}, state shape: {state.shape}")
 
-        # state = analyze(state, H, d, ens_id, enkf_io, params)
+        # state = analyze(state, H, d, ens_id, enkf_io, icesee_kwargs)
         # enkf_io.write_analysis(t, state, ens_id)
 
 enkf_io.close()

@@ -4,26 +4,26 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
     % Inputs: data_fname (output file name), ens_id (ensemble ID), rank, nprocs (MPI settings),
     %         k (time step index), dt (time step), tinitial, tfinal (time bounds)
 
-    % Read kwargs from .mat file
-    model_kwargs = sprintf('model_kwargs_%d.mat', ens_id);
-    kwargs       = load(model_kwargs);
-    cluster_name = char(kwargs.cluster_name);
-    steps        = double(kwargs.steps);
-    icesee_path  = char(kwargs.icesee_path);
-    data_path    = char(kwargs.data_path);
-    devmode      = logical(kwargs.devmode);
-    issm_example_dir     = char(kwargs.issm_examples_dir);
-    deepwater_melting_rate = double(kwargs.deepwater_melting_rate);
-    smb = double(kwargs.smb);
-    mean_friction  = double(kwargs.mean_friction);
-    reference_data = char(kwargs.reference_data);
-    nens = double(kwargs.Nens);
+    % Read icesee_kwargs from .mat file
+    icesee_kwargs_file = sprintf('icesee_kwargs_%d.mat', ens_id);
+    icesee_kwargs       = load(icesee_kwargs_file);
+    cluster_name = char(icesee_kwargs.cluster_name);
+    steps        = double(icesee_kwargs.steps);
+    icesee_path  = char(icesee_kwargs.icesee_path);
+    data_path    = char(icesee_kwargs.data_path);
+    devmode      = logical(icesee_kwargs.devmode);
+    issm_example_dir     = char(icesee_kwargs.issm_examples_dir);
+    deepwater_melting_rate = double(icesee_kwargs.deepwater_melting_rate);
+    smb = double(icesee_kwargs.smb);
+    mean_friction  = double(icesee_kwargs.mean_friction);
+    reference_data = char(icesee_kwargs.reference_data);
+    nens = double(icesee_kwargs.Nens);
     wrong_reference_data = 'wrong_reference_data.mat';
-    min_friction = double(kwargs.min_friction);
-    max_friction = double(kwargs.max_friction);
-    abs_vel_weight = double(kwargs.abs_vel_weight);
-    rel_vel_weight = double(kwargs.rel_vel_weight);
-    tikhonov_regularization_weight = double(kwargs.tikhonov_regularization_weight);
+    min_friction = double(icesee_kwargs.min_friction);
+    max_friction = double(icesee_kwargs.max_friction);
+    abs_vel_weight = double(icesee_kwargs.abs_vel_weight);
+    rel_vel_weight = double(icesee_kwargs.rel_vel_weight);
+    tikhonov_regularization_weight = double(icesee_kwargs.tikhonov_regularization_weight);
 
 
     % Get the current working directory
@@ -36,8 +36,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
     % set initail ens_id
     ens_id_init = 0;
-    s_perturb = double(kwargs.s_nurge);
-    b_perturb = double(kwargs.b_nurge);
+    s_perturb = double(icesee_kwargs.s_nurge);
+    b_perturb = double(icesee_kwargs.b_nurge);
 
     output_frequency = 1; % make sure this is set to 1 for coupling with ICESEE
 
@@ -61,7 +61,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % Use the same Weertman exponents as the MISMIP reference model.
         md.friction.p = 3 * ones(md.mesh.numberofelements, 1);
         md.friction.q = zeros(md.mesh.numberofelements, 1);
-        md = apply_configured_initial_geometry(md, bed, kwargs);
+        md = apply_configured_initial_geometry(md, bed, icesee_kwargs);
 
         % Diagnose the velocity implied by this geometry without advancing
         % thickness, bed, grounding line, or time.
@@ -220,7 +220,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.friction.p = 3 * ones(md.mesh.numberofelements,1);
         md.friction.q = zeros(md.mesh.numberofelements,1);
 
-        md = apply_configured_initial_geometry(md, bed, kwargs);
+        md = apply_configured_initial_geometry(md, bed, icesee_kwargs);
 
         md.smb.mass_balance=smb*ones(md.mesh.numberofvertices,1);
         md.transient.ismovingfront=0;
@@ -417,7 +417,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.friction.q = zeros(md.mesh.numberofelements,1);
 
  
-            md = apply_configured_initial_geometry(md, bed, kwargs);
+            md = apply_configured_initial_geometry(md, bed, icesee_kwargs);
 
             % pos = find(md.mask.ocean_levelset < 0);
             % md.geometry.thickness(pos)=1/(1-di)*md.geometry.surface(pos);
@@ -943,8 +943,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % load true state model for boundary conditions and other settings
         md = loadmodel(filename);
 
-        vel_idx = double(kwargs.vel_idx);
-        % km = double(kwargs.km);
+        vel_idx = double(icesee_kwargs.vel_idx);
+        % km = double(icesee_kwargs.km);
         km = k+1; % matlab indexing starts at 1
 
         maxsteps = 40;
@@ -1072,7 +1072,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
     end
 end
 
-function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
+function md = apply_configured_initial_geometry(md, bed_candidate, icesee_kwargs)
 %APPLY_CONFIGURED_INITIAL_GEOMETRY Build one physically consistent prior.
 % The same construction is used for the no-assimilation trajectory and each
 % ensemble member.  Surface is never biased independently: it is recovered
@@ -1106,95 +1106,95 @@ function md = apply_configured_initial_geometry(md, bed_candidate, kwargs)
     pattern_phase = 0.0;
     thickness_factor_min = 0.60;
     thickness_factor_max = 1.25;
-    if isfield(kwargs, 'initial_thickness_scale')
-        thickness_scale = double(kwargs.initial_thickness_scale);
+    if isfield(icesee_kwargs, 'initial_thickness_scale')
+        thickness_scale = double(icesee_kwargs.initial_thickness_scale);
     end
-    if isfield(kwargs, 'initial_bed_offset_m')
-        bed_offset_m = double(kwargs.initial_bed_offset_m);
+    if isfield(icesee_kwargs, 'initial_bed_offset_m')
+        bed_offset_m = double(icesee_kwargs.initial_bed_offset_m);
     end
-    if isfield(kwargs, 'initial_bed_background_domain')
-        bed_domain = lower(strtrim(char(kwargs.initial_bed_background_domain)));
+    if isfield(icesee_kwargs, 'initial_bed_background_domain')
+        bed_domain = lower(strtrim(char(icesee_kwargs.initial_bed_background_domain)));
     end
-    if isfield(kwargs, 'initial_bed_gl_buffer_m')
-        bed_gl_buffer_m = double(kwargs.initial_bed_gl_buffer_m);
+    if isfield(icesee_kwargs, 'initial_bed_gl_buffer_m')
+        bed_gl_buffer_m = double(icesee_kwargs.initial_bed_gl_buffer_m);
     end
-    if isfield(kwargs, 'initial_floating_bed_anomaly_factor')
+    if isfield(icesee_kwargs, 'initial_floating_bed_anomaly_factor')
         floating_bed_anomaly_factor = double( ...
-            kwargs.initial_floating_bed_anomaly_factor);
+            icesee_kwargs.initial_floating_bed_anomaly_factor);
     end
-    if isfield(kwargs, 'initial_floating_bed_max_error_m')
+    if isfield(icesee_kwargs, 'initial_floating_bed_max_error_m')
         floating_bed_max_error_m = double( ...
-            kwargs.initial_floating_bed_max_error_m);
+            icesee_kwargs.initial_floating_bed_max_error_m);
     end
-    if isfield(kwargs, 'initial_floating_bed_transition_m')
+    if isfield(icesee_kwargs, 'initial_floating_bed_transition_m')
         floating_bed_transition_m = double( ...
-            kwargs.initial_floating_bed_transition_m);
+            icesee_kwargs.initial_floating_bed_transition_m);
     end
-    if isfield(kwargs, 'initial_floating_bed_flotation_margin_m')
+    if isfield(icesee_kwargs, 'initial_floating_bed_flotation_margin_m')
         floating_bed_flotation_margin_m = double( ...
-            kwargs.initial_floating_bed_flotation_margin_m);
+            icesee_kwargs.initial_floating_bed_flotation_margin_m);
     end
-    if isfield(kwargs, 'initial_bed_smoothing_iterations')
+    if isfield(icesee_kwargs, 'initial_bed_smoothing_iterations')
         bed_smoothing_iterations = double( ...
-            kwargs.initial_bed_smoothing_iterations);
+            icesee_kwargs.initial_bed_smoothing_iterations);
     end
-    if isfield(kwargs, 'initial_bed_smoothing_strength')
+    if isfield(icesee_kwargs, 'initial_bed_smoothing_strength')
         bed_smoothing_strength = double( ...
-            kwargs.initial_bed_smoothing_strength);
+            icesee_kwargs.initial_bed_smoothing_strength);
     end
-    if isfield(kwargs, 'initial_bed_seed_max_x_m')
-        bed_seed_max_x_m = double(kwargs.initial_bed_seed_max_x_m);
+    if isfield(icesee_kwargs, 'initial_bed_seed_max_x_m')
+        bed_seed_max_x_m = double(icesee_kwargs.initial_bed_seed_max_x_m);
     end
-    if isfield(kwargs, 'initial_bed_downstream_anomaly_factor')
+    if isfield(icesee_kwargs, 'initial_bed_downstream_anomaly_factor')
         bed_downstream_anomaly_factor = double( ...
-            kwargs.initial_bed_downstream_anomaly_factor);
+            icesee_kwargs.initial_bed_downstream_anomaly_factor);
     end
-    if isfield(kwargs, 'initial_thickness_anomaly_fraction')
-        thickness_anomaly_fraction = double(kwargs.initial_thickness_anomaly_fraction);
+    if isfield(icesee_kwargs, 'initial_thickness_anomaly_fraction')
+        thickness_anomaly_fraction = double(icesee_kwargs.initial_thickness_anomaly_fraction);
     end
-    if isfield(kwargs, 'initial_thickness_anomaly_m')
-        thickness_anomaly_m = double(kwargs.initial_thickness_anomaly_m);
+    if isfield(icesee_kwargs, 'initial_thickness_anomaly_m')
+        thickness_anomaly_m = double(icesee_kwargs.initial_thickness_anomaly_m);
     end
-    if isfield(kwargs, 'initial_thickness_delta_min_m')
-        thickness_delta_min_m = double(kwargs.initial_thickness_delta_min_m);
+    if isfield(icesee_kwargs, 'initial_thickness_delta_min_m')
+        thickness_delta_min_m = double(icesee_kwargs.initial_thickness_delta_min_m);
     end
-    if isfield(kwargs, 'initial_thickness_delta_max_m')
-        thickness_delta_max_m = double(kwargs.initial_thickness_delta_max_m);
+    if isfield(icesee_kwargs, 'initial_thickness_delta_max_m')
+        thickness_delta_max_m = double(icesee_kwargs.initial_thickness_delta_max_m);
     end
-    if isfield(kwargs, 'initial_floating_thickness_anomaly_factor')
+    if isfield(icesee_kwargs, 'initial_floating_thickness_anomaly_factor')
         floating_thickness_anomaly_factor = double( ...
-            kwargs.initial_floating_thickness_anomaly_factor);
+            icesee_kwargs.initial_floating_thickness_anomaly_factor);
     end
-    if isfield(kwargs, 'initial_gl_seaward_thickness_m')
+    if isfield(icesee_kwargs, 'initial_gl_seaward_thickness_m')
         gl_seaward_thickness_m = double( ...
-            kwargs.initial_gl_seaward_thickness_m);
+            icesee_kwargs.initial_gl_seaward_thickness_m);
     end
-    if isfield(kwargs, 'initial_gl_seaward_width_m')
-        gl_seaward_width_m = double(kwargs.initial_gl_seaward_width_m);
+    if isfield(icesee_kwargs, 'initial_gl_seaward_width_m')
+        gl_seaward_width_m = double(icesee_kwargs.initial_gl_seaward_width_m);
     end
-    if isfield(kwargs, 'initial_bed_anomaly_m')
-        bed_anomaly_m = double(kwargs.initial_bed_anomaly_m);
+    if isfield(icesee_kwargs, 'initial_bed_anomaly_m')
+        bed_anomaly_m = double(icesee_kwargs.initial_bed_anomaly_m);
     end
-    if isfield(kwargs, 'initial_bed_delta_min_m')
-        bed_delta_min_m = double(kwargs.initial_bed_delta_min_m);
+    if isfield(icesee_kwargs, 'initial_bed_delta_min_m')
+        bed_delta_min_m = double(icesee_kwargs.initial_bed_delta_min_m);
     end
-    if isfield(kwargs, 'initial_bed_delta_max_m')
-        bed_delta_max_m = double(kwargs.initial_bed_delta_max_m);
+    if isfield(icesee_kwargs, 'initial_bed_delta_max_m')
+        bed_delta_max_m = double(icesee_kwargs.initial_bed_delta_max_m);
     end
-    if isfield(kwargs, 'initial_prior_length_x_m')
-        pattern_length_x_m = double(kwargs.initial_prior_length_x_m);
+    if isfield(icesee_kwargs, 'initial_prior_length_x_m')
+        pattern_length_x_m = double(icesee_kwargs.initial_prior_length_x_m);
     end
-    if isfield(kwargs, 'initial_prior_length_y_m')
-        pattern_length_y_m = double(kwargs.initial_prior_length_y_m);
+    if isfield(icesee_kwargs, 'initial_prior_length_y_m')
+        pattern_length_y_m = double(icesee_kwargs.initial_prior_length_y_m);
     end
-    if isfield(kwargs, 'initial_prior_pattern_phase')
-        pattern_phase = double(kwargs.initial_prior_pattern_phase);
+    if isfield(icesee_kwargs, 'initial_prior_pattern_phase')
+        pattern_phase = double(icesee_kwargs.initial_prior_pattern_phase);
     end
-    if isfield(kwargs, 'initial_thickness_factor_min')
-        thickness_factor_min = double(kwargs.initial_thickness_factor_min);
+    if isfield(icesee_kwargs, 'initial_thickness_factor_min')
+        thickness_factor_min = double(icesee_kwargs.initial_thickness_factor_min);
     end
-    if isfield(kwargs, 'initial_thickness_factor_max')
-        thickness_factor_max = double(kwargs.initial_thickness_factor_max);
+    if isfield(icesee_kwargs, 'initial_thickness_factor_max')
+        thickness_factor_max = double(icesee_kwargs.initial_thickness_factor_max);
     end
     if ~isfinite(thickness_scale) || thickness_scale <= 0 || thickness_scale > 2
         error('[ICESEE] initial_thickness_scale must be in (0, 2].');

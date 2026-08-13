@@ -132,3 +132,94 @@ applications/issm_model/examples/ISMIP_Choi/_modelrun_datasets/figures
 /tmp/
 __pycache__/
 *.py[cod]
+
+# =============================================================================
+# Repository-wide local/generated artifacts
+# =============================================================================
+
+# OS, editors, notebooks, and AI workspaces
+.DS_Store
+**/.DS_Store
+.vscode/
+**/.vscode/
+.claude/
+**/.claude/
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+*.asv
+*.swp
+*.swo
+*~
+
+# Python caches and local environments
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# ICESEE-generated run directories
+**/_modelrun_datasets/
+**/_modelrun_datasets_*/
+**/_modelrun_*/
+**/_reviewer_*/
+**/results/
+**/icesee_perf_outputs/
+**/None/
+# **/.png
+
+# Array stores and temporary tests
+*.zarr/
+**/*.zarr/
+tmp_*_test/
+test_ensemble_data_*.h5
+
+# ICESEE/ISSM runtime handoff files
+**/icesee_kwargs_*.mat
+**/model_kwargs_*.mat
+**/enkf_state.mat
+**/statusfile_*.txt
+**/cmdfile_*.txt
+**/icesee_timing.log
+
+# Generated logs and scheduler output
+*.log
+*.out
+*.err
+slurm-*.out
+
+# LaTeX and MATLAB-generated auxiliary files
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.synctex.gz
+*.toc
+
+# Generated movies and HTML exports
+*.mp4
+*.avi
+**/html/
+
+# Native build artifacts
+*.o
+*.so
+*.dylib
+*.mex*
+
+# Globally ignored documents, images, and datasets
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.h5
+*.tex

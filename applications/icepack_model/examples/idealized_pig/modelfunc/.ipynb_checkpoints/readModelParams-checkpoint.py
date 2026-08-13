@@ -3,7 +3,7 @@ import yaml
 
 
 def readModelParams(paramsFile, key=None):
-    """Parse a model params dict from a yaml file. File can either have a
+    """Parse a model-parameter dictionary from a YAML file. File can either have a
     single unnamed dict:
     x: abc
     y: xyz
@@ -20,14 +20,14 @@ def readModelParams(paramsFile, key=None):
     Parameters
     ----------
     paramsFile : str
-        yaml file with desired model params
+        YAML file with the desired model parameters.
     key: str [Optional]
         key to select which dict to return.
 
     Returns
     -------
     dict
-        dict with model params with 'params' added as file it was read from.
+        Model parameters with ``parameter_file`` recording their source file.
     """
     if paramsFile is None:
         return {}
@@ -39,7 +39,7 @@ def readModelParams(paramsFile, key=None):
                 if key in modelParams:
                     modelParams = modelParams[key]
             # Force to use name of file actually being read
-            modelParams['params'] = paramsFile
+            modelParams['parameter_file'] = paramsFile
     except Exception:
-        myerror(f'Could not open params file: {paramsFile}')
+        myerror(f'Could not open parameter file: {paramsFile}')
     return modelParams

@@ -10,14 +10,14 @@ def test_analysis_increment_relaxation_and_block_limits():
     forecast = np.zeros((6, 2))
     analysis = np.full((6, 2), 100.0)
     rows = np.arange(6)
-    kwargs = {
+    icesee_kwargs = {
         "analysis_relaxation_factor": 0.5,
         "analysis_relaxation_factors": {"bed": 1.0},
         "analysis_increment_limits": {"Thickness": 20.0, "bed": 60.0},
     }
 
     result = stabilize_analysis_increments(
-        analysis, forecast, rows, ["Thickness", "bed"], 3, kwargs
+        analysis, forecast, rows, ["Thickness", "bed"], 3, icesee_kwargs
     )
 
     np.testing.assert_allclose(result[:3], 20.0)

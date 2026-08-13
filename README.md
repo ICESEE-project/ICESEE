@@ -34,10 +34,14 @@ To get started with ICESEE:
 |----------|-------------|
 | ICESEE-Spack | HPC and cluster deployment |
 | ICESEE-Containers | Containerized execution environments |
-| ICESEE-GHUB | Cloud and browser-based scientific workflows |
+| [CryoStack](https://cryostack.eas.gatech.edu/index.html) | Browser-based ICESEE workflows and access to local, HPC, and cloud resources |
 
 >For Cluster installation and runs, see [ICESEE-Spack](https://github.com/ICESEE-project/ICESEE-Spack) or [ICESEE-Containers](https://github.com/ICESEE-project/ICESEE-Containers)
- and for cloud runs, see [ICESEE-GHUB](https://github.com/ICESEE-project/ICESEE-GHUB)
+ and for browser-based ICESEE workflows, see [CryoStack](https://cryostack.eas.gatech.edu/index.html).
+
+### ICESEE on CryoStack
+
+ICESEE is available through [CryoStack](https://cryostack.eas.gatech.edu/index.html), Georgia Tech's integrated platform for cryosphere modeling, data assimilation, scientific visualization, and HPC-enabled research. The CryoStack ICESEE interface supports state estimation, parameter inference, and ensemble-based data-assimilation workflows while providing a consistent path from browser-based configuration to local, remote, HPC, or cloud execution resources.
 
 ---
 
@@ -105,27 +109,14 @@ Explore the Wiki to find:
 
 ---
 
-## Key Features
-
-- Modular ensemble-based data assimilation framework
-- Cross-language scientific model coupling
-- Scalable HPC and distributed-memory workflows
-- HDF5/NetCDF-based scientific data pipelines
-- Containerized and cloud-enabled execution
-- AI/ML-ready scientific workflow infrastructure
-- Extensible APIs for integrating external models
-- Support for uncertainty quantification and ensemble forecasting
-
----
-
 ## Future Directions
 
 - Integration of scientific machine learning workflows into data assimilation pipelines
 - Development of neural surrogate models for accelerated ice-sheet simulations
 - AI-enhanced parameter estimation and adaptive ensemble tuning
-- Integration with AWS and cloud-native scientific computing environments
+- Expansion of cloud-native and remote execution through CryoStack
 - Expansion of distributed HPC workflows for large-scale ensemble forecasting
-- Incorporation into the GHUB online ice-sheet platform
+- Continued integration of ICESEE workflows and supported models into CryoStack
 - Intelligent workflow orchestration and automated HPC diagnostics
 
 - Machine learning–based parameter estimation
@@ -137,18 +128,6 @@ Explore the Wiki to find:
 - AI-assisted diagnostics and parameter tuning
 
 These capabilities are under active development and are not yet part of the stable ICESEE release.
-
----
-
-## Future Directions
-
-- Integration of scientific machine learning workflows into data assimilation pipelines
-- Development of neural surrogate models for accelerated ice-sheet simulations
-- AI-assisted parameter estimation and adaptive ensemble tuning
-- Integration with cloud-native scientific computing environments
-- Expansion of distributed HPC workflows for large-scale ensemble forecasting
-- Continued development of the ICESEE-GHUB ecosystem
-- Intelligent workflow orchestration and automated diagnostics
 
 ---
 

@@ -4,35 +4,35 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
     % Inputs: data_fname (output file name), ens_id (ensemble ID), rank, nprocs (MPI settings),
     %         k (time step index), dt (time step), tinitial, tfinal (time bounds)
 
-    % Read kwargs from .mat file
-    model_kwargs = sprintf('model_kwargs_%d.mat', ens_id);
-    kwargs       = load(model_kwargs);
-    cluster_name = char(kwargs.cluster_name);
-    steps        = double(kwargs.steps);
-    icesee_path  = char(kwargs.icesee_path);
-    data_path    = char(kwargs.data_path);
-    devmode      = logical(kwargs.devmode);
-    issm_example_dir     = char(kwargs.issm_examples_dir);
-    deepwater_melting_rate = double(kwargs.deepwater_melting_rate);
-    smb = double(kwargs.smb);
-    mean_friction  = double(kwargs.mean_friction);
-    reference_data = char(kwargs.reference_data);
-    nens = double(kwargs.Nens);
+    % Read icesee_kwargs from .mat file
+    icesee_kwargs_file = sprintf('icesee_kwargs_%d.mat', ens_id);
+    icesee_kwargs       = load(icesee_kwargs_file);
+    cluster_name = char(icesee_kwargs.cluster_name);
+    steps        = double(icesee_kwargs.steps);
+    icesee_path  = char(icesee_kwargs.icesee_path);
+    data_path    = char(icesee_kwargs.data_path);
+    devmode      = logical(icesee_kwargs.devmode);
+    issm_example_dir     = char(icesee_kwargs.issm_examples_dir);
+    deepwater_melting_rate = double(icesee_kwargs.deepwater_melting_rate);
+    smb = double(icesee_kwargs.smb);
+    mean_friction  = double(icesee_kwargs.mean_friction);
+    reference_data = char(icesee_kwargs.reference_data);
+    nens = double(icesee_kwargs.Nens);
     wrong_reference_data = 'wrong_reference_data.mat';
-    min_friction = double(kwargs.min_friction);
-    max_friction = double(kwargs.max_friction);
-    abs_vel_weight = double(kwargs.abs_vel_weight);
-    rel_vel_weight = double(kwargs.rel_vel_weight);
-    tikhonov_regularization_weight = double(kwargs.tikhonov_regularization_weight);
+    min_friction = double(icesee_kwargs.min_friction);
+    max_friction = double(icesee_kwargs.max_friction);
+    abs_vel_weight = double(icesee_kwargs.abs_vel_weight);
+    rel_vel_weight = double(icesee_kwargs.rel_vel_weight);
+    tikhonov_regularization_weight = double(icesee_kwargs.tikhonov_regularization_weight);
 
-    if iscell(kwargs.vec_inputs)
-        vec_inputs = kwargs.vec_inputs;
-    elseif isstring(kwargs.vec_inputs)
-        vec_inputs = cellstr(kwargs.vec_inputs(:));
-    elseif ischar(kwargs.vec_inputs)
-        vec_inputs = cellstr(kwargs.vec_inputs);
+    if iscell(icesee_kwargs.vec_inputs)
+        vec_inputs = icesee_kwargs.vec_inputs;
+    elseif isstring(icesee_kwargs.vec_inputs)
+        vec_inputs = cellstr(icesee_kwargs.vec_inputs(:));
+    elseif ischar(icesee_kwargs.vec_inputs)
+        vec_inputs = cellstr(icesee_kwargs.vec_inputs);
     else
-        error('Unsupported type for kwargs.vec_inputs');
+        error('Unsupported type for icesee_kwargs.vec_inputs');
     end
 
     vec_inputs = reshape(vec_inputs, 1, []);
@@ -48,8 +48,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
     % set initail ens_id
     ens_id_init = 0;
-    s_perturb = double(kwargs.s_nurge);
-    b_perturb = double(kwargs.b_nurge);
+    s_perturb = double(icesee_kwargs.s_nurge);
+    b_perturb = double(icesee_kwargs.b_nurge);
 
     output_frequency = 1; % make sure this is set to 1 for coupling with ICESEE
 
@@ -819,8 +819,8 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % load true state model for boundary conditions and other settings
         md = loadmodel(filename);
 
-        vel_idx = double(kwargs.vel_idx);
-        % km = double(kwargs.km);
+        vel_idx = double(icesee_kwargs.vel_idx);
+        % km = double(icesee_kwargs.km);
         km = k+1; % matlab indexing starts at 1
 
         maxsteps = 40;

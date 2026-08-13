@@ -191,9 +191,9 @@ def _project_smb_to_basis(smb, coords_m, mode="none"):
     return basis @ coefficients
 
 
-def _append_history(model_kwargs, time_now, h, u, v, max_length):
-    """Store a bounded rolling history in model_kwargs."""
-    history = model_kwargs.setdefault("_smb_inference_history", [])
+def _append_history(icesee_kwargs, time_now, h, u, v, max_length):
+    """Store a bounded rolling history in icesee_kwargs."""
+    history = icesee_kwargs.setdefault("_smb_inference_history", [])
 
     # Restart/repeated-write protection: replace, rather than duplicate, time.
     if history and np.isclose(history[-1][0], time_now):
@@ -210,7 +210,7 @@ def apply_smb_physics_correction(
     analysis_vec,
     vec_inputs,
     hdim,
-    model_kwargs,
+    icesee_kwargs,
     timestep=None,
     model_time=None,
 ):
@@ -219,7 +219,7 @@ def apply_smb_physics_correction(
     This is a drop-in replacement for the original function. Pass the physical
     model time explicitly when it is available.
 
-    Important configuration keys in ``model_kwargs``:
+    Important configuration keys in ``icesee_kwargs``:
 
     physics_smb_inference        bool, default False
     smb_history_length           int,  default 5 (minimum 3)
@@ -234,15 +234,15 @@ def apply_smb_physics_correction(
     smb_projection_basis         str, default 'none'
     mesh_coordinate_scale_to_m   float, default 1.0; use 1000 for km input
     smb_physical_bounds          optional (lower, upper), in m/yr
-    dt                           time per model step; falls back to params['dt']
+    dt                           time per model step; falls back to icesee_kwargs['dt']
     """
-    if not model_kwargs.get("physics_smb_inference", False):
+    if not icesee_kwargs.get("physics_smb_inference", False):
         return analysis_vec
 
     source = _configured_smb_source(
-        vec_inputs, model_kwargs.get("observed_params", [])
+        vec_inputs, icesee_kwargs.get("observed_params", [])
     )
-    model_kwargs["_smb_last_source"] = source
+    icesee_kwargs["_smb_last_source"] = source
     if source == "disabled":
         return analysis_vec
 
@@ -250,14 +250,14 @@ def apply_smb_physics_correction(
 
     # This supports either pasting the function beside the project's existing
     # get_mesh_coordinates helper, or importing this file as a module and
-    # supplying coordinates/getter through model_kwargs.
-    coords = model_kwargs.get("mesh_coordinates")
+    # supplying coordinates/getter through icesee_kwargs.
+    coords = icesee_kwargs.get("mesh_coordinates")
     if coords is None:
-        coordinate_getter = model_kwargs.get("mesh_coordinate_getter")
+        coordinate_getter = icesee_kwargs.get("mesh_coordinate_getter")
         if coordinate_getter is None:
             coordinate_getter = _registry_coordinates
         if callable(coordinate_getter):
-            coords = coordinate_getter(model_kwargs)
+            coords = coordinate_getter(icesee_kwargs)
     if coords is None:
         return analysis_vec
     coords = np.asarray(coords, dtype=float)
@@ -266,11 +266,10 @@ def apply_smb_physics_correction(
             f"Expected mesh coordinates with shape {(hdim, 2)}, got {coords.shape}"
         )
 
-    coordinate_scale = float(model_kwargs.get("mesh_coordinate_scale_to_m", 1.0))
+    coordinate_scale = float(icesee_kwargs.get("mesh_coordinate_scale_to_m", 1.0))
     coords_m = coords * coordinate_scale
 
-    params = model_kwargs.get("params", {})
-    dt = float(model_kwargs.get("dt", params.get("dt", 1.0)))
+    dt = float(icesee_kwargs.get("dt", 1.0))
     if dt <= 0.0:
         raise ValueError("dt must be positive for SMB inference")
 
@@ -278,9 +277,9 @@ def apply_smb_physics_correction(
         time_now = float(model_time)
     elif timestep is None:
         # Backward-compatible fallback, though passing timestep is preferred.
-        time_now = float(model_kwargs.get("_smb_inference_call_count", 0)) * dt
-        model_kwargs["_smb_inference_call_count"] = (
-            model_kwargs.get("_smb_inference_call_count", 0) + 1
+        time_now = float(icesee_kwargs.get("_smb_inference_call_count", 0)) * dt
+        icesee_kwargs["_smb_inference_call_count"] = (
+            icesee_kwargs.get("_smb_inference_call_count", 0) + 1
         )
     else:
         time_now = float(timestep) * dt
@@ -295,16 +294,16 @@ def apply_smb_physics_correction(
         corrected = _project_smb_to_basis(
             smb_now,
             coords_m,
-            model_kwargs.get("smb_projection_basis", "none"),
+            icesee_kwargs.get("smb_projection_basis", "none"),
         )
-        bounds = model_kwargs.get("smb_physical_bounds")
+        bounds = icesee_kwargs.get("smb_physical_bounds")
         if bounds is not None:
             lower, upper = map(float, bounds)
             if lower >= upper:
                 raise ValueError("smb_physical_bounds must satisfy lower < upper")
             corrected = np.clip(corrected, lower, upper)
         analysis_vec[smb_slice, :] = corrected
-        model_kwargs["_smb_regularized_previous"] = corrected.copy()
+        icesee_kwargs["_smb_regularized_previous"] = corrected.copy()
         return analysis_vec
 
     h_slice = _state_slice(vec_inputs, "h", hdim)
@@ -317,24 +316,24 @@ def apply_smb_physics_correction(
     u_now = np.asarray(analysis_vec[u_slice, :], dtype=float)
     v_now = np.asarray(analysis_vec[v_slice, :], dtype=float)
 
-    spinup_reference = model_kwargs.get("_smb_spinup_reference")
+    spinup_reference = icesee_kwargs.get("_smb_spinup_reference")
     if spinup_reference is None or np.shape(spinup_reference) != np.shape(smb_now):
         spinup_reference = smb_now.copy()
-        model_kwargs["_smb_spinup_reference"] = spinup_reference
+        icesee_kwargs["_smb_spinup_reference"] = spinup_reference
 
-    history_length = max(int(model_kwargs.get("smb_history_length", 5)), 3)
+    history_length = max(int(icesee_kwargs.get("smb_history_length", 5)), 3)
     history = _append_history(
-        model_kwargs, time_now, h_now, u_now, v_now, history_length
+        icesee_kwargs, time_now, h_now, u_now, v_now, history_length
     )
     if len(history) < 3:
         return analysis_vec
 
     # Early in an assimilation the large corrections to H and velocity are not
     # physical tendencies. Do not interpret that spin-up transient as SMB.
-    start_time = float(model_kwargs.get("smb_inference_start_time", 0.0))
+    start_time = float(icesee_kwargs.get("smb_inference_start_time", 0.0))
     if time_now <= start_time:
         hold = np.clip(
-            float(model_kwargs.get("smb_spinup_hold_factor", 0.0)), 0.0, 1.0
+            float(icesee_kwargs.get("smb_spinup_hold_factor", 0.0)), 0.0, 1.0
         )
         if hold > 0.0:
             held_smb = (
@@ -343,7 +342,7 @@ def apply_smb_physics_correction(
             analysis_vec[smb_slice, :] = _project_smb_to_basis(
                 held_smb,
                 coords_m,
-                model_kwargs.get("smb_projection_basis", "none"),
+                icesee_kwargs.get("smb_projection_basis", "none"),
             )
         return analysis_vec
 
@@ -369,17 +368,17 @@ def apply_smb_physics_correction(
         coords_m,
         mean_fx,
         mean_fy,
-        k=int(model_kwargs.get("smb_divergence_neighbors", 24)),
+        k=int(icesee_kwargs.get("smb_divergence_neighbors", 24)),
     )
     raw_smb = dhdt + div_flux
 
     lambda_space = max(
-        float(model_kwargs.get("smb_spatial_regularization", 25.0)), 0.0
+        float(icesee_kwargs.get("smb_spatial_regularization", 25.0)), 0.0
     )
     lambda_time = max(
-        float(model_kwargs.get("smb_temporal_regularization", 4.0)), 0.0
+        float(icesee_kwargs.get("smb_temporal_regularization", 4.0)), 0.0
     )
-    graph_k = int(model_kwargs.get("smb_graph_neighbors", 12))
+    graph_k = int(icesee_kwargs.get("smb_graph_neighbors", 12))
 
     cache_key = (
         coords_m.shape[0],
@@ -389,16 +388,16 @@ def apply_smb_physics_correction(
         lambda_time,
         graph_k,
     )
-    cache = model_kwargs.get("_smb_regularization_cache")
+    cache = icesee_kwargs.get("_smb_regularization_cache")
     if cache is None or cache[0] != cache_key:
         solver = _regularization_solver(
             coords_m, lambda_space, lambda_time, graph_k
         )
-        model_kwargs["_smb_regularization_cache"] = (cache_key, solver)
+        icesee_kwargs["_smb_regularization_cache"] = (cache_key, solver)
     else:
         solver = cache[1]
 
-    previous = model_kwargs.get("_smb_regularized_previous")
+    previous = icesee_kwargs.get("_smb_regularized_previous")
     if previous is None or np.shape(previous) != np.shape(smb_now):
         previous = smb_now.copy()
 
@@ -410,26 +409,26 @@ def apply_smb_physics_correction(
     finite = np.isfinite(inferred)
     inferred = np.where(finite, inferred, previous)
 
-    bounds = model_kwargs.get("smb_physical_bounds")
+    bounds = icesee_kwargs.get("smb_physical_bounds")
     if bounds is not None:
         lower, upper = map(float, bounds)
         if lower >= upper:
             raise ValueError("smb_physical_bounds must satisfy lower < upper")
         inferred = np.clip(inferred, lower, upper)
 
-    blend = np.clip(float(model_kwargs.get("smb_blend_factor", 0.35)), 0.0, 1.0)
-    ramp_time = max(float(model_kwargs.get("smb_blend_ramp_time", 0.0)), 0.0)
+    blend = np.clip(float(icesee_kwargs.get("smb_blend_factor", 0.35)), 0.0, 1.0)
+    ramp_time = max(float(icesee_kwargs.get("smb_blend_ramp_time", 0.0)), 0.0)
     if ramp_time > 0.0:
         blend *= np.clip((time_now - start_time) / ramp_time, 0.0, 1.0)
     corrected = (1.0 - blend) * smb_now + blend * inferred
     corrected = _project_smb_to_basis(
         corrected,
         coords_m,
-        model_kwargs.get("smb_projection_basis", "none"),
+        icesee_kwargs.get("smb_projection_basis", "none"),
     )
     analysis_vec[smb_slice, :] = corrected
 
     # Anchor the next temporal solve to what was actually applied. This avoids
     # accumulating an unapplied raw correction during the blend ramp.
-    model_kwargs["_smb_regularized_previous"] = corrected.copy()
+    icesee_kwargs["_smb_regularized_previous"] = corrected.copy()
     return analysis_vec
