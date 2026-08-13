@@ -1,8 +1,4 @@
-# Canonical configuration for the synchronized WBF / EBF / IBF rebuttal
-# experiments. This file is intentionally self-contained: it is the flattened
-# result of the accepted heterogeneous hybrid configuration and does not
-# extend another YAML file.
-
+# Main config file for ISMIP Choi experiments with EnKF-based friction inference.
 physical-parameters:
   Lx: 640e3
   Ly: 80e3
@@ -34,7 +30,7 @@ enkf-parameters:
   Nens: 60
   freq_obs: 1
   obs_start_time: 2
-  obs_max_time: 50
+  obs_max_time: 40
   generate_synthetic_obs: 1
   generate_true_state: 1
   generate_nurged_state: 1
@@ -53,7 +49,7 @@ enkf-parameters:
   friction_idx: 5
 
   # Friction-method-specific flags are overridden by each child profile.
-  inversion_flag: 0
+  inversion_flag: 1
   inversion_start_time: 2.0
   frozen_analysis_vars: []
   min_friction: 1900
@@ -155,6 +151,8 @@ enkf-parameters:
   initial_floating_thickness_anomaly_factor: 0.25
   initial_thickness_factor_min: 0.9
   initial_thickness_factor_max: 1.1
+  initial_gl_seaward_thickness_m: 500.0 
+  initial_gl_seaward_width_m: 40000.0 
 
   initial_bed_offset_m: -80.0
   initial_bed_anomaly_m: 120.0

@@ -1,7 +1,7 @@
 """Coordinate provider shared by Icepack application backends."""
 
 
-def get_icepack_node_coordinates(model_kwargs):
+def get_icepack_node_coordinates(icesee_kwargs):
     """Return physical coordinates in the scalar-space DOF ordering.
 
     Icepack state blocks in ICESEE use ``Q``'s nodal ordering.  The mesh can
@@ -10,13 +10,13 @@ def get_icepack_node_coordinates(model_kwargs):
     """
     import firedrake
 
-    Q = model_kwargs.get("Q")
+    Q = icesee_kwargs.get("Q")
     if Q is None:
         raise ValueError(
             "Icepack coordinate provider requires the scalar function space "
-            "'Q' in model_kwargs"
+            "'Q' in icesee_kwargs"
         )
-    mesh = model_kwargs.get("mesh")
+    mesh = icesee_kwargs.get("mesh")
     if mesh is None:
         mesh = Q.mesh()
 

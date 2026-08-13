@@ -3,7 +3,7 @@
 # @date: 2025-09-07
 # @description: - Class to handle parallel I/O operations for Ensemble Kalman Filter (EnKF) data.
 #                 This class is designed to work with MPI for parallel processing and supports both
-#                 serial and parallel file batch creation modes.  
+#                 serial and parallel file batch creation modes.
 #               - It extends the EnKFIO_zarr class to provide additional functionality specific to
 #                 parallel I/O operations with zarr format.
 #               - EnkF analysis step utils have been added to this class including generation of synthetic
@@ -41,22 +41,22 @@ def retry_on_failure(
 ) -> Callable:
     """
     A decorator to retry a function or method up to max_attempts times with a delay between attempts.
-    
+
     Args:
         max_attempts (int): Maximum number of retry attempts (default: 5).
         delay (float): Seconds to wait between retries (default: 1.0).
         mpi_comm: Optional MPI communicator object for distributed environments (default: None).
-    
+
     Returns:
         Callable: The wrapped function with retry logic.
     """
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> T:
+        def wrapper(*args, **icesee_kwargs) -> T:
             rank = mpi_comm.Get_rank() if mpi_comm is not None else "N/A"
             for attempt in range(max_attempts):
                 try:
-                    return func(*args, **kwargs)
+                    return func(*args, **icesee_kwargs)
                 except IndexError as e:
                     if attempt < max_attempts - 1:
                         print(f"[Rank {rank}] Attempt {attempt + 1} failed with IndexError: {e}. Retrying in {delay}s...")
@@ -75,14 +75,14 @@ def retry_on_failure(
     return decorator
 
 class EnKF_fully_parallel_IO:
-    def __init__(self, file_prefix, nd, nens, nt, subcomm, mpi_comm, params, \
+    def __init__(self, file_prefix, nd, nens, nt, subcomm, mpi_comm, icesee_kwargs, \
                  serial_file_creation=False, base_path="enkf_data", batch_size=50,\
                  h5_file_compression=None, h5_file_compression_level=4, h5_file_chunk_size=1000):
         try:
             self.nd = nd
             self.nens = nens
             self.nt = nt
-            self.params = params
+            self.icesee_kwargs = icesee_kwargs
             self.base_path = base_path
             self.file_prefix = file_prefix
             self.batch_size = batch_size
@@ -104,7 +104,7 @@ class EnKF_fully_parallel_IO:
             self.h5_file_chunk_size = h5_file_chunk_size
 
             # collective I/O threshold (32 is a reasonable default for many systems)
-            self.collective_threshold = int(params.get("collective_threshold", 16))
+            self.collective_threshold = int(icesee_kwargs.get("collective_threshold", 16))
             self.use_collective_io = (self.mpi_comm.Get_size() >= self.collective_threshold)
 
             def _state_file_name(self, t):
@@ -257,7 +257,7 @@ class EnKF_fully_parallel_IO:
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
-    
+
     def _make_dxpl(self):
         import h5py.h5p as h5p, h5py.h5fd as h5fd
         dxpl = h5p.create(h5p.DATASET_XFER)
@@ -348,7 +348,7 @@ class EnKF_fully_parallel_IO:
 
         data = self.datasets[batch_idx][:, ens_idx]
         return np.asarray(data, dtype=np.float64).reshape(-1)
-       
+
 
     @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD)
     def write_forecast(self, t, data, ens_idx):
@@ -385,7 +385,7 @@ class EnKF_fully_parallel_IO:
         ]
 
         return np.asarray(data, dtype=np.float64).reshape(-1)
-       
+
 
     @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD)
     def write_analysis(self, t, data, ens_idx):
@@ -408,7 +408,7 @@ class EnKF_fully_parallel_IO:
             self.nd_start_world:self.nd_end_world,
             ens_idx,
         ] = data
-    
+
     def compute_forecast_mean_chunked_v2(self, k, flag=None):
         """
         Simple & hang-free:
@@ -471,7 +471,7 @@ class EnKF_fully_parallel_IO:
             dxpl.set_dxpl_mpio(h5fd.MPIO_COLLECTIVE)
 
             with h5py.File(file_path, 'a', driver='mpio', comm=comm) as f:
-    
+
                 # --- Collective dataset creation: ALL ranks must take the same branch
                 exists_local = ('mean' in f)
                 # If any rank sees it, treat as exists for all to avoid split branches
@@ -551,19 +551,19 @@ class EnKF_fully_parallel_IO:
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
-    
+
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
-    def generate_observation_schedule(self, **kwargs):
+    def generate_observation_schedule(self, **icesee_kwargs):
         import numpy as np
 
-        t = np.asarray(kwargs["t"], dtype=float)
+        t = np.asarray(icesee_kwargs["t"], dtype=float)
         if t.ndim != 1 or t.size == 0:
             raise ValueError("`t` must be a 1D non-empty array of times.")
         t_min, t_max = float(t[0]), float(t[-1])
 
-        freq_obs = float(self.params["freq_obs"])
-        obs_start = float(self.params["obs_start_time"])
-        obs_max_cfg = float(self.params["obs_max_time"])
+        freq_obs = float(self.icesee_kwargs["freq_obs"])
+        obs_start = float(self.icesee_kwargs["obs_start_time"])
+        obs_max_cfg = float(self.icesee_kwargs["obs_max_time"])
 
         obs_start = max(obs_start, t_min)
         obs_max = min(obs_max_cfg, t_max)
@@ -591,7 +591,7 @@ class EnKF_fully_parallel_IO:
         return obs_t_req, obs_idx, num_observations
 
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
-    def _create_synthetic_observations(self, **kwargs):
+    def _create_synthetic_observations(self, **icesee_kwargs):
         import os
         import re
         import h5py
@@ -602,19 +602,19 @@ class EnKF_fully_parallel_IO:
         nd = self.nd
         nt = self.nt
 
-        obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
+        obs_t, ind_m, m_obs = self.generate_observation_schedule(**icesee_kwargs)
         ind_m = np.asarray(ind_m, dtype=int)  # your code treats these as step indices
         obs_t = np.asarray(obs_t, dtype=float)
 
         rank = self.mpi_comm.Get_rank()
 
-        total_state_param_vars = self.params["total_state_param_vars"]
+        total_state_param_vars = self.icesee_kwargs["total_state_param_vars"]
         hdim = nd // total_state_param_vars
 
         # ----------------------------
         # Bed snapshots: interpret as YEARS like partial-parallel
         # ----------------------------
-        bed_snaps = np.asarray(kwargs.get("bed_obs_snapshot", []), dtype=float)
+        bed_snaps = np.asarray(icesee_kwargs.get("bed_obs_snapshot", []), dtype=float)
         bed_snap_cols = []
         bed_time_to_col = {}
 
@@ -642,30 +642,30 @@ class EnKF_fully_parallel_IO:
                     statevec_true = f["true_state"][:]  # (nd, nt or nt+1)
 
                 # Build index map once
-                _, indx_map, _ = icesee_get_index(**kwargs)
-                vec_inputs = list(kwargs["vec_inputs"])
+                _, indx_map, _ = icesee_get_index(**icesee_kwargs)
+                vec_inputs = list(icesee_kwargs["vec_inputs"])
 
                 # Helpers / options
-                num_state_vars = kwargs.get("num_state_vars", self.params.get("num_state_vars"))
-                observed_params = set(kwargs.get("observed_params", []))
+                num_state_vars = icesee_kwargs.get("num_state_vars", self.icesee_kwargs.get("num_state_vars"))
+                observed_params = set(icesee_kwargs.get("observed_params", []))
 
                 bed_aliases = {"bed", "bedrock", "bed_topography", "bedtopo", "bedtopography"}
                 key_is_bed = {k: (k in bed_aliases) for k in vec_inputs}
                 key_idx_map = {k: np.asarray(indx_map[k], dtype=int) for k in vec_inputs}
 
                 # ---- Bed sparsity controls (accept BOTH naming conventions safely) ----
-                Ly = kwargs.get("Ly", self.params.get("Ly", None))
-                Lx = kwargs.get("Lx", self.params.get("Lx", None))
-                model_name = kwargs.get("model_name", None)
+                Ly = icesee_kwargs.get("Ly", self.icesee_kwargs.get("Ly", None))
+                Lx = icesee_kwargs.get("Lx", self.icesee_kwargs.get("Lx", None))
+                model_name = icesee_kwargs.get("model_name", None)
 
                 # allow either key name:
-                bed_stride_km = kwargs.get("bed_obs_stride", None)
+                bed_stride_km = icesee_kwargs.get("bed_obs_stride", None)
                 if bed_stride_km is None:
-                    bed_stride_km = kwargs.get("bed_obs_stride_km", None)
+                    bed_stride_km = icesee_kwargs.get("bed_obs_stride_km", None)
 
-                bed_spacing_pts = kwargs.get("bed_obs_spacing", None)
-                bed_indices_user = kwargs.get("bed_obs_indices", None)
-                bed_mask_user = kwargs.get("bed_obs_mask", None)
+                bed_spacing_pts = icesee_kwargs.get("bed_obs_spacing", None)
+                bed_indices_user = icesee_kwargs.get("bed_obs_indices", None)
+                bed_mask_user = icesee_kwargs.get("bed_obs_mask", None)
 
                 # ---- Build bed_mask_map using the SAME priority/shape handling as partial ----
                 bed_mask_map = {}
@@ -712,8 +712,8 @@ class EnKF_fully_parallel_IO:
                         if re.match(r"(?i)^issm$", str(model_name)):
                             import h5py  # already imported, but harmless
 
-                            icesee_path = kwargs.get("icesee_path")
-                            data_path = kwargs.get("data_path")
+                            icesee_path = icesee_kwargs.get("icesee_path")
+                            data_path = icesee_kwargs.get("data_path")
 
                             file_path = f"{icesee_path}/{data_path}/mesh_idxy_{0}.h5"
                             try:
@@ -795,7 +795,7 @@ class EnKF_fully_parallel_IO:
                     )
 
                     # Fill error_R by blocks (same idea)
-                    sig_obs = np.asarray(self.params["sig_obs"]).reshape(-1)
+                    sig_obs = np.asarray(self.icesee_kwargs["sig_obs"]).reshape(-1)
                     if sig_obs.size < total_state_param_vars:
                         sig_obs = np.pad(sig_obs, (0, total_state_param_vars - sig_obs.size), mode="edge")
                     elif sig_obs.size > total_state_param_vars:
@@ -807,7 +807,7 @@ class EnKF_fully_parallel_IO:
                         error_R[s:e, :] = sig
 
                     # ==== Main observation loop (columns km), aligned to partial ====
-                    obs_set = set(kwargs.get("observed_vars", [])) | set(kwargs.get("observed_params", []))
+                    obs_set = set(icesee_kwargs.get("observed_vars", [])) | set(icesee_kwargs.get("observed_params", []))
 
                     km = 0
                     for step in range(nt):
@@ -850,26 +850,26 @@ class EnKF_fully_parallel_IO:
         self.mpi_comm.Barrier()
         return ind_m, m_obs
 
-    def H_matrix(self, **kwargs):
+    def H_matrix(self, **icesee_kwargs):
         """
         Fully-parallel version: write H directly to Zarr, but use the SAME
         observation-index logic as the partial-parallel run (including bed masks).
 
         H contains ONLY real observation points (and bed subsampling/masking),
-        with rows ordered exactly as `params["all_observed"]` concatenation.
+        with rows ordered exactly as `icesee_kwargs["all_observed"]` concatenation.
         """
         try:
-            params = self.params
-            observed = params["all_observed"]  # e.g. ['h','u','v','smb','bed']
-            vec_inputs = kwargs.get("vec_inputs", [])
+            icesee_kwargs = self.icesee_kwargs
+            observed = icesee_kwargs["all_observed"]  # e.g. ['h','u','v','smb','bed']
+            vec_inputs = icesee_kwargs.get("vec_inputs", [])
 
             # --- Recompute index map (same as partial parallel) ---
-            vecs, indx_map, _ = icesee_get_index(**kwargs)
+            vecs, indx_map, _ = icesee_get_index(**icesee_kwargs)
 
             nd = int(self.nd)  # state size
 
             # --- Retrieve bed masks (must already exist) ---
-            bed_mask_map = kwargs.get("bed_mask_map", {})
+            bed_mask_map = icesee_kwargs.get("bed_mask_map", {})
 
             bed_aliases = {"bed", "bedrock", "bed_topography", "bedtopo", "bedtopography"}
             key_is_bed = {k: (k in bed_aliases) for k in vec_inputs}
@@ -918,7 +918,7 @@ class EnKF_fully_parallel_IO:
             m = int(obs_indices.size)
 
             # ---- Output path (HDF5) ----
-            H_matrix_file = kwargs.get("H_matrix_h5_path", f"{self.base_path}/H_matrix.h5")
+            H_matrix_file = icesee_kwargs.get("H_matrix_h5_path", f"{self.base_path}/H_matrix.h5")
 
             rank = self.mpi_comm.Get_rank()
             if rank == 0:
@@ -932,9 +932,9 @@ class EnKF_fully_parallel_IO:
                     pass
 
                 # Tunables (safe defaults)
-                row_chunk = int(kwargs.get("H_row_chunk", min(512, m)))
-                col_chunk = int(kwargs.get("H_col_chunk", min(2048, nd)))
-                block_rows = int(kwargs.get("H_write_block_rows", row_chunk))
+                row_chunk = int(icesee_kwargs.get("H_row_chunk", min(512, m)))
+                col_chunk = int(icesee_kwargs.get("H_col_chunk", min(2048, nd)))
+                block_rows = int(icesee_kwargs.get("H_write_block_rows", row_chunk))
 
                 row_chunk = max(1, min(row_chunk, m))
                 col_chunk = max(1, min(col_chunk, nd))
@@ -995,16 +995,16 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def compute_X5_utils_(self, **kwargs):
+    def compute_X5_utils_(self, **icesee_kwargs):
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
-        k = kwargs.get('k')
+        k = icesee_kwargs.get('k')
         k = k + 1 if k < self.nt - 1 else k
-        km = kwargs.get('km')
+        km = icesee_kwargs.get('km')
         try:
-            # H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
-            # synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
-            m = kwargs.get('m_obs')
+            # H_matrix_zarr_path = icesee_kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
+            # synthetic_obs_zarr_path = icesee_kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
+            m = icesee_kwargs.get('m_obs')
             Nens = self.nens
 
             # --- Open H (read-only) once and slice local columns
@@ -1051,10 +1051,10 @@ class EnKF_fully_parallel_IO:
             # States_local = np.empty((local_nd, Nens), dtype=H_local.dtype, order='C')
             States_local =zarr.zeros((local_nd, Nens), dtype=H_local.dtype, store=f"{self.base_path}/States_local_{self.mpi_comm.Get_rank()}.zarr", chunks=(local_nd, 1), overwrite=True)
             for j in range(Nens):
-                # States_local[:, j] = self.read_analysis(k, j)  # each returns local slice (local_nd,) 
+                # States_local[:, j] = self.read_analysis(k, j)  # each returns local slice (local_nd,)
                 States_local[:, j] = self.read_analysis(k, j)  # each returns local slice (local_nd,)
             _local_analysis_time = MPI.Wtime() - _local_analysis_time
-            kwargs["time_analysis_file_writing"] += _local_analysis_time
+            icesee_kwargs["time_analysis_file_writing"] += _local_analysis_time
 
 
             # --- HA for all ensemble members in one GEMM + one Allreduce on the whole matrix
@@ -1077,30 +1077,30 @@ class EnKF_fully_parallel_IO:
             #     # Dprime = (d_global - Hmean_global)[:, None] * np.ones((1, Nens), dtype=HA.dtype)
             #     Dprime = d_global[:, None] - HA
 
-            #     return Dprime, Eta, Eta, kwargs
+            #     return Dprime, Eta, Eta, icesee_kwargs
 
             HAprime = HA - Hmean_global[:, None]
             Eta = HAprime
 
             Dprime = d_global[:, None] - HA
 
-            return Dprime, Eta, HAprime, kwargs
+            return Dprime, Eta, HAprime, icesee_kwargs
         except Exception as e:
             print(f"Error in compute_X5_utils: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def compute_X5_modified(self, **kwargs):
+    def compute_X5_modified(self, **icesee_kwargs):
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
         try:
             Nens = self.nens
 
-            # Dprime, Eta, HA, kwargs = self.compute_X5_utils_(km, **kwargs)
-            Dprime, Eta, HAprime, kwargs  = self.compute_X5_utils_(**kwargs)
+            # Dprime, Eta, HA, icesee_kwargs = self.compute_X5_utils_(km, **icesee_kwargs)
+            Dprime, Eta, HAprime, icesee_kwargs  = self.compute_X5_utils_(**icesee_kwargs)
             # print(f"\n [Rank {self.mpi_comm.Get_rank()}] Dprime norm: {np.linalg.norm(Dprime)}, Eta norm: {np.linalg.norm(Eta)}, HA norm: {np.linalg.norm(HA)} \n")
-            # Dprime, Eta, HA = self.compute_X5_utils_batch(**kwargs)
+            # Dprime, Eta, HA = self.compute_X5_utils_batch(**icesee_kwargs)
 
             # compute the HAbar
             # HAbar = np.mean(HA, axis=1)
@@ -1114,7 +1114,7 @@ class EnKF_fully_parallel_IO:
             # compute HAprime + Eta
             HAprime_Eta = HAprime + Eta
             # HAprime_Eta = Eta  # since HAprime = Eta
-           
+
             # print(f"\n[Rank {self.mpi_comm.Get_rank()}] HAprime_Eta norm: {np.linalg.norm(HAprime_Eta)}, shape: {HAprime_Eta.shape}\n")
             # print(f"\n [Rank {self.mpi_comm.Get_rank()}] Dprime_local shape: {Dprime_local.shape} HAprime_local shape: {HAprime_local.shape} HAprime_Eta_local shape: {HAprime_Eta_local.shape}\n ")
 
@@ -1123,7 +1123,7 @@ class EnKF_fully_parallel_IO:
 
             # get the min (m Nens)
             nrmin = min(Nens, m)
-            
+
             # convert S to eigenvalues
             sig = sig**2
 
@@ -1174,7 +1174,7 @@ class EnKF_fully_parallel_IO:
             # print(f"[ICESEE] Rank: {self.mpi_comm.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
             del X4; gc.collect()
 
-            return X5, kwargs
+            return X5, icesee_kwargs
 
         except Exception as e:
             print(f"Error in compute_X5_modified: {e}")
@@ -1184,9 +1184,9 @@ class EnKF_fully_parallel_IO:
 
 
     # compute analysis mean
-    def compute_analysis_update(self, **kwargs):
+    def compute_analysis_update(self, **icesee_kwargs):
         # Compute the analysis update for each rank
-        k = kwargs.get('k')  
+        k = icesee_kwargs.get('k')
         k = k + 1 if k < self.nt - 1 else k
         nt = self.nt
         try:
@@ -1200,8 +1200,8 @@ class EnKF_fully_parallel_IO:
             start = MPI.Wtime()
 
             # call the compute X5 function
-            # X5 = self.compute_X5_(k, **kwargs)
-            X5, kwargs = self.compute_X5_modified(**kwargs)
+            # X5 = self.compute_X5_(k, **icesee_kwargs)
+            X5, icesee_kwargs = self.compute_X5_modified(**icesee_kwargs)
             # compute column sums for X5
 
             # ---
@@ -1240,15 +1240,15 @@ class EnKF_fully_parallel_IO:
             analysis_updates = all_states @ X5  # Matrix multiplication
 
             # performm inflation
-            # inflation_factor = self.params.get('inflation_factor', 1.0)
-            # ndim = analysis_updates.shape[0]//self.params["total_state_param_vars"]
-            # state_block_size = ndim * self.params["num_state_vars"]
+            # inflation_factor = self.icesee_kwargs.get('inflation_factor', 1.0)
+            # ndim = analysis_updates.shape[0]//self.icesee_kwargs["total_state_param_vars"]
+            # state_block_size = ndim * self.icesee_kwargs["num_state_vars"]
             # mean_params = np.mean(analysis_updates[state_block_size:, :], axis=1).reshape(-1, 1)
             # pertubations = analysis_updates[state_block_size:, :] - mean_params
             # # inflated_pertubations = pertubations * inflation_factor
             # analysis_updates[state_block_size:, :] = mean_params + (pertubations * inflation_factor)
 
-            inflation_factor = self.params.get("inflation_factor", 1.0)
+            inflation_factor = self.icesee_kwargs.get("inflation_factor", 1.0)
 
             mean_all = np.mean(analysis_updates, axis=1).reshape(-1, 1)
             perturbations = analysis_updates - mean_all
@@ -1257,12 +1257,12 @@ class EnKF_fully_parallel_IO:
             # check for negative thicknes and set to 1e-3 if vec_input contains h
             # Define valid thickness variable names
             THICKNESS_VARS = {
-                "h", "ice_thickness", "thickness", "ice_thick", 
+                "h", "ice_thickness", "thickness", "ice_thick",
                 "hi", "h_ice", "h_ice_thickness", "H"
             }
             min_thickness = 1
-            vec_inputs = kwargs.get("vec_inputs", None)
-         
+            vec_inputs = icesee_kwargs.get("vec_inputs", None)
+
             for i, input_var in enumerate(vec_inputs or []):
                 if input_var in THICKNESS_VARS:
                     start = i * ndim
@@ -1275,11 +1275,11 @@ class EnKF_fully_parallel_IO:
             for j in range(Nens):
                 self.write_analysis(k, analysis_updates[:, j], j)
             _local_analysis_time1 = MPI.Wtime() - _local_analysis_time1
-            kwargs["time_analysis_file_writing"] += (_local_analysis_time0 + _local_analysis_time1)
+            icesee_kwargs["time_analysis_file_writing"] += (_local_analysis_time0 + _local_analysis_time1)
 
             # compute the anlysis mean and write to h5 file
             _time_analysis_mean = MPI.Wtime()
-            if kwargs.get('compute_analysis_mean', False):
+            if icesee_kwargs.get('compute_analysis_mean', False):
                 yi = np.sum(X5, axis=1)
                 analysis_mean = np.dot(all_states, yi) / Nens
                 # print(f"[Rank {self.mpi_comm.Get_rank()}]  shape: {analysis_mean.shape} shape_ {self.nd_end_world - self.nd_start_world}")
@@ -1299,7 +1299,7 @@ class EnKF_fully_parallel_IO:
                     comm.Barrier()
                     # _k = k + 1 if k < self.nt - 1 else k
                     f['mean'][self.nd_start_world:self.nd_end_world, k] = analysis_mean
-            kwargs["time_analysis_ensemble_mean_generation"] += (MPI.Wtime() - _time_analysis_mean)
+            icesee_kwargs["time_analysis_ensemble_mean_generation"] += (MPI.Wtime() - _time_analysis_mean)
             # print(f"\n[ICESEE] Rank {rank} completed analysis update for time step {k+1}/{nt} analysis_mean norm {np.linalg.norm(analysis_mean)}\n")
 
             # clean up zarr file
@@ -1308,11 +1308,11 @@ class EnKF_fully_parallel_IO:
             # for path in [allstates_sate_zarr_path, mean_params_zarr_path, pertubations_zarr_path, analysis_updates_zarr_path]:
             #     if os.path.exists(path):
             #         shutil.rmtree(path)
-            
+
             self.mpi_comm.Barrier()
             # del all_states_zarr
             gc.collect()
-            return kwargs
+            return icesee_kwargs
             # ----**** --------------------------------------------------------
 
         except Exception as e:
@@ -1330,4 +1330,3 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    

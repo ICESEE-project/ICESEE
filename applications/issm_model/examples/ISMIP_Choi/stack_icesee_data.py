@@ -150,15 +150,15 @@ def consolidate_h5(input_dir: str,
 def finalize_stack(output_dir: str,
                    mode: str = "vds",
                    dset_name: str | None = "states",
-                   **kwargs) -> str:
+                   **builder_options) -> str:
     """
     mode: 'vds' (no copy) or 'h5' (materialized).
-    kwargs are passed to the underlying builder (e.g., allow_missing=True).
+    builder_options are passed to the underlying builder (e.g., allow_missing=True).
     """
     if mode.lower() == "vds":
-        return build_vds(output_dir, dset_name=dset_name, **kwargs)
+        return build_vds(output_dir, dset_name=dset_name, **builder_options)
     elif mode.lower() in ("h5", "materialized"):
-        return consolidate_h5(output_dir, dset_name=dset_name, **kwargs)
+        return consolidate_h5(output_dir, dset_name=dset_name, **builder_options)
     else:
         raise ValueError("mode must be 'vds' or 'h5'")
 
@@ -192,4 +192,3 @@ if __name__ == "__main__":
         allow_missing=args.allow_missing
     )
     print(f"[Finalize] Stacked dataset written: {out}")
-

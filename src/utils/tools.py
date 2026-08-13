@@ -170,15 +170,15 @@ def consolidate_h5(input_dir: str,
 def finalize_stack(output_dir: str,
                    mode: str = "vds",
                    dset_name: str | None = "states",
-                   **kwargs) -> str:
+                   **builder_options) -> str:
     """
     mode: 'vds' (no copy) or 'h5' (materialized).
-    kwargs are passed to the underlying builder (e.g., allow_missing=True).
+    builder_options are passed to the underlying builder (e.g., allow_missing=True).
     """
     if mode.lower() == "vds":
-        return build_vds(output_dir, dset_name=dset_name, **kwargs)
+        return build_vds(output_dir, dset_name=dset_name, **builder_options)
     elif mode.lower() in ("h5", "materialized"):
-        return consolidate_h5(output_dir, dset_name=dset_name, **kwargs)
+        return consolidate_h5(output_dir, dset_name=dset_name, **builder_options)
     else:
         raise ValueError("mode must be 'vds' or 'h5'")
 
@@ -204,12 +204,12 @@ def install_requirements(force_install=False, verbose=False):
     if os.path.exists(".installed") and not force_install:
         print("[ICESEE] Dependencies are already installed. Skipping installation.")
         return
-    
+
     try:
         # Run the command to install the requirements from requirements.txt
         print("[ICESEE] Installing dependencies from requirements.txt...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "../requirements.txt"])
-        
+
         # Create a `.installed` marker file to indicate successful installation
         with open(".installed", "w") as f:
             f.write("Dependencies installed successfully.\n")
@@ -304,18 +304,18 @@ def extract_datasets_from_h5(file_path):
     return datasets
 
 # --- best for saving all data to h5 file in parallel environment
-def save_all_data(enkf_params=None, nofilter=None, data_path=None, **kwargs):
+def save_all_data(icesee_kwargs, nofilter=None, data_path=None, **datasets):
     """
     General function to save datasets based on the provided parameters.
     """
     # Keep summary metadata beside the ensemble/state files for this run.
-    data_path = data_path or enkf_params.get("data_path") or "_modelrun_datasets"
+    data_path = data_path or icesee_kwargs.get("data_path") or "_modelrun_datasets"
 
     # Update filter_type only if nofilter is provided
-    filter_type = "true-wrong" if nofilter else enkf_params["filter_type"]
+    filter_type = "true-wrong" if nofilter else icesee_kwargs["filter_type"]
 
     # --- Local MPI implementation ---
-    if re.match(r"\AMPI\Z", enkf_params["parallel_flag"], re.IGNORECASE) or re.match(r"\AMPI_model\Z", enkf_params["parallel_flag"], re.IGNORECASE):
+    if re.match(r"\AMPI\Z", icesee_kwargs["parallel_flag"], re.IGNORECASE) or re.match(r"\AMPI_model\Z", icesee_kwargs["parallel_flag"], re.IGNORECASE):
         from mpi4py import MPI
         comm = MPI.COMM_WORLD  # Initialize MPI
         rank = comm.Get_rank()  # Get rank of current MPI process
@@ -325,26 +325,26 @@ def save_all_data(enkf_params=None, nofilter=None, data_path=None, **kwargs):
         if rank == 0:
             save_arrays_to_h5(
                 filter_type=filter_type,  # Use updated or original filter_type
-                model=enkf_params["model_name"],
-                parallel_flag=enkf_params["parallel_flag"],
-                commandlinerun=enkf_params["commandlinerun"],
+                model=icesee_kwargs["model_name"],
+                parallel_flag=icesee_kwargs["parallel_flag"],
+                commandlinerun=icesee_kwargs["commandlinerun"],
                 data_path=data_path,
-                **kwargs
+                **datasets
             )
         else:
             None
     else:
         save_arrays_to_h5(
             filter_type=filter_type,  # Use updated or original filter_type
-            model=enkf_params["model_name"],
-            parallel_flag=enkf_params["parallel_flag"],
-            commandlinerun=enkf_params["commandlinerun"],
+            model=icesee_kwargs["model_name"],
+            parallel_flag=icesee_kwargs["parallel_flag"],
+            commandlinerun=icesee_kwargs["commandlinerun"],
             data_path=data_path,
-            **kwargs
+            **datasets
         )
 
 # ---- function to get the index of the variables in the vector dynamically
-def icesee_get_index(vec=None, **kwargs):
+def icesee_get_index(vec=None, **icesee_kwargs):
     """
     If var_nd is provided: variables in vec_inputs may have different global sizes.
     In this branch we DO NOT use dim_list, because dim_list is typically packed under
@@ -355,22 +355,21 @@ def icesee_get_index(vec=None, **kwargs):
       - rank-local ownership is contiguous within each variable
     """
     try:
-        var_nd = kwargs.get('var_nd', None)
+        var_nd = icesee_kwargs.get('var_nd', None)
 
         if var_nd is not None:
-            vec_inputs = kwargs.get("vec_inputs", None)
-            params = kwargs.get("params", None)
-            if vec_inputs is None or params is None:
-                raise ValueError("vec_inputs and params must be provided")
+            vec_inputs = icesee_kwargs.get("vec_inputs", None)
+            if vec_inputs is None:
+                raise ValueError("vec_inputs must be provided in icesee_kwargs")
 
             # communicator selection
-            if params["default_run"]:
-                comm = kwargs.get("subcomm", None)
+            if icesee_kwargs["default_run"]:
+                comm = icesee_kwargs.get("subcomm", None)
             else:
-                comm = kwargs.get("comm_world", None)
+                comm = icesee_kwargs.get("comm_world", None)
 
             # rank/size
-            if comm is None or params.get("even_distribution", False):
+            if comm is None or icesee_kwargs.get("even_distribution", False):
                 rank = 0
                 nranks = 1
             else:
@@ -427,17 +426,17 @@ def icesee_get_index(vec=None, **kwargs):
         # Case 2: original equal-size logic (unchanged)
         # ============================
         else:
-            vec_inputs = kwargs.get("vec_inputs", None)
-            nd = kwargs.get("nd")
-            # print(f"[ICESEE-debug] vec_inputs: {vec_inputs}, nd: {nd}, kwargs: {kwargs}\n")
-            if kwargs["default_run"]:
-                comm = kwargs.get("subcomm", None)
+            vec_inputs = icesee_kwargs.get("vec_inputs", None)
+            nd = icesee_kwargs.get("nd")
+            # print(f"[ICESEE-debug] vec_inputs: {vec_inputs}, nd: {nd}, icesee_kwargs: {icesee_kwargs}\n")
+            if icesee_kwargs["default_run"]:
+                comm = icesee_kwargs.get("subcomm", None)
             else:
-                comm = kwargs.get("comm_world", None)
-            
-            # len_vec = kwargs["total_state_param_vars"]
+                comm = icesee_kwargs.get("comm_world", None)
+
+            # len_vec = icesee_kwargs["total_state_param_vars"]
             len_vec = len(vec_inputs)
-            dim_list_param = np.array(kwargs.get('dim_list', None)) // len(kwargs.get('vec_inputs_old', None))
+            dim_list_param = np.array(icesee_kwargs.get('dim_list', None)) // len(icesee_kwargs.get('vec_inputs_old', None))
             dim_list_param = dim_list_param[:len_vec]
             hdim = nd // len_vec
             # print(f"[ICESEE-debug] len_vec: {len_vec}, dim_list_param: {dim_list_param}, hdim: {hdim}\n")
@@ -447,7 +446,7 @@ def icesee_get_index(vec=None, **kwargs):
                 dim = dim_list_param[rank]
                 offsets = [0]
             else:
-                if kwargs["even_distribution"]:
+                if icesee_kwargs["even_distribution"]:
                     rank = 0
                     dim = dim_list_param[rank]
                     offsets = [0]
@@ -466,14 +465,14 @@ def icesee_get_index(vec=None, **kwargs):
                 index_map[var] = np.arange(start, end)
                 var_start += hdim
 
-            local_size_per_rank = kwargs.get('dim_list', None)
+            local_size_per_rank = icesee_kwargs.get('dim_list', None)
             return None, index_map, local_size_per_rank[rank]
     except Exception as e:
         print(f"Error occurred in icesee_get_index: {e}")
         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
         print(f"Traceback details:\n{tb_str}")
         # self.mpi_comm.Abort(1)
-    
+
 # ==============================================================================
 
 # # Refined ANSI color codes
@@ -506,14 +505,14 @@ def icesee_get_index(vec=None, **kwargs):
 #     """Set up a logger for timing output."""
 #     logger = logging.getLogger("ICESEE_Timing")
 #     logger.setLevel(logging.INFO)
-    
+
 #     # Avoid duplicate handlers
 #     if not logger.handlers:
 #         # File handler for logging to a file
 #         file_handler = logging.FileHandler(log_file)
 #         file_handler.setFormatter(logging.Formatter("%(message)s"))
 #         logger.addHandler(file_handler)
-        
+
 #         # Optional: Stream handler for console output (only for root process)
 #         comm = MPI.COMM_WORLD
 #         rank = comm.Get_rank()
@@ -521,14 +520,14 @@ def icesee_get_index(vec=None, **kwargs):
 #             stream_handler = logging.StreamHandler(sys.stderr)  # Use stderr to avoid stdout issues
 #             stream_handler.setFormatter(logging.Formatter("%(message)s"))
 #             logger.addHandler(stream_handler)
-    
+
 #     return logger
 
 # def display_timing(computational_time: float, wallclock_time: float) -> None:
 #     """Display computational and wall-clock times with perfectly aligned formatting using logging."""
 #     # Set up logger
 #     logger = setup_logger()
-    
+
 #     # Only log from the root MPI process
 #     comm = MPI.COMM_WORLD
 #     rank = comm.Get_rank()
@@ -538,33 +537,33 @@ def icesee_get_index(vec=None, **kwargs):
 #     # Formatted time strings
 #     comp_time_str = format_time(computational_time)
 #     wall_time_str = format_time(wallclock_time)
-    
+
 #     # Content lines (no trailing spaces after emojis)
 #     title = "[ICESEE] Performance Metrics"
 #     comp_line = f"Computational Time (Σ): {comp_time_str} (DAY:HR:MIN:SEC.ms) ⏱️"
 #     wall_line = f"Wall-Clock Time (max):  {wall_time_str} (DAY:HR:MIN:SEC.ms) 🕒"
-    
+
 #     # Calculate max width based on plain text length (excluding ANSI codes)
 #     max_content_width = max(len(title), len(comp_line), len(wall_line))
 #     box_width = max_content_width + 12  # 2 for '║' on each side + 2 for padding
-    
+
 #     # Box drawing
 #     header = f"{COLORS['GRAY']}╔{'═' * box_width}╗{COLORS['RESET']}"
 #     footer = f"{COLORS['GRAY']}╚{'═' * box_width}╝{COLORS['RESET']}"
-    
+
 #     # Pad lines to exact width, ensuring no extra spaces
 #     def pad_line(text: str) -> str:
 #         padding = " " * (max_content_width - len(text) + 6 + 4)
 #         return f"{COLORS['GRAY']}║ {text}{padding} ║{COLORS['RESET']}"
-    
+
 #     def pad_line_comp(text: str) -> str:
 #         padding = " " * (max_content_width - len(text) + 7 + 4)
 #         return f"{COLORS['GRAY']}║ {text}{padding} ║{COLORS['RESET']}"
-    
+
 #     def pad_line_wall(text: str) -> str:
 #         padding = " " * (max_content_width - len(text) + 5 + 4)
 #         return f"{COLORS['GRAY']}║ {text}{padding} ║{COLORS['RESET']}"
-    
+
 #     # Log with strict alignment
 #     logger.info(f"\n{header}")
 #     logger.info(f"{COLORS['CYAN']}{pad_line(title)}{COLORS['RESET']}")
@@ -593,7 +592,7 @@ def setup_logger(log_file: str = None):
     import logging
     import sys
     from mpi4py import MPI
-    
+
     if log_file is None:
         diagnostics_dir = Path(
             os.environ.get("ICESEE_RESULTS_DIR", "_modelrun_datasets")
@@ -603,26 +602,26 @@ def setup_logger(log_file: str = None):
 
     logger = logging.getLogger("ICESEE_Timing")
     logger.setLevel(logging.INFO)
-    
+
     if not logger.handlers:
         file_handler = logging.FileHandler(log_file)
         file_handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(file_handler)
-        
+
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         if rank == 0:
             stream_handler = logging.StreamHandler(sys.stderr)
             stream_handler.setFormatter(logging.Formatter("%(message)s"))
             logger.addHandler(stream_handler)
-    
+
     return logger
 
 def display_timing_default(computational_time: float, wallclock_time: float) -> None:
     """Display computational and wall-clock times with perfectly aligned formatting using logging."""
     # Set up logger
     logger = setup_logger()
-    
+
     # Only log from the root MPI process
     # comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -632,22 +631,22 @@ def display_timing_default(computational_time: float, wallclock_time: float) -> 
     # Formatted time strings
     comp_time_str = format_time(computational_time)
     wall_time_str = format_time(wallclock_time)
-    
+
     # Content lines (no trailing spaces after emojis)
     # title = "[ICESEE] Performance Metrics"
     title = f"[ICESEE] Metrics on {MPI.COMM_WORLD.Get_size()} ranks"
     comp_line = f"Computational Time (Σ): {comp_time_str} (DAY:HR:MIN:SEC.ms) ⏱️"
     wall_line = f"Wall-Clock Time (max):  {wall_time_str} (DAY:HR:MIN:SEC.ms) 🕒"
-    
+
     # Calculate max width based on the longest metric label and value
     max_label_width = max(len(entry[0]) for entry in time_entries)
     max_value_width = max(len(entry[1]) for entry in time_entries[1:])  # Skip header for value width
     total_width = max_label_width + max_value_width - 14  # 2 for '║' + 2 for padding
-    
+
     # Box drawing
     header = f"{COLORS['GRAY']}╔{'═' * total_width}╗{COLORS['RESET']}"
     footer = f"{COLORS['GRAY']}╚{'═' * total_width}╝{COLORS['RESET']}"
-    
+
     # Pad lines to exact width with strict alignment
     def pad_line(label: str, value: str = "") -> str:
         if not value:  # Header
@@ -657,7 +656,7 @@ def display_timing_default(computational_time: float, wallclock_time: float) -> 
             label_padding = " " * (max_label_width -17 - len(label))  # +1 for space
             value_padding = " " * (max_value_width -17 - len(value))  # +1 for space
             return f"{COLORS['GRAY']}║ {label}{label_padding}{value}{value_padding}{COLORS['RESET']}{COLORS['GRAY']}  ║{COLORS['RESET']}"
-    
+
     # Log with strict alignment
     logger.info(f"{header}")
     for entry in time_entries:
@@ -688,7 +687,7 @@ def setup_logger(log_file: str = None):
     import logging
     import sys
     from mpi4py import MPI
-    
+
     if log_file is None:
         diagnostics_dir = Path(
             os.environ.get("ICESEE_RESULTS_DIR", "_modelrun_datasets")
@@ -698,19 +697,19 @@ def setup_logger(log_file: str = None):
 
     logger = logging.getLogger("ICESEE_Timing")
     logger.setLevel(logging.INFO)
-    
+
     if not logger.handlers:
         file_handler = logging.FileHandler(log_file)
         file_handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(file_handler)
-        
+
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         if rank == 0:
             stream_handler = logging.StreamHandler(sys.stderr)
             stream_handler.setFormatter(logging.Formatter("%(message)s"))
             logger.addHandler(stream_handler)
-    
+
     return logger
 
 def display_timing_verbose(
@@ -734,10 +733,10 @@ def display_timing_verbose(
 ) -> None:
     """Display all timing metrics in a table with strict aligned formatting using logging, all in gray."""
     # from mpi4py import MPI
-    
+
     # Set up logger
     logger = setup_logger()
-    
+
     # Only log from the root MPI process
     # comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -763,16 +762,16 @@ def display_timing_verbose(
         ("Forecast Ensemble Mean Computation", format_time(time_forecast_ensemble_mean_computation)),
         ("Analysis Ensemble Mean Computation", format_time(time_analysis_ensemble_mean_computation)),
     ]
-    
+
     # Calculate max width based on the longest metric label and value
     max_label_width = max(len(entry[0]) for entry in time_entries)
     max_value_width = max(len(entry[1]) for entry in time_entries[1:])  # Skip header for value width
     total_width = max_label_width + max_value_width - 14  # 2 for '║' + 2 for padding
-    
+
     # Box drawing
     header = f"{COLORS['GRAY']}╔{'═' * total_width}╗{COLORS['RESET']}"
     footer = f"{COLORS['GRAY']}╚{'═' * total_width}╝{COLORS['RESET']}"
-    
+
     # Pad lines to exact width with strict alignment
     def pad_line(label: str, value: str = "") -> str:
         if not value:  # Header
@@ -782,7 +781,7 @@ def display_timing_verbose(
             label_padding = " " * (max_label_width -17 - len(label))  # +1 for space
             value_padding = " " * (max_value_width -17 - len(value))  # +1 for space
             return f"{COLORS['GRAY']}║ {label}{label_padding}{value}{value_padding}{COLORS['RESET']}{COLORS['GRAY']}  ║{COLORS['RESET']}"
-    
+
     # Log with strict alignment
     logger.info(f"{header}")
     for entry in time_entries:
@@ -795,24 +794,24 @@ def display_timing_verbose(
 def get_grid_dimensions(nx, ny, ndim):
     """
     Calculate grid dimensions mx and my based on physical dimensions and total points.
-    
+
     Parameters:
     nx (int): Number of elements in x-direction
     ny (int): Number of elements in y-direction
     ndim (int): Total number of grid points (mx * my)
-    
+
     Returns:
     tuple: (mx, my) - number of grid points in x and y directions
     """
     # Calculate aspect ratio from physical dimensions
     alpha = nx / ny
-    
+
     # Initial estimate based on aspect ratio and ndim
     # mx/my = alpha and mx*my = ndim
     # mx = sqrt(ndim * alpha), my = sqrt(ndim / alpha)
     mx = np.sqrt(ndim * alpha)
     my = np.sqrt(ndim / alpha)
-    
+
     # Initial rounding
     if mx - int(mx) > 0.5:
         mx = int(np.ceil(mx))
@@ -822,7 +821,7 @@ def get_grid_dimensions(nx, ny, ndim):
         mx = int(np.floor(mx))
     else:
         mx, my = int(mx), int(my)
-    
+
     # Quick adjustment to reach ndim
     current_product = mx * my
     if current_product != ndim:
@@ -830,7 +829,7 @@ def get_grid_dimensions(nx, ny, ndim):
         scale = np.sqrt(ndim / current_product)
         mx = int(round(mx * scale))
         my = int(round(my * scale))
-        
+
         # Fast fine-tuning with minimal iterations
         product = mx * my
         if product < ndim:
@@ -847,7 +846,7 @@ def get_grid_dimensions(nx, ny, ndim):
                 else:
                     my -= 1
                 product = mx * my
-    
+
     return mx, my
 
 def midpoint_rect(mx, my):
@@ -977,8 +976,8 @@ if __name__ == "__main__":
     )
     print(f"[Finalize] Stacked dataset written: {out}")
 
-def icesee_fingerprint(params: dict, keys=("model_name","nd","nt","Nens","base_seed")) -> str:
-    sub = {k: params.get(k) for k in keys}
+def icesee_fingerprint(icesee_kwargs: dict, keys=("model_name","nd","nt","Nens","base_seed")) -> str:
+    sub = {k: icesee_kwargs.get(k) for k in keys}
     blob = json.dumps(sub, sort_keys=True, separators=(",",":"))
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 

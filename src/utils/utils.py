@@ -2,7 +2,7 @@
 # @Author: Brian Kyanjo
 # @Date: 2024-09-24
 # @Description: This script includes the some of the utility functions used in the
-#               EnKF data assimilation scheme. 
+#               EnKF data assimilation scheme.
 # =============================================================================
 
 # import libraries
@@ -19,6 +19,7 @@ from scipy.spatial.distance import cdist
 
 # import utility functions
 from ICESEE.src.utils.tools import icesee_get_index
+from ICESEE.src.utils.icesee_context import normalize_icesee_kwargs
 
 
 # --- helper functions ---
@@ -48,10 +49,11 @@ def cross_flow_track_mask(x_coord_m, stride_km, half_width_m=1000.0):
     return mask
 
 class UtilsFunctions:
-    def __init__(self, params=None, model_kwargs=None, ensemble=None):
-        self.params = params
+    def __init__(self, icesee_kwargs=None, ensemble=None, **legacy_context):
+        self.icesee_kwargs = normalize_icesee_kwargs(
+            icesee_kwargs, **legacy_context
+        )
         self.ensemble = ensemble
-        self.model_kwargs = model_kwargs 
 
     # ------------------------------ helpers ------------------------------
     @staticmethod
@@ -70,7 +72,7 @@ class UtilsFunctions:
         Map a model time index k_model (0..nt-1) -> obs column km (0..m_obs-1),
         using mapping produced by _create_synthetic_observations.
         """
-        m = self.model_kwargs.get("obs_model_to_col", None)
+        m = self.icesee_kwargs.get("obs_model_to_col", None)
         if m is None:
             return None
         return m.get(int(k_model), None)
@@ -89,29 +91,29 @@ class UtilsFunctions:
 
         import numpy as np
 
-        params = self.params
-        # observed = params["all_observed"]                 # e.g., ['h','u','v','smb','bed']
+        icesee_kwargs = self.icesee_kwargs
+        # observed = icesee_kwargs["all_observed"]                 # e.g., ['h','u','v','smb','bed']
         observed = (
-            self.model_kwargs.get("observed_vars", []) +
-            self.model_kwargs.get("observed_params", [])
+            self.icesee_kwargs.get("observed_vars", []) +
+            self.icesee_kwargs.get("observed_params", [])
         )
 
         if len(observed) == 0:
-            observed = self.model_kwargs.get("all_observed", [])
+            observed = self.icesee_kwargs.get("all_observed", [])
 
         if len(observed) == 0:
-            observed = self.params.get("all_observed", [])
+            observed = self.icesee_kwargs.get("all_observed", [])
 
-        vec_inputs = self.model_kwargs["vec_inputs"]      # e.g., ['h','s','u','v','bed','fric','smb']
+        vec_inputs = self.icesee_kwargs["vec_inputs"]      # e.g., ['h','s','u','v','bed','fric','smb']
 
-        vecs, indx_map, _ = icesee_get_index(**self.model_kwargs)
+        vecs, indx_map, _ = icesee_get_index(**self.icesee_kwargs)
 
         bed_aliases = {'bed', 'bedrock', 'bed_topography', 'bedtopo', 'bedtopography'}
         is_bed_key = lambda k: (str(k).lower() in bed_aliases)
 
-        bed_mask_static = self.model_kwargs.get("bed_mask_map_static", {})  # key -> (n_bed,)
-        bed_mask_cols   = self.model_kwargs.get("bed_mask_map_cols", {})    # key -> (n_bed, m_obs)
-        bed_snap_cols   = set(self.model_kwargs.get("bed_snap_cols", []))
+        bed_mask_static = self.icesee_kwargs.get("bed_mask_map_static", {})  # key -> (n_bed,)
+        bed_mask_cols   = self.icesee_kwargs.get("bed_mask_map_cols", {})    # key -> (n_bed, m_obs)
+        bed_snap_cols   = set(self.icesee_kwargs.get("bed_snap_cols", []))
 
         all_obs_indices = []
 
@@ -157,7 +159,7 @@ class UtilsFunctions:
                 idx = idx[obs_mask_full[idx]]
 
             if idx.size > 0:
-                all_obs_indices.append(idx)   
+                all_obs_indices.append(idx)
 
             # all_obs_indices.append(idx)
 
@@ -177,7 +179,7 @@ class UtilsFunctions:
         H = np.zeros((m_obs, n_model), dtype=float)
         H[np.arange(m_obs), obs_indices] = 1.0
         return H
-    
+
     def H_indices(self, n_model, km=None, obs_mask_full=None):
         """
         Same index-selection logic as H_matrix, but returns just the integer
@@ -189,23 +191,23 @@ class UtilsFunctions:
         import numpy as np
 
         observed = (
-            self.model_kwargs.get("observed_vars", []) +
-            self.model_kwargs.get("observed_params", [])
+            self.icesee_kwargs.get("observed_vars", []) +
+            self.icesee_kwargs.get("observed_params", [])
         )
         if len(observed) == 0:
-            observed = self.model_kwargs.get("all_observed", [])
+            observed = self.icesee_kwargs.get("all_observed", [])
         if len(observed) == 0:
-            observed = self.params.get("all_observed", [])
+            observed = self.icesee_kwargs.get("all_observed", [])
 
-        vec_inputs = self.model_kwargs["vec_inputs"]
-        vecs, indx_map, _ = icesee_get_index(**self.model_kwargs)
+        vec_inputs = self.icesee_kwargs["vec_inputs"]
+        vecs, indx_map, _ = icesee_get_index(**self.icesee_kwargs)
 
         bed_aliases = {'bed', 'bedrock', 'bed_topography', 'bedtopo', 'bedtopography'}
         is_bed_key = lambda k: (str(k).lower() in bed_aliases)
 
-        bed_mask_static = self.model_kwargs.get("bed_mask_map_static", {})
-        bed_mask_cols = self.model_kwargs.get("bed_mask_map_cols", {})
-        bed_snap_cols = set(self.model_kwargs.get("bed_snap_cols", []))
+        bed_mask_static = self.icesee_kwargs.get("bed_mask_map_static", {})
+        bed_mask_cols = self.icesee_kwargs.get("bed_mask_map_cols", {})
+        bed_snap_cols = set(self.icesee_kwargs.get("bed_snap_cols", []))
 
         all_obs_indices = []
 
@@ -258,12 +260,12 @@ class UtilsFunctions:
     def JObs_indices(self, n_model):
         """Index-based counterpart to JObs_fun — returns obs_indices instead
         of a dense H matrix."""
-        k_model = self.model_kwargs.get("k", None)
+        k_model = self.icesee_kwargs.get("k", None)
         km = None
         if k_model is not None:
             km = self._get_obs_col_from_model_step(k_model)
 
-        hu_obs = self.model_kwargs.get("hu_obs_loaded", None)
+        hu_obs = self.icesee_kwargs.get("hu_obs_loaded", None)
         obs_mask_full = None
         if (hu_obs is not None) and (km is not None):
             obs_mask_full = ~np.isnan(hu_obs[:, int(km)])
@@ -273,9 +275,9 @@ class UtilsFunctions:
     def Obs_fun(self, virtual_obs, H=None, km=None):
         n = 1 if np.isscalar(virtual_obs) else virtual_obs.shape[0]
         if H is None:
-            hu_obs = self.model_kwargs.get("hu_obs_loaded", None)
+            hu_obs = self.icesee_kwargs.get("hu_obs_loaded", None)
             #  read hu_obs from file
-            # _synthetic_obs = self.model_kwargs.get("synthetic_obs_file", None)
+            # _synthetic_obs = self.icesee_kwargs.get("synthetic_obs_file", None)
             # with h5py.File(_synthetic_obs, 'r') as f:
             #     hu_obs  = f['hu_obs'][:]
             obs_mask_full = None
@@ -285,14 +287,14 @@ class UtilsFunctions:
         return H @ virtual_obs
 
     def JObs_fun(self, n_model):
-        k_model = self.model_kwargs.get("k", None)
+        k_model = self.icesee_kwargs.get("k", None)
         km = None
         if k_model is not None:
             km = self._get_obs_col_from_model_step(k_model)
 
-        hu_obs = self.model_kwargs.get("hu_obs_loaded", None)
+        hu_obs = self.icesee_kwargs.get("hu_obs_loaded", None)
         #  read hu_obs from file
-        # _synthetic_obs = self.model_kwargs.get("synthetic_obs_file", None)
+        # _synthetic_obs = self.icesee_kwargs.get("synthetic_obs_file", None)
         # with h5py.File(_synthetic_obs, 'r') as f:
         #     hu_obs  = f['hu_obs'][:]
 
@@ -303,19 +305,19 @@ class UtilsFunctions:
         return self.H_matrix(n_model, km=km, obs_mask_full=obs_mask_full)
 
     # -------------------------- observation schedule --------------------------
-    def generate_observation_schedule(self, **kwargs):
+    def generate_observation_schedule(self, **icesee_kwargs):
         import numpy as np
         import traceback, sys
 
         try:
-            t = np.asarray(kwargs["t"], dtype=float)
+            t = np.asarray(icesee_kwargs["t"], dtype=float)
             if t.ndim != 1 or t.size == 0:
                 raise ValueError("`t` must be a 1D non-empty array of times.")
             t_min, t_max = float(t[0]), float(t[-1])
 
-            freq_obs = float(self.params["freq_obs"])
-            obs_start = float(self.params["obs_start_time"])
-            obs_max_cfg = float(self.params["obs_max_time"])
+            freq_obs = float(self.icesee_kwargs["freq_obs"])
+            obs_start = float(self.icesee_kwargs["obs_start_time"])
+            obs_max_cfg = float(self.icesee_kwargs["obs_max_time"])
 
             obs_start = max(obs_start, t_min)
             obs_max = min(obs_max_cfg, t_max)
@@ -344,7 +346,7 @@ class UtilsFunctions:
             return np.array([]), np.array([], dtype=int), 0
 
     # --------------------- consistent synthetic observation maker ---------------------
-    def _create_synthetic_observations(self, **kwargs):
+    def _create_synthetic_observations(self, **icesee_kwargs):
         """
         Create synthetic observations hu_obs consistent with H_matrix(..., km).
 
@@ -355,21 +357,23 @@ class UtilsFunctions:
                           - 'static' : bed_mask_map_static[key] -> (n_bed,)
                           - 'cols'   : bed_mask_map_cols[key]   -> (n_bed, m_obs)
         Side-effects:
-            Updates model_kwargs with:
+            Updates icesee_kwargs with:
               bed_mask_map_static, bed_mask_map_cols, bed_snap_cols,
               ind_m, obs_t, obs_model_to_col mapping.
         """
         import numpy as np
 
-        statevec_true = kwargs.get("statevec_true", None)
+        if not icesee_kwargs:
+            icesee_kwargs = self.icesee_kwargs
+
+        statevec_true = icesee_kwargs.get("statevec_true", None)
         if statevec_true is None:
             raise ValueError("statevec_true is required")
 
-        params = kwargs.get("params", self.params)
-        vec_inputs = list(kwargs["vec_inputs"])
+        vec_inputs = list(icesee_kwargs["vec_inputs"])
 
         # Observation schedule
-        obs_t_req, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
+        obs_t_req, ind_m, m_obs = self.generate_observation_schedule(**icesee_kwargs)
         ind_m = np.asarray(ind_m, dtype=int)  # model time indices (0-based)
         obs_t_req = np.asarray(obs_t_req, dtype=float)
 
@@ -380,7 +384,7 @@ class UtilsFunctions:
         obs_model_to_col = {int(k_model): int(col) for col, k_model in enumerate(ind_m)}
 
         # Bed snapshot times (in same units as obs_t_req)
-        bed_snaps = np.asarray(kwargs.get("bed_obs_snapshot", []), dtype=float).ravel()
+        bed_snaps = np.asarray(icesee_kwargs.get("bed_obs_snapshot", []), dtype=float).ravel()
         bed_snap_cols = []
         if bed_snaps.size > 0 and obs_t_req.size > 0:
             for bed_time in bed_snaps:
@@ -392,7 +396,7 @@ class UtilsFunctions:
         print("[ICESEE] bed_snap_cols:", bed_snap_cols)
 
         # Indices in state vector
-        vecs, indx_map, _ = icesee_get_index(statevec_true, **kwargs)
+        vecs, indx_map, _ = icesee_get_index(statevec_true, **icesee_kwargs)
 
         # preallocate obs in *state* size (so you can keep your old hu_obs layout)
         nd_full = statevec_true.shape[0]
@@ -400,12 +404,12 @@ class UtilsFunctions:
         hu_obs = np.full((nd_full, m_obs), np.nan, dtype=float)  # use NaN for unobserved
 
         # error_R: keep your block-structure logic
-        total_state_param_vars = params["total_state_param_vars"]
+        total_state_param_vars = icesee_kwargs["total_state_param_vars"]
         hdim = nd_full // total_state_param_vars
 
         # error_R = np.zeros((nd_full, m_obs), dtype=float)
         error_R = np.full((nd_full, m_obs), np.nan, dtype=float)  # use NaN for unobserved
-        sig_obs = params["sig_obs"]
+        sig_obs = icesee_kwargs["sig_obs"]
         # for i, sig in enumerate(sig_obs):
         #     a = i * hdim
         #     b = a + hdim
@@ -415,15 +419,15 @@ class UtilsFunctions:
         key_is_bed = {k: (str(k).lower() in bed_aliases) for k in vec_inputs}
 
         # ---------------- build STATIC bed mask (tracks/spacing/user mask) ----------------
-        Lx = kwargs.get("Lx", self.params.get("Lx", None))
-        Ly = kwargs.get("Ly", self.params.get("Ly", None))
-        model_name = kwargs.get("model_name", None)
+        Lx = icesee_kwargs.get("Lx", self.icesee_kwargs.get("Lx", None))
+        Ly = icesee_kwargs.get("Ly", self.icesee_kwargs.get("Ly", None))
+        model_name = icesee_kwargs.get("model_name", None)
 
-        bed_stride_km = kwargs.get("bed_obs_stride", None)
-        bed_track_half_width_m = kwargs.get("bed_obs_track_half_width_m", 1000.0)
-        bed_spacing_pts = kwargs.get("bed_obs_spacing", None)
-        bed_indices_user = kwargs.get("bed_obs_indices", None)
-        bed_mask_user = kwargs.get("bed_obs_mask", None)
+        bed_stride_km = icesee_kwargs.get("bed_obs_stride", None)
+        bed_track_half_width_m = icesee_kwargs.get("bed_obs_track_half_width_m", 1000.0)
+        bed_spacing_pts = icesee_kwargs.get("bed_obs_spacing", None)
+        bed_indices_user = icesee_kwargs.get("bed_obs_indices", None)
+        bed_mask_user = icesee_kwargs.get("bed_obs_mask", None)
 
         bed_mask_map_static = {}
         bed_mask_map_cols = {}
@@ -468,8 +472,8 @@ class UtilsFunctions:
                 import re, h5py
 
                 if re.match(r"(?i)^issm$", str(model_name)):
-                    icesee_path = kwargs.get("icesee_path")
-                    data_path = kwargs.get("data_path")
+                    icesee_path = icesee_kwargs.get("icesee_path")
+                    data_path = icesee_kwargs.get("data_path")
                     mesh_file = f"{icesee_path}/{data_path}/mesh_idxy_0.h5"
                     with h5py.File(mesh_file, "r") as f:
                         x_param_m = np.asarray(
@@ -488,7 +492,7 @@ class UtilsFunctions:
             bed_mask_map_cols[k] = np.zeros((n_bed, m_obs), dtype=bool)
 
         # ---------------- build observations per obs column ----------------
-        obs_set = set(kwargs.get("observed_vars", []) + kwargs.get("observed_params", []))
+        obs_set = set(icesee_kwargs.get("observed_vars", []) + icesee_kwargs.get("observed_params", []))
         for ii, key in enumerate(vec_inputs):
             if key not in obs_set:
                 continue
@@ -502,10 +506,10 @@ class UtilsFunctions:
         thickness_key = None
         for key in indx_map.keys():
             if key.lower() in thickness_candidates:
-                thickness_key = key  
+                thickness_key = key
                 break
 
-        di = float(kwargs.get("di", 0.8930))
+        di = float(icesee_kwargs.get("di", 0.8930))
 
         for km, k_model in enumerate(ind_m):
             # Non-bed observations
@@ -572,16 +576,16 @@ class UtilsFunctions:
                         )
 
         # ---------------- publish masks + mapping so H_matrix can match ----------------
-        kwargs["obs_t"] = obs_t_req
-        kwargs["ind_m"] = ind_m
-        kwargs["m_obs"] = m_obs
-        kwargs["obs_model_to_col"] = obs_model_to_col
+        icesee_kwargs["obs_t"] = obs_t_req
+        icesee_kwargs["ind_m"] = ind_m
+        icesee_kwargs["m_obs"] = m_obs
+        icesee_kwargs["obs_model_to_col"] = obs_model_to_col
 
-        kwargs["bed_snap_cols"] = bed_snap_cols
-        kwargs["bed_mask_map_static"] = bed_mask_map_static
-        kwargs["bed_mask_map_cols"] = bed_mask_map_cols
+        icesee_kwargs["bed_snap_cols"] = bed_snap_cols
+        icesee_kwargs["bed_mask_map_static"] = bed_mask_map_static
+        icesee_kwargs["bed_mask_map_cols"] = bed_mask_map_cols
 
-        self.model_kwargs.update(kwargs)
+        self.icesee_kwargs.update(icesee_kwargs)
 
         bed_masks = {"static": bed_mask_map_static, "cols": bed_mask_map_cols}
-        return hu_obs, error_R.T, bed_masks, kwargs
+        return hu_obs, error_R.T, bed_masks, icesee_kwargs

@@ -12,7 +12,7 @@ def register_coord_provider(model_name, fn):
     _COORD_PROVIDERS[str(model_name).lower()] = fn
 
 
-def get_mesh_coordinates(model_kwargs):
+def get_mesh_coordinates(icesee_kwargs):
     """Return and cache physical coordinates for the current model nodes.
 
     Providers may return one- or multi-dimensional coordinates, but their
@@ -20,10 +20,10 @@ def get_mesh_coordinates(model_kwargs):
     failed/early lookup is deliberately not cached so that file-backed model
     providers (for example ISSM) can be retried after model initialization.
     """
-    if model_kwargs.get("mesh_coords") is not None:
-        return model_kwargs["mesh_coords"]
+    if icesee_kwargs.get("mesh_coords") is not None:
+        return icesee_kwargs["mesh_coords"]
 
-    model_name = str(model_kwargs.get("model_name", "")).lower()
+    model_name = str(icesee_kwargs.get("model_name", "")).lower()
     provider = _COORD_PROVIDERS.get(model_name)
     coords = None
 
@@ -34,7 +34,7 @@ def get_mesh_coordinates(model_kwargs):
         )
     else:
         try:
-            coords = provider(model_kwargs)
+            coords = provider(icesee_kwargs)
         except Exception as exc:
             print(
                 f"[ICESEE][coordinates] Coordinate provider for "
@@ -55,11 +55,11 @@ def get_mesh_coordinates(model_kwargs):
     if not np.all(np.isfinite(coords)):
         raise ValueError("Mesh coordinates contain non-finite values")
 
-    model_kwargs["mesh_coords"] = coords
+    icesee_kwargs["mesh_coords"] = coords
     return coords
 
 
-def prepare_random_field_coordinates(model_kwargs, expected_nodes=None):
+def prepare_random_field_coordinates(icesee_kwargs, expected_nodes=None):
     """Pack registered mesh coordinates for graph random-field generation.
 
     This is called after model initialization and before ensemble
@@ -69,9 +69,9 @@ def prepare_random_field_coordinates(model_kwargs, expected_nodes=None):
     so a missing provider or incompatible node count is reported immediately.
     """
     method = str(
-        model_kwargs.get(
+        icesee_kwargs.get(
             "random_field_method",
-            model_kwargs.get("enkf_field_method", "fft"),
+            icesee_kwargs.get("enkf_field_method", "fft"),
         )
     ).strip().lower()
     if method not in {"fft", "graph"}:
@@ -81,13 +81,13 @@ def prepare_random_field_coordinates(model_kwargs, expected_nodes=None):
 
     # Store the normalized spelling so every downstream noise-generation path
     # (initial ensemble, forecast noise, and stochastic observations) agrees.
-    model_kwargs["random_field_method"] = method
+    icesee_kwargs["random_field_method"] = method
     if method == "fft":
         return None
 
-    coords = get_mesh_coordinates(model_kwargs)
+    coords = get_mesh_coordinates(icesee_kwargs)
     if coords is None:
-        model_name = model_kwargs.get("model_name", "model")
+        model_name = icesee_kwargs.get("model_name", "model")
         raise ValueError(
             f"random_field_method='graph' requires registered node coordinates "
             f"for model {model_name!r}"
@@ -98,8 +98,8 @@ def prepare_random_field_coordinates(model_kwargs, expected_nodes=None):
             f"dimension: {coords.shape[0]} != {int(expected_nodes)}"
         )
 
-    model_kwargs["mesh_coords"] = coords
-    if model_kwargs.get("verbose", False):
+    icesee_kwargs["mesh_coords"] = coords
+    if icesee_kwargs.get("verbose", False):
         print(
             f"[ICESEE] graph random fields use {coords.shape[0]} registered "
             f"mesh coordinates ({coords.shape[1]}D)"
@@ -138,9 +138,9 @@ def restore_frozen_analysis_vars(
     return analysis_vec
 
 
-def active_observation_std(model_kwargs, k_obs, obs_indices):
+def active_observation_std(icesee_kwargs, k_obs, obs_indices):
     """Return configured standard deviations for active observation rows."""
-    error_r = model_kwargs.get("error_R")
+    error_r = icesee_kwargs.get("error_R")
     if error_r is None:
         raise ValueError(
             "enkf_observation_error_mode='stochastic_R' requires error_R"
@@ -269,34 +269,34 @@ def compute_local_patches_X5(
     Dprime,
     Nens,
     obs_indices,
-    model_kwargs,
+    icesee_kwargs,
 ):
     """Compute exact-grouped local transforms for patch-based analysis."""
-    if not model_kwargs.get("local_analysis", False):
+    if not icesee_kwargs.get("local_analysis", False):
         return {}
 
-    requested = model_kwargs.get("localized_vars", [])
+    requested = icesee_kwargs.get("localized_vars", [])
     target_vars = (
         [value for value in requested if value in vec_inputs]
         if requested
         else list(vec_inputs)
     )
 
-    node_coords = get_mesh_coordinates(model_kwargs)
+    node_coords = get_mesh_coordinates(icesee_kwargs)
     if node_coords is None:
         return {}
 
     obs_coords = build_obs_coords(obs_indices, node_coords, vec_inputs, hdim)
     if obs_coords.shape[0] == 0:
         _log_once(
-            model_kwargs,
+            icesee_kwargs,
             "no_obs",
             "[ICESEE][local_analysis] No active observations this cycle; "
             "skipping.",
         )
         return {}
 
-    manual_radius = model_kwargs.get("localization_radius")
+    manual_radius = icesee_kwargs.get("localization_radius")
     obs_tree = cKDTree(obs_coords)
     results = {}
 
@@ -315,7 +315,7 @@ def compute_local_patches_X5(
         else:
             radius = estimate_adaptive_radius(
                 obs_coords,
-                target_count=model_kwargs.get("target_local_obs_count"),
+                target_count=icesee_kwargs.get("target_local_obs_count"),
             )
             mode_string = f"radius={radius:.2f} (auto, density-based)"
 
@@ -343,7 +343,7 @@ def compute_local_patches_X5(
 
         group_count = len(results[key])
         _log_once(
-            model_kwargs,
+            icesee_kwargs,
             f"groups_{key}",
             f"[ICESEE][local_analysis] '{key}': {group_count} unique "
             f"local-observation groups ({mode_string})",
@@ -353,11 +353,11 @@ def compute_local_patches_X5(
     return results
 
 
-def _log_once(model_kwargs, tag, message, value=None):
+def _log_once(icesee_kwargs, tag, message, value=None):
     """Write a diagnostic only on first use or a meaningful value change."""
     from tqdm import tqdm
 
-    cache = model_kwargs.setdefault("_log_once_cache", {})
+    cache = icesee_kwargs.setdefault("_log_once_cache", {})
     previous = cache.get(tag)
     should_print = previous is None
     if not should_print and value is not None:
@@ -365,7 +365,7 @@ def _log_once(model_kwargs, tag, message, value=None):
         should_print = abs(value - previous) / denominator > 0.10
 
     if should_print:
-        communicator = model_kwargs.get("comm_world")
+        communicator = icesee_kwargs.get("comm_world")
         rank = communicator.Get_rank() if communicator is not None else 0
         if rank == 0:
             tqdm.write(message)

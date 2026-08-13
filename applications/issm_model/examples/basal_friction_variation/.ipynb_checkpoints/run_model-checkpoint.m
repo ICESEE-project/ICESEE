@@ -4,20 +4,20 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
     % Inputs: data_fname (output file name), ens_id (ensemble ID), rank, nprocs (MPI settings),
     %         k (time step index), dt (time step), tinitial, tfinal (time bounds)
 
-    % Read kwargs from .mat file
-    model_kwargs = sprintf('model_kwargs_%d.mat', ens_id);
-    kwargs       = load(model_kwargs);
-    cluster_name = char(kwargs.cluster_name);
-    steps        = double(kwargs.steps);
-    icesee_path  = char(kwargs.icesee_path);
-    data_path    = char(kwargs.data_path);
-    devmode      = logical(kwargs.devmode);
+    % Read icesee_kwargs from .mat file
+    icesee_kwargs_file = sprintf('icesee_kwargs_%d.mat', ens_id);
+    icesee_kwargs       = load(icesee_kwargs_file);
+    cluster_name = char(icesee_kwargs.cluster_name);
+    steps        = double(icesee_kwargs.steps);
+    icesee_path  = char(icesee_kwargs.icesee_path);
+    data_path    = char(icesee_kwargs.data_path);
+    devmode      = logical(icesee_kwargs.devmode);
 
-    deepwater_melting_rate = double(kwargs.deepwater_melting_rate);
-    smb = double(kwargs.smb);
-    mean_friction  = double(kwargs.mean_friction);
+    deepwater_melting_rate = double(icesee_kwargs.deepwater_melting_rate);
+    smb = double(icesee_kwargs.smb);
+    mean_friction  = double(icesee_kwargs.mean_friction);
 
-    reference_data = char(kwargs.reference_data);
+    reference_data = char(icesee_kwargs.reference_data);
     
     wrong_reference_data = 'wrong_reference_data.mat';
 

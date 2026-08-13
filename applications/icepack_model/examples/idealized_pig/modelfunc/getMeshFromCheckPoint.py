@@ -9,7 +9,7 @@ import firedrake
 import warnings
 
 
-def getMeshFromCheckPoint(checkFile,kwargs):
+def getMeshFromCheckPoint(checkFile,icesee_kwargs):
     '''
     If a new checkpoint file, read the mesh from there.
     '''
@@ -17,7 +17,7 @@ def getMeshFromCheckPoint(checkFile,kwargs):
         checkFile = f'{checkFile}.h5'
     # print(checkFile)
 
-    with firedrake.CheckpointFile(checkFile, 'r',comm=kwargs["comm"]) as chk:
+    with firedrake.CheckpointFile(checkFile, 'r',comm=icesee_kwargs["comm"]) as chk:
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', category=DeprecationWarning)
             try:

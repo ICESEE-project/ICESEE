@@ -2,7 +2,7 @@
 # Implicit 1D flowline model (Jax version)
 # @author: Brian Kyanjo
 # @date: 2024-09-24
-# @description: This script includes the flowline model using JAX, 
+# @description: This script includes the flowline model using JAX,
 #               - Jacobian computation using JAX
 #               - Implicit solver using JAX
 # =============================================================================
@@ -21,53 +21,53 @@ from ICESEE.config._utility_imports import icesee_get_index
 jax.config.update("jax_enable_x64", True) # Set the precision in JAX to use float64
 
 # Bed topography function --------------------------------------------------------------
-def bed(x, **kwargs):
+def bed(x, **icesee_kwargs):
     """
     Bed topography function, which computes the bed shape based on input x and model parameters.
-    
+
     Parameters:
     x (jax.numpy array): Input spatial grid points.
-    
+
     Returns:
     jax.numpy array: The bed topography values at each x location.
     """
     import jax.numpy as jnp
-    
+
     # Ensure parameters are floats
-    sillamp    = kwargs['sillamp']
-    sillsmooth = kwargs['sillsmooth']
-    xsill      = kwargs['xsill']
+    sillamp    = icesee_kwargs['sillamp']
+    sillsmooth = icesee_kwargs['sillsmooth']
+    xsill      = icesee_kwargs['xsill']
 
     # Compute the bed topography
     b = sillamp * (-2 * jnp.arccos((1 - sillsmooth) * jnp.sin(jnp.pi * x / (2 * xsill))) / jnp.pi - 1)
     return b
 
 # Implicit flowline model function (Jax version) --------------------------------------------------------------
-def flowline(varin, varin_old, **kwargs):
+def flowline(varin, varin_old, **icesee_kwargs):
     # Unpack grid
-    NX          = kwargs["NX"]
-    N1          = kwargs["N1"]
-    dt          = kwargs["dt"] / kwargs["tscale"]
-    ds          = kwargs["grid"]["dsigma"]
-    sigma       = kwargs["grid"]["sigma"]
-    sigma_elem  = kwargs["grid"]["sigma_elem"]
+    NX          = icesee_kwargs["NX"]
+    N1          = icesee_kwargs["N1"]
+    dt          = icesee_kwargs["dt"] / icesee_kwargs["tscale"]
+    ds          = icesee_kwargs["grid"]["dsigma"]
+    sigma       = icesee_kwargs["grid"]["sigma"]
+    sigma_elem  = icesee_kwargs["grid"]["sigma_elem"]
 
     # Unpack parameters
-    tcurrent    = kwargs["tcurrent"]
-    xscale      = kwargs["xscale"]
-    hscale      = kwargs["hscale"]
-    lambd       = kwargs["lambda"]
-    m           = kwargs["m"]
-    n           = kwargs["n"]
-    a           = kwargs["accum"] / kwargs["ascale"]
-    eps         = kwargs["eps"]
-    transient   = kwargs["transient"]
+    tcurrent    = icesee_kwargs["tcurrent"]
+    xscale      = icesee_kwargs["xscale"]
+    hscale      = icesee_kwargs["hscale"]
+    lambd       = icesee_kwargs["lambda"]
+    m           = icesee_kwargs["m"]
+    n           = icesee_kwargs["n"]
+    a           = icesee_kwargs["accum"] / icesee_kwargs["ascale"]
+    eps         = icesee_kwargs["eps"]
+    transient   = icesee_kwargs["transient"]
 
     # put a guard on mdot, it could be a scalar or an array
-    if isinstance(kwargs["facemelt"], (int, float)):
-        mdot = kwargs["facemelt"] / kwargs["uscale"]
+    if isinstance(icesee_kwargs["facemelt"], (int, float)):
+        mdot = icesee_kwargs["facemelt"] / icesee_kwargs["uscale"]
     else:
-        mdot   = kwargs["facemelt"][tcurrent]/kwargs["uscale"]
+        mdot   = icesee_kwargs["facemelt"][tcurrent]/icesee_kwargs["uscale"]
     # Unpack variables
     h = varin[0:NX]
     u = varin[NX:2*NX]
@@ -77,17 +77,17 @@ def flowline(varin, varin_old, **kwargs):
     xg_old = varin_old[2*NX]
 
 
-    # Calculate bed 
-    hf  = -bed(xg * xscale, **kwargs) / (hscale * (1 - lambd))
-    hfm = -bed(xg * sigma_elem[-1] * xscale, **kwargs) / (hscale * (1 - lambd))
-    b   = -bed(xg * sigma * xscale, **kwargs) / hscale
+    # Calculate bed
+    hf  = -bed(xg * xscale, **icesee_kwargs) / (hscale * (1 - lambd))
+    hfm = -bed(xg * sigma_elem[-1] * xscale, **icesee_kwargs) / (hscale * (1 - lambd))
+    b   = -bed(xg * sigma * xscale, **icesee_kwargs) / hscale
 
     # Initialize the residual vector
     F = jnp.zeros(2 * NX + 1, dtype=jnp.float64)
 
-    # Calculate thickness functions        
+    # Calculate thickness functions
     F = F.at[0].set(transient * (h[0] - h_old[0]) / dt + (2 * h[0] * u[0]) / (ds[0] * xg)  - a)
-    
+
     F = F.at[1].set(
         transient * (h[1] - h_old[1]) / dt
         - transient * sigma_elem[1] * (xg - xg_old) * (h[2] - h[0]) / (2 * dt * ds[1] * xg)
@@ -112,7 +112,7 @@ def flowline(varin, varin_old, **kwargs):
     + (h[NX-1] * (u[NX-1] + mdot * hf / h[NX-1] + u[NX-2]) - h[NX-2] * (u[NX-2] + u[NX-3])) / (2 * xg * ds[NX-2])
     - a
     )
-    
+
     # Calculate velocity functions
     F = F.at[NX].set(
         ((4 * eps / (xg * ds[0]) ** ((1 / n) + 1)) * (h[1] * (u[1] - u[0]) * abs(u[1] - u[0]) ** ((1 / n) - 1)
@@ -141,14 +141,14 @@ def flowline(varin, varin_old, **kwargs):
     return F
 
 # Calculate the Jacobian of the flowline model function --------------------------------------------------------------
-def Jac_calc(huxg_old, **kwargs):
+def Jac_calc(huxg_old, **icesee_kwargs):
     """
     Use automatic differentiation to calculate Jacobian for nonlinear solver.
     """
 
     def f(varin):
         # Call the flowline function with current arguments
-        return flowline(varin, huxg_old, **kwargs)
+        return flowline(varin, huxg_old, **icesee_kwargs)
 
     # Create a function that calculates the Jacobian using JAX
     def Jf(varin):
@@ -158,20 +158,20 @@ def Jac_calc(huxg_old, **kwargs):
     return Jf
 
 # initialize_model function --------------------------------------------------------------
-def initialize_model(**kwargs):
+def initialize_model(**icesee_kwargs):
     """
     Initialize the flowline model by solving for the initial state.
     """
-    xg = 300e3/kwargs['xscale']
-    hf = (-bed(xg * kwargs['xscale'], **kwargs)/kwargs["hscale"])/(1 -kwargs["lambda"])
-    h = 1 - (1-hf)*kwargs['grid']['sigma']
-    u = 1*(kwargs['grid']["sigma_elem"]**(1/3)) + 1e-3
+    xg = 300e3/icesee_kwargs['xscale']
+    hf = (-bed(xg * icesee_kwargs['xscale'], **icesee_kwargs)/icesee_kwargs["hscale"])/(1 -icesee_kwargs["lambda"])
+    h = 1 - (1-hf)*icesee_kwargs['grid']['sigma']
+    u = 1*(icesee_kwargs['grid']["sigma_elem"]**(1/3)) + 1e-3
     huxg_old = np.concatenate((h, u, [xg]))
 
     # print(f"Initializing the flowline model h: {h}, u: {u}, xg: {xg}, hf: {hf}")
 
-    Jf = Jac_calc(huxg_old, **kwargs)
-    flowline_func = lambda varin: flowline(varin, huxg_old, **kwargs)
+    Jf = Jac_calc(huxg_old, **icesee_kwargs)
+    flowline_func = lambda varin: flowline(varin, huxg_old, **icesee_kwargs)
     solve_result = root(
         flowline_func,
         huxg_old,
@@ -183,33 +183,33 @@ def initialize_model(**kwargs):
     return huxg_out0
 
 # Function that runs the flowline model function --------------------------------------------------------------
-def run_model(ensemble, **kwargs):
+def run_model(ensemble, **icesee_kwargs):
     """
     Run the implicit flowline model over nt time steps.
     """
 
     varin = ensemble.copy()
     last_entry = varin[-1]
-    
+
     # Jacobian calculation
-    Jf = Jac_calc(ensemble, **kwargs)
+    Jf = Jac_calc(ensemble, **icesee_kwargs)
 
     # Solve the system of nonlinear equations
     solve_result = root(
-        lambda varin: flowline(varin, ensemble, **kwargs), 
-        ensemble, 
-        jac=Jf, 
+        lambda varin: flowline(varin, ensemble, **icesee_kwargs),
+        ensemble,
+        jac=Jf,
         method='hybr',  # Hybr is a commonly used solver like nlsolve
         options={'maxiter': 100}
     )
-    
+
     # Update the old solution
     ensemble = solve_result.x
-    vecs, indx_map, dim_per_proc = icesee_get_index(**kwargs)
+    vecs, indx_map, dim_per_proc = icesee_get_index(**icesee_kwargs)
     # update with last entry
     ensemble[-1] = last_entry
     updated_state = {}
-    for key in kwargs['vec_inputs']:
+    for key in icesee_kwargs['vec_inputs']:
         updated_state[key] = ensemble[indx_map[key]]
     return updated_state
 

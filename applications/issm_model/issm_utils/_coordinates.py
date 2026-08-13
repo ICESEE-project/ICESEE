@@ -6,10 +6,10 @@ import h5py
 import numpy as np
 
 
-def get_issm_node_coordinates(model_kwargs):
+def get_issm_node_coordinates(icesee_kwargs):
     """Load physical ISSM nodal coordinates in state-vector ordering."""
-    data_path = model_kwargs.get("data_path", "_modelrun_datasets")
-    icesee_path = model_kwargs.get("icesee_path", os.getcwd())
+    data_path = icesee_kwargs.get("data_path", "_modelrun_datasets")
+    icesee_path = icesee_kwargs.get("icesee_path", os.getcwd())
     mesh_path = os.path.join(icesee_path, data_path, "mesh_idxy_0.h5")
 
     with h5py.File(mesh_path, "r") as mesh_file:

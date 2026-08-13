@@ -11,7 +11,7 @@ def inputMeltParams(meltParams):
     Parameters
     ----------
     meltParams : str
-        yaml file with melt params for various models
+        yaml file with melt icesee_kwargs for various models
     """
     if not os.path.exists(meltParams):
         myerror(f'inputMeltParams: meltParams file ({meltParams}) not found.')
@@ -22,7 +22,7 @@ def inputMeltParams(meltParams):
 
 def piecewiseWithDepth(h, floating, meltParams, Q, *argv, returnScale=False,
                        meltRegions=None,
-                       **kwargs):
+                       **icesee_kwargs):
     """ Melt function that is described piecewise by set of polynomials
     Melt is in units of m/yr w.e.
     Parameters
@@ -85,8 +85,8 @@ def piecewiseWithDepth(h, floating, meltParams, Q, *argv, returnScale=False,
             # Get the mask, which is just 1 if no region
             regionScale = meltRegions[regionKey]
             trend = 0.
-            if 'trend' in kwargs.keys():
-                trend = kwargs['trend']
+            if 'trend' in icesee_kwargs.keys():
+                trend = icesee_kwargs['trend']
             # Integrate the initial melt for the local region
             intMelt = firedrake.assemble(regionScale * melt1 * floating *
                                          firedrake.dx)

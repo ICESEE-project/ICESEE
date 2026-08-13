@@ -58,7 +58,7 @@ class FlagVisitor(ast.NodeVisitor):
 
     def _subscript_key(self, subscript_node):
         """
-        Extract key from params['key'] in a version-safe way.
+        Extract key from icesee_kwargs['key'] in a version-safe way.
         Returns the literal key if available; otherwise 'Computed'.
         """
         slc = subscript_node.slice  # py3.9+ uses expression directly here
@@ -148,11 +148,11 @@ class FlagVisitor(ast.NodeVisitor):
                     "line": getattr(node, "lineno", None),
                 })
 
-        # Dictionary assignments: params['key'] = value
+        # Dictionary assignments: icesee_kwargs['key'] = value
         for tgt in node.targets:
             if isinstance(tgt, ast.Subscript) and isinstance(tgt.value, ast.Name):
                 dict_name = tgt.value.id
-                if dict_name in ["params", "kwargs", "execution_mode"]:
+                if dict_name in ["icesee_kwargs", "execution_mode"]:
                     key = self._subscript_key(tgt)
                     default, flag_type = self._infer_type_and_default(node.value)
 
@@ -234,7 +234,7 @@ class FlagVisitor(ast.NodeVisitor):
         # YAML parameters from .get() calls
         elif isinstance(node.func, ast.Attribute) and node.func.attr == "get":
             if isinstance(node.func.value, ast.Name) and node.func.value.id in [
-                "enkf_params", "modeling_params", "physical_params", "params", "kwargs"
+                "_enkf_section", "_modeling_section", "_physical_section", "icesee_kwargs"
             ]:
                 if len(node.args) >= 1 and isinstance(node.args[0], ast.Constant):
                     key = node.args[0].value
@@ -255,11 +255,11 @@ class FlagVisitor(ast.NodeVisitor):
                         "line": getattr(node, "lineno", None),
                     })
 
-        # Dictionary updates: kwargs.update({...})
+        # Dictionary updates: icesee_kwargs.update({...})
         if isinstance(node.func, ast.Attribute) and node.func.attr == "update":
             if isinstance(node.func.value, ast.Name):
                 dict_name = node.func.value.id
-                if dict_name in ["params", "kwargs"]:
+                if dict_name == "icesee_kwargs":
                     if len(node.args) == 1 and isinstance(node.args[0], ast.Dict):
                         d = node.args[0]
                         for k_node, v_node in zip(d.keys, d.values):
@@ -278,7 +278,7 @@ class FlagVisitor(ast.NodeVisitor):
 
                     elif len(node.args) == 1 and isinstance(node.args[0], ast.Name):
                         dict_ref = node.args[0].id
-                        if dict_ref in ["physical_params", "modeling_params", "enkf_params"]:
+                        if dict_ref in ["_physical_section", "_modeling_section", "_enkf_section"]:
                             self.dict_params.append({
                                 "name": f"{dict_ref}_keys",
                                 "description": self._generate_description(f"{dict_ref}_keys", "Dictionary", comment),
