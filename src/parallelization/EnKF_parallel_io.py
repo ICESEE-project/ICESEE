@@ -1300,6 +1300,13 @@ class EnKF_fully_parallel_IO:
                 bed_time_to_col[bed_time] = j
             bed_snap_cols = sorted(set(bed_snap_cols))
 
+        # The snapshot columns are analysis metadata, not a writer-local
+        # implementation detail.  Persist them in both dictionaries before
+        # rank 0 writes the observations so every later analysis/restart path
+        # sees the same gate schedule as execution mode 1.
+        icesee_kwargs["bed_snap_cols"] = list(bed_snap_cols)
+        self.icesee_kwargs["bed_snap_cols"] = list(bed_snap_cols)
+
         if rank == 0:
             try:
                 print("[ICESEE] Generating synthetic observations ...")
@@ -1455,6 +1462,7 @@ class EnKF_fully_parallel_IO:
                     for name in (
                         "hu_obs", "error_R", "hu_obs_compact", "obs_indices",
                         "obs_std", "obs_active", "obs_index", "obs_t", "obs_max_time",
+                        "bed_snap_cols",
                     ):
                         if name in f:
                             del f[name]
@@ -1527,6 +1535,11 @@ class EnKF_fully_parallel_IO:
                     f.create_dataset("obs_std", data=obs_std, dtype="f8")
                     f.create_dataset("obs_index", data=ind_m, dtype="i8")
                     f.create_dataset("obs_t", data=obs_t, dtype="f8")
+                    f.create_dataset(
+                        "bed_snap_cols",
+                        data=np.asarray(bed_snap_cols, dtype=np.int64),
+                        dtype="i8",
+                    )
                     f.create_dataset("obs_max_time", data=np.asarray([obs_t[-1] if obs_t.size else 0.0]))
                     f.attrs["observation_storage"] = "compact_rows"
                     f.attrs["state_dimension"] = int(nd)

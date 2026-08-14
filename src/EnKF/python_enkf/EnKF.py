@@ -30,7 +30,7 @@ def worker(args):
 
 class EnsembleKalmanFilter:
     def __init__(self, Observation_vec=None, Cov_obs=None, Cov_model=None, \
-                 Observation_function=None, Obs_Jacobian=None, parameters=None, taper_matrix=None, parallel_manager = None, parallel_flag="serial"):
+                 Observation_function=None, Obs_Jacobian=None, parameters=None, taper_matrix=None, parallel_manager=None, analysis_backend="serial"):
         """
         Initializes the Analysis class for the Ensemble Kalman Filter (EnKF).
 
@@ -42,7 +42,8 @@ class EnsembleKalmanFilter:
         Cov_model: ndarray - Model covariance matrix (n x n).
         taper: ndarray - Covariance taper matrix (n x n).
         icesee_kwargs: dict - Dictionary containing parameters like "m_obs" and others.\
-        parallel_flag: str - Flag for parallelization (serial,MPI, Dask, Ray, Multiprocessing).
+        analysis_backend: low-level analysis backend (serial, MPI_model, Dask,
+            Ray, Multiprocessing). This is not the top-level execution mode.
         """
         self.Observation_vec        = Observation_vec
         self.Cov_obs                = Cov_obs
@@ -51,7 +52,7 @@ class EnsembleKalmanFilter:
         self.parameters             = parameters
         self.taper_matrix           = taper_matrix
         self.Observation_function   = Observation_function
-        self.parallel_flag          = parallel_flag
+        self.analysis_backend       = analysis_backend
         self.parallel_manager       = parallel_manager
 
     # Forecast step
@@ -62,7 +63,7 @@ class EnsembleKalmanFilter:
         Parameters:
             forecast_step_single: Callable - Function for the forecast step of each ensemble member.
             Q_err: ndarray - Process noise matrix.
-            parallel_flag: str - Flag for parallelization (serial,MPI, Dask, Ray, Multiprocessing).
+            analysis_backend: low-level compute backend selected by the runner.
             **icesee_kwargs: dict - Keyword arguments for the model.
 
         Returns:
@@ -80,7 +81,7 @@ class EnsembleKalmanFilter:
         noise         = icesee_kwargs.get("noise", None)
 
 
-        if re.match(r"\Aserial\Z", self.parallel_flag, re.IGNORECASE):
+        if re.match(r"\Aserial\Z", self.analysis_backend, re.IGNORECASE):
             # Serial forecast step
             nd, Nens = ensemble.shape # Get the number of ensemble members
             if icesee_kwargs["joint_estimation"] or icesee_kwargs["localization_flag"]:
@@ -125,7 +126,7 @@ class EnsembleKalmanFilter:
             return ensemble
 
         # Using divide and conquer parallelization with MPI for non-MPI application in forecast_step_single
-        elif re.match(r"\ANon-mpi-model\Z", self.parallel_flag, re.IGNORECASE):
+        elif re.match(r"\ANon-mpi-model\Z", self.analysis_backend, re.IGNORECASE):
             """
             Called only when the numerical model in the forecast step is not MPI parallelized
             """
@@ -164,7 +165,7 @@ class EnsembleKalmanFilter:
             return ensemble
 
         # Using MPI split communicator for MPI application in forecast_step_single
-        elif re.match(r"\AMPI_model\Z", self.parallel_flag, re.IGNORECASE):
+        elif re.match(r"\AMPI_model\Z", self.analysis_backend, re.IGNORECASE):
             """
             if the numerical model ran in the forecast step is MPI parallelized
             - use parallelization with MPI split communicator (COMM_model) from the icesee_mpi_parallelization
@@ -214,7 +215,7 @@ class EnsembleKalmanFilter:
 
 
         # Parallel forecast step using Multiprocessing
-        elif re.match(r"\AMultiprocessing\Z", self.parallel_flag, re.IGNORECASE):
+        elif re.match(r"\AMultiprocessing\Z", self.analysis_backend, re.IGNORECASE):
             """
             Run the forecast_step_single function Nens times simultaneously using multiprocessing.
             """
@@ -263,7 +264,7 @@ class EnsembleKalmanFilter:
 
 
         # Parallel forecast step using Dask
-        elif re.match(r"\ADask\Z", self.parallel_flag, re.IGNORECASE):
+        elif re.match(r"\ADask\Z", self.analysis_backend, re.IGNORECASE):
             import dask
             import dask.array as da
             from dask import compute, delayed
@@ -286,7 +287,7 @@ class EnsembleKalmanFilter:
             return ensemble
 
         # Parallel forecast step using Ray
-        elif re.match(r"\ARay\Z", self.parallel_flag, re.IGNORECASE):
+        elif re.match(r"\ARay\Z", self.analysis_backend, re.IGNORECASE):
             import ray
 
             nd, Nens = ensemble.shape
@@ -318,7 +319,7 @@ class EnsembleKalmanFilter:
 
 
         # python openmp parallelization
-        elif re.match(r"\APyomp\Z", self.parallel_flag, re.IGNORECASE):
+        elif re.match(r"\APyomp\Z", self.analysis_backend, re.IGNORECASE):
             # check if the Pyomp module is installed
             try:
                 # check python version: it should be [3.9 - 3.10]

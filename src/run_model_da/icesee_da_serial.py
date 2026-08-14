@@ -32,7 +32,7 @@ from ICESEE.src.EnKF._generate_synthetic_observations import generate_synthetic_
 from ICESEE.src.EnKF._generate_true_wrong_state import generate_true_wrong_state
 from ICESEE.src.EnKF._ensemble_initialization import ensemble_initialization
 from ICESEE.src.utils.localization import prepare_random_field_coordinates
-from ICESEE.src.utils.icesee_context import normalize_icesee_kwargs
+from ICESEE.src.utils.icesee_context import normalize_execution_mode, normalize_icesee_kwargs
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
                               generate_pseudo_random_field_1d, \
@@ -50,7 +50,8 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
     # --- unpack the data assimilation arguments
     filter_type       = icesee_kwargs.get("filter_type", "EnKF")      # filter type
     model             = icesee_kwargs.get("model_name",None)          # model name
-    parallel_flag     = icesee_kwargs.get("parallel_flag",False)      # parallel flag
+    normalize_execution_mode(icesee_kwargs, expected=0)
+    analysis_backend  = str(icesee_kwargs.get("analysis_backend", "serial"))
     Q_err             = icesee_kwargs.get("Q_err",None)               # process noise
     commandlinerun    = icesee_kwargs.get("commandlinerun",None)      # run through the terminal
     Lx, Ly            = icesee_kwargs.get("Lx",1.0), icesee_kwargs.get("Ly",1.0)
@@ -298,7 +299,7 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
 
 
     # --- Initialize the EnKF class ---
-    EnKFclass = EnKF(parameters=icesee_kwargs, parallel_manager=parallel_manager, parallel_flag = parallel_flag)
+    EnKFclass = EnKF(parameters=icesee_kwargs, parallel_manager=parallel_manager, analysis_backend=analysis_backend)
 
     # tqdm progress bar
     # Initialize progress bar on the root process
@@ -456,7 +457,6 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
             #                 Observation_function=UtilsFunctions(icesee_kwargs, ensemble_vec).Obs_fun, \
             #                 Obs_Jacobian=UtilsFunctions(icesee_kwargs, ensemble_vec).JObs_fun, \
             #                 parameters=  icesee_kwargs,\
-            #                 parallel_flag=   parallel_flag)
 
             # Create default functions object once
             utils = UtilsFunctions(
@@ -497,7 +497,7 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
                 Observation_function = Obs_fun,   # pass function handle
                 Obs_Jacobian         = JObs_fun,  # pass function handle
                 parameters           = icesee_kwargs,
-                parallel_flag        = parallel_flag
+                analysis_backend     = analysis_backend
             )
 
             # Compute the analysis ensemble

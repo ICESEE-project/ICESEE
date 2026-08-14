@@ -1,5 +1,6 @@
 import h5py
 import numpy as np
+import pytest
 
 from ICESEE.src.parallelization.EnKF_parallel_io import (
     EnKF_fully_parallel_IO,
@@ -29,12 +30,16 @@ from ICESEE.src.parallelization._mpi_ensemble_intialization import (
 from ICESEE.src.parallelization._parallel_i_o import (
     finalize_analysis_ensemble,
 )
+from ICESEE.src.parallelization._mpi_generate_synthetic_observations import (
+    synchronize_observation_schedule,
+)
 from ICESEE.src.utils.localization import (
     compute_X5_from_matrices,
     generated_observation_terms,
     iter_generated_observation_columns,
     stochastic_observation_terms,
 )
+from ICESEE.src.utils.icesee_context import normalize_execution_mode
 from ICESEE.src.utils.tools import _list_sorted_files, icesee_get_index
 
 
@@ -53,6 +58,51 @@ class _SingleRankComm:
 
     def allgather(self, value):
         return [value]
+
+
+def test_execution_mode_is_the_single_validated_runner_selector():
+    for mode in (0, 1, 2):
+        settings = {"execution_mode": mode}
+        assert normalize_execution_mode(settings) == mode
+        assert settings["execution_mode"] == mode
+
+    with pytest.raises(ValueError, match="execution_mode must be"):
+        normalize_execution_mode({"execution_mode": 3})
+
+
+def test_observation_schedule_restores_bed_snapshot_columns(tmp_path):
+    observation_file = tmp_path / "synthetic_obs.h5"
+    with h5py.File(observation_file, "w") as handle:
+        handle["obs_index"] = np.array([10, 20, 30], dtype=np.int64)
+        handle["obs_t"] = np.array([1.0, 2.0, 3.0])
+        handle["bed_snap_cols"] = np.array([1], dtype=np.int64)
+
+    settings = synchronize_observation_schedule({
+        "comm_world": _SingleRankComm(),
+        "synthetic_obs_file": str(observation_file),
+    })
+
+    assert settings["bed_snap_cols"] == [1]
+    assert settings["obs_model_to_col"] == {10: 0, 20: 1, 30: 2}
+
+
+def test_observation_schedule_recovers_legacy_bed_snapshot_columns(tmp_path):
+    observation_file = tmp_path / "synthetic_obs.h5"
+    with h5py.File(observation_file, "w") as handle:
+        handle["obs_index"] = np.array([10, 20, 30], dtype=np.int64)
+        handle["obs_t"] = np.array([1.0, 2.0, 3.0])
+
+    settings = synchronize_observation_schedule({
+        "comm_world": _SingleRankComm(),
+        "synthetic_obs_file": str(observation_file),
+        "bed_obs_snapshot": [2.0, 8.0],
+        "dt": 0.1,
+        "t": np.arange(0.0, 3.1, 0.1),
+    })
+
+    # The in-range snapshot is recovered, while year 8 must not be silently
+    # mapped to the final observation column.
+    assert settings["bed_snap_cols"] == [1]
 
 
 def test_hdf5_compression_configuration_normalizes_yaml_none():

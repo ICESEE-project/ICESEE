@@ -41,7 +41,7 @@ from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_field
                               generate_pseudo_random_field_1d, \
                               generate_pseudo_random_field_2D, \
                               generate_enkf_field
-from ICESEE.src.utils.icesee_context import normalize_icesee_kwargs
+from ICESEE.src.utils.icesee_context import normalize_execution_mode, normalize_icesee_kwargs
 from ICESEE.src.utils.localization import prepare_random_field_coordinates
 
 # --- call the ICESEE mpi parallel manager ---
@@ -61,7 +61,7 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
     # --- unpack the data assimilation arguments
     filter_type       = icesee_kwargs.get("filter_type", "EnKF")      # filter type
     model             = icesee_kwargs.get("model_name",None)          # model name
-    parallel_flag     = icesee_kwargs.get("parallel_flag",False)      # parallel flag
+    execution_mode    = normalize_execution_mode(icesee_kwargs, expected=2)
     Q_err             = icesee_kwargs.get("Q_err",None)               # process noise
     commandlinerun    = icesee_kwargs.get("commandlinerun",None)      # run through the terminal
     Lx, Ly            = icesee_kwargs.get("Lx",1.0), icesee_kwargs.get("Ly",1.0)
@@ -555,7 +555,7 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
             icesee_kwargs.update({"k": k, "km":km, "alpha": alpha, "rho": rho, "tau": tau, "dt": dt,"n": n})
             icesee_kwargs.update({"generate_enkf_field": generate_enkf_field}) #save the function to generate the enkf field
 
-            if re.match(r"\AMPI_model\Z", parallel_flag, re.IGNORECASE):
+            if execution_mode == 2:
                 # -- time forecast step ---
                 _time_forecast_step = MPI.Wtime()
 

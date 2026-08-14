@@ -89,7 +89,6 @@
 | `localized_vars` | list of variables to localize (only used if localization_flag is True) | list | [] | No | None | YAML |
 | `m_obs` | Parameter for m obs in dictionary | Unknown | Computed(num_observations) | No | None | Dictionary |
 | `mesh_coordinate_scale_to_m` | YAML configuration parameter for mesh coordinate scale to m | float | 1.0 | No | None | YAML |
-| `mode` | Parameter for mode in dictionary | Unknown | Computed(execution_mode) | No | None | Dictionary |
 | `model_name` | --- Ensemble Parameters --- | Unknown | Computed | No | None | Dictionary |
 | `model_nprocs` | Parameter for model nprocs in dictionary | Unknown | Computed | No | None | Dictionary |
 | `modeling_params` | Parameter for modeling params in dictionary | Unknown | Computed(modeling_params) | No | None | Dictionary |
@@ -108,7 +107,6 @@
 | `observations_available` | --- Observations Parameters --- | bool | False | No | None | YAML |
 | `observed_params` | YAML configuration parameter for observed params | list | [] | No | None | YAML |
 | `observed_vars` | YAML configuration parameter for observed vars | list | [] | No | None | YAML |
-| `parallel_flag` | Controls parallel flag behavior in script logic | Unknown | Computed | No | None | Dictionary |
 | `param_ens_spread` | YAML configuration parameter for param ens spread | list | [] | No | None | YAML |
 | `param_inflation_factor` | --- Ensemble Parameters --- | Unknown | Computed | No | None | Dictionary |
 | `parameter_estimation` | YAML configuration parameter for parameter estimation | bool | False | No | None | YAML |

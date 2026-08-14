@@ -47,7 +47,6 @@ enkf-parameters:
   # enkf model parameters
   model_name: "lorenz"         # name of the model
   filter_type: "EnKF"           # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
-  parallel_flag: "MPI_Model"             # parallel flag: Serial, MPI, MPI_model
   execution_mode: 2                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
   commandlinerun: "True"         # command line run flag: True, False
   data_path: _modelrun_datasets

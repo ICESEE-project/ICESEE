@@ -64,13 +64,14 @@ if 'ipykernel' in sys.modules:
 # =============================================================================
 # --- Command Line Arguments ---
 if not flag_jupyter:
-    # Mapping for execution mode
-    execution_modes_str = {
+    # Mapping for the intra-mode ensemble distribution strategy.  This is
+    # intentionally separate from ``execution_mode`` (0/1/2 in YAML).
+    distribution_modes_str = {
         'default_run': 0,
         'sequential_run': 1,
         'even_distribution': 2
     }
-    execution_modes_int = {v: k for k, v in execution_modes_str.items()}  # Reverse mapping
+    distribution_modes_int = {v: k for k, v in distribution_modes_str.items()}
 
     # CL args.
     parser = ArgumentParser(description='ICESEE: Ice Sheet Parameter and State Estimation model')
@@ -84,7 +85,7 @@ if not flag_jupyter:
     parser.add_argument('--sequential_run', action='store_true', help='sequential run')
     parser.add_argument('--even_distribution', action='store_true', help='even distribution')
     parser.add_argument('--data_path', type=str, required=False, default=None, help='folder to save data for single or multiple runs')
-    parser.add_argument('execution_mode', type=int, choices=[0, 1, 2], nargs='?', help='Execution mode: 0=default_run, 1=sequential_run, 2=even_distribution')
+    parser.add_argument('distribution_mode', type=int, choices=[0, 1, 2], nargs='?', help='Ensemble distribution: 0=default, 1=sequential, 2=even')
     parser.add_argument('--model_nprocs', type=int, required = False, default=None, help='number of processors for the coupled model')
     parser.add_argument('-F', '--force-params', type=str, required=False, default='params.yaml', help='Path to YAML parameter file (default: params.yaml)')
 
@@ -95,13 +96,13 @@ if not flag_jupyter:
     if (args.default_run or args.sequential_run or args.even_distribution):
         run_flag = True
 
-    # Determine execution mode
+    # Determine the distribution strategy within the selected execution mode.
     selected_mode = 'default_run'  # Default mode
 
-    if args.execution_mode is not None:
-        selected_mode = execution_modes_int[args.execution_mode]  # Convert int to string
+    if args.distribution_mode is not None:
+        selected_mode = distribution_modes_int[args.distribution_mode]
     else:
-        for mode in execution_modes_str.keys():
+        for mode in distribution_modes_str.keys():
             if getattr(args, mode):
                 selected_mode = mode
                 break
@@ -175,7 +176,6 @@ if not flag_jupyter:
         'obs_max_time': int(float(_enkf_section.get('obs_max_time', 1))),
         'obs_start_time': float(_enkf_section.get('obs_start_time', 1)),
         'localization_flag': bool(_enkf_section.get('localization_flag', False)),
-        'parallel_flag': _enkf_section.get('parallel_flag', 'serial'),
         'n_modeltasks': int(_enkf_section.get('n_modeltasks', 1)),
         'execution_flag': int(_enkf_section.get('execution_flag', 0)),
         'model_name': _enkf_section.get('model_name', 'model'),
@@ -239,18 +239,6 @@ if not flag_jupyter:
         icesee_kwargs['execution_flag'] = 2
     else:
         icesee_kwargs['execution_flag'] = 0
-
-    # set run modes
-    execution_mode = {
-        'serial': 1 if icesee_kwargs.get('execution_mode', 0) == 0  else 0,
-        'partial': 1 if icesee_kwargs.get('execution_mode', 0) == 1  else 0,
-        'full': 1 if icesee_kwargs.get('execution_mode', 0) == 2  else 0,
-    }
-    # if none of the above modes is set to True set partial to True
-    if not any(execution_mode.values()):
-        execution_mode['partial'] = True
-
-    icesee_kwargs.update({'mode': execution_mode})
 
     # update for time t
     icesee_kwargs['t'] = np.linspace(0, int(float(_modeling_section['num_years'])), icesee_kwargs['nt'] + 1)
@@ -445,7 +433,6 @@ if not flag_jupyter:
         icesee_kwargs['number_obs_instants'] = num_observations
         icesee_kwargs['m_obs'] = num_observations
 
-    icesee_kwargs['parallel_flag']       = _enkf_section.get('parallel_flag', 'serial')
     icesee_kwargs['commandlinerun']      = _enkf_section.get('commandlinerun', False)
 
     #  check available parameters in the obseve_params list that need to be observed
@@ -456,24 +443,7 @@ if not flag_jupyter:
 
     icesee_kwargs['params_vec'] = params_vec
 
-    import re
-
-    # if re.match(r'\AMPI_model\Z', icesee_kwargs.get('parallel_flag'), re.IGNORECASE):
-    #     # --- Initialize MPI ---
-    #     from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
-
-    #     icesee_rank, icesee_size, icesee_comm, ens_id = ParallelManager().icesee_mpi_init(icesee_kwargs)
-
-    #     # check if _modelrun_datasets exists in path if not create one
-    #     _modelrun_datasets = icesee_kwargs.get('data_path',None)
-    #     if icesee_rank == 0 and not os.path.exists(_modelrun_datasets):
-    #         os.makedirs(_modelrun_datasets, exist_ok=True)
-
-    #     #  synchronize the processes
-    #     icesee_comm.Barrier()
-
-    # else:
-    if not re.match(r'\AMPI_model\Z', icesee_kwargs.get('parallel_flag'), re.IGNORECASE):
+    if int(icesee_kwargs['execution_mode']) == 0:
         icesee_rank = 0
         icesee_size = 1
         icesee_comm = None

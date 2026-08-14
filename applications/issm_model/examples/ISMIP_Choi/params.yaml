@@ -98,7 +98,6 @@ enkf-parameters:
 
   model_name: issm
   filter_type: EnKF
-  parallel_flag: MPI_model
   n_modeltasks: 4
   commandlinerun: "True"
   execution_flag: 0

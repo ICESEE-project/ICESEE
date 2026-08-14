@@ -195,9 +195,7 @@ class ParallelManager:
         # if self.model_nprocs is None: use model_nprocs = size_world or subcomm_size_min
         self.model_nprocs = icesee_kwargs.get("model_nprocs")
 
-        # remove data file
-        import re
-        if re.match(r"\AMPI_model\Z", icesee_kwargs.get('parallel_flag'), re.IGNORECASE):
+        if int(icesee_kwargs.get("execution_mode", 1)) in (1, 2):
             _modelrun_datasets = icesee_kwargs.get("data_path",None)
             if self.rank_world == 0 and not os.path.exists(_modelrun_datasets):
                  os.makedirs(_modelrun_datasets, exist_ok=True)

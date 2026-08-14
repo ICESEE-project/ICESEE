@@ -14,6 +14,25 @@ import numpy as np
 
 _LEGACY_CONTEXT_KEYS = ("params", "model_kwargs", "kwargs")
 
+EXECUTION_MODE_NAMES = {
+    0: "serial",
+    1: "partial parallel",
+    2: "fully parallel, bounded-memory",
+}
+
+
+def normalize_execution_mode(context, expected=None):
+    """Return and validate ICESEE's sole top-level execution selector."""
+    mode = int(context.get("execution_mode", 1))
+    if mode not in EXECUTION_MODE_NAMES:
+        raise ValueError("execution_mode must be 0 (serial), 1 (partial), or 2 (full)")
+    if expected is not None and mode != int(expected):
+        raise ValueError(
+            f"runner for execution_mode={expected} received execution_mode={mode}"
+        )
+    context["execution_mode"] = mode
+    return mode
+
 
 def normalize_icesee_kwargs(context=None, **values):
     """Return one flat ICESEE runtime context.

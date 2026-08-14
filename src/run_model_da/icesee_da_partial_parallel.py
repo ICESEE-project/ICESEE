@@ -36,7 +36,7 @@ from ICESEE.src.utils.localization import prepare_random_field_coordinates
 from ICESEE.src.utils.inference_plugin import (
     reset_inference_plugin_state,
 )
-from ICESEE.src.utils.icesee_context import normalize_icesee_kwargs
+from ICESEE.src.utils.icesee_context import normalize_execution_mode, normalize_icesee_kwargs
 
 # ======================== Run model with EnKF ========================
 def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
@@ -47,7 +47,7 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
     # --- unpack the data assimilation arguments
     filter_type       = icesee_kwargs.get("filter_type", "EnKF")      # filter type
     model             = icesee_kwargs.get("model_name",None)          # model name
-    parallel_flag     = icesee_kwargs.get("parallel_flag",False)      # parallel flag
+    execution_mode    = normalize_execution_mode(icesee_kwargs, expected=1)
     Q_err             = icesee_kwargs.get("Q_err",None)               # process noise
     commandlinerun    = icesee_kwargs.get("commandlinerun",None)      # run through the terminal
     Lx, Ly            = icesee_kwargs.get("Lx",1.0), icesee_kwargs.get("Ly",1.0)
@@ -56,7 +56,7 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
     resume_timestep   = 0
 
     # --- call the ICESEE mpi parallel manager ---
-    if re.match(r"\AMPI_model\Z", parallel_flag, re.IGNORECASE):
+    if execution_mode == 1:
         from mpi4py import MPI
         from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
         from ICESEE.src.parallelization._mpi_analysis_functions import analysis_enkf_update, EnKF_X5, DEnKF_X5, \
@@ -480,7 +480,7 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
         icesee_kwargs.update({"k": k, "km":km, "alpha": alpha, "rho": rho, "tau": tau, "dt": dt,"n": n})
         icesee_kwargs.update({"generate_enkf_field": generate_enkf_field})
 
-        if re.match(r"\AMPI_model\Z", parallel_flag, re.IGNORECASE):
+        if execution_mode == 1:
             _time_forecast_step = MPI.Wtime()
 
             icesee_kwargs.update({"_modelrun_datasets": _modelrun_datasets,

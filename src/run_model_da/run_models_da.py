@@ -22,8 +22,13 @@
 # ==============================================================================
 
 import importlib
+import os
 import sys, traceback
-from ICESEE.src.utils.icesee_context import normalize_icesee_kwargs
+from ICESEE.src.utils.icesee_context import (
+    EXECUTION_MODE_NAMES,
+    normalize_execution_mode,
+    normalize_icesee_kwargs,
+)
 
 _MODE_TO_TARGET = {
     "serial":  ("ICESEE.src.run_model_da.icesee_da_serial",
@@ -35,25 +40,46 @@ _MODE_TO_TARGET = {
 }
 
 def _resolve_mode(icesee_kwargs) -> str:
-    """Accept 'mode' as str or dict {'serial':1,'partial':0,'full':0}. Default 'partial'."""
-    if not isinstance(icesee_kwargs, dict):
-        return "partial"
-    mode = icesee_kwargs.get("mode", "partial")
-    if isinstance(mode, dict):
-        mode = next((k for k, v in mode.items() if v), "partial")
-    return mode
+    """Resolve the runner exclusively from the canonical integer mode."""
+    return {0: "serial", 1: "partial", 2: "full"}[
+        normalize_execution_mode(icesee_kwargs)
+    ]
 
 # ======================== Run model with EnKF ========================
 def icesee_model_data_assimilation(**icesee_kwargs):
     """
     Run ICESEE model-data assimilation using the Ensemble Kalman Filter (and variants).
 
-    Keyword arguments form the single flat ICESEE runtime context. ``mode``
-    may be ``"serial"``, ``"partial"``, or ``"full"``; the legacy Boolean
-    mode mapping is also accepted at this public boundary.
+    Keyword arguments form the single flat ICESEE runtime context.
+    ``execution_mode`` is the sole top-level runner selector: 0 is serial,
+    1 is partial parallel, and 2 is fully parallel bounded-memory execution.
     """
     icesee_kwargs = normalize_icesee_kwargs(icesee_kwargs)
     mode = _resolve_mode(icesee_kwargs)
+    mode_number = icesee_kwargs["execution_mode"]
+
+    # Emit one unambiguous runtime selection. MPI workers suppress this when
+    # launched with rank metadata in their environment.
+    rank_hint = int(
+        next(
+            (
+                os.environ[name]
+                for name in (
+                    "OMPI_COMM_WORLD_RANK",
+                    "PMIX_RANK",
+                    "PMI_RANK",
+                    "MV2_COMM_WORLD_RANK",
+                )
+                if name in os.environ
+            ),
+            "0",
+        )
+    )
+    if rank_hint == 0:
+        print(
+            f"[ICESEE] Execution mode {mode_number}: "
+            f"{EXECUTION_MODE_NAMES[mode_number]}"
+        )
 
     # ``batch_size`` is an I/O-window control, not an ensemble/time batching
     # heuristic.  In particular, mode 2 must honor a value of one or two;
@@ -82,3 +108,4 @@ def icesee_model_data_assimilation(**icesee_kwargs):
         print(f"[ICESEE] Error in {mode} run mode:")
         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
         print(f"Traceback details:\n{tb_str}")
+        raise

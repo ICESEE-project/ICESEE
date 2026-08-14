@@ -239,7 +239,7 @@ def install_requirements(force_install=False, verbose=False):
 def save_arrays_to_h5(
     filter_type=None,
     model=None,
-    parallel_flag=None,
+    execution_mode=0,
     commandlinerun=None,
     data_path=None,
     **datasets,
@@ -250,7 +250,7 @@ def save_arrays_to_h5(
     Parameters:
         filter_type (str): Type of filter used (e.g., 'ENEnKF', 'DEnKF').
         model (str): Name of the model (e.g., 'icepack').
-        parallel_flag (str): Flag to indicate if MPI parallelism is enabled. Default is 'MPI'.
+        execution_mode (int): 0=serial, 1=partial MPI, 2=full MPI.
         commandlinerun (bool): Indicates if the function is triggered by a command-line run. Default is False.
         data_path (str or os.PathLike): Run-output directory. Defaults to
             ``_modelrun_datasets``.
@@ -262,7 +262,7 @@ def save_arrays_to_h5(
     output_dir = Path(data_path or "_modelrun_datasets")
     output_file = output_dir / f"{filter_type}-{model}.h5"
 
-    if parallel_flag == "MPI" or commandlinerun:
+    if int(execution_mode) in (1, 2) or commandlinerun:
         # Create the configured run-output folder if it does not exist.
         if not output_dir.exists():
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -330,7 +330,8 @@ def save_all_data(icesee_kwargs, nofilter=None, data_path=None, **datasets):
     filter_type = "true-wrong" if nofilter else icesee_kwargs["filter_type"]
 
     # --- Local MPI implementation ---
-    if re.match(r"\AMPI\Z", icesee_kwargs["parallel_flag"], re.IGNORECASE) or re.match(r"\AMPI_model\Z", icesee_kwargs["parallel_flag"], re.IGNORECASE):
+    execution_mode = int(icesee_kwargs.get("execution_mode", 0))
+    if execution_mode in (1, 2):
         from mpi4py import MPI
         comm = MPI.COMM_WORLD  # Initialize MPI
         rank = comm.Get_rank()  # Get rank of current MPI process
@@ -341,7 +342,7 @@ def save_all_data(icesee_kwargs, nofilter=None, data_path=None, **datasets):
             save_arrays_to_h5(
                 filter_type=filter_type,  # Use updated or original filter_type
                 model=icesee_kwargs["model_name"],
-                parallel_flag=icesee_kwargs["parallel_flag"],
+                execution_mode=execution_mode,
                 commandlinerun=icesee_kwargs["commandlinerun"],
                 data_path=data_path,
                 **datasets
@@ -352,7 +353,7 @@ def save_all_data(icesee_kwargs, nofilter=None, data_path=None, **datasets):
         save_arrays_to_h5(
             filter_type=filter_type,  # Use updated or original filter_type
             model=icesee_kwargs["model_name"],
-            parallel_flag=icesee_kwargs["parallel_flag"],
+            execution_mode=execution_mode,
             commandlinerun=icesee_kwargs["commandlinerun"],
             data_path=data_path,
             **datasets

@@ -56,16 +56,47 @@ def synchronize_observation_schedule(icesee_kwargs, obs_file=None):
                 else:
                     dt = float(icesee_kwargs.get("dt", 1.0))
                     obs_t = obs_index.astype(float) * dt
+            if "bed_snap_cols" in f:
+                bed_snap_cols = np.asarray(
+                    f["bed_snap_cols"][:], dtype=np.int64
+                )
+            else:
+                # Backward compatibility for compact mode-2 observation files
+                # written before bed snapshot metadata was persisted.  Only
+                # accept an actual time match: mapping an out-of-range snapshot
+                # to the nearest endpoint would incorrectly activate bed
+                # inference at an unrelated analysis cycle.
+                configured = np.asarray(
+                    icesee_kwargs.get("bed_obs_snapshot", []), dtype=float
+                ).reshape(-1)
+                matched = []
+                if configured.size and obs_t.size:
+                    model_t = np.asarray(
+                        icesee_kwargs.get("t", []), dtype=float
+                    ).reshape(-1)
+                    if model_t.size > 1:
+                        tolerance = 0.5 * float(np.min(np.diff(model_t)))
+                    else:
+                        tolerance = 0.5 * float(icesee_kwargs.get("dt", 1.0))
+                    tolerance = max(tolerance, 32.0 * np.finfo(float).eps)
+                    for snapshot in configured:
+                        column = int(np.argmin(np.abs(obs_t - snapshot)))
+                        if abs(float(obs_t[column]) - float(snapshot)) <= tolerance:
+                            matched.append(column)
+                bed_snap_cols = np.asarray(
+                    sorted(set(matched)), dtype=np.int64
+                )
         if obs_t.size != obs_index.size:
             raise ValueError(
                 f"Observation schedule mismatch in '{path}': "
                 f"{obs_index.size} indices but {obs_t.size} times"
             )
-        payload = (obs_index, obs_t)
+        payload = (obs_index, obs_t, bed_snap_cols)
 
-    obs_index, obs_t = comm.bcast(payload, root=0)
+    obs_index, obs_t, bed_snap_cols = comm.bcast(payload, root=0)
     obs_index = np.asarray(obs_index, dtype=np.int64)
     obs_t = np.asarray(obs_t, dtype=float)
+    bed_snap_cols = np.asarray(bed_snap_cols, dtype=np.int64)
     m_obs = int(obs_index.size)
     mapping = {int(step): int(col) for col, step in enumerate(obs_index)}
     icesee_kwargs.update({
@@ -76,6 +107,7 @@ def synchronize_observation_schedule(icesee_kwargs, obs_file=None):
         "m_obs": m_obs,
         "number_obs_instants": m_obs,
         "obs_model_to_col": mapping,
+        "bed_snap_cols": bed_snap_cols.tolist(),
     })
     return icesee_kwargs
 
