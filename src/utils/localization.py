@@ -201,6 +201,87 @@ def stochastic_observation_terms(HA, d, sigma, seed):
     return ha_prime, eta, d_prime
 
 
+def iter_generated_observation_columns(
+    icesee_kwargs, obs_indices, nens, state_dimension, k_obs
+):
+    """Yield deterministic ``generated_R`` columns at observed state rows.
+
+    The generator order is member-major and then variable-major.  Both MPI
+    execution engines use this iterator, making the generated observation
+    factor independent of rank placement and allowing mode 2 to write one
+    column at a time instead of materializing a state-sized factor.
+    """
+    from ICESEE.src.run_model_da._error_generation import generate_enkf_field
+
+    obs_indices = np.asarray(obs_indices, dtype=np.int64).ravel()
+    total_vars = int(icesee_kwargs["total_state_param_vars"])
+    state_vars = int(icesee_kwargs["num_state_vars"])
+    divisor = total_vars if (
+        icesee_kwargs.get("joint_estimation", False)
+        or icesee_kwargs.get("localization_flag", False)
+    ) else state_vars
+    hdim, remainder = divmod(int(state_dimension), divisor)
+    if remainder:
+        raise ValueError(
+            f"State dimension {state_dimension} is not divisible by {divisor}"
+        )
+
+    sigma_blocks = list(icesee_kwargs["sig_obs"])
+    if icesee_kwargs.get("inversion_flag", False):
+        friction_idx = int(icesee_kwargs.get("friction_idx", -1))
+        sigma_blocks = [
+            value for index, value in enumerate(sigma_blocks)
+            if index != friction_idx
+        ]
+
+    lx = float(icesee_kwargs.get("Lx", 1.0))
+    ly = float(icesee_kwargs.get("Ly", 1.0))
+    seed = int(icesee_kwargs.get("base_seed", 42)) + 1000003 * (
+        int(k_obs) + 1
+    )
+    rng = np.random.default_rng(seed)
+    for member in range(int(nens)):
+        blocks = []
+        for block_index, block_sigma in enumerate(sigma_blocks):
+            field_kwargs = dict(icesee_kwargs)
+            field_kwargs.update(
+                ii_sig=block_index,
+                Lx_dim=np.sqrt(lx * ly),
+                noise_dim=hdim,
+                num_vars=total_vars,
+                rng=rng,
+            )
+            blocks.append(
+                float(block_sigma) * np.asarray(
+                    generate_enkf_field(**field_kwargs), dtype=np.float64
+                ).ravel()
+            )
+        full_column = np.concatenate(blocks)
+        if obs_indices.size and int(obs_indices.max()) >= full_column.size:
+            raise ValueError(
+                "generated_R field is shorter than the active observation "
+                f"index range ({full_column.size} values)"
+            )
+        yield member, full_column[obs_indices]
+
+
+def generated_observation_terms(
+    HA, d, icesee_kwargs, obs_indices, state_dimension, k_obs
+):
+    """Build mode-independent generated observation-error analysis terms."""
+    HA = np.asarray(HA, dtype=np.float64)
+    d = np.asarray(d, dtype=np.float64).ravel()
+    eta = np.empty_like(HA)
+    for member, column in iter_generated_observation_columns(
+        icesee_kwargs, obs_indices, HA.shape[1], state_dimension, k_obs
+    ):
+        eta[:, member] = column
+    eta -= eta.mean(axis=1, keepdims=True)
+    ha_prime = HA - HA.mean(axis=1, keepdims=True)
+    d_prime = d[:, None] + eta - HA
+    return ha_prime, eta, d_prime
+
+
 def build_obs_coords(obs_indices, node_coords, vec_inputs, hdim):
     """Map global observation rows to per-block physical coordinates."""
     del vec_inputs  # retained in the public signature for compatibility

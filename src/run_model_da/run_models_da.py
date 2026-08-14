@@ -55,10 +55,16 @@ def icesee_model_data_assimilation(**icesee_kwargs):
     icesee_kwargs = normalize_icesee_kwargs(icesee_kwargs)
     mode = _resolve_mode(icesee_kwargs)
 
-    nt = icesee_kwargs['nt']
-    batch_size = icesee_kwargs.get('batch_size')
-    icesee_kwargs['batch_size'] = batch_size if batch_size!=1 else (nt if nt <= 20 else max(1, (nt + 9) // 5))
-    # icesee_kwargs.update({'batch_size', nt if nt <= 100 else max(1, (nt + 9) // 10)})
+    # ``batch_size`` is an I/O-window control, not an ensemble/time batching
+    # heuristic.  In particular, mode 2 must honor a value of one or two;
+    # silently expanding ``1`` to a sizeable fraction of ``nt`` can reserve a
+    # large ensemble history before the first forecast and defeats bounded
+    # large-data execution.
+    batch_size = icesee_kwargs.get("batch_size")
+    if batch_size is None:
+        icesee_kwargs["batch_size"] = 2 if mode == "full" else 1
+    else:
+        icesee_kwargs["batch_size"] = max(1, int(batch_size))
 
     if mode not in _MODE_TO_TARGET:
         raise ValueError(

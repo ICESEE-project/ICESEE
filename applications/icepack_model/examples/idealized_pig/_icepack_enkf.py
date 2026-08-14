@@ -186,6 +186,13 @@ def generate_true_state(**icesee_kwargs):
 
                 kk += 1
 
+    # Fully parallel execution supplies an HDF5 dataset as the write target.
+    # The complete trajectory is already on disk; slicing every variable here
+    # would materialize the entire (potentially tens-of-GB) trajectory in RAM.
+    if isinstance(statevec_true, h5py.Dataset):
+        statevec_true.flush()
+        return None
+
     updated_state = {}
     for key in icesee_kwargs["vec_inputs"]:
         updated_state[key] = statevec_true[indx_map[key], :]
@@ -509,6 +516,11 @@ def generate_nurged_state(**icesee_kwargs):
                     F["s_nudged_profiles"][:,kk] = s_profiles
 
                 kk += 1
+
+    # See generate_true_state: mode 2 writes this trajectory in place.
+    if isinstance(statevec_nurged, h5py.Dataset):
+        statevec_nurged.flush()
+        return None
 
     updated_state = {}
     for key in icesee_kwargs["vec_inputs"]:

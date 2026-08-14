@@ -22,6 +22,7 @@ from ICESEE.src.utils.localization import (
     apply_local_patches,
     compute_local_patches_X5,
     compute_X5_from_matrices,
+    generated_observation_terms,
     stochastic_observation_terms,
     restore_frozen_analysis_vars,
 )
@@ -112,6 +113,91 @@ def stabilize_analysis_increments(
     return stabilized
 
 
+def apply_analysis_controls_local(
+    analysis_vec,
+    forecast_vec,
+    global_rows,
+    icesee_kwargs,
+):
+    """Apply the row-local post-analysis policy shared by modes 1 and 2.
+
+    Keeping these operations in one function is part of the execution-mode
+    parity contract: a full-parallel run must not silently use different
+    relaxation, inflation, frozen-variable, or bed-update semantics merely
+    because its state matrix is streamed from disk.
+    """
+    vec_inputs = list(icesee_kwargs.get("vec_inputs", []))
+    if not vec_inputs:
+        raise ValueError("vec_inputs is empty during EnKF analysis")
+
+    nd = int(icesee_kwargs["nd"])
+    # The current analysis controls operate on the common ICESEE block layout
+    # (one mesh-sized block per configured state/parameter).  Reject an
+    # incompatible layout rather than applying controls to the wrong rows.
+    if nd % len(vec_inputs) != 0:
+        raise ValueError(
+            "analysis controls require equal-sized state/parameter blocks: "
+            f"nd={nd}, blocks={len(vec_inputs)}"
+        )
+    hdim = nd // len(vec_inputs)
+
+    controlled = stabilize_analysis_increments(
+        analysis_vec=analysis_vec,
+        forecast_vec=forecast_vec,
+        global_rows=global_rows,
+        vec_inputs=vec_inputs,
+        hdim=hdim,
+        icesee_kwargs=icesee_kwargs,
+    )
+
+    state_inflation = icesee_kwargs.get(
+        "state_inflation_factor", icesee_kwargs.get("inflation_factor", 1.0)
+    )
+    param_inflation = icesee_kwargs.get(
+        "param_inflation_factor", icesee_kwargs.get("inflation_factor", 1.0)
+    )
+    bed_inflation = icesee_kwargs.get("bed_inflation_factor", param_inflation)
+
+    inflation_vec = np.full(global_rows.size, float(param_inflation))
+    num_state_vars = int(icesee_kwargs.get("num_state_vars", 0))
+    for block_index, key in enumerate(vec_inputs):
+        start = block_index * hdim
+        end = start + hdim
+        local_mask = (global_rows >= start) & (global_rows < end)
+        if not np.any(local_mask):
+            continue
+        key_lower = str(key).lower()
+        if block_index < num_state_vars:
+            inflation_vec[local_mask] = float(state_inflation)
+        elif key_lower in {
+            "bed", "bedrock", "bedtopography", "bed_topography",
+            "bed_elevation",
+        }:
+            inflation_vec[local_mask] = float(bed_inflation)
+
+    local_mean = np.mean(controlled, axis=1, keepdims=True)
+    controlled = local_mean + inflation_vec[:, None] * (controlled - local_mean)
+    controlled = restore_frozen_analysis_vars(
+        controlled,
+        forecast_vec,
+        global_rows,
+        vec_inputs,
+        hdim,
+        icesee_kwargs.get("frozen_analysis_vars", []),
+    )
+    controlled = apply_bed_update_gate_local(
+        analysis_vec=controlled,
+        forecast_vec=forecast_vec,
+        global_rows=global_rows,
+        vec_inputs=vec_inputs,
+        hdim=hdim,
+        icesee_kwargs=icesee_kwargs,
+    )
+    if not np.all(np.isfinite(controlled)):
+        raise FloatingPointError("non-finite values produced by analysis controls")
+    return controlled
+
+
 # ============================ EnKF functions ============================
 def EnKF_X5(k_obs, ensemble_vec, Nens, hu_obs, icesee_kwargs, UtilsFunctions):
     comm_world = icesee_kwargs.get("comm_world")
@@ -178,7 +264,6 @@ def EnKF_X5(k_obs, ensemble_vec, Nens, hu_obs, icesee_kwargs, UtilsFunctions):
         # ============================================== END NEW
 
     # ---- EXISTING in-memory path, unchanged below ----
-    generate_enkf_field = icesee_kwargs.get("generate_enkf_field", False)
     icesee_kwargs["hu_obs_loaded"] = hu_obs
     icesee_kwargs["km"] = k_obs
 
@@ -206,41 +291,9 @@ def EnKF_X5(k_obs, ensemble_vec, Nens, hu_obs, icesee_kwargs, UtilsFunctions):
         Eta = HAprime.copy()
         Dprime = d.reshape(-1, 1) - HA
     elif error_mode == "generated_r":
-        if icesee_kwargs["joint_estimation"] or icesee_kwargs["localization_flag"]:
-            hdim = ensemble_vec.shape[0] // icesee_kwargs["total_state_param_vars"]
-        else:
-            hdim = ensemble_vec.shape[0] // icesee_kwargs["num_state_vars"]
-
-        Lx, Ly = icesee_kwargs.get("Lx"), icesee_kwargs.get("Ly")
-        if icesee_kwargs.get("inversion_flag", False):
-            friction_idx = int(icesee_kwargs.get("friction_idx", -1))
-            sigma_blocks = [
-                value
-                for index, value in enumerate(icesee_kwargs["sig_obs"])
-                if index != friction_idx
-            ]
-        else:
-            sigma_blocks = icesee_kwargs["sig_obs"]
-
-        eta_members = []
-        for _ in range(Nens):
-            noise_blocks = []
-            for block_index, block_sigma in enumerate(sigma_blocks):
-                icesee_kwargs.update(
-                    {
-                        "ii_sig": block_index,
-                        "Lx_dim": np.sqrt(Lx * Ly),
-                        "noise_dim": hdim,
-                        "num_vars": icesee_kwargs["total_state_param_vars"],
-                    }
-                )
-                noise_blocks.append(block_sigma * generate_enkf_field(**icesee_kwargs))
-            eta_members.append(np.concatenate(noise_blocks, axis=0))
-        eta_all = np.asarray(eta_members).T
-        eta_all -= np.mean(eta_all, axis=1, keepdims=True)
-        Eta = eta_all[obs_indices, :]
-        HAprime = HA - np.mean(HA, axis=1, keepdims=True)
-        Dprime = d.reshape(-1, 1) + Eta - HA
+        HAprime, Eta, Dprime = generated_observation_terms(
+            HA, d, icesee_kwargs, obs_indices, ensemble_vec.shape[0], k_obs
+        )
     else:
         raise ValueError(
             "enkf_observation_error_mode must be 'stochastic_R', "
@@ -353,60 +406,14 @@ def analysis_enkf_update(
     if icesee_kwargs.get("local_analysis", False):
         analysis_vec = apply_local_patches(analysis_vec, scatter_ensemble, global_rows, local_patches)
 
-    vec_inputs = icesee_kwargs.get("vec_inputs", [])
-    nblocks = len(vec_inputs)
-    if nblocks == 0:
-        raise ValueError("vec_inputs is empty during EnKF analysis")
-    hdim = icesee_kwargs.get("nd", icesee_kwargs["nd"]) // nblocks
-    analysis_vec = stabilize_analysis_increments(
+    t0 = MPI.Wtime()
+    analysis_vec = apply_analysis_controls_local(
         analysis_vec=analysis_vec,
         forecast_vec=scatter_ensemble,
         global_rows=global_rows,
-        vec_inputs=vec_inputs,
-        hdim=hdim,
         icesee_kwargs=icesee_kwargs,
-    )
-
-    t0 = MPI.Wtime()
-    state_inflation = icesee_kwargs.get("state_inflation_factor", icesee_kwargs.get("inflation_factor", 1.0))
-    param_inflation = icesee_kwargs.get("param_inflation_factor", icesee_kwargs.get("inflation_factor", 1.0))
-    bed_inflation = icesee_kwargs.get("bed_inflation_factor", param_inflation)
-
-    inflation_vec = np.ones(local_nd) * param_inflation
-    for ii, key in enumerate(vec_inputs):
-        start, end = ii * hdim, ii * hdim + hdim
-        local_mask = (global_rows >= start) & (global_rows < end)
-        if not np.any(local_mask):
-            continue
-        key_l = key.lower()
-        if ii < icesee_kwargs["num_state_vars"]:
-            inflation_vec[local_mask] = state_inflation
-        elif key_l in ["bed", "bedrock", "bedtopography", "bed_topography"]:
-            inflation_vec[local_mask] = bed_inflation
-        else:
-            inflation_vec[local_mask] = param_inflation
-
-    local_mean = np.mean(analysis_vec, axis=1, keepdims=True)
-    local_pert = analysis_vec - local_mean
-    analysis_vec = local_mean + inflation_vec[:, None] * local_pert
-    analysis_vec = restore_frozen_analysis_vars(
-        analysis_vec,
-        scatter_ensemble,
-        global_rows,
-        vec_inputs,
-        hdim,
-        icesee_kwargs.get("frozen_analysis_vars", []),
     )
     time_analysis_mean_generation += MPI.Wtime() - t0
-
-    analysis_vec = apply_bed_update_gate_local(
-        analysis_vec=analysis_vec,
-        forecast_vec=scatter_ensemble,
-        global_rows=global_rows,
-        vec_inputs=vec_inputs,
-        hdim=hdim,
-        icesee_kwargs=icesee_kwargs,
-    )
 
     t0 = MPI.Wtime()
     parallel_write_ensemble_scattered(

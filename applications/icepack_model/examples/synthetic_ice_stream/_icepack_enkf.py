@@ -65,6 +65,12 @@ def generate_true_state(**icesee_kwargs):
         if icesee_kwargs["joint_estimation"]:
             statevec_true[indx_map["smb"],k+1] = a.dat.data_ro
 
+    # In fully parallel mode the trajectory has already been written to HDF5.
+    # Do not read the complete file-backed state back into memory to return it.
+    if isinstance(statevec_true, h5py.Dataset):
+        statevec_true.flush()
+        return None
+
     update_state = {'h': statevec_true[indx_map["h"],:],
                     'u': statevec_true[indx_map["u"],:],
                     'v': statevec_true[indx_map["v"],:]}
@@ -285,6 +291,10 @@ def generate_nurged_state(**icesee_kwargs):
             da_  = firedrake.Constant(daa)
             a    = firedrake.Function(Q).interpolate(a_in + da_ * x / Lx)
             statevec_nurged[indx_map["smb"],k+1] = a.dat.data_ro
+
+    if isinstance(statevec_nurged, h5py.Dataset):
+        statevec_nurged.flush()
+        return None
 
     updated_state = {'h': statevec_nurged[indx_map["h"],:],
                     'u': statevec_nurged[indx_map["u"],:],

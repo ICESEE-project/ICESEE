@@ -189,7 +189,22 @@ if not flag_jupyter:
         'collective_threshold': int(_enkf_section.get('collective_threshold', 16)), # threshold for switching to collective I/O
     })
 
-    icesee_kwargs.update({'batch_size': min(int(_enkf_section.get('batch_size', 50)), icesee_kwargs['nt'])})  # number of time steps to process in each batch
+    # Mode 2 uses a two-shard sliding window by default: the current and next
+    # ensemble states remain open without reserving the full run history.
+    # ``batch_size`` is consumed by execution mode 2.  The execution mode is
+    # commonly selected by the launcher rather than stored in the YAML, so it
+    # is not reliable to derive this default from ``_enkf_section`` here.
+    # Keep the file window small unless the user explicitly opts into a wider
+    # one; otherwise a mode-2 run can pre-create a large fraction of its full
+    # ensemble history before the first forecast is evaluated.
+    default_batch_size = 2
+    icesee_kwargs.update({'batch_size': min(int(_enkf_section.get('batch_size', default_batch_size)), icesee_kwargs['nt'])})
+    icesee_kwargs.update({
+        'synthetic_observation_storage': str(_enkf_section.get('synthetic_observation_storage', 'compact')),
+        'ensemble_storage_dtype': str(_enkf_section.get('ensemble_storage_dtype', 'float64')),
+        'storage_safety_factor': float(_enkf_section.get('storage_safety_factor', 1.10)),
+        'fail_on_insufficient_storage': bool(_enkf_section.get('fail_on_insufficient_storage', False)),
+    })
 
     # Spatial random-field backend.  Keep FFT as the backward-compatible
     # default; graph mode is selected explicitly and consumes the physical
@@ -279,10 +294,28 @@ if not flag_jupyter:
         'observations_available': _enkf_section.get('observations_available', False),
         'obs_data_path': _enkf_section.get('obs_data_path', icesee_kwargs.get('coupled_model_datasets_dir', 'data') + '/observations_data.h5'),
         'create_ensemble_dataset': _enkf_section.get('create_ensemble_dataset', True),
+        # Full-parallel large-data controls.  VDS exposes one logical 3-D
+        # ensemble without copying the timestep shards.
+        'ensemble_finalize_mode': str(_enkf_section.get('ensemble_finalize_mode', 'vds')),
+        # ``auto`` preserves full history when it fits and switches to a
+        # restartable rolling window when it does not.
+        'ensemble_history_mode': str(_enkf_section.get('ensemble_history_mode', 'auto')),
+        'analysis_memory_budget_mb': float(_enkf_section.get('analysis_memory_budget_mb', 256.0)),
+        'analysis_row_chunk_size': int(_enkf_section.get('analysis_row_chunk_size', 0)),
+        'observation_row_chunk_size': int(_enkf_section.get('observation_row_chunk_size', 0)),
+        'analysis_finalize_memory_budget_mb': float(_enkf_section.get('analysis_finalize_memory_budget_mb', 2048.0)),
+        'analysis_finalize_member_chunk_size': int(_enkf_section.get('analysis_finalize_member_chunk_size', 0)),
+        'local_analysis_memory_budget_mb': float(_enkf_section.get('local_analysis_memory_budget_mb', 2048.0)),
+        'observation_operator_storage': str(_enkf_section.get('observation_operator_storage', 'indices')),
+        'analysis_svd_energy': float(_enkf_section.get('analysis_svd_energy', 0.999)),
+        'finalize_row_chunk_size': int(_enkf_section.get('finalize_row_chunk_size', 16384)),
         'restart_enabled': _enkf_section.get('restart_enabled', True),
         'force_fresh_start': _enkf_section.get('force_fresh_start', False),
         'checkpoint_every': int(_enkf_section.get('checkpoint_every', 1)),
         'base_seed': int(_enkf_section.get('base_seed', 42)),
+        # Keep process-noise timing independent of execution mode.  The
+        # default matches the established mode-1 schedule.
+        'process_noise_schedule': str(_enkf_section.get('process_noise_schedule', 'observations')),
         'k_start_override': _enkf_section.get('k_start_override', None),
         'ICESEE_PERFORMANCE_TEST': bool(_enkf_section.get('ICESEE_PERFORMANCE_TEST', False)), # this is an environment variable
         'h5_file_compression': _enkf_section.get('h5_file_compression', None), # e.g., 'gzip' or 'lzf' or 'szip' or None

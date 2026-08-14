@@ -29,7 +29,11 @@ def _extract_time(fname: str) -> int:
     return int(m.group(1))
 
 def _list_sorted_files(input_dir: str):
-    files = glob.glob(os.path.join(input_dir, "icesee_enkf_ens_*.h5"))
+    files = [
+        path
+        for path in glob.glob(os.path.join(input_dir, "icesee_enkf_ens_*.h5"))
+        if re.search(FNAME_PATTERN, os.path.basename(path))
+    ]
     if not files:
         raise RuntimeError(f"No input files found in {input_dir}")
     files.sort(key=_extract_time)
@@ -54,7 +58,8 @@ def h5py_has_mpi():
 def build_vds(input_dir: str,
               dset_name: str | None = None,
               out_file: str | None = None,
-              fillvalue=np.nan) -> str:
+              fillvalue=np.nan,
+              row_chunk_size: int = 16384) -> str:
     files = _list_sorted_files(input_dir)
     if dset_name is None:
         dset_name = _infer_dataset_name(files[0], prefer="states")
@@ -71,13 +76,16 @@ def build_vds(input_dir: str,
     # Build VDS layout
     layout = h5py.VirtualLayout(shape=(nd, nens, nt), dtype=dtype)
     for t, f in enumerate(files):
-        vsrc = h5py.VirtualSource(f, dset_name, shape=(nd, nens))
+        # Absolute source names keep the VDS valid when opened elsewhere.
+        vsrc = h5py.VirtualSource(os.path.abspath(f), dset_name, shape=(nd, nens))
         layout[:, :, t] = vsrc
 
     os.makedirs(os.path.dirname(out_file) or ".", exist_ok=True)
     with h5py.File(out_file, "w", libver="latest") as fout:
         # dset_name='ensemble'
-        fout.create_virtual_dataset(dset_name, layout, fillvalue=fillvalue)
+        states = fout.create_virtual_dataset(dset_name, layout, fillvalue=fillvalue)
+        if dset_name != "ensemble":
+            fout["ensemble"] = states
         fout.attrs.update({
             "nd": nd, "nens": nens, "nt": nt,
             "stack_type": "VDS",
@@ -87,11 +95,13 @@ def build_vds(input_dir: str,
         # Compute ensemble mean (iterate time slices lazily)
         mean_dset = fout.create_dataset(
             "ensemble_mean", shape=(nd, nt), dtype=np.float64,
-            chunks=(nd, 1), fillvalue=np.nan
+            chunks=(min(nd, max(1, int(row_chunk_size))), 1), fillvalue=np.nan
         )
         for t in range(nt):
-            arr = fout[dset_name][:, :, t]
-            mean_dset[:, t] = np.nanmean(arr, axis=1)
+            for row0 in range(0, nd, max(1, int(row_chunk_size))):
+                row1 = min(nd, row0 + max(1, int(row_chunk_size)))
+                arr = fout[dset_name][row0:row1, :, t]
+                mean_dset[row0:row1, t] = np.nanmean(arr, axis=1)
 
     return out_file
 
@@ -102,7 +112,8 @@ def consolidate_h5(input_dir: str,
                    compression: str = "gzip",
                    compression_opts: int = 4,
                    chunks: tuple[int,int,int] | None = None,
-                   allow_missing: bool = False) -> str:
+                   allow_missing: bool = False,
+                   row_chunk_size: int = 16384) -> str:
     files = _list_sorted_files(input_dir)
     if dset_name is None:
         dset_name = _infer_dataset_name(files[0], prefer="states")
@@ -117,7 +128,7 @@ def consolidate_h5(input_dir: str,
     nt = len(files)
     if chunks is None:
         # Good default for time-wise appends and time-slice reads
-        chunks = (nd, nens, 1)
+        chunks = (min(nd, max(1, int(row_chunk_size))), nens, 1)
 
     os.makedirs(os.path.dirname(out_file) or ".", exist_ok=True)
     with h5py.File(out_file, "w") as fout:
@@ -136,7 +147,7 @@ def consolidate_h5(input_dir: str,
         )
         mean_dset = fout.create_dataset(
             "ensemble_mean", shape=(nd, nt), dtype=np.float64,
-            chunks=(nd, 1), compression=compression,
+            chunks=(min(nd, max(1, int(row_chunk_size))), 1), compression=compression,
             compression_opts=compression_opts,
             shuffle=True, fletcher32=True
         )
@@ -147,22 +158,26 @@ def consolidate_h5(input_dir: str,
             "dataset_name": dset_name
         })
 
-        # Copy time slices, one file at a time (low memory)
+        # Copy row chunks, never a complete state x ensemble slice.
         for t, fpath in enumerate(files):
             try:
                 with h5py.File(fpath, "r") as fi:
-                    arr = fi[dset_name][...]
+                    source = fi[dset_name]
+                    if source.shape != (nd, nens):
+                        raise ValueError(
+                            f"Shape mismatch at {fpath}: {source.shape} != {(nd, nens)}"
+                        )
+                    for row0 in range(0, nd, max(1, int(row_chunk_size))):
+                        row1 = min(nd, row0 + max(1, int(row_chunk_size)))
+                        arr = source[row0:row1, :]
+                        dset[row0:row1, :, t] = arr
+                        mean_dset[row0:row1, t] = np.nanmean(arr, axis=1)
             except Exception as e:
                 if allow_missing:
-                    arr = np.full((nd, nens), np.nan, dtype=dtype)
+                    dset[:, :, t] = np.nan
+                    mean_dset[:, t] = np.nan
                 else:
                     raise RuntimeError(f"Failed reading {fpath}: {e}") from e
-
-            if arr.shape != (nd, nens):
-                raise ValueError(f"Shape mismatch at {fpath}: {arr.shape} != {(nd, nens)}")
-
-            dset[:, :, t] = arr
-            mean_dset[:, t] = np.nanmean(arr, axis=1)  # (nd,) → store column
 
     return out_file
 
@@ -428,6 +443,10 @@ def icesee_get_index(vec=None, **icesee_kwargs):
         else:
             vec_inputs = icesee_kwargs.get("vec_inputs", None)
             nd = icesee_kwargs.get("nd")
+            if not vec_inputs:
+                raise ValueError("vec_inputs must be a non-empty sequence")
+            if nd is None:
+                raise ValueError("nd must be provided")
             # print(f"[ICESEE-debug] vec_inputs: {vec_inputs}, nd: {nd}, icesee_kwargs: {icesee_kwargs}\n")
             if icesee_kwargs["default_run"]:
                 comm = icesee_kwargs.get("subcomm", None)
@@ -436,7 +455,28 @@ def icesee_get_index(vec=None, **icesee_kwargs):
 
             # len_vec = icesee_kwargs["total_state_param_vars"]
             len_vec = len(vec_inputs)
-            dim_list_param = np.array(icesee_kwargs.get('dim_list', None)) // len(icesee_kwargs.get('vec_inputs_old', None))
+            # ``vec_inputs_old`` is populated when a temporary analysis (for
+            # example an inversion) operates on a reduced variable list.  It
+            # is not required by simpler applications such as Lorenz96, so
+            # fall back to the active layout instead of calling ``len(None)``.
+            layout_inputs = icesee_kwargs.get("vec_inputs_old") or vec_inputs
+            dim_list = icesee_kwargs.get("dim_list")
+            if dim_list is None or len(dim_list) == 0:
+                # Simple/default applications can enter initialization before
+                # ``generate_true_wrong_state`` has published ``dim_list``.
+                # Recover the layout from the communicator instead of making
+                # callers depend on that side effect.  A COMM_SELF subcomm
+                # therefore yields [nd], while a spatial model subcomm yields
+                # the per-rank local state dimensions.
+                if comm is None or icesee_kwargs.get("even_distribution", False):
+                    dim_list = [int(nd)]
+                else:
+                    dim_list = comm.allgather(int(nd))
+            if nd % len_vec:
+                raise ValueError(
+                    f"nd={nd} is not divisible by len(vec_inputs)={len_vec}"
+                )
+            dim_list_param = np.asarray(dim_list, dtype=int) // len(layout_inputs)
             dim_list_param = dim_list_param[:len_vec]
             hdim = nd // len_vec
             # print(f"[ICESEE-debug] len_vec: {len_vec}, dim_list_param: {dim_list_param}, hdim: {hdim}\n")
@@ -465,8 +505,7 @@ def icesee_get_index(vec=None, **icesee_kwargs):
                 index_map[var] = np.arange(start, end)
                 var_start += hdim
 
-            local_size_per_rank = icesee_kwargs.get('dim_list', None)
-            return None, index_map, local_size_per_rank[rank]
+            return None, index_map, int(np.asarray(dim_list, dtype=int)[rank])
     except Exception as e:
         print(f"Error occurred in icesee_get_index: {e}")
         tb_str = "".join(traceback.format_exception(*sys.exc_info()))

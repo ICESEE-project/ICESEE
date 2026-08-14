@@ -93,6 +93,10 @@ Explore the Wiki to find:
 - Debugging and troubleshooting guides
 - HPC deployment recommendations
 
+For memory- and storage-bounded execution of large ensembles, including rolling
+history, compact observations, restart behavior, and capacity limits, see the
+[large-scale execution guide](docs/large-scale-execution.md).
+
 ---
 
 ## Key Features

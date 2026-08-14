@@ -26,7 +26,7 @@ setenv('ICESEE_OVERLAY_ASSIMILATED_GL','');
 % setenv('ICESEE_RESULTS_DIR', '_modelrun_datasets_method_comparison_40yr_ebf')
 % setenv('ICESEE_RESULTS_DIR', ...
 %     '_modelrun_datasets_p3q0_principal_ibf_100yr_seaward_gl')
-setenv('ICESEE_RESULTS_DIR', '_modelrun_p3_')
+setenv('ICESEE_RESULTS_DIR', '_modelrun_datasets_issm_n40_fixed')
 % read_results
 % Do not set ICESEE_RESULTS_DIR here: doing so silently overrides the
 % caller's selection and can make a corrected run appear unchanged.

@@ -69,7 +69,10 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
                                             parallel_write_vector_from_root, parallel_write_full_ensemble_from_root, \
                                             parallel_write_ensemble_scattered, gather_and_broadcast_data_default_run
         from ICESEE.src.parallelization._mpi_generate_true_wrong_state import generate_true_wrong_state
-        from ICESEE.src.parallelization._mpi_generate_synthetic_observations import generate_synthetic_observations
+        from ICESEE.src.parallelization._mpi_generate_synthetic_observations import (
+            generate_synthetic_observations,
+            synchronize_observation_schedule,
+        )
         from ICESEE.src.parallelization._mpi_ensemble_intialization import ensemble_initialization
 
         # start the timer
@@ -111,7 +114,11 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
         icesee_kwargs.update({"true_nurged_file": _true_nurged, "synthetic_obs_file": _synthetic_obs})
 
         # --- initialize seed for reproducibility ---
-        ParallelManager().initialize_seed(comm_world, base_seed=0)
+        # Modes 1 and 2 must start from the same global seed.  Individual
+        # forecast/process-noise streams are member keyed downstream, so this
+        # seed controls initialization without depending on MPI placement.
+        base_seed = int(icesee_kwargs.get("base_seed", 42))
+        ParallelManager().initialize_seed(comm_world, base_seed=base_seed)
 
         # fetch model nprocs
         model_nprocs = icesee_kwargs.get("model_nprocs", 1)
@@ -185,6 +192,10 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
         time_generation_synthetic_obs = MPI.Wtime()
         # call the generate_synthetic_observations function
         icesee_kwargs =  generate_synthetic_observations(**icesee_kwargs)
+        # The writer rank updates the schedule while constructing observations;
+        # reload it from the artifact and broadcast it so every analysis rank
+        # follows the exact same model-step schedule.
+        icesee_kwargs = synchronize_observation_schedule(icesee_kwargs)
         # --- time generation of synthetic observations ---
         time_generation_synthetic_obs = MPI.Wtime() - time_generation_synthetic_obs
 

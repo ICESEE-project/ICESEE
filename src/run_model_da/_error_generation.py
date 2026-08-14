@@ -947,6 +947,21 @@ def generate_enkf_field(**icesee_kwargs):
         )
     icesee_kwargs["method"] = method
 
+    # Use the caller's member-keyed generator in every sampling branch.  The
+    # small-state fast path formerly called ``default_rng()`` implicitly inside
+    # ``sample_periodic_exp_cov``; that made otherwise identical execution
+    # modes diverge during ensemble initialization.  Falling back to ``seed``
+    # keeps direct API calls reproducible as well.
+    rng = icesee_kwargs.get("rng")
+    if rng is None:
+        # ``seed`` is also a historical model/config parameter and can be a
+        # YAML float.  The DA-wide base seed is the stable fallback shared by
+        # execution modes; accept integral numeric spellings for compatibility.
+        seed_value = icesee_kwargs.get(
+            "base_seed", icesee_kwargs.get("seed", 42)
+        )
+        rng = np.random.default_rng(int(seed_value))
+
     # The run drivers pack registered application coordinates once into
     # icesee_kwargs immediately before ensemble initialization.  Retain a lazy
     # lookup here as well for tests and other direct generator callers.
@@ -1019,16 +1034,18 @@ def generate_enkf_field(**icesee_kwargs):
                 q_total = []
                 for i in range(num_vars):
                     var_rh = rh[i]
-                    q_var = sample_periodic_exp_cov(hdim, var_rh, Lx)
+                    q_var = sample_periodic_exp_cov(hdim, var_rh, Lx, rng=rng)
                     q_total.append(q_var)
                 return np.concatenate(q_total, axis=0)
             else:
-                return sample_periodic_exp_cov(hdim, rh[ii_sig], Lx)
+                return sample_periodic_exp_cov(hdim, rh[ii_sig], Lx, rng=rng)
         else:
             if ii_sig is None:
-                return sample_periodic_exp_cov(hdim * num_vars, rh, Lx)
+                return sample_periodic_exp_cov(
+                    hdim * num_vars, rh, Lx, rng=rng
+                )
             else:
-                return sample_periodic_exp_cov(hdim, rh, Lx)
+                return sample_periodic_exp_cov(hdim, rh, Lx, rng=rng)
 
     # ------------------------------------------------------------
     # Main branch

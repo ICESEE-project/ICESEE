@@ -370,6 +370,22 @@ class UtilsFunctions:
         if statevec_true is None:
             raise ValueError("statevec_true is required")
 
+        # Synthetic observations are an experiment artifact, not an implicit
+        # side effect of whichever MPI execution path happened to run first.
+        # A dedicated generator makes the artifact identical for modes 1 and
+        # 2, independent of rank count and prior consumption of NumPy's global
+        # random state.  Users can override this stream without changing the
+        # process-noise or ensemble-initialization streams.
+        observation_seed = int(
+            icesee_kwargs.get(
+                "synthetic_observation_seed",
+                int(icesee_kwargs.get("base_seed", icesee_kwargs.get("seed", 42)))
+                + 2000003,
+            )
+        )
+        observation_rng = np.random.default_rng(observation_seed)
+        icesee_kwargs["synthetic_observation_seed"] = observation_seed
+
         vec_inputs = list(icesee_kwargs["vec_inputs"])
 
         # Observation schedule
@@ -525,7 +541,10 @@ class UtilsFunctions:
 
                 if (key in obs_set) and (not key_is_bed.get(key, False)):
                     sigma = error_R[idx, km]
-                    hu_obs[idx, km] = statevec_true[idx, k_model] + np.random.normal(0.0, sigma, size=idx.size)
+                    hu_obs[idx, km] = (
+                        statevec_true[idx, k_model]
+                        + observation_rng.normal(0.0, sigma, size=idx.size)
+                    )
                 else:
                     #  leave NaN for unobserved entries
                     pass
@@ -571,7 +590,7 @@ class UtilsFunctions:
                         # sigma_obs = error_R[idx_obs, km]
                         sigma_bed = float(sig_obs[ii])
                         error_R[idx_obs, km] = sigma_bed
-                        hu_obs[idx_obs, km] = statevec_true[idx_obs, k_model] + np.random.normal(
+                        hu_obs[idx_obs, km] = statevec_true[idx_obs, k_model] + observation_rng.normal(
                             0.0, sigma_bed, size=idx_obs.size
                         )
 
