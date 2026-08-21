@@ -372,6 +372,12 @@ def analysis_enkf_update(
     size_world = comm_world.Get_size()
 
     X5 = BM.bcast(X5, comm=comm_world)
+    # EnKF_X5 constructs grouped local-analysis transforms on rank zero in
+    # the in-memory mode.  Every rank owns a different slab of state rows, so
+    # each rank must receive the same patch registry before applying its local
+    # transforms.  Broadcasting only the global X5 silently made non-root
+    # ranks fall back to the global analysis for localized variables.
+    local_patches = comm_world.bcast(local_patches, root=0)
     time_analysis_mean_generation = BM.bcast(time_analysis_mean_generation, comm=comm_world)
     icesee_kwargs["X5"] = X5
 

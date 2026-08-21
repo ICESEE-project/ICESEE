@@ -18,6 +18,7 @@ from ICESEE.src.utils.inference_plugin import (
     apply_bed_observation_anchor_global,
     apply_bed_domain_gate_global,
     apply_global_inference_hook,
+    resolve_bed_update_schedule,
 )
 
 
@@ -78,6 +79,49 @@ def finalize_analysis_ensemble(
     model_dt = float(icesee_kwargs.get("dt", 1.0))
     current_model_time = float(timestep) * model_dt
 
+    # Resolve the bed schedule at the global-finalization boundary itself.
+    # Do not rely on private state set earlier by a row-local kwargs copy.
+    bed_active, bed_is_snapshot, _ = resolve_bed_update_schedule(icesee_kwargs)
+    icesee_kwargs["_bed_update_active"] = bed_active
+    icesee_kwargs["_bed_is_snapshot"] = bed_is_snapshot
+
+    def trace_stage(stage, values):
+        """Persist parity-only finalization stages for mode diagnostics."""
+        if not icesee_kwargs.get("execution_parity_trace", False):
+            return
+        trace_dir = os.path.join(
+            icesee_kwargs.get("data_path", "."), "_execution_parity_trace"
+        )
+        os.makedirs(trace_dir, exist_ok=True)
+        np.save(
+            os.path.join(
+                trace_dir,
+                f"finalize_{int(timestep):06d}_{stage}.npy",
+            ),
+            np.asarray(values),
+        )
+
+    if icesee_kwargs.get("execution_parity_trace", False):
+        trace_dir = os.path.join(
+            icesee_kwargs.get("data_path", "."), "_execution_parity_trace"
+        )
+        os.makedirs(trace_dir, exist_ok=True)
+        np.savez(
+            os.path.join(
+                trace_dir, f"finalize_{int(timestep):06d}_schedule.npz"
+            ),
+            km=np.array([-1 if icesee_kwargs.get("km") is None
+                         else int(icesee_kwargs["km"])], dtype=np.int64),
+            bed_active=np.array([bed_active], dtype=np.uint8),
+            bed_is_snapshot=np.array([bed_is_snapshot], dtype=np.uint8),
+            bed_snap_cols=np.asarray(
+                icesee_kwargs.get("bed_snap_cols", []), dtype=np.int64
+            ),
+        )
+
+    trace_stage("00_forecast", forecast_vec)
+    trace_stage("01_input", analysis_vec)
+
     analysis_vec = apply_bed_domain_gate_global(
         analysis_vec=analysis_vec,
         forecast_vec=forecast_vec,
@@ -92,6 +136,7 @@ def finalize_analysis_ensemble(
         icesee_kwargs=icesee_kwargs,
         stage="pre",
     )
+    trace_stage("02_gated_anchored", analysis_vec)
     if bed_idx is not None and forecast_vec is not None:
         icesee_kwargs["_bed_forecast_reference"] = np.asarray(
             forecast_vec[bed_idx, :], dtype=float
@@ -106,6 +151,7 @@ def finalize_analysis_ensemble(
         model_time=current_model_time,
         stage="pre_geometry",
     )
+    trace_stage("03_inference", analysis_vec)
     analysis_vec = apply_bed_domain_gate_global(
         analysis_vec=analysis_vec,
         forecast_vec=forecast_vec,
@@ -120,6 +166,7 @@ def finalize_analysis_ensemble(
         icesee_kwargs=icesee_kwargs,
         stage="post",
     )
+    trace_stage("04_post_gate_anchor", analysis_vec)
     if icesee_kwargs.get("physics_bed_inference", False) and bed_idx is not None:
         icesee_kwargs["_bed_previous_applied"] = np.asarray(
             analysis_vec[bed_idx, :], dtype=float
@@ -165,7 +212,7 @@ def finalize_analysis_ensemble(
         analysis_vec[surface_idx, :] = base + thickness
         analysis_vec[thickness_idx, :] = thickness
 
-    return apply_global_inference_hook(
+    analysis_vec = apply_global_inference_hook(
         analysis_vec=analysis_vec,
         vec_inputs=vec_inputs,
         hdim=hdim,
@@ -174,6 +221,8 @@ def finalize_analysis_ensemble(
         model_time=current_model_time,
         stage="post_geometry",
     )
+    trace_stage("05_post_geometry", analysis_vec)
+    return analysis_vec
 
 
 # def parallel_write_ensemble_scattered(timestep, ensemble_mean, icesee_kwargs, ensemble_chunk, comm, icesee_kwargs, output_file="icesee_ensemble_data.h5"):
@@ -614,7 +663,33 @@ def parallel_write_ensemble_scattered(
         inv_kwargs_member = dict(inv_kwargs)
         inv_kwargs_member["ens_id"] = ens_id
 
+        trace_dir = None
+        if icesee_kwargs.get("execution_parity_trace", False):
+            trace_dir = os.path.join(
+                icesee_kwargs.get("data_path", "."),
+                "_execution_parity_trace",
+            )
+            os.makedirs(trace_dir, exist_ok=True)
+            np.save(
+                os.path.join(
+                    trace_dir,
+                    f"inversion_{int(timestep):06d}_member_{ens_id:06d}_input.npy",
+                ),
+                member,
+            )
+
         data = model_module.inverse_step_single(ensemble=member, **inv_kwargs_member)
+
+        if data is None:
+            raise RuntimeError(
+                "inverse_step_single returned no result for ensemble member "
+                f"{ens_id}; inspect the preceding model-adapter/ISSM error."
+            )
+        if not hasattr(data, "items"):
+            raise TypeError(
+                "inverse_step_single must return a mapping, got "
+                f"{type(data).__name__} for ensemble member {ens_id}."
+            )
 
         update_dict = {"ens_id": ens_id}
 
@@ -624,6 +699,15 @@ def parallel_write_ensemble_scattered(
             if key_l in ["coefficient", "friction", "friction_coefficient", "fcoef", "frictioncoefficient"]:
                 update_dict["friction_idx"] = indx_map_inv[key]
                 update_dict["friction_val"] = np.asarray(value).copy()
+
+                if trace_dir is not None:
+                    np.save(
+                        os.path.join(
+                            trace_dir,
+                            f"inversion_{int(timestep):06d}_member_{ens_id:06d}_friction.npy",
+                        ),
+                        np.asarray(value),
+                    )
 
             # elif key_l in ["vx", "velocity_x", "vel_x", "v_x"]:
             #     update_dict["vx_idx"] = indx_map_inv[key]
@@ -668,6 +752,11 @@ def parallel_write_ensemble_scattered(
             if icesee_kwargs.get("DEnKF_flag", False):
                 mean_now = np.mean(dset[:, :, timestep], axis=1)
                 dset[:, :, timestep] += mean_now[:, np.newaxis]
+
+        print(
+            "[ICESEE][inversion] Completed member-wise friction inversion "
+            f"for {Nens} members at stored timestep {timestep}."
+        )
 
         del data_before_arr
         gc.collect()

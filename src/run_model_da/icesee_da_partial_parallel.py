@@ -35,6 +35,7 @@ from ICESEE.src.utils.localization import prepare_random_field_coordinates
 
 from ICESEE.src.utils.inference_plugin import (
     reset_inference_plugin_state,
+    resolve_analysis_cycle_time,
 )
 from ICESEE.src.utils.icesee_context import normalize_execution_mode, normalize_icesee_kwargs
 
@@ -533,7 +534,9 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
                         inversion_start_time = float(
                             icesee_kwargs.get("inversion_start_time", 0.0)
                         )
-                        cycle_time = float(np.asarray(icesee_kwargs["t"])[k])
+                        cycle_time, model_cycle_time = resolve_analysis_cycle_time(
+                            icesee_kwargs, k, km
+                        )
                         inversion_flag = (
                             inversion_enabled
                             and cycle_time + 1.0e-12 >= inversion_start_time
@@ -547,8 +550,15 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
                         if rank_world == 0 and inversion_enabled and not inversion_flag:
                             print(
                                 "[ICESEE] Deferring friction inversion at "
-                                f"t={cycle_time:g} yr; configured start is "
+                                f"observation t={cycle_time:g} yr "
+                                f"(model t={model_cycle_time:g} yr); configured start is "
                                 f"{inversion_start_time:g} yr."
+                            )
+                        elif rank_world == 0 and inversion_flag:
+                            print(
+                                "[ICESEE] Friction inversion enabled at "
+                                f"observation t={cycle_time:g} yr "
+                                f"(model t={model_cycle_time:g} yr)."
                             )
                         nd_old = icesee_kwargs.get("nd", nd)
                         icesee_kwargs.update({"nd_old": nd_old})

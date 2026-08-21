@@ -1,5 +1,7 @@
 """Model-agnostic coordinate registry and patch-based local EnKF analysis."""
 
+import os
+
 import numpy as np
 from scipy.spatial import cKDTree
 
@@ -376,6 +378,26 @@ def compute_local_patches_X5(
             "skipping.",
         )
         return {}
+
+    # Keep parity diagnostics entirely opt-in.  These arrays identify whether
+    # execution modes disagree before neighborhood construction (coordinates,
+    # active observation ordering, or observation-space analysis terms).
+    if icesee_kwargs.get("execution_parity_trace", False):
+        trace_dir = os.path.join(
+            icesee_kwargs.get("data_path", "."),
+            "_execution_parity_trace",
+        )
+        os.makedirs(trace_dir, exist_ok=True)
+        timestep = int(icesee_kwargs.get("k", -1)) + 1
+        np.savez(
+            os.path.join(trace_dir, f"local_terms_{timestep:06d}.npz"),
+            node_coords=np.asarray(node_coords),
+            obs_indices=np.asarray(obs_indices),
+            obs_coords=np.asarray(obs_coords),
+            HAprime=np.asarray(HAprime),
+            Eta=np.asarray(Eta),
+            Dprime=np.asarray(Dprime),
+        )
 
     manual_radius = icesee_kwargs.get("localization_radius")
     obs_tree = cKDTree(obs_coords)

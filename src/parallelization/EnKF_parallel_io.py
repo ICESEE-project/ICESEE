@@ -33,6 +33,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Optional, TypeVar, Any
 from ICESEE.src.utils.tools import icesee_get_index
 from ICESEE.src.utils.localization import iter_generated_observation_columns
+from ICESEE.src.utils.utils import cross_flow_track_mask
 
 T = TypeVar("T")
 
@@ -244,6 +245,120 @@ def _inversion_variable_info(nd, icesee_kwargs):
         "start": int(indices[0]),
         "stop": int(indices[-1]) + 1,
     }
+
+
+def finalize_hybrid_analysis_like_mode1(
+    analysis_full,
+    forecast_full,
+    timestep,
+    icesee_kwargs,
+    finalizer,
+):
+    """Apply the exact mode-1 reduced-state hybrid finalization contract.
+
+    Mode 1 removes basal friction before the EnKF analysis, finalizes the
+    remaining state/parameter blocks, merges those blocks into the saved full
+    forecast member, and subsequently obtains friction from inversion.  Merely
+    freezing friction rows in a full-state mode-2 analysis is not equivalent:
+    post-analysis inference and geometry hooks also depend on the configured
+    state layout.  This helper keeps mode 2's fixed-size on-disk shards while
+    reproducing mode 1's five-block finalization exactly.
+    """
+    analysis_full = np.asarray(analysis_full)
+    forecast_full = np.asarray(forecast_full)
+    if analysis_full.shape != forecast_full.shape or analysis_full.ndim != 2:
+        raise ValueError(
+            "Hybrid analysis and forecast must be equal 2-D full-state arrays."
+        )
+
+    info = _inversion_variable_info(analysis_full.shape[0], icesee_kwargs)
+    if info is None:
+        return finalizer(
+            analysis_vec=analysis_full,
+            forecast_vec=forecast_full,
+            timestep=timestep,
+            icesee_kwargs=icesee_kwargs,
+        )
+
+    full_names = list(
+        icesee_kwargs.get("vec_inputs_old")
+        or icesee_kwargs.get("vec_inputs")
+        or []
+    )
+    variable_map = _global_variable_index_map(
+        analysis_full.shape[0],
+        full_names,
+        icesee_kwargs.get("var_nd_old", icesee_kwargs.get("var_nd")),
+    )
+    kept_names = [
+        name for index, name in enumerate(full_names)
+        if index != info["index"]
+    ]
+    kept_rows = np.concatenate([variable_map[name] for name in kept_names])
+    analysis_reduced = np.asarray(analysis_full[kept_rows, :]).copy()
+
+    if bool(icesee_kwargs.get("execution_parity_trace", False)):
+        print(
+            "[ICESEE][mode2-parity] Applying mode-1 hybrid handoff at "
+            f"stored timestep {int(timestep)}: full_rows="
+            f"{analysis_full.shape[0]}, reduced_rows={kept_rows.size}, "
+            f"excluded={info['name']!r}.",
+            flush=True,
+        )
+
+    # This mirrors parallel_write_ensemble_scattered: mode 1 supplies the
+    # forecast to the finalizer only when the bed-domain gate needs it.  The
+    # saved full forecast is nevertheless always the merge base.
+    forecast_reduced = None
+    if str(icesee_kwargs.get("bed_update_domain", "all")).lower() != "all":
+        forecast_reduced = np.asarray(forecast_full[kept_rows, :]).copy()
+
+    reduced_kwargs = dict(icesee_kwargs)
+    reduced_kwargs.update({
+        "vec_inputs": kept_names,
+        "vec_inputs_new": kept_names,
+        "total_state_param_vars": len(kept_names),
+        "nd": int(kept_rows.size),
+        "nd_old": int(analysis_full.shape[0]),
+        "excluded_indices": [int(info["index"])],
+    })
+    var_nd = icesee_kwargs.get("var_nd_old", icesee_kwargs.get("var_nd"))
+    if isinstance(var_nd, dict):
+        reduced_kwargs["var_nd"] = {
+            name: int(var_nd[name]) for name in kept_names
+        }
+    elif isinstance(var_nd, (list, tuple, np.ndarray)) and len(var_nd) == len(full_names):
+        reduced_kwargs["var_nd"] = [
+            int(value) for index, value in enumerate(var_nd)
+            if index != info["index"]
+        ]
+
+    finalized_reduced = finalizer(
+        analysis_vec=analysis_reduced,
+        forecast_vec=forecast_reduced,
+        timestep=timestep,
+        icesee_kwargs=reduced_kwargs,
+    )
+    if np.asarray(finalized_reduced).shape != analysis_reduced.shape:
+        raise ValueError(
+            "Reduced hybrid finalizer returned an incompatible shape: "
+            f"{np.asarray(finalized_reduced).shape} instead of "
+            f"{analysis_reduced.shape}."
+        )
+
+    # Mode 1 starts with ensemble_before_analysis and injects only the updated
+    # non-friction blocks.  In particular, no pre-inversion friction analysis
+    # can leak into the model handed to inverse_step_single.
+    merged = np.asarray(forecast_full).copy()
+    merged[kept_rows, :] = finalized_reduced
+
+    # ``finalizer`` stores temporal inference state in its kwargs mapping.
+    # Preserve those mutations even though a reduced compatibility mapping was
+    # needed for the call above.
+    for key, value in reduced_kwargs.items():
+        if key.startswith(("_bed_", "_smb_")):
+            icesee_kwargs[key] = value
+    return merged
 
 
 def _exclude_inversion_observations(obs_indices, icesee_kwargs, nd):
@@ -503,6 +618,43 @@ class EnKF_fully_parallel_IO:
             or icesee_kwargs.get("physics_smb_inference", False)
         )
 
+    _FINALIZATION_STATE_PREFIXES = (
+        "_bed_",
+        "_smb_",
+    )
+
+    def _restore_finalization_state(self, icesee_kwargs):
+        """Restore mutable inference state lost by ``**kwargs`` expansion.
+
+        Execution mode 1 passes one runtime dictionary through consecutive
+        analysis cycles.  Mode 2's method API expands that dictionary with
+        ``**icesee_kwargs``, which creates a new mapping on every call.  The
+        post-analysis inference hooks retain private temporal/reference state
+        in that mapping, so silently discarding it changes the numerical
+        algorithm at the first non-trivial bed/SMB update.
+        """
+        persistent = getattr(self, "_finalization_state", {})
+        for key, value in persistent.items():
+            # The class-owned state is authoritative.  ``icesee_kwargs`` may
+            # still contain a stale value returned by an earlier ``**kwargs``
+            # expansion, so checking only for key absence is insufficient.
+            icesee_kwargs[key] = (
+                value.copy() if isinstance(value, np.ndarray)
+                else copy.deepcopy(value)
+            )
+
+    def _save_finalization_state(self, icesee_kwargs):
+        """Persist private post-analysis state for the next mode-2 cycle."""
+        state = {
+            key: (
+                value.copy() if isinstance(value, np.ndarray)
+                else copy.deepcopy(value)
+            )
+            for key, value in icesee_kwargs.items()
+            if key.startswith(self._FINALIZATION_STATE_PREFIXES)
+        }
+        self._finalization_state = state
+
     def _finalize_analysis_member_slabs(
         self, canonical, temp_path, timestep, icesee_kwargs
     ):
@@ -548,12 +700,21 @@ class EnKF_fully_parallel_IO:
                 # Member-local finalization must not leak mutable diagnostic
                 # state from one slab into the next.
                 slab_kwargs = dict(icesee_kwargs)
-                finalized = finalize_analysis_ensemble(
-                    analysis_vec=analysis,
-                    forecast_vec=forecast,
-                    timestep=timestep,
-                    icesee_kwargs=slab_kwargs,
-                )
+                if bool(icesee_kwargs.get("inversion_flag", False)):
+                    finalized = finalize_hybrid_analysis_like_mode1(
+                        analysis,
+                        forecast,
+                        timestep,
+                        slab_kwargs,
+                        finalize_analysis_ensemble,
+                    )
+                else:
+                    finalized = finalize_analysis_ensemble(
+                        analysis_vec=analysis,
+                        forecast_vec=forecast,
+                        timestep=timestep,
+                        icesee_kwargs=slab_kwargs,
+                    )
                 analysis_states[:, member0:member1] = np.asarray(
                     finalized, dtype=self.storage_dtype
                 )
@@ -613,12 +774,21 @@ class EnKF_fully_parallel_IO:
                         forecast = np.asarray(forecast_handle["states"])
                     with h5py.File(temp_path, "r+") as analysis_handle:
                         analysis = np.asarray(analysis_handle["states"])
-                        analysis = finalize_analysis_ensemble(
-                            analysis_vec=analysis,
-                            forecast_vec=forecast,
-                            timestep=timestep,
-                            icesee_kwargs=icesee_kwargs,
-                        )
+                        if bool(icesee_kwargs.get("inversion_flag", False)):
+                            analysis = finalize_hybrid_analysis_like_mode1(
+                                analysis,
+                                forecast,
+                                timestep,
+                                icesee_kwargs,
+                                finalize_analysis_ensemble,
+                            )
+                        else:
+                            analysis = finalize_analysis_ensemble(
+                                analysis_vec=analysis,
+                                forecast_vec=forecast,
+                                timestep=timestep,
+                                icesee_kwargs=icesee_kwargs,
+                            )
                         analysis_handle["states"][:, :] = analysis
                         analysis_handle.flush()
             except Exception as exc:
@@ -683,7 +853,33 @@ class EnKF_fully_parallel_IO:
                             or icesee_kwargs.get("vec_inputs")
                         ),
                     })
+                    trace_dir = None
+                    if icesee_kwargs.get("execution_parity_trace", False):
+                        trace_dir = os.path.join(
+                            icesee_kwargs.get("data_path", "."),
+                            "_execution_parity_trace",
+                        )
+                        os.makedirs(trace_dir, exist_ok=True)
+                        np.save(
+                            os.path.join(
+                                trace_dir,
+                                f"inversion_{int(timestep):06d}_member_{ens_id:06d}_input.npy",
+                            ),
+                            member,
+                        )
+
                     result = inverse_step(ensemble=member, **inv_kwargs)
+                    if result is None:
+                        raise RuntimeError(
+                            "inverse_step_single returned no result for "
+                            f"ensemble member {ens_id}; inspect the preceding "
+                            "model-adapter/ISSM error."
+                        )
+                    if not hasattr(result, "items"):
+                        raise TypeError(
+                            "inverse_step_single must return a mapping, got "
+                            f"{type(result).__name__} for ensemble member {ens_id}."
+                        )
                     value = None
                     for key, candidate in result.items():
                         if str(key).lower() in {
@@ -702,6 +898,14 @@ class EnKF_fully_parallel_IO:
                         raise ValueError(
                             f"Inversion returned {value.size} friction values; "
                             f"expected {info['stop'] - info['start']}."
+                        )
+                    if trace_dir is not None:
+                        np.save(
+                            os.path.join(
+                                trace_dir,
+                                f"inversion_{int(timestep):06d}_member_{ens_id:06d}_friction.npy",
+                            ),
+                            value,
                         )
                     local_updates.append((ens_id, value))
         except Exception as exc:
@@ -733,6 +937,11 @@ class EnKF_fully_parallel_IO:
         finally:
             handle.close()
         self.mpi_comm.Barrier()
+        if self.rank == 0:
+            print(
+                "[ICESEE][inversion] Completed member-wise friction inversion "
+                f"for {self.nens} members at stored timestep {timestep}."
+            )
 
     def _create_file_collective(self, fname):
         import h5py, h5py.h5p as h5p, h5py.h5f as h5f, h5py.h5fd as h5fd
@@ -1329,7 +1538,9 @@ class EnKF_fully_parallel_IO:
                 observed_params = set(icesee_kwargs.get("observed_params", []))
 
                 bed_aliases = {"bed", "bedrock", "bed_topography", "bedtopo", "bedtopography"}
-                key_is_bed = {k: (k in bed_aliases) for k in vec_inputs}
+                key_is_bed = {
+                    k: (str(k).lower() in bed_aliases) for k in vec_inputs
+                }
                 key_idx_map = {k: np.asarray(indx_map[k], dtype=int) for k in vec_inputs}
 
                 # ---- Bed sparsity controls (accept BOTH naming conventions safely) ----
@@ -1345,6 +1556,9 @@ class EnKF_fully_parallel_IO:
                 bed_spacing_pts = icesee_kwargs.get("bed_obs_spacing", None)
                 bed_indices_user = icesee_kwargs.get("bed_obs_indices", None)
                 bed_mask_user = icesee_kwargs.get("bed_obs_mask", None)
+                bed_track_half_width_m = icesee_kwargs.get(
+                    "bed_obs_track_half_width_m", 1000.0
+                )
 
                 # ---- Build bed_mask_map using the SAME priority/shape handling as partial ----
                 bed_mask_map = {}
@@ -1389,8 +1603,6 @@ class EnKF_fully_parallel_IO:
                     # Priority 4: LiDAR-like / stride in km (2D grid or ISSM mesh)
                     elif (bed_stride_km is not None) and (Lx is not None) and (Ly is not None):
                         if re.match(r"(?i)^issm$", str(model_name)):
-                            import h5py  # already imported, but harmless
-
                             icesee_path = icesee_kwargs.get("icesee_path")
                             data_path = icesee_kwargs.get("data_path")
 
@@ -1398,35 +1610,25 @@ class EnKF_fully_parallel_IO:
                             try:
                                 with h5py.File(file_path, "r") as f:
                                     x_param = f["/fric_x"][:]
-                                    y_param = f["/fric_y"][:]
                             except FileNotFoundError:
                                 raise FileNotFoundError(
                                     f"ISSM mesh file '{file_path}' not found. "
                                     "Please generate the mesh indicies before running ICESEE."
                                 )
 
-                            y_param = np.asarray(y_param / 1000.0, dtype=float).reshape(-1)
-                            x_param = np.asarray(x_param / 1000.0, dtype=float).reshape(-1)
+                            # Use the same units and implementation as mode 1:
+                            # mesh x is in metres, stride is configured in km,
+                            # and track width is an independent metre value.
+                            mask = cross_flow_track_mask(
+                                x_param,
+                                stride_km=bed_stride_km,
+                                half_width_m=bed_track_half_width_m,
+                            )
 
-                            y_min, y_max = np.min(y_param), np.max(y_param)
-                            x_min, x_max = np.min(x_param), np.max(x_param)
-
-                            local_len = x_param.size
-                            bed_stride_km_local = float(bed_stride_km) / 1000.0  # keep your partial conversion
-
-                            x_lines = np.arange(x_min, x_max + 1e-6, bed_stride_km_local)
-
-                            if x_lines.size > 1:
-                                dx_nom = (x_max - x_min) / (x_lines.size - 1)
-                            else:
-                                dx_nom = bed_stride_km_local
-                            band = 0.5 * dx_nom
-
-                            mask = np.zeros(local_len, dtype=bool)
-                            for x_line in x_lines:
-                                mask |= np.abs(x_param - x_line) <= band
-
-                            print(f"[ICESEE<-ISSM] bed LiDAR mask for '{k}': {mask.sum()} of {local_len} points observed")
+                            print(
+                                f"[ICESEE<-ISSM] bed LiDAR mask for '{k}': "
+                                f"{mask.sum()} of {x_param.size} points observed"
+                            )
 
                         else:
                             # 2D grid assumption like partial
@@ -1477,16 +1679,47 @@ class EnKF_fully_parallel_IO:
                         list(icesee_kwargs.get("observed_vars", []))
                         + list(icesee_kwargs.get("observed_params", []))
                     ))
+                    thickness_key = next(
+                        (
+                            key for key in vec_inputs
+                            if str(key).lower() in {
+                                "h", "thickness", "ice_thickness"
+                            }
+                        ),
+                        None,
+                    )
                     obs_indices_parts = []
                     obs_std_parts = []
                     obs_is_bed_parts = []
+                    bed_thickness_indices_parts = []
                     for key in observed:
                         if key not in key_idx_map:
                             raise KeyError(f"Observed key '{key}' is not in vec_inputs")
                         idx = key_idx_map[key]
                         bed_flag = key_is_bed.get(key, False)
                         if bed_flag:
-                            idx = idx[bed_mask_map.get(key, np.ones(idx.size, dtype=bool))]
+                            if thickness_key is None:
+                                raise ValueError(
+                                    "Grounded-only bed observations require a "
+                                    "thickness variable in vec_inputs."
+                                )
+                            thickness_idx = key_idx_map[thickness_key]
+                            if thickness_idx.size != idx.size:
+                                raise ValueError(
+                                    "Bed and thickness blocks must be pointwise "
+                                    "aligned for grounded-only bed observations."
+                                )
+                            static_mask = bed_mask_map.get(
+                                key, np.ones(idx.size, dtype=bool)
+                            )
+                            idx = idx[static_mask]
+                            bed_thickness_indices_parts.append(
+                                thickness_idx[static_mask]
+                            )
+                        else:
+                            bed_thickness_indices_parts.append(
+                                np.full(idx.size, -1, dtype=np.int64)
+                            )
                         sigma = float(sig_obs[vec_inputs.index(key)])
                         obs_indices_parts.append(idx)
                         obs_std_parts.append(np.full(idx.size, sigma, dtype=np.float64))
@@ -1495,6 +1728,9 @@ class EnKF_fully_parallel_IO:
                     obs_indices = np.concatenate(obs_indices_parts).astype(np.int64)
                     obs_std = np.concatenate(obs_std_parts)
                     obs_is_bed = np.concatenate(obs_is_bed_parts)
+                    bed_thickness_indices = np.concatenate(
+                        bed_thickness_indices_parts
+                    ).astype(np.int64)
                     nobs = int(obs_indices.size)
                     col_chunk = max(1, min(50, m_obs))
                     row_chunk = max(1, min(
@@ -1517,7 +1753,13 @@ class EnKF_fully_parallel_IO:
                         )
                         active = f.create_dataset(
                             "obs_active", (nobs, m_obs),
-                            chunks=(row_chunk, col_chunk), dtype="bool"
+                            # Store the mask as an ordinary byte rather than
+                            # HDF5's enum-backed boolean type.  MATLAB h5read
+                            # exposes the latter as a cell array on some
+                            # releases, which breaks the ISSM inversion
+                            # adapter's logical indexing.  NumPy/h5py still
+                            # converts this dataset to bool transparently.
+                            chunks=(row_chunk, col_chunk), dtype="u1"
                         )
                     else:
                         # HDF5 chunks may not exceed a zero-length axis.  A
@@ -1529,7 +1771,7 @@ class EnKF_fully_parallel_IO:
                         )
                         active = f.create_dataset(
                             "obs_active",
-                            data=np.empty((nobs, 0), dtype=bool),
+                            data=np.empty((nobs, 0), dtype=np.uint8),
                         )
                     f.create_dataset("obs_indices", data=obs_indices, dtype="i8")
                     f.create_dataset("obs_std", data=obs_std, dtype="f8")
@@ -1571,7 +1813,29 @@ class EnKF_fully_parallel_IO:
                             # ``ind_m`` contains zero-based columns of the
                             # stored reference trajectory.
                             tcol = int(step)
-                            active_col = (~obs_is_bed) | np.isin(km, bed_snap_cols)
+                            # Match execution mode 1 exactly: bed data are
+                            # available only at configured snapshot columns
+                            # and only where the reference state is grounded.
+                            # The compact row registry contains the static
+                            # survey support; the dynamic grounded gate must
+                            # still be evaluated separately at every snapshot.
+                            active_col = ~obs_is_bed
+                            if km in bed_snap_cols and np.any(obs_is_bed):
+                                bed_positions = np.flatnonzero(obs_is_bed)
+                                bed_rows = obs_indices[bed_positions]
+                                thickness_rows = bed_thickness_indices[
+                                    bed_positions
+                                ]
+                                bed_values = _read_rows_preserve_order(
+                                    truth, bed_rows, tcol
+                                )
+                                thickness_values = _read_rows_preserve_order(
+                                    truth, thickness_rows, tcol
+                                )
+                                di = float(icesee_kwargs.get("di", 0.8930))
+                                active_col[bed_positions] = (
+                                    thickness_values + bed_values / di > 0.0
+                                )
                             active[:, km] = active_col
                             for start in range(0, nobs, row_chunk):
                                 stop = min(nobs, start + row_chunk)
@@ -1970,6 +2234,7 @@ class EnKF_fully_parallel_IO:
     # compute analysis mean
     def compute_analysis_update(self, **icesee_kwargs):
         # Compute the analysis update for each rank
+        self._restore_finalization_state(icesee_kwargs)
         k = icesee_kwargs.get('k')
         k = k + 1 if k < self.nt - 1 else k
         nt = self.nt
@@ -2066,6 +2331,7 @@ class EnKF_fully_parallel_IO:
                 temp_handle.close()
 
             self._publish_analysis_file(k, temp_path, icesee_kwargs)
+            self._save_finalization_state(icesee_kwargs)
 
             # Means are derived only after the finalized analysis is published;
             # otherwise diagnostics and restart state can describe different

@@ -96,6 +96,10 @@ Explore the Wiki to find:
 For memory- and storage-bounded execution of large ensembles, including rolling
 history, compact observations, restart behavior, and capacity limits, see the
 [large-scale execution guide](docs/large-scale-execution.md).
+The validated mode-2 parity contract and proposed spatially distributed mode-3
+architecture are documented in the
+[mode-2 development contract](docs/execution-mode-2-development.md) and
+[mode-3 design](docs/execution-mode-3-design.md), respectively.
 
 ---
 
