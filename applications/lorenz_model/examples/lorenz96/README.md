@@ -30,10 +30,13 @@ To execute the [run_da_lorenz96.py](./run_da_lorenz96.py) script, follow these s
      - **EnRSKF**: Ensemble Square Root Kalman Filter
 
 4. **Outputs**:
-   - Results are saved in the `results/` directory as `.h5` files with the naming format:
+   - All run outputs are kept together in `_modelrun_datasets/`. Summary
+     metadata uses the naming format:
      ```
      filter_type-model.h5
      ```
+     Ensemble/state files retain their existing names, while generated plots
+     are written to `_modelrun_datasets/figures/`.
 
 5. **Visualize Results**:
    - Use the notebook [read_results.ipynb](./read_results.ipynb) to load and plot the results for detailed analysis.

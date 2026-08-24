@@ -1,24 +1,24 @@
 function initialize_model(rank, nprocs, ens_id)
 
-    %  read kwargs from a .mat file
-	model_kwargs = sprintf('model_kwargs_%d.mat', ens_id);
-	kwargs 			= load(model_kwargs);
+    %  read icesee_kwargs from a .mat file
+	icesee_kwargs_file = sprintf('icesee_kwargs_%d.mat', ens_id);
+	icesee_kwargs 			= load(icesee_kwargs_file);
 
 	%  access the values of the dictionary
-	ParamFile 			 = char(kwargs.ParamFile);
-	Lx 					 = double(kwargs.Lx); % length of the domain in x direction
-	Ly 					 = double(kwargs.Ly); % length of the domain in y direction
-	nx 					 = double(kwargs.nx); % number of nodes in x direction
-	ny 					 = double(kwargs.ny); % number of nodes in y direction
-    extrusion_layers     = double(kwargs.extrusion_layers); % number of layers for extrusion
-    extrusion_exponent	 = double(kwargs.extrusion_exponent); % exponent for extrusion
-	flow_model			 = char(kwargs.flow_model); % flow model to use
-	sliding_vx			 = double(kwargs.sliding_vx); % sliding velocity in x
-	sliding_vy			 = double(kwargs.sliding_vy); % sliding velocity in y
-	cluster_name 		 = char(kwargs.cluster_name); % cluster name
-	step_ens  		     = double(kwargs.steps); % step for ensemble 
-	icesee_path		     = char(kwargs.icesee_path); % path to icesee
-	data_path		     = char(kwargs.data_path); % path to data
+	ParamFile 			 = char(icesee_kwargs.ParamFile);
+	Lx 					 = double(icesee_kwargs.Lx); % length of the domain in x direction
+	Ly 					 = double(icesee_kwargs.Ly); % length of the domain in y direction
+	nx 					 = double(icesee_kwargs.nx); % number of nodes in x direction
+	ny 					 = double(icesee_kwargs.ny); % number of nodes in y direction
+    extrusion_layers     = double(icesee_kwargs.extrusion_layers); % number of layers for extrusion
+    extrusion_exponent	 = double(icesee_kwargs.extrusion_exponent); % exponent for extrusion
+	flow_model			 = char(icesee_kwargs.flow_model); % flow model to use
+	sliding_vx			 = double(icesee_kwargs.sliding_vx); % sliding velocity in x
+	sliding_vy			 = double(icesee_kwargs.sliding_vy); % sliding velocity in y
+	cluster_name 		 = char(icesee_kwargs.cluster_name); % cluster name
+	step_ens  		     = double(icesee_kwargs.steps); % step for ensemble
+	icesee_path		     = char(icesee_kwargs.icesee_path); % path to icesee
+	data_path		     = char(icesee_kwargs.data_path); % path to data
 
 	folder = sprintf('./Models/ens_id_%d', ens_id);
 	% Only create if it doesn't exist
@@ -250,4 +250,3 @@ function initialize_model(rank, nprocs, ens_id)
 	end
     
 end
-

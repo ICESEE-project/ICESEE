@@ -25,22 +25,22 @@ def retry_on_failure(
 ) -> Callable:
     """
     A decorator to retry a function or method up to max_attempts times with a delay between attempts.
-    
+
     Args:
         max_attempts (int): Maximum number of retry attempts (default: 5).
         delay (float): Seconds to wait between retries (default: 1.0).
         mpi_comm: Optional MPI communicator object for distributed environments (default: None).
-    
+
     Returns:
         Callable: The wrapped function with retry logic.
     """
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> T:
+        def wrapper(*args, **icesee_kwargs) -> T:
             rank = mpi_comm.Get_rank() if mpi_comm is not None else "N/A"
             for attempt in range(max_attempts):
                 try:
-                    return func(*args, **kwargs)
+                    return func(*args, **icesee_kwargs)
                 except IndexError as e:
                     if attempt < max_attempts - 1:
                         print(f"[Rank {rank}] Attempt {attempt + 1} failed with IndexError: {e}. Retrying in {delay}s...")
@@ -59,12 +59,12 @@ def retry_on_failure(
     return decorator
 
 class EnKFIO:
-    def __init__(self, file_prefix, nd, nens, nt, subcomm, mpi_comm, params, serial_file_creation=True, base_path="enkf_data", batch_size=50):
+    def __init__(self, file_prefix, nd, nens, nt, subcomm, mpi_comm, icesee_kwargs, serial_file_creation=True, base_path="enkf_data", batch_size=50):
         try:
             self.nd = nd
             self.nens = nens
             self.nt = nt
-            self.params = params
+            self.icesee_kwargs = icesee_kwargs
             self.base_path = base_path
             self.file_prefix = file_prefix
             self.batch_size = batch_size
@@ -166,7 +166,7 @@ class EnKFIO:
                         #     chunks=(row_chunk, col_chunk),
                         #     dtype='f8'
                         # )
-                        
+
             self.mpi_comm.Barrier()
 
             for t in range(t_start, t_start + nfiles):
@@ -469,8 +469,8 @@ class EnKFIO:
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
-    
-    def compute_forecast_mean_chunked_v2(self, k, **kwargs):
+
+    def compute_forecast_mean_chunked_v2(self, k, **icesee_kwargs):
         """
         Simple & hang-free:
         - running sum in RAM (length = local_rows)
@@ -758,19 +758,18 @@ class EnKFIO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def icesee_get_index(self, **kwargs):
+    def icesee_get_index(self, **icesee_kwargs):
         try:
-            vec_inputs = kwargs.get("vec_inputs", None)
-            params = kwargs.get("params", None)
-            nd = kwargs.get("nd", params.get("nd", None))
+            vec_inputs = icesee_kwargs.get("vec_inputs", None)
+            nd = icesee_kwargs.get("nd")
 
-            if params["default_run"]:
-                comm = kwargs.get("subcomm", None)
+            if icesee_kwargs["default_run"]:
+                comm = icesee_kwargs.get("subcomm", None)
             else:
-                comm = kwargs.get("comm_world", None)
-            
-            len_vec = params["total_state_param_vars"]
-            dim_list_param = np.array(kwargs.get('dim_list', None)) // len_vec
+                comm = icesee_kwargs.get("comm_world", None)
+
+            len_vec = icesee_kwargs["total_state_param_vars"]
+            dim_list_param = np.array(icesee_kwargs.get('dim_list', None)) // len_vec
             hdim = nd // len_vec
 
             if comm is None:
@@ -778,7 +777,7 @@ class EnKFIO:
                 dim = dim_list_param[rank]
                 offsets = [0]
             else:
-                if params["even_distribution"]:
+                if icesee_kwargs["even_distribution"]:
                     rank = 0
                     dim = dim_list_param[rank]
                     offsets = [0]
@@ -797,7 +796,7 @@ class EnKFIO:
                 index_map[var] = np.arange(start, end)
                 var_start += hdim
 
-            local_size_per_rank = kwargs.get('dim_list', None)
+            local_size_per_rank = icesee_kwargs.get('dim_list', None)
             return index_map, local_size_per_rank[rank]
         except Exception as e:
             print(f"Error occurred in icesee_get_index: {e}")
@@ -806,12 +805,12 @@ class EnKFIO:
             self.mpi_comm.Abort(1)
 
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
-    def generate_observation_schedule(self, **kwargs):
+    def generate_observation_schedule(self, **icesee_kwargs):
         try:
-            t = np.array(kwargs["t"])
-            freq_obs = self.params["freq_obs"]
-            obs_start_time = self.params["obs_start_time"]
-            obs_max_time = self.params["obs_max_time"]
+            t = np.array(icesee_kwargs["t"])
+            freq_obs = self.icesee_kwargs["freq_obs"]
+            obs_start_time = self.icesee_kwargs["obs_start_time"]
+            obs_max_time = self.icesee_kwargs["obs_max_time"]
 
             max_t = np.max(t)
             obs_max_time = min(obs_max_time, max_t)
@@ -834,14 +833,14 @@ class EnKFIO:
             self.mpi_comm.Abort(1)
 
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
-    def _create_synthetic_observations(self, **kwargs):
+    def _create_synthetic_observations(self, **icesee_kwargs):
         try:
-            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path')
-            error_R_zarr_path = kwargs.get('error_R_zarr_path')
-            nd = kwargs.get('nd')
-            nt = kwargs.get('nt')
+            synthetic_obs_zarr_path = icesee_kwargs.get('synthetic_obs_zarr_path')
+            error_R_zarr_path = icesee_kwargs.get('error_R_zarr_path')
+            nd = icesee_kwargs.get('nd')
+            nt = icesee_kwargs.get('nt')
 
-            obs_t, ind_m, m_obs = self.generate_observation_schedule(**kwargs)
+            obs_t, ind_m, m_obs = self.generate_observation_schedule(**icesee_kwargs)
             m = m_obs
             m_R = m_obs*2 +1
 
@@ -860,32 +859,32 @@ class EnKFIO:
             if rank == 0:
                 hu_obs = zarr.create_array(store=synthetic_obs_zarr_path, shape=(nd, m), chunks=(min(1000, nd), min(50, m)), dtype='f8', overwrite=True)
                 error_R = zarr.create_array(store=error_R_zarr_path, shape=(nd, m_R), chunks=(min(1000, nd), min(50, m_R)), dtype='f8', overwrite=True)
-            
+
             self.mpi_comm.Barrier()
             hu_obs = zarr.open_array(store=synthetic_obs_zarr_path, mode='r+')
             error_R = zarr.open_array(store=error_R_zarr_path, mode='r+')
             self.mpi_comm.Barrier()
 
-            if kwargs.get('joint_estimation', False) or self.params.get('localization_flag', False):
-                hdim = nd // self.params["total_state_param_vars"]
+            if icesee_kwargs.get('joint_estimation', False) or self.icesee_kwargs.get('localization_flag', False):
+                hdim = nd // self.icesee_kwargs["total_state_param_vars"]
             else:
-                hdim = nd // self.params["total_state_param_vars"]
+                hdim = nd // self.icesee_kwargs["total_state_param_vars"]
 
             if rank == 0:
-                for i, sig in enumerate(self.params["sig_obs"]):
+                for i, sig in enumerate(self.icesee_kwargs["sig_obs"]):
                     start_idx = i*hdim
                     end_idx = start_idx + hdim
                     error_R[start_idx:end_idx,:] = np.ones((hdim,1)) * sig
             self.mpi_comm.Barrier()
 
             statevec_true = zarr.open_array(store="output/statevec_true.zarr", mode='r+')
-            indx_map, _ = self.icesee_get_index(**kwargs)
+            indx_map, _ = self.icesee_get_index(**icesee_kwargs)
             if self.nd < 10000:
                 if rank==0:
                     km = 0
                     for step in range(nt):
                         if (km<m_obs) and (step+1 == ind_m[km]):
-                            for key in kwargs['vec_inputs']:
+                            for key in icesee_kwargs['vec_inputs']:
                                 # hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1]
                                 hu_obs[indx_map[key],km] = statevec_true[indx_map[key],step+1] + np.random.normal(0,error_R[indx_map[key],km],len(indx_map[key]))
 
@@ -907,7 +906,7 @@ class EnKFIO:
                         if km < m_obs:
                             step = ind_m[km] - 1
                             if 0 <= step < nt:
-                                for key in kwargs['vec_inputs']:
+                                for key in icesee_kwargs['vec_inputs']:
                                     indices = indx_map[key]
                                     local_indices = indices[(indices >= row_start) & (indices < row_end)]
                                     if len(local_indices) > 0:
@@ -933,7 +932,7 @@ class EnKFIO:
                         if km < m_obs:
                             step = ind_m[km] - 1
                             if 0 <= step < nt:
-                                for key in kwargs['vec_inputs']:
+                                for key in icesee_kwargs['vec_inputs']:
                                     indices = indx_map[key]
                                     local_indices = indices[(indices >= row_start) & (indices < row_end)]
                                     if len(local_indices) > 0:
@@ -952,11 +951,11 @@ class EnKFIO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def H_matrix(self, **kwargs):
+    def H_matrix(self, **icesee_kwargs):
         try:
-            zarr_path = kwargs.get('H_matrix_zarr_path')
-            nd = kwargs.get('nd')
-            m_obs = kwargs.get('m_obs')
+            zarr_path = icesee_kwargs.get('H_matrix_zarr_path')
+            nd = icesee_kwargs.get('nd')
+            m_obs = icesee_kwargs.get('m_obs')
             m = m_obs * 2 + 1
             di = int((nd - 2) / (2 * m_obs))
 
@@ -967,9 +966,9 @@ class EnKFIO:
 
             H_matrix_file[m_obs * 2, nd - 2] = 1
 
-            if self.params.get('joint_estimation', False):
-                ndim = nd // self.params["total_state_param_vars"]
-                state_variables_size = ndim * self.params["num_state_vars"]
+            if self.icesee_kwargs.get('joint_estimation', False):
+                ndim = nd // self.icesee_kwargs["total_state_param_vars"]
+                state_variables_size = ndim * self.icesee_kwargs["num_state_vars"]
                 H_matrix_file[:, state_variables_size:] = 0
         except Exception as e:
             print(f"Error in H_matrix: {e}")
@@ -977,10 +976,10 @@ class EnKFIO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def Eta_matrix(self, k, ens_idx, **kwargs):
+    def Eta_matrix(self, k, ens_idx, **icesee_kwargs):
         try:
-            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
-            # Eta_matrix_zarr_path = kwargs.get('Eta_matrix_zarr_path', "output/Eta_matrix.zarr")
+            H_matrix_zarr_path = icesee_kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
+            # Eta_matrix_zarr_path = icesee_kwargs.get('Eta_matrix_zarr_path', "output/Eta_matrix.zarr")
 
             H_matrix_file = zarr.open_array(H_matrix_zarr_path, mode='r')
             H_local = H_matrix_file[:, self.nd_start_world:self.nd_end_world]
@@ -988,41 +987,13 @@ class EnKFIO:
             mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
             with h5py.File(mean_file_path, 'r', driver='mpio', comm=self.mpi_comm) as f:
                 ens_mean = f['mean'][self.nd_start_world:self.nd_end_world, k]
-                
+
             state = self.read_analysis(k, ens_idx)
             ens_pertubations = state - ens_mean
 
             Eta_local = np.dot(H_local, ens_pertubations)
 
-            # compute Eta_global from all ranks 
-            Eta_global = np.empty_like(Eta_local)
-            self.mpi_comm.Allreduce(Eta_local, Eta_global, op=MPI.SUM)
-
-            return Eta_global
-        except Exception as e:
-            print(f"Error in Eta_matrix: {e}")
-            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-            print(f"Traceback details:\n{tb_str}")
-            self.mpi_comm.Abort(1)
-    
-    def Eta_matrix_root(self, k, ens_idx, **kwargs):
-        try:
-            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
-            # Eta_matrix_zarr_path = kwargs.get('Eta_matrix_zarr_path', "output/Eta_matrix.zarr")
-
-            H_matrix_file = zarr.open_array(H_matrix_zarr_path, mode='r')
-            H_local = H_matrix_file[:, self.nd_start_world:self.nd_end_world]
-
-            mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-            with h5py.File(mean_file_path, 'r', driver='mpio', comm=self.mpi_comm) as f:
-                ens_mean = f['mean'][self.nd_start_world:self.nd_end_world, k]
-                
-            state = self.read_analysis(k, ens_idx)
-            ens_pertubations = state - ens_mean
-
-            Eta_local = np.dot(H_local, ens_pertubations)
-
-            # compute Eta_global from all ranks 
+            # compute Eta_global from all ranks
             Eta_global = np.empty_like(Eta_local)
             self.mpi_comm.Allreduce(Eta_local, Eta_global, op=MPI.SUM)
 
@@ -1033,11 +1004,39 @@ class EnKFIO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def compute_X5_root(self, km, **kwargs):
+    def Eta_matrix_root(self, k, ens_idx, **icesee_kwargs):
         try:
-            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
-            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', "output/synthetic_obs.zarr")
-            # d_matrix_zarr_path = kwargs.get('d_matrix_zarr_path', "output/d_matrix.zarr")
+            H_matrix_zarr_path = icesee_kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
+            # Eta_matrix_zarr_path = icesee_kwargs.get('Eta_matrix_zarr_path', "output/Eta_matrix.zarr")
+
+            H_matrix_file = zarr.open_array(H_matrix_zarr_path, mode='r')
+            H_local = H_matrix_file[:, self.nd_start_world:self.nd_end_world]
+
+            mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
+            with h5py.File(mean_file_path, 'r', driver='mpio', comm=self.mpi_comm) as f:
+                ens_mean = f['mean'][self.nd_start_world:self.nd_end_world, k]
+
+            state = self.read_analysis(k, ens_idx)
+            ens_pertubations = state - ens_mean
+
+            Eta_local = np.dot(H_local, ens_pertubations)
+
+            # compute Eta_global from all ranks
+            Eta_global = np.empty_like(Eta_local)
+            self.mpi_comm.Allreduce(Eta_local, Eta_global, op=MPI.SUM)
+
+            return Eta_global
+        except Exception as e:
+            print(f"Error in Eta_matrix: {e}")
+            tb_str = "".join(traceback.format_exception(*sys.exc_info()))
+            print(f"Traceback details:\n{tb_str}")
+            self.mpi_comm.Abort(1)
+
+    def compute_X5_root(self, km, **icesee_kwargs):
+        try:
+            H_matrix_zarr_path = icesee_kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
+            synthetic_obs_zarr_path = icesee_kwargs.get('synthetic_obs_zarr_path', "output/synthetic_obs.zarr")
+            # d_matrix_zarr_path = icesee_kwargs.get('d_matrix_zarr_path', "output/d_matrix.zarr")
 
             H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')
             H_local = H_matrix[:, self.nd_start_world:self.nd_end_world]
@@ -1082,10 +1081,10 @@ class EnKFIO:
             D_global = d_global + Eta  # (m, nens)
             Dprime = D_global - HA  # (m, nens)
 
-            # -- create a zarr file for each processor to write to  
-            m = kwargs.get('m_obs')*2+1
+            # -- create a zarr file for each processor to write to
+            m = icesee_kwargs.get('m_obs')*2+1
             Nens = self.nens
-        
+
             X5 = np.empty((Nens, Nens))
             if self.mpi_comm.Get_rank() == 0:
             # if False:
@@ -1105,7 +1104,7 @@ class EnKFIO:
 
                 # get the min (m Nens)
                 nrmin = min(Nens, m)
-                
+
                 # convert S to eigenvalues
                 sig = sig**2
 
@@ -1153,12 +1152,12 @@ class EnKFIO:
                     print(f"[ICESEE] Sum of each X5 column is not 1.0: {np.sum(X5, axis=0)}")
                 # print(f"[ICESEE] Rank: {comm_world.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
                 del X4; gc.collect()
-            
+
             # Broadcast X5 to all ranks
             self.mpi_comm.Bcast(X5, root=0)
 
             return X5
-        
+
         except Exception as e:
             print(f"Error in compute_X5_analysis_mean: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
@@ -1166,12 +1165,12 @@ class EnKFIO:
             self.mpi_comm.Abort(1)
 
     @retry_on_failure(max_attempts=5, delay=1.0, mpi_comm=MPI.COMM_WORLD)
-    def compute_X5_(self, km, **kwargs):
-        # innovation (Dprime) = D - HA 
+    def compute_X5_(self, km, **icesee_kwargs):
+        # innovation (Dprime) = D - HA
         try:
-            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
-            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', "output/synthetic_obs.zarr")
-            # d_matrix_zarr_path = kwargs.get('d_matrix_zarr_path', "output/d_matrix.zarr")
+            H_matrix_zarr_path = icesee_kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
+            synthetic_obs_zarr_path = icesee_kwargs.get('synthetic_obs_zarr_path', "output/synthetic_obs.zarr")
+            # d_matrix_zarr_path = icesee_kwargs.get('d_matrix_zarr_path', "output/d_matrix.zarr")
 
             H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')
             H_local = H_matrix[:, self.nd_start_world:self.nd_end_world]
@@ -1191,7 +1190,7 @@ class EnKFIO:
             # wrapper function for all ensemble members
             def D_HA(ens_idx):
                 # call Eta_matrix
-                Eta_global = self.Eta_matrix(km, ens_idx, **kwargs)
+                Eta_global = self.Eta_matrix(km, ens_idx, **icesee_kwargs)
 
                 # compute D
                 D_global = d_global + Eta_global
@@ -1205,8 +1204,8 @@ class EnKFIO:
                 return Eta_global, D_global, HA_global
 
             # compute innovations for all ens members
-            # -- create a zarr file for each processor to write to  
-            m = kwargs.get('m_obs')*2+1
+            # -- create a zarr file for each processor to write to
+            m = icesee_kwargs.get('m_obs')*2+1
             Nens = self.nens
             Dprime = np.zeros((m,self.nens))
             HA = np.zeros((m, self.nens))
@@ -1233,7 +1232,7 @@ class EnKFIO:
 
             # get the min (m Nens)
             nrmin = min(Nens, m)
-            
+
             # convert S to eigenvalues
             sig = sig**2
 
@@ -1297,14 +1296,14 @@ class EnKFIO:
             del X4; gc.collect()
 
             return X5
-        
+
         except Exception as e:
             print(f"Error in compute_X5_analysis_mean: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
-    
-    def compute_X5_utils_batch(self, km, **kwargs):
+
+    def compute_X5_utils_batch(self, km, **icesee_kwargs):
         """
         Returns:
         Eta   : (m, Nens)
@@ -1316,11 +1315,11 @@ class EnKFIO:
             rank = comm.Get_rank()
 
             # ---- Config / inputs
-            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
-            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', "output/synthetic_obs.zarr")
-            m = kwargs.get('m_obs') * 2 + 1
+            H_matrix_zarr_path = icesee_kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
+            synthetic_obs_zarr_path = icesee_kwargs.get('synthetic_obs_zarr_path', "output/synthetic_obs.zarr")
+            m = icesee_kwargs.get('m_obs') * 2 + 1
             Nens = int(self.nens)
-            block_size = int(kwargs.get('block_size', max(16, min(64, Nens))))  # tuneable batch size
+            block_size = int(icesee_kwargs.get('block_size', max(16, min(64, Nens))))  # tuneable batch size
 
             # ---- Open H once and slice local columns
             H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')  # shape (m_total, nd_total) or (m, nd_total) as per your layout
@@ -1389,13 +1388,13 @@ class EnKFIO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def compute_X5_utils(self, km, **kwargs):
+    def compute_X5_utils(self, km, **icesee_kwargs):
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
         try:
-            H_matrix_zarr_path = kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
-            synthetic_obs_zarr_path = kwargs.get('synthetic_obs_zarr_path', "output/synthetic_obs.zarr")
-            m = kwargs.get('m_obs') * 2 + 1
+            H_matrix_zarr_path = icesee_kwargs.get('H_matrix_zarr_path', "output/H_matrix.zarr")
+            synthetic_obs_zarr_path = icesee_kwargs.get('synthetic_obs_zarr_path', "output/synthetic_obs.zarr")
+            m = icesee_kwargs.get('m_obs') * 2 + 1
             Nens = self.nens
 
             # --- Open H (read-only) once and slice local columns
@@ -1456,15 +1455,15 @@ class EnKFIO:
             self.mpi_comm.Abort(1)
 
 
-    def compute_X5_modified(self, km, **kwargs):
+    def compute_X5_modified(self, km, **icesee_kwargs):
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
         try:
-            m = kwargs.get('m_obs') * 2 + 1
+            m = icesee_kwargs.get('m_obs') * 2 + 1
             Nens = self.nens
 
-            Dprime, Eta, HA = self.compute_X5_utils(km, **kwargs)
-            # Dprime, Eta, HA = self.compute_X5_utils_batch(km, **kwargs)
+            Dprime, Eta, HA = self.compute_X5_utils(km, **icesee_kwargs)
+            # Dprime, Eta, HA = self.compute_X5_utils_batch(km, **icesee_kwargs)
 
             # compute the HAbar
             # HAbar = np.mean(HA, axis=1)
@@ -1482,7 +1481,7 @@ class EnKFIO:
 
             # get the min (m Nens)
             nrmin = min(Nens, m)
-            
+
             # convert S to eigenvalues
             sig = sig**2
 
@@ -1540,7 +1539,7 @@ class EnKFIO:
 
 
     # compute analysis mean
-    def compute_analysis_update(self, km, **kwargs):
+    def compute_analysis_update(self, km, **icesee_kwargs):
         # Compute the analysis update for each rank
         try:
             self._ensure_batch(km)
@@ -1553,8 +1552,8 @@ class EnKFIO:
             start = MPI.Wtime()
 
             # call the compute X5 function
-            # X5 = self.compute_X5_(km, **kwargs)
-            X5 = self.compute_X5_modified(km, **kwargs)
+            # X5 = self.compute_X5_(km, **icesee_kwargs)
+            X5 = self.compute_X5_modified(km, **icesee_kwargs)
             # compute column sums for X5
 
             # ---
@@ -1588,9 +1587,9 @@ class EnKFIO:
             analysis_updates = all_states_zarr @ X5  # Matrix multiplication
 
             # performm inflation
-            inflation_factor = self.params.get('inflation_factor', 1.0)
-            ndim = analysis_updates.shape[0]//self.params["total_state_param_vars"]
-            state_block_size = ndim * self.params["num_state_vars"]
+            inflation_factor = self.icesee_kwargs.get('inflation_factor', 1.0)
+            ndim = analysis_updates.shape[0]//self.icesee_kwargs["total_state_param_vars"]
+            state_block_size = ndim * self.icesee_kwargs["num_state_vars"]
             mean_params = np.mean(analysis_updates[state_block_size:, :], axis=1).reshape(-1, 1)
             pertubations = analysis_updates[state_block_size:, :] - mean_params
             # inflated_pertubations = pertubations * inflation_factor
@@ -1599,12 +1598,12 @@ class EnKFIO:
             # check for negative thicknes and set to 1e-3 if vec_input contains h
             # Define valid thickness variable names
             THICKNESS_VARS = {
-                "h", "ice_thickness", "thickness", "ice_thick", 
+                "h", "ice_thickness", "thickness", "ice_thick",
                 "hi", "h_ice", "h_ice_thickness", "H"
             }
             min_thickness = 1e-3
-            vec_inputs = kwargs.get("vec_inputs", None)
-         
+            vec_inputs = icesee_kwargs.get("vec_inputs", None)
+
             for i, input_var in enumerate(vec_inputs or []):
                 if input_var in THICKNESS_VARS:
                     start = i * ndim
@@ -1630,14 +1629,14 @@ class EnKFIO:
                         )
                 comm.Barrier()
                 f['mean'][self.nd_start_world:self.nd_end_world, km] = analysis_mean
-            
+
             # clean up zarr file
             # if os.path.exists(zarr_path):
             #     shutil.rmtree(zarr_path)
             for path in [allstates_sate_zarr_path, mean_params_zarr_path, pertubations_zarr_path, analysis_updates_zarr_path]:
                 if os.path.exists(path):
                     shutil.rmtree(path)
-            
+
             self.mpi_comm.Barrier()
             # del all_states_zarr
             gc.collect()

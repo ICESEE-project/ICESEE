@@ -18,7 +18,7 @@ from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import
 from ICESEE.applications.issm_model.issm_utils.matlab2python.server_utils import run_icesee_with_server
 
 # --- model initialization ---
-def initialize_model(**kwargs):
+def initialize_model(**icesee_kwargs):
     """ des: intialize the issm model
         - calls the issm initalize_model.m matlab function to initialize the model
     """
@@ -28,44 +28,44 @@ def initialize_model(**kwargs):
     # --- copy intialize_model.m to the current directory
     shutil.copyfile(os.path.join(os.path.dirname(__file__), 'initialize_model.m'), 'initialize_model.m')
 
-    comm = kwargs.get('icesee_comm')
+    comm = icesee_kwargs.get('icesee_comm')
     icesee_rank = comm.Get_rank()
     # icesee_size = comm.Get_size()
-    icesee_size =kwargs.get('model_nprocs')
-    ens_id      =kwargs.get('ens_id')
-    
+    icesee_size =icesee_kwargs.get('model_nprocs')
+    ens_id      =icesee_kwargs.get('ens_id')
 
-    # read the model kwargs from the file
-    server      =kwargs.get('server')
-    icesee_path =kwargs.get('icesee_path')
-    data_path   =kwargs.get('data_path')
+
+    # Read model configuration from the file.
+    server      =icesee_kwargs.get('server')
+    icesee_path =icesee_kwargs.get('icesee_path')
+    data_path   =icesee_kwargs.get('data_path')
     issm_cmd = f"run(\'issm_env\'); initialize_model({icesee_rank}, {icesee_size}, {ens_id})"
     # result = run_icesee_with_server(lambda: server.send_command(issm_cmd),server,False,comm)
     if not server.send_command(issm_cmd):
         print(f"[DEBUG] Error sending command: {issm_cmd}")
         server.kill_matlab_processes()
         sys.exit(1)
-    
+
     # if not result:
     #     sys.exit(1)
     # -- we would have broadcasted data to the remaining  ranks but now if nprocs > Nens, we need to duplicate data by copying data from ens_id_0000 to ens_id_0001, ens_id_0002, ... ens_id_000Nens
     if icesee_rank == 0:
         data_dir = './Models/ens_id_0'
-        kwargs_data = 'model_kwargs_0.mat'
-        Nens =kwargs.get('Nens')
+        icesee_data = 'icesee_kwargs_0.mat'
+        Nens =icesee_kwargs.get('Nens')
         for ens in range(1, Nens):
             new_data_dir = f'./Models/ens_id_{ens}'
-            new_kwargs_data = f'model_kwargs_{ens}.mat'
+            new_icesee_data = f'icesee_kwargs_{ens}.mat'
             # if os.path.exists(new_data_dir):
             #     shutil.rmtree(new_data_dir)
             shutil.copytree(data_dir, new_data_dir, dirs_exist_ok=True)
-            shutil.copyfile(kwargs_data, new_kwargs_data)
+            shutil.copyfile(icesee_data, new_icesee_data)
             # print(f"[DEBUG] Copied {data_dir} to {new_data_dir}")
-            # print(f"[DEBUG] Copied {kwargs_data} to {new_kwargs_data}")
+            # print(f"[DEBUG] Copied {icesee_data} to {new_icesee_data}")
     comm.Barrier()
 
     # fetch model size from output file
-    try: 
+    try:
         output_filename = f'{icesee_path}/{data_path}/ensemble_init_{ens_id}.h5'
         # print(f"[DEBUG] Attempting to open file: {output_filename}")
         if not os.path.exists(output_filename):
@@ -80,39 +80,38 @@ def initialize_model(**kwargs):
     except Exception as e:
         print(f"[Initialize-model] Error reading the file: {e}")
 
-        
-    
+
+
 # ---- ISSM model ----
-def ISSM_model(**kwargs):
+def ISSM_model(**icesee_kwargs):
     """ des: run the issm model
         - calls the issm run_model.m matlab function to run the model
     """
 
     # --- get the number of processors ---
-    # nprocs = kwargs.get('nprocs')
-    k = kwargs.get('k')
-    dt = kwargs.get('dt')
-    tinitial = kwargs.get('tinitial')
-    tfinal = kwargs.get('tfinal')
-    # rank = kwargs.get('rank')
-    ens_id = kwargs.get('ens_id')
-    comm = kwargs.get('comm')
-    params = kwargs.get('params')
+    # nprocs = icesee_kwargs.get('nprocs')
+    k = icesee_kwargs.get('k')
+    dt = icesee_kwargs.get('dt')
+    tinitial = icesee_kwargs.get('tinitial')
+    tfinal = icesee_kwargs.get('tfinal')
+    # rank = icesee_kwargs.get('rank')
+    ens_id = icesee_kwargs.get('ens_id')
+    comm = icesee_kwargs.get('comm')
 
     # get rank
     rank   = comm.Get_rank()
     # nprocs = comm.Get_size()
-    nprocs = params.get('model_nprocs')
+    nprocs = icesee_kwargs.get('model_nprocs')
 
     # print(f"[DEBUG] ISSM model {rank} of {nprocs}")
 
     # --- copy run_model.m to the current directory
     shutil.copyfile(os.path.join(os.path.dirname(__file__), 'run_model.m'), 'run_model.m')
 
-    
+
     # --- call the run_model.m function ---
-    server   = kwargs.get('server')
-    filename = kwargs.get('fname') 
+    server   = icesee_kwargs.get('server')
+    filename = icesee_kwargs.get('fname')
     # print(f"file name: {filename}")
 
     try:
@@ -129,7 +128,7 @@ def ISSM_model(**kwargs):
 
 
 # ---- Run model for ISSM ----
-def run_model(ensemble, **kwargs):
+def run_model(ensemble, **icesee_kwargs):
     """ des: run the issm model with ensemble matrix from ICESEE
         returns: dictionary of the output from the issm model
     """
@@ -138,13 +137,13 @@ def run_model(ensemble, **kwargs):
     import os
 
     # --- get the number of processors ---
-    nprocs = kwargs.get('nprocs')
-    server              = kwargs.get('server')
-    # rank                = kwargs.get('rank')
-    issm_examples_dir   = kwargs.get('issm_examples_dir')
-    icesee_path         = kwargs.get('icesee_path')
-    comm                = kwargs.get('comm')
-    vec_inputs          = kwargs.get('vec_inputs')
+    nprocs = icesee_kwargs.get('nprocs')
+    server              = icesee_kwargs.get('server')
+    # rank                = icesee_kwargs.get('rank')
+    issm_examples_dir   = icesee_kwargs.get('issm_examples_dir')
+    icesee_path         = icesee_kwargs.get('icesee_path')
+    comm                = icesee_kwargs.get('comm')
+    vec_inputs          = icesee_kwargs.get('vec_inputs')
 
     rank                = comm.Get_rank()
 
@@ -153,24 +152,24 @@ def run_model(ensemble, **kwargs):
 
     # --- filename for data saving
     fname = 'enkf_state.mat'
-    kwargs.update({'fname': fname})
-    
-    ens_id = kwargs.get('ens_id')
+    icesee_kwargs.update({'fname': fname})
 
-    # try: 
+    ens_id = icesee_kwargs.get('ens_id')
+
+    # try:
     if True:
         # Generate output filename based on rank
-        icesee_path    = kwargs.get('icesee_path')
-        data_path      = kwargs.get('data_path')
+        icesee_path    = icesee_kwargs.get('icesee_path')
+        data_path      = icesee_kwargs.get('data_path')
         input_filename = f'{icesee_path}/{data_path}/ensemble_output_{ens_id}.h5'
 
         #  write the ensemble to the h5 file
-        k = kwargs.get('k')
+        k = icesee_kwargs.get('k')
 
         # -- call the icess_get_index function to get the index of the ensemble
         # print(f"[DEBUG] run_model {rank} of {comm.Get_size()}")
         # print(f"[DEBUG] Ensemble: {ensemble[:5]}")
-        vecs, indx_map, _ = icesee_get_index(ensemble, **kwargs)
+        vecs, indx_map, _ = icesee_get_index(ensemble, **icesee_kwargs)
 
         # if k > 0:
         if True:
@@ -180,7 +179,7 @@ def run_model(ensemble, **kwargs):
             Vz = ensemble[indx_map["Vz"]]
             Pressure = ensemble[indx_map["Pressure"]]
             # -> fetch the vx, vy, vz, and pressure from the ensemble
-            
+
             # -----
             with h5py.File(input_filename, 'w', driver='mpio', comm=comm) as f:
                 f.create_dataset('ensemble', data=ensemble)
@@ -188,15 +187,15 @@ def run_model(ensemble, **kwargs):
                 f.create_dataset('Vy', data=Vy)
                 f.create_dataset('Vz', data=Vz)
                 f.create_dataset('Pressure', data=Pressure)
-                
+
             # print(f"[HDF5] Saved: {input_filename}")
 
         # --- call the issm model  to update the state and parameters variables ---
-        ISSM_model(**kwargs)
+        ISSM_model(**icesee_kwargs)
 
         # -- change directory back to the original directory
         os.chdir(icesee_path)
-        
+
         #  --- read the output from the h5 file ISSM model ---
         try:
         # if True:
@@ -216,6 +215,6 @@ def run_model(ensemble, **kwargs):
         except Exception as e:
             print(f"[Run model] Error reading the file: {e}")
         #     return None
-    
+
     # -- change directory back to the original directory
     os.chdir(icesee_path)

@@ -14,48 +14,148 @@ from ICESEE.src.utils.utils import UtilsFunctions
 from ICESEE.src.utils.tools import icesee_get_index
 
 
-def generate_synthetic_observations(**model_kwargs):
+def synchronize_observation_schedule(icesee_kwargs, obs_file=None):
+    """Load and broadcast the canonical observation schedule.
+
+    Synthetic observations are written by one MPI rank, while every rank
+    evaluates the forecast/analysis schedule.  Returning the rank-local
+    ``icesee_kwargs`` from the generator can therefore leave non-writer ranks
+    with the schedule computed during configuration parsing.  The observation
+    artifact is the authoritative source because its columns were generated
+    with exactly these indices.
+
+    This helper deliberately mutates and returns ``icesee_kwargs`` so both
+    execution modes use identical schedule metadata.
+    """
+    comm = icesee_kwargs.get("comm_world", MPI.COMM_WORLD)
+    rank = comm.Get_rank()
+    path = obs_file or icesee_kwargs.get("synthetic_obs_file")
+
+    payload = None
+    if rank == 0:
+        if not path or not h5py.is_hdf5(path):
+            raise FileNotFoundError(
+                f"Cannot synchronize observation schedule: '{path}' is not a valid HDF5 file"
+            )
+        with h5py.File(path, "r") as f:
+            if "obs_index" in f:
+                obs_index = np.asarray(f["obs_index"][:], dtype=np.int64)
+            elif "ind_m" in f:
+                obs_index = np.asarray(f["ind_m"][:], dtype=np.int64)
+            else:
+                raise KeyError(f"'{path}' contains neither /obs_index nor /ind_m")
+
+            if "obs_t" in f:
+                obs_t = np.asarray(f["obs_t"][:], dtype=float)
+            else:
+                # Older compact files did not retain obs_t.  Recover it from
+                # the configured model time vector without changing indices.
+                model_t = np.asarray(icesee_kwargs.get("t", []), dtype=float)
+                if model_t.size and np.all((obs_index >= 0) & (obs_index < model_t.size)):
+                    obs_t = model_t[obs_index]
+                else:
+                    dt = float(icesee_kwargs.get("dt", 1.0))
+                    obs_t = obs_index.astype(float) * dt
+            if "bed_snap_cols" in f:
+                bed_snap_cols = np.asarray(
+                    f["bed_snap_cols"][:], dtype=np.int64
+                )
+            else:
+                # Backward compatibility for compact mode-2 observation files
+                # written before bed snapshot metadata was persisted.  Only
+                # accept an actual time match: mapping an out-of-range snapshot
+                # to the nearest endpoint would incorrectly activate bed
+                # inference at an unrelated analysis cycle.
+                configured = np.asarray(
+                    icesee_kwargs.get("bed_obs_snapshot", []), dtype=float
+                ).reshape(-1)
+                matched = []
+                if configured.size and obs_t.size:
+                    model_t = np.asarray(
+                        icesee_kwargs.get("t", []), dtype=float
+                    ).reshape(-1)
+                    if model_t.size > 1:
+                        tolerance = 0.5 * float(np.min(np.diff(model_t)))
+                    else:
+                        tolerance = 0.5 * float(icesee_kwargs.get("dt", 1.0))
+                    tolerance = max(tolerance, 32.0 * np.finfo(float).eps)
+                    for snapshot in configured:
+                        column = int(np.argmin(np.abs(obs_t - snapshot)))
+                        if abs(float(obs_t[column]) - float(snapshot)) <= tolerance:
+                            matched.append(column)
+                bed_snap_cols = np.asarray(
+                    sorted(set(matched)), dtype=np.int64
+                )
+        if obs_t.size != obs_index.size:
+            raise ValueError(
+                f"Observation schedule mismatch in '{path}': "
+                f"{obs_index.size} indices but {obs_t.size} times"
+            )
+        payload = (obs_index, obs_t, bed_snap_cols)
+
+    obs_index, obs_t, bed_snap_cols = comm.bcast(payload, root=0)
+    obs_index = np.asarray(obs_index, dtype=np.int64)
+    obs_t = np.asarray(obs_t, dtype=float)
+    bed_snap_cols = np.asarray(bed_snap_cols, dtype=np.int64)
+    m_obs = int(obs_index.size)
+    mapping = {int(step): int(col) for col, step in enumerate(obs_index)}
+    icesee_kwargs.update({
+        "ind_m": obs_index,
+        "obs_index": obs_index,
+        "obs_t": obs_t,
+        "tobserve": obs_index,
+        "m_obs": m_obs,
+        "number_obs_instants": m_obs,
+        "obs_model_to_col": mapping,
+        "bed_snap_cols": bed_snap_cols.tolist(),
+    })
+    return icesee_kwargs
+
+
+def generate_synthetic_observations(**icesee_kwargs):
     """Generate synthetic observations for the ICESEE model.
     """
 
-    # unpack model_kwargs
-    params         = model_kwargs.get("params", {})
-    model_module   = model_kwargs.get("model_module", None)
-    comm_world     = model_kwargs.get("comm_world", MPI.COMM_WORLD)
-    _synthetic_obs = model_kwargs.get("synthetic_obs_file")
-    _true_nurged   = model_kwargs.get("true_nurged_file")
-    color          = model_kwargs.get("color", 0)
-    subcomm        = model_kwargs.get("subcomm", None)
-    sub_rank       = model_kwargs.get("sub_rank", 0)
+    # unpack icesee_kwargs
+    model_module   = icesee_kwargs.get("model_module", None)
+    comm_world     = icesee_kwargs.get("comm_world", MPI.COMM_WORLD)
+    _synthetic_obs = icesee_kwargs.get("synthetic_obs_file")
+    _true_nurged   = icesee_kwargs.get("true_nurged_file")
+    color          = icesee_kwargs.get("color", 0)
+    subcomm        = icesee_kwargs.get("subcomm", None)
+    sub_rank       = icesee_kwargs.get("sub_rank", 0)
     rank_world = comm_world.Get_rank()
     size_world = comm_world.Get_size()
 
 
-    if model_kwargs.get("generate_synthetic_obs", True):   
-        if params["even_distribution"] or (params["default_run"] and size_world <= params["Nens"]):
+    if icesee_kwargs.get("generate_synthetic_obs", True):
+        if icesee_kwargs["even_distribution"] or (icesee_kwargs["default_run"] and size_world <= icesee_kwargs["Nens"]):
             if rank_world == 0:
                 # --- Synthetic Observations ---
                 print("[ICESEE] Generating synthetic observations ...")
                 with h5py.File(_true_nurged, "r") as f:
                     ensemble_true_state = f['true_state'][:]
 
-                utils_funs = UtilsFunctions(params, ensemble_true_state)
-                model_kwargs.update({"statevec_true": ensemble_true_state})
-                hu_obs, error_R, bed_masks, kwargs = utils_funs._create_synthetic_observations(**model_kwargs)
+                utils_funs = UtilsFunctions(
+                    icesee_kwargs=icesee_kwargs,
+                    ensemble=ensemble_true_state
+                )
+                icesee_kwargs.update({"statevec_true": ensemble_true_state})
+                hu_obs, error_R, bed_masks, icesee_kwargs = utils_funs._create_synthetic_observations(**icesee_kwargs)
 
                 # check if the best_mask_map is generated
-                model_kwargs.update({"bed_mask_map": bed_masks})
-                
+                icesee_kwargs.update({"bed_mask_map": bed_masks})
+
                 # observe or don't observe parameters.
-                vecs, indx_map,_ = icesee_get_index(hu_obs, **model_kwargs)
-                # check if model_kwargs['observe_params'] is empty
-                if len(model_kwargs['observed_params']) == 0:
-                    for key in model_kwargs['params_vec']:
+                vecs, indx_map,_ = icesee_get_index(hu_obs, **icesee_kwargs)
+                # check if icesee_kwargs['observe_params'] is empty
+                if len(icesee_kwargs['observed_params']) == 0:
+                    for key in icesee_kwargs['params_vec']:
                         hu_obs[indx_map[key],:] = 0.0
                         error_R[:,indx_map[key]] = 0.0
-                else: 
-                    for key in model_kwargs['params_vec']:
-                        if key not in model_kwargs['observed_params']:
+                else:
+                    for key in icesee_kwargs['params_vec']:
+                        if key not in icesee_kwargs['observed_params']:
                             hu_obs[indx_map[key],:] = 0.0
                             error_R[:,indx_map[key]] = 0.0
 
@@ -86,12 +186,25 @@ def generate_synthetic_observations(**model_kwargs):
                         )
 
                     # ---- metadata needed to rebuild H consistently ----
-                    f.create_dataset("bed_snap_cols", data=np.asarray(kwargs["bed_snap_cols"], dtype=int))
-                    f.create_dataset("ind_m", data=np.asarray(kwargs["ind_m"], dtype=int))
-                    f.create_dataset("obs_t", data=np.asarray(kwargs["obs_t"], dtype=float))
+                    f.create_dataset("bed_snap_cols", data=np.asarray(icesee_kwargs["bed_snap_cols"], dtype=int))
+                    obs_index = np.asarray(icesee_kwargs["ind_m"], dtype=int)
+                    obs_t = np.asarray(icesee_kwargs["obs_t"], dtype=float)
+                    f.create_dataset("ind_m", data=obs_index)
+                    f.create_dataset("obs_t", data=obs_t)
+                    # Plotting-facing aliases keep all observation data and
+                    # metadata together in synthetic_obs.h5.  The original
+                    # names remain for backward compatibility with existing
+                    # analysis and restart code.
+                    f.create_dataset("obs_index", data=obs_index)
+                    f.create_dataset(
+                        "obs_max_time",
+                        data=np.asarray(
+                            [np.max(obs_t) if obs_t.size else 0.0], dtype=float
+                        ),
+                    )
 
                     # obs_model_to_col is a dict -> store as parallel arrays
-                    m = kwargs.get("obs_model_to_col", {})
+                    m = icesee_kwargs.get("obs_model_to_col", {})
                     keys = np.asarray(list(m.keys()), dtype=int)
                     vals = np.asarray([m[k] for k in keys], dtype=int)
                     f.create_dataset("obs_model_to_col_keys", data=keys)
@@ -104,10 +217,10 @@ def generate_synthetic_observations(**model_kwargs):
 
             else:
                 pass
-                # hu_obs = np.empty((params["nd"],params["number_obs_instants"]),dtype=np.float64)
-                # error_R = np.empty((params["number_obs_instants"], params["nd"]),dtype=np.float64)
+                # hu_obs = np.empty((icesee_kwargs["nd"],icesee_kwargs["number_obs_instants"]),dtype=np.float64)
+                # error_R = np.empty((icesee_kwargs["number_obs_instants"], icesee_kwargs["nd"]),dtype=np.float64)
 
-            if params["even_distribution"]:
+            if icesee_kwargs["even_distribution"]:
                 # Bcast the observations
                 comm_world.Bcast(hu_obs, root=0)
             else:
@@ -121,25 +234,28 @@ def generate_synthetic_observations(**model_kwargs):
             if rank_world == 0:
                 print("[ICESEE] Generating synthetic observations ...")
 
-            if params["default_run"] and size_world > params["Nens"]:
+            if icesee_kwargs["default_run"] and size_world > icesee_kwargs["Nens"]:
                 subcomm.Barrier()
                 # comm_world.Bcast(hu_obs, root=0)
                 if sub_rank == 0:
-                    utils_funs = UtilsFunctions(params, ensemble_true_state)
-                    model_kwargs.update({"statevec_true": ensemble_true_state})
-                    hu_obs, error_R, bed_mask_map, kwargs = utils_funs._create_synthetic_observations(**model_kwargs)
-                    model_kwargs.update({"bed_mask_map": bed_mask_map})
+                    utils_funs = UtilsFunctions(
+                        icesee_kwargs=icesee_kwargs,
+                        ensemble=ensemble_true_state
+                    )
+                    icesee_kwargs.update({"statevec_true": ensemble_true_state})
+                    hu_obs, error_R, bed_mask_map, icesee_kwargs = utils_funs._create_synthetic_observations(**icesee_kwargs)
+                    icesee_kwargs.update({"bed_mask_map": bed_mask_map})
 
                     # observe or don't observe parameters.
-                    vecs, indx_map,_ = icesee_get_index(hu_obs, **model_kwargs)
-                    # check if model_kwargs['observe_params'] is empty
-                    if len(model_kwargs['observed_params']) == 0:
-                        for key in model_kwargs['params_vec']:
-                            hu_obs[indx_map[key],:] = 0.0 
+                    vecs, indx_map,_ = icesee_get_index(hu_obs, **icesee_kwargs)
+                    # check if icesee_kwargs['observe_params'] is empty
+                    if len(icesee_kwargs['observed_params']) == 0:
+                        for key in icesee_kwargs['params_vec']:
+                            hu_obs[indx_map[key],:] = 0.0
                             error_R[:,indx_map[key]] = 0.0
-                    else: 
-                        for key in model_kwargs['params_vec']:
-                            if key not in model_kwargs['observed_params']:
+                    else:
+                        for key in icesee_kwargs['params_vec']:
+                            if key not in icesee_kwargs['observed_params']:
                                 hu_obs[indx_map[key],:] = 0.0
                                 error_R[:,indx_map[key]] = 0.0
 
@@ -171,27 +287,30 @@ def generate_synthetic_observations(**model_kwargs):
                 # broadcast to the global communicator
                 # comm_world.Bcast(hu_obs, root=0)
                 # print(f"[ICESEE] rank {rank_world} Shape of the observations: {hu_obs.shape}")
-                # exit()    
-            elif params["sequential_run"]:
+                # exit()
+            elif icesee_kwargs["sequential_run"]:
                 comm_world.Barrier()
-                # g_shape = model_kwargs['dim_list'][rank_world]
-                # utils_funs = UtilsFunctions(params, ensemble_true_state)
-                # model_kwargs.update({"statevec_true": ensemble_true_state})
-                # hu_obs = utils_funs._create_synthetic_observations(**model_kwargs)
+                # g_shape = icesee_kwargs['dim_list'][rank_world]
+                # utils_funs = UtilsFunctions(icesee_kwargs, ensemble_true_state)
+                # icesee_kwargs.update({"statevec_true": ensemble_true_state})
+                # hu_obs = utils_funs._create_synthetic_observations(**icesee_kwargs)
                 # # gather from every rank to rank 0
                 # gathered_obs = comm_world.gather(hu_obs[:g_shape,:], root=0)
                 # if rank_world == 0:
                 #     print(f"[ICESEE] {[arr.shape for arr in gathered_obs]}")
                 #     hu_obs = np.vstack(gathered_obs)
                 # else:
-                #     hu_obs = np.empty((model_kwargs["global_shape"],params["number_obs_instants"]),dtype=np.float64)
-                
+                #     hu_obs = np.empty((icesee_kwargs["global_shape"],icesee_kwargs["number_obs_instants"]),dtype=np.float64)
+
                 # comm_world.Bcast(hu_obs, root=0)
                 if rank_world == 0:
-                    utils_funs = UtilsFunctions(params, ensemble_true_state)
-                    model_kwargs.update({"statevec_true": ensemble_true_state})
-                    hu_obs, error_R, bed_mask_map, kwargs = utils_funs._create_synthetic_observations(**model_kwargs)
-                    model_kwargs.update({"bed_mask_map": bed_mask_map})
+                    utils_funs = UtilsFunctions(
+                        icesee_kwargs=icesee_kwargs,
+                        ensemble=ensemble_true_state
+                    )
+                    icesee_kwargs.update({"statevec_true": ensemble_true_state})
+                    hu_obs, error_R, bed_mask_map, icesee_kwargs = utils_funs._create_synthetic_observations(**icesee_kwargs)
+                    icesee_kwargs.update({"bed_mask_map": bed_mask_map})
                     shape_ = np.array(hu_obs.shape,dtype=np.int32)
                     shape_R = np.array(error_R.shape,dtype=np.int32)
                 else:
@@ -209,4 +328,4 @@ def generate_synthetic_observations(**model_kwargs):
                 comm_world.Bcast(hu_obs, root=0)
                 comm_world.Bcast(error_R, root=0)
 
-    return model_kwargs
+    return icesee_kwargs

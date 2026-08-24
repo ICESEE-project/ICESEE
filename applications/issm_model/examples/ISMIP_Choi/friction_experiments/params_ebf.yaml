@@ -1,0 +1,16 @@
+extends: ../param.yaml
+
+modeling-parameters:
+  num_years: 40
+  timesteps_per_year: 0.1
+
+
+enkf-parameters:
+  freq_obs: 1
+  obs_start_time: 2
+  obs_max_time: 24
+  ensemble_spinup_years: 4.0
+  ensemble_spinup_dt: 0.1
+  data_path: _modelrun_datasets_p3q0_comparison_ebf_40yr
+  inversion_flag: 0
+  frozen_analysis_vars: []

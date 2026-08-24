@@ -1,7 +1,7 @@
 # =============================================================================
 # @author: Brian Kyanjo
 # @date: 2024-09-24
-# @description: Optimized and Robust Ensemble Kalman Filter (EnKF) class with 
+# @description: Optimized and Robust Ensemble Kalman Filter (EnKF) class with
 #               Parallelization.
 #               - The class includes the analysis step of the EnKF with both
 #                 Stochastic and Deterministic EnKF options.
@@ -12,17 +12,17 @@ from scipy.stats import multivariate_normal
 from joblib import Parallel, delayed
 
 class EnsembleKalmanFilter:
-    def __init__(self, ObsFun, JObsFun, Cov_obs, Cov_model, taper, params, ensemble_threshold=30, n_jobs=-1):
+    def __init__(self, ObsFun, JObsFun, Cov_obs, Cov_model, taper, icesee_kwargs, ensemble_threshold=30, n_jobs=-1):
         """
         Initializes the Ensemble Kalman Filter (EnKF) with parallelization.
-        
+
         Parameters:
         ObsFun: Callable - Observation function mapping state space to observation space.
         JObsFun: Callable - Jacobian of the observation function.
         Cov_obs: ndarray - Observation covariance matrix (m x m).
         Cov_model: ndarray - Model covariance matrix (n x n).
         taper: ndarray - Covariance taper matrix (n x n).
-        params: dict - Dictionary containing parameters like "m_obs" and others.
+        icesee_kwargs: dict - Dictionary containing parameters like "m_obs" and others.
         ensemble_threshold: int - Threshold for choosing between Stochastic and Deterministic EnKF.
         n_jobs: int - Number of parallel jobs to run (-1 uses all available cores).
         """
@@ -31,7 +31,7 @@ class EnsembleKalmanFilter:
         self.Cov_obs = Cov_obs
         self.Cov_model = Cov_model
         self.taper = taper
-        self.params = params
+        self.icesee_kwargs = icesee_kwargs
         self.ensemble_threshold = ensemble_threshold
         self.n_jobs = n_jobs  # Number of parallel jobs for joblib
         self._validate_input()
@@ -49,7 +49,7 @@ class EnsembleKalmanFilter:
 
     def _compute_kalman_gain(self):
         """Compute the Kalman gain based on the Jacobian of the observation function."""
-        Jobs = self.JObsFun(self.Cov_model.shape[0], self.params["m_obs"])
+        Jobs = self.JObsFun(self.Cov_model.shape[0], self.icesee_kwargs["m_obs"])
         inv_matrix = np.linalg.inv(Jobs @ self.Cov_model @ Jobs.T + self.Cov_obs)
         KalGain = self.Cov_model @ Jobs.T @ inv_matrix
         return KalGain
@@ -60,16 +60,16 @@ class EnsembleKalmanFilter:
 
     def _update_ensemble_member(self, member_idx, huxg_ens, obs_virtual, KalGain):
         """Update a single ensemble member using the stochastic analysis step."""
-        return huxg_ens[:, member_idx] + KalGain @ (obs_virtual[:, member_idx] - self.ObsFun(huxg_ens[:, member_idx], self.params["m_obs"]))
+        return huxg_ens[:, member_idx] + KalGain @ (obs_virtual[:, member_idx] - self.ObsFun(huxg_ens[:, member_idx], self.icesee_kwargs["m_obs"]))
 
     def EnKF_analyze(self, huxg_ens, huxg_obs):
         """
         Perform the analysis step of the Ensemble Kalman Filter (Stochastic EnKF) with parallelization.
-        
+
         Parameters:
         huxg_ens: ndarray (n x N) - Ensemble matrix of model states (n: state size, N: ensemble size).
         huxg_obs: ndarray (m,) - Observation vector (m: measurement size).
-        
+
         Returns:
         analysis_ens: ndarray (n x N) - The updated ensemble after analysis.
         analysis_cov: ndarray (n x n) - The updated covariance after analysis.
@@ -95,11 +95,11 @@ class EnsembleKalmanFilter:
     def DEnKF_analyze(self, huxg_ens, huxg_obs):
         """
         Perform the analysis step of the Deterministic Ensemble Kalman Filter (DEnKF) with parallelization.
-        
+
         Parameters:
         huxg_ens: ndarray (n x N) - Ensemble matrix of model states (n: state size, N: ensemble size).
         huxg_obs: ndarray (m,) - Observation vector (m: measurement size).
-        
+
         Returns:
         analysis_ens: ndarray (n x N) - The updated ensemble after analysis.
         analysis_cov: ndarray (n x n) - The updated covariance after analysis.
@@ -111,12 +111,12 @@ class EnsembleKalmanFilter:
 
         # Compute analysis of ensemble mean
         huxg_ens_mean = np.mean(huxg_ens, axis=1, keepdims=True)
-        analysis_mean = huxg_ens_mean + KalGain @ (huxg_obs - self.ObsFun(huxg_ens_mean, self.params["m_obs"]))
+        analysis_mean = huxg_ens_mean + KalGain @ (huxg_obs - self.ObsFun(huxg_ens_mean, self.icesee_kwargs["m_obs"]))
 
         # Create parallel computation for anomalies
         huxg_ens_anom = huxg_ens - huxg_ens_mean
         analysis_ens_anom = np.array(Parallel(n_jobs=self.n_jobs)(
-            delayed(lambda i: huxg_ens_anom[:, i] - 0.5 * KalGain @ self.ObsFun(huxg_ens_anom[:, i], self.params["m_obs"])) 
+            delayed(lambda i: huxg_ens_anom[:, i] - 0.5 * KalGain @ self.ObsFun(huxg_ens_anom[:, i], self.icesee_kwargs["m_obs"]))
             for i in range(N)
         )).T
 

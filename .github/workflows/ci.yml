@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, develop_new, "icesee/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install MPI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openmpi-bin libopenmpi-dev
+
+      - name: Install ICESEE
+        run: |
+          python -m pip install -U pip setuptools wheel
+          python -m pip install -r requirements/ci.txt
+          python -m pip install -e ".[dev,mpi,viz]"
+
+      - name: Setup ICESEE paths
+        run: |
+            bash scripts/ci/ci_setup.sh
+
+      - name: Test ICESEE import
+        run: |
+            echo "ICESEE_ROOT=$ICESEE_ROOT"
+            echo "PYTHONPATH=$PYTHONPATH"
+            python - <<'PY'
+            import os
+            import sys
+            import importlib
+
+            root = os.environ["ICESEE_ROOT"]
+            if root not in sys.path:
+                sys.path.insert(0, root)
+
+            m = importlib.import_module("ICESEE")
+            print("ICESEE imported from:", m.__file__)
+            PY
+
+      - name: Run Lorenz96 CI example and generate figure
+        run: |
+          mkdir -p applications/lorenz_model/examples/lorenz96/_modelrun_datasets/figures
+          python scripts/ci/run_lorenz96_ci.py
+
+      - name: Test bounded-memory analysis and bed-update controls
+        run: |
+          pytest -q \
+            src/tests/test_full_parallel_large_data.py \
+            src/tests/test_bed_update_domain.py
+
+      - name: Upload Lorenz96 figure artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lorenz96-ci-figure
+          path: applications/lorenz_model/examples/lorenz96/_modelrun_datasets/figures/lorenz96_ci.png

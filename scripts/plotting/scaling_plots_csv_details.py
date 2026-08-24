@@ -2,10 +2,13 @@
 ICeSEE performance plotting utility.
 
 Usage (inside a notebook or script):
-    analyze_icesee("icesee_timing.log", scaling_type="strong_scaling")
+    analyze_icesee(
+        "_modelrun_datasets/diagnostics/icesee_timing.log",
+        scaling_type="strong_scaling",
+    )
 
 Outputs:
-  - PNGs and CSVs in icesee_perf_outputs
+  - PNGs and CSVs under the run's diagnostics/performance directory
 Notes:
   - Uses Assimilation time if present (preferred), else falls back to Wall-Clock,
     else to Computational Sum.
@@ -208,8 +211,14 @@ def _line_plot(x, y, xlabel, ylabel, title, out_path,flag=None):
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
-def analyze_icesee(log_path: str, scaling_type: str = "strong_scaling", model_np: int = 1):
-    out_dir = Path("icesee_perf_outputs")
+def analyze_icesee(
+    log_path: str,
+    scaling_type: str = "strong_scaling",
+    model_np: int = 1,
+    output_dir=None,
+):
+    log_path = Path(log_path)
+    out_dir = Path(output_dir) if output_dir else log_path.parent / "performance"
     out_dir.mkdir(exist_ok=True, parents=True)
 
     df = _parse_log(log_path, model_np=model_np)  
@@ -281,5 +290,5 @@ def analyze_icesee(log_path: str, scaling_type: str = "strong_scaling", model_np
     }
 
 # Example calls:
-# analyze_icesee("icesee_timing.log", scaling_type="strong_scaling")
-# analyze_icesee("icesee_timing.log", scaling_type="weak_scaling")
+# analyze_icesee("_modelrun_datasets/diagnostics/icesee_timing.log", scaling_type="strong_scaling")
+# analyze_icesee("_modelrun_datasets/diagnostics/icesee_timing.log", scaling_type="weak_scaling")

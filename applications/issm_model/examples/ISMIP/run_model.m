@@ -1,13 +1,13 @@
 function run_model(data_fname,ens_id,rank,nprocs,k,dt,tinitial,tfinal)
 	% function run_model
 	
-		%  read kwargs from a .mat file
-		model_kwargs = sprintf('model_kwargs_%d.mat', ens_id);
-		kwargs 			= load(model_kwargs);
-		cluster_name    = char(kwargs.cluster_name);
-		steps 			= double(kwargs.steps);
-		icesee_path     = char(kwargs.icesee_path);
-		data_path       = char(kwargs.data_path);
+		%  read icesee_kwargs from a .mat file
+		icesee_kwargs_file = sprintf('icesee_kwargs_%d.mat', ens_id);
+		icesee_kwargs 			= load(icesee_kwargs_file);
+		cluster_name    = char(icesee_kwargs.cluster_name);
+		steps 			= double(icesee_kwargs.steps);
+		icesee_path     = char(icesee_kwargs.icesee_path);
+		data_path       = char(icesee_kwargs.data_path);
 
 		
 		fprintf('[MATLAB] Running model with rank: %d, nprocs: %d filename: %s\n', rank, nprocs, data_fname);

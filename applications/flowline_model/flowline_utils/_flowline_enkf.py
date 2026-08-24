@@ -2,7 +2,7 @@
 # Implicit 1D flowline model (Jax version)
 # @author: Brian Kyanjo
 # @date: 2024-09-24
-# @description: This script includes the flowline model using JAX, 
+# @description: This script includes the flowline model using JAX,
 #               - Jacobian computation using JAX
 #               - Implicit solver using JAX
 # =============================================================================
@@ -19,31 +19,31 @@ from scipy.stats import norm, multivariate_normal
 jax.config.update("jax_enable_x64", True) # Set the precision in JAX to use float64
 
 # Implicit flowline model function (Jax version) --------------------------------------------------------------
-def flowline(varin, varin_old, params, grid, bedfun):
+def flowline(varin, varin_old, icesee_kwargs, grid, bedfun):
     # Unpack grid
-    NX          = params["NX"]
-    N1          = params["N1"]
-    dt          = params["dt"] / params["tscale"]
+    NX          = icesee_kwargs["NX"]
+    N1          = icesee_kwargs["N1"]
+    dt          = icesee_kwargs["dt"] / icesee_kwargs["tscale"]
     ds          = grid["dsigma"]
     sigma       = grid["sigma"]
     sigma_elem  = grid["sigma_elem"]
 
     # Unpack parameters
-    tcurrent    = params["tcurrent"]
-    xscale      = params["xscale"]
-    hscale      = params["hscale"]
-    lambd       = params["lambda"]
-    m           = params["m"]
-    n           = params["n"]
-    a           = params["accum"] / params["ascale"]
-    eps         = params["eps"]
-    transient   = params["transient"]
+    tcurrent    = icesee_kwargs["tcurrent"]
+    xscale      = icesee_kwargs["xscale"]
+    hscale      = icesee_kwargs["hscale"]
+    lambd       = icesee_kwargs["lambda"]
+    m           = icesee_kwargs["m"]
+    n           = icesee_kwargs["n"]
+    a           = icesee_kwargs["accum"] / icesee_kwargs["ascale"]
+    eps         = icesee_kwargs["eps"]
+    transient   = icesee_kwargs["transient"]
 
     # put a guard on mdot, it could be a scalar or an array
-    if isinstance(params["facemelt"], (int, float)):
-        mdot = params["facemelt"] / params["uscale"]
+    if isinstance(icesee_kwargs["facemelt"], (int, float)):
+        mdot = icesee_kwargs["facemelt"] / icesee_kwargs["uscale"]
     else:
-        mdot   = params["facemelt"][tcurrent]/params["uscale"]
+        mdot   = icesee_kwargs["facemelt"][tcurrent]/icesee_kwargs["uscale"]
 
     # Unpack variables
     h = varin[0:NX]
@@ -54,7 +54,7 @@ def flowline(varin, varin_old, params, grid, bedfun):
     xg_old = varin_old[2*NX]
 
 
-    # Calculate bed 
+    # Calculate bed
     hf  = -bedfun(xg * xscale) / (hscale * (1 - lambd))
     hfm = -bedfun(xg * sigma_elem[-1] * xscale) / (hscale * (1 - lambd))
     b   = -bedfun(xg * sigma * xscale) / hscale
@@ -62,9 +62,9 @@ def flowline(varin, varin_old, params, grid, bedfun):
     # Initialize the residual vector
     F = jnp.zeros(2 * NX + 1, dtype=jnp.float64)
 
-    # Calculate thickness functions        
+    # Calculate thickness functions
     F = F.at[0].set(transient * (h[0] - h_old[0]) / dt + (2 * h[0] * u[0]) / (ds[0] * xg)  - a)
-    
+
     F = F.at[1].set(
         transient * (h[1] - h_old[1]) / dt
         - transient * sigma_elem[1] * (xg - xg_old) * (h[2] - h[0]) / (2 * dt * ds[1] * xg)
@@ -89,7 +89,7 @@ def flowline(varin, varin_old, params, grid, bedfun):
     + (h[NX-1] * (u[NX-1] + mdot * hf / h[NX-1] + u[NX-2]) - h[NX-2] * (u[NX-2] + u[NX-3])) / (2 * xg * ds[NX-2])
     - a
     )
-    
+
     # Calculate velocity functions
     F = F.at[NX].set(
         ((4 * eps / (xg * ds[0]) ** ((1 / n) + 1)) * (h[1] * (u[1] - u[0]) * abs(u[1] - u[0]) ** ((1 / n) - 1)
@@ -118,16 +118,16 @@ def flowline(varin, varin_old, params, grid, bedfun):
     return F
 
 # Calculate the Jacobian of the flowline model function --------------------------------------------------------------
-def Jac_calc(huxg_old, params, grid, bedfun, flowlinefun):
+def Jac_calc(huxg_old, icesee_kwargs, grid, bedfun, flowlinefun):
     """
     Use automatic differentiation to calculate Jacobian for nonlinear solver.
     """
 
     def f(varin):
         # Initialize F as an array of zeros with size 2*NX + 1
-        # F = jnp.zeros(2 * params["NX"] + 1, dtype=jnp.float64)
+        # F = jnp.zeros(2 * icesee_kwargs["NX"] + 1, dtype=jnp.float64)
         # Call the flowline function with current arguments
-        return flowlinefun(varin, huxg_old, params, grid, bedfun)
+        return flowlinefun(varin, huxg_old, icesee_kwargs, grid, bedfun)
         # print(F)
         # return F
 
@@ -139,34 +139,34 @@ def Jac_calc(huxg_old, params, grid, bedfun, flowlinefun):
     return Jf
 
 # Function that runs the flowline model function --------------------------------------------------------------
-def flowline_run(varin, params, grid, bedfun, flowlinefun):
-    nt = params["NT"]
+def flowline_run(varin, icesee_kwargs, grid, bedfun, flowlinefun):
+    nt = icesee_kwargs["NT"]
     huxg_old = varin
     huxg_all = np.zeros((huxg_old.shape[0], nt))
 
     for i in range(nt):
-        if not params["assim"]:
-            params["tcurrent"] = i + 1  # Adjusting for 1-based indexing in Julia
-        
+        if not icesee_kwargs["assim"]:
+            icesee_kwargs["tcurrent"] = i + 1  # Adjusting for 1-based indexing in Julia
+
         # Jacobian calculation
-        Jf = Jac_calc(huxg_old, params, grid, bedfun, flowlinefun)
-        
+        Jf = Jac_calc(huxg_old, icesee_kwargs, grid, bedfun, flowlinefun)
+
         # Solve the system of nonlinear equations
         solve_result = root(
-            lambda varin: flowlinefun(varin, huxg_old, params, grid, bedfun), 
-            huxg_old, 
-            jac=Jf, 
+            lambda varin: flowlinefun(varin, huxg_old, icesee_kwargs, grid, bedfun),
+            huxg_old,
+            jac=Jf,
             method='hybr',  # Hybr is a commonly used solver like nlsolve
             options={'maxiter': 100}
         )
-        
+
         # Update the old solution
         huxg_old = solve_result.x
-        
+
         # Store the result for this time step
         huxg_all[:, i] = huxg_old
 
-        if not params["assim"]:
+        if not icesee_kwargs["assim"]:
             print(f"Step {i + 1}\n")
-    
+
     return huxg_all

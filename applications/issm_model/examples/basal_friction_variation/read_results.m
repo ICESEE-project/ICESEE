@@ -31,7 +31,7 @@ k_array = [20, 80, 120, 240, 480, 560, 700] +1;
 dt      = 0.2;
 
 % ---------------- Load essentials --------------
-results_dir = 'results';
+results_dir = data_file_paths;
 filter_type = 'true-wrong';
 file_path   = fullfile(results_dir, sprintf('%s-issm.h5', filter_type));
 t        = h5read(file_path,'/t'); 
@@ -663,8 +663,7 @@ function plot_gl_on_bed_evolution( ...
 
     % ---- Save figure (300 dpi) ----
     % Use folder relative to THIS script (not MATLAB's current folder)
-    scriptdir = fileparts(mfilename('fullpath'));
-    outdir    = fullfile(scriptdir, 'figures');
+    outdir = ensure_figdir();
     
     if ~exist(outdir, 'dir')
         mkdir(outdir);
@@ -1698,12 +1697,9 @@ function s = fmt_years(t)
 end
 
 function outdir = ensure_figdir()
-% Create a figures folder.
-    scriptdir = fileparts(mfilename('fullpath'));
-    if isempty(scriptdir)
-        scriptdir = pwd; % fallback
-    end
-    outdir = fullfile(scriptdir, 'figures');
+% Create the figures folder inside the selected run directory.
+    global data_file_paths
+    outdir = fullfile(data_file_paths, 'figures');
     if ~exist(outdir,'dir'), mkdir(outdir); end
 end
 
@@ -2333,8 +2329,7 @@ function out = compute_rmse_timeseries(k_array, dt, t, model_true_state, model_n
 
     % ---- Save figure (300 dpi) ----
     % Use folder relative to THIS script (not MATLAB's current folder)
-    scriptdir = fileparts(mfilename('fullpath'));
-    outdir    = fullfile(scriptdir, 'figures');
+    outdir = ensure_figdir();
     
     if ~exist(outdir, 'dir')
         mkdir(outdir);

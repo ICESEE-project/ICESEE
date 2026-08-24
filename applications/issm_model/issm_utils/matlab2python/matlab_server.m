@@ -12,10 +12,10 @@ function matlab_server(cmdfile, statusfile)
     disp(['Command file: ', cmdfile]);
     disp(['Status file: ', statusfile]);
     
-    % Write "ready" to statusfile to signal Python that server is up
-    fid = fopen(statusfile, 'w');
-    fprintf(fid, 'ready');
-    fclose(fid);
+    % Publish statuses atomically.  Opening statusfile with 'w' briefly made
+    % it visible as an empty file, so Python could read '' and kill a healthy
+    % server before fprintf/fclose completed.
+    write_status_atomic(statusfile, 'ready');
     disp(' Server initialized and ready.');
     
     % Main loop
@@ -46,9 +46,7 @@ function matlab_server(cmdfile, statusfile)
                 disp(['Executing: ', command]);
                 evalin('base', command);  % Execute in base workspace
                 disp('Command completed.');
-                fid = fopen(statusfile, 'w');
-                fprintf(fid, 'done');
-                fclose(fid);
+                write_status_atomic(statusfile, 'done');
                 drawnow;  % Ensure GUI updates if needed
                 pause(0.1);  % Allow time for GUI updates
                 disp('Status updated to done.');
@@ -56,8 +54,23 @@ function matlab_server(cmdfile, statusfile)
                 
             catch ME
                 disp(['[MATLAB ERROR] ', getReport(ME)]);
+                write_status_atomic(statusfile, 'error');
                 delete(cmdfile);  % Clean up even on error
             end
         end
+    end
+end
+
+function write_status_atomic(statusfile, value)
+    tmpfile = [statusfile, '.tmp'];
+    fid = fopen(tmpfile, 'w');
+    if fid < 0
+        error('Could not open temporary status file: %s', tmpfile);
+    end
+    fprintf(fid, '%s', value);
+    fclose(fid);
+    [ok, message] = movefile(tmpfile, statusfile, 'f');
+    if ~ok
+        error('Could not publish MATLAB server status: %s', message);
     end
 end
