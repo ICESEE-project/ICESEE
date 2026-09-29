@@ -14,8 +14,22 @@ from typing import Any, Callable, Mapping
 
 import numpy as np
 
-from src.parallelization.distributed_fields import DistributedFieldRegistry
-from src.parallelization.distributed_native_runtime import NativeDistributedMember
+
+# ICESEE.-prefixed (not "from src...."): distributed_fields.py/distributed_
+# native_runtime.py each do their OWN relative "from .distributed_adapter
+# import ..." internally. A relative import resolves against the importing
+# module's own __package__, so importing this pair via the bare "src...."
+# path here (while mode3_runner.py/distributed_native_runtime.py import
+# the REST of this stack via the "ICESEE.src...." path) would bind their
+# internal DistributedStateLayout/DistributedBlockStateLayout classes to a
+# SEPARATE module identity from the ones distributed_native_runtime.py
+# checks pool.layout against with isinstance() -- confirmed directly: this
+# reproduced a real "native member returned an unsupported distributed
+# layout" TypeError in initialize_native_member_pool during a real mode-3
+# run, since the isinstance() checks there legitimately failed against a
+# same-named-but-different class object.
+from ICESEE.src.parallelization.distributed_fields import DistributedFieldRegistry
+from ICESEE.src.parallelization.distributed_native_runtime import NativeDistributedMember
 
 
 @dataclass(frozen=True)
@@ -279,6 +293,7 @@ class IcepackNativeAdapter:
         finalize_analysis: Callable[..., None] | None = None,
         inverse_member: Callable[..., None] | None = None,
         restore_checkpoint: Callable[..., None] | None = None,
+        reactivate_member: Callable[..., IcepackNativeState] | None = None,
     ) -> None:
         for name, callback in (
             ("initialize_member", initialize_member),
@@ -294,6 +309,8 @@ class IcepackNativeAdapter:
             raise TypeError("inverse_member must be callable")
         if restore_checkpoint is not None and not callable(restore_checkpoint):
             raise TypeError("restore_checkpoint must be callable")
+        if reactivate_member is not None and not callable(reactivate_member):
+            raise TypeError("reactivate_member must be callable")
         self._initialize_member = initialize_member
         self._forecast_member = forecast_member
         self._observe_member = observe_member
@@ -308,6 +325,16 @@ class IcepackNativeAdapter:
         if restore_checkpoint is not None:
             self.restore_native_checkpoint = self._native_restore_callback(
                 restore_checkpoint
+            )
+        # Bounded-memory round scheduling (StreamingNativeDistributedMemberPool,
+        # src/parallelization/distributed_streaming_runtime.py) duck-types
+        # this attribute's presence to decide whether it may treat this
+        # adapter as stream-capable -- only bound when the application
+        # supplies a reactivation callback, exactly like the two optional
+        # protocols above.
+        if reactivate_member is not None:
+            self.reactivate_native_member = self._native_reactivate_callback(
+                reactivate_member
             )
 
     @staticmethod
@@ -353,6 +380,27 @@ class IcepackNativeAdapter:
             state.registry.synchronize_ghosts()
 
         return restore_native_checkpoint
+
+    @staticmethod
+    def _native_reactivate_callback(callback: Callable[..., IcepackNativeState]):
+        def reactivate_native_member(
+            member_id: int,
+            packed_state: np.ndarray,
+            *,
+            topology: Any,
+            icesee_kwargs: Mapping[str, Any],
+        ) -> NativeDistributedMember:
+            state = callback(
+                int(member_id),
+                np.asarray(packed_state),
+                topology=topology,
+                icesee_kwargs=icesee_kwargs,
+            )
+            if not isinstance(state, IcepackNativeState):
+                raise TypeError("Icepack reactivator must return IcepackNativeState")
+            return NativeDistributedMember(int(member_id), state.registry, state)
+
+        return reactivate_native_member
 
     @staticmethod
     def _state(member: NativeDistributedMember) -> IcepackNativeState:

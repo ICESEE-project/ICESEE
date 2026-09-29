@@ -7,6 +7,7 @@
 # --- Imports ---
 import os
 import sys
+import shutil
 import h5py
 import numpy as np
 import warnings
@@ -30,6 +31,93 @@ def get_project_root():
         current_dir = os.path.dirname(current_dir)  # Move one level up
 
     return current_dir
+
+def _parse_generic_cli_overrides(extra_argv):
+    """Parse leftover CLI tokens (anything not claimed by the named
+    ``argparse`` arguments) into a ``{key: raw_string}`` dict.
+
+    Supports ``--key=value`` and ``--key value`` syntax. A bare ``--key``
+    with no following value (or immediately followed by another ``--``
+    token) is treated as the boolean flag ``"true"``. This is what lets
+    *any* YAML configuration key be overridden from the command line
+    (e.g. ``--sig_Q=[0.02,0.02,0.02]`` or ``--inflation_factor=1.5``)
+    without a hand-written ``parser.add_argument()`` call for every new
+    key introduced to ICESEE.
+    """
+    overrides = {}
+    i = 0
+    while i < len(extra_argv):
+        tok = extra_argv[i]
+        if not tok.startswith('--'):
+            i += 1
+            continue
+        body = tok[2:]
+        if '=' in body:
+            key, raw_value = body.split('=', 1)
+            overrides[key] = raw_value
+            i += 1
+        else:
+            key = body
+            if i + 1 < len(extra_argv) and not extra_argv[i + 1].startswith('--'):
+                overrides[key] = extra_argv[i + 1]
+                i += 2
+            else:
+                overrides[key] = 'true'
+                i += 1
+    return overrides
+
+
+def _coerce_cli_override(raw_value, current_value):
+    """Coerce a raw CLI override string to match the type of the
+    existing configuration value it is replacing.
+
+    Uses ``yaml.safe_load`` to reuse YAML's own int/float/bool/list/None
+    parsing rules on the CLI string, rather than requiring every
+    configuration key to hand-declare its own ``argparse`` type. If the
+    existing value is a numpy array, the parsed value is cast back into
+    an array of the same dtype so downstream numeric code keeps working
+    unchanged.
+    """
+    try:
+        parsed_value = yaml.safe_load(raw_value)
+    except yaml.YAMLError:
+        parsed_value = raw_value
+
+    if isinstance(current_value, np.ndarray):
+        return np.array(parsed_value, dtype=current_value.dtype)
+    if isinstance(current_value, bool):
+        return bool(parsed_value)
+    if isinstance(current_value, int) and not isinstance(parsed_value, bool):
+        return int(parsed_value)
+    if isinstance(current_value, float):
+        return float(parsed_value)
+    return parsed_value
+
+
+def apply_generic_cli_overrides(icesee_kwargs, extra_argv):
+    """Apply arbitrary ``--key=value`` CLI overrides onto ``icesee_kwargs``.
+
+    Any configuration key that already exists in ``icesee_kwargs`` (i.e.
+    every key sourced from ``params.yaml``'s physical/modeling/enkf
+    sections, plus the derived keys computed in this loader) can be
+    overridden from the command line, automatically -- new configuration
+    keys never need a new ``parser.add_argument()`` call. An unrecognized
+    ``--key`` (not already present in ``icesee_kwargs``) raises a
+    ``ValueError`` to catch typos rather than silently creating a new,
+    unused key.
+    """
+    overrides = _parse_generic_cli_overrides(extra_argv)
+    for key, raw_value in overrides.items():
+        if key not in icesee_kwargs:
+            raise ValueError(
+                f"Unrecognized command-line override '--{key}'. It does not match "
+                "any existing ICESEE configuration key (check params.yaml section "
+                "names/keys for a typo)."
+            )
+        icesee_kwargs[key] = _coerce_cli_override(raw_value, icesee_kwargs[key])
+        print(f"[ICESEE] CLI override applied: {key} = {icesee_kwargs[key]!r}")
+    return icesee_kwargs
+
 
 # Get the root of the project
 project_root = get_project_root()
@@ -88,8 +176,17 @@ if not flag_jupyter:
     parser.add_argument('distribution_mode', type=int, choices=[0, 1, 2], nargs='?', help='Ensemble distribution: 0=default, 1=sequential, 2=even')
     parser.add_argument('--model_nprocs', type=int, required = False, default=None, help='number of processors for the coupled model')
     parser.add_argument('-F', '--force-params', type=str, required=False, default='params.yaml', help='Path to YAML parameter file (default: params.yaml)')
+    parser.add_argument('--execution_mode', type=int, required=False, default=None, choices=[0, 1, 2, 3],
+                         help='Execution mode: 0=serial, 1=partial parallel, 2=fully parallel, '
+                              '3=spatially distributed. Overrides enkf-parameters.execution_mode in the YAML file.')
 
-    args = parser.parse_args()
+    # ``parse_known_args`` (instead of ``parse_args``) lets the fixed set of
+    # named arguments above coexist with a generic catch-all: any leftover
+    # ``--key=value`` token that doesn't match one of them is treated as a
+    # generic override of a YAML configuration key (see
+    # ``apply_generic_cli_overrides`` below), applied once ``icesee_kwargs``
+    # is fully built.
+    args, _cli_extra_argv = parser.parse_known_args()
 
     # check if default run arugment is provided
     run_flag = False
@@ -162,8 +259,39 @@ if not flag_jupyter:
     })
 
     # --- Ensemble Parameters ---
+    # nt (2026-09-28, second pass): different applications interpret
+    # `timesteps_per_year` differently -- Icepack/Lorenz96/ISSM's own
+    # run_da_*.py all self-derive nt=num_years/timesteps_per_year (dt in
+    # years), but this generic loader has no way to know that convention
+    # holds for every application (confirmed: it does not -- see
+    # docs/execution-mode-3-design.md's reconciliation notes). Generically
+    # assuming EITHER formula here was the actual bug, not just which
+    # formula was chosen: a one-time internal nt/t is built here (used
+    # only to feed the generic generate_observation_schedule() call below,
+    # BEFORE any application gets a chance to self-derive its own nt in
+    # its own run_da_*.py) and there is no application-agnostic way to
+    # compute it correctly for every application from num_years/
+    # timesteps_per_year alone.
+    #
+    # Fix: let the application's own YAML declare its already-resolved
+    # `nt` directly (`modeling-parameters.nt`) when the num_years*
+    # timesteps_per_year default below is not what that application's own
+    # nt actually is -- an explicit, application-owned value, not a
+    # generic reinterpretation of what `timesteps_per_year` means. Falls
+    # back to the ORIGINAL historical formula (num_years *
+    # timesteps_per_year) when `nt` is not given, so every existing
+    # configuration that does not opt in is completely unaffected -- this
+    # generic loader never assumes, derives, or special-cases any
+    # application's own time-discretization convention. See
+    # applications/icepack_model/examples/idealized_pig/params.yaml's own
+    # `nt: 1640` for the one application currently opting in, and
+    # test_observation_schedule_uses_correct_nt_convention.py.
     icesee_kwargs.update({
-        'nt': int(float(_modeling_section['num_years']) * float(_modeling_section['timesteps_per_year'])), # number of time steps
+        'nt': (
+            int(float(_modeling_section['nt']))
+            if 'nt' in _modeling_section
+            else int(float(_modeling_section['num_years']) * float(_modeling_section['timesteps_per_year']))
+        ),
         'dt': 1.0 / float(_modeling_section['timesteps_per_year']),
         'num_state_vars': int(float(_enkf_section.get('num_state_vars', 1))),
         'num_param_vars': int(float(_enkf_section.get('num_param_vars', 0))),
@@ -180,13 +308,14 @@ if not flag_jupyter:
         'execution_flag': int(_enkf_section.get('execution_flag', 0)),
         'model_name': _enkf_section.get('model_name', 'model'),
         'use_random_fields': bool(_enkf_section.get('use_random_fields', False)),
-        'execution_mode'   : int(_enkf_section.get('execution_mode', 1)),  # 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
+        'execution_mode'   : int(_enkf_section.get('execution_mode', 1)),  # 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run, 3 -> spatially distributed (application-specific; see src/parallelization/distributed_mode3_registry.py). Re-applied below (CLI --execution_mode takes precedence over the YAML value).
         'serial_file_creation': bool(_enkf_section.get('serial_file_creation', True)),
         'chunk_size': int(_enkf_section.get('chunk_size', 5000)),
         'joint_estimated_params': _enkf_section.get('joint_estimated_params', []),
         'coupled_model_datasets_dir': _enkf_section.get('coupled_model_datasets', 'data'),
         'vec_inputs': _enkf_section['vec_inputs'],
         'collective_threshold': int(_enkf_section.get('collective_threshold', 16)), # threshold for switching to collective I/O
+        'ranks_per_model': _enkf_section.get('ranks_per_model', None),  # Stage 4A hierarchical topology: None -> legacy auto policy, int -> explicit, "auto" -> resource_plan's auto policy (see resource_plan.py / model_capabilities.py)
     })
 
     # Mode 2 uses a two-shard sliding window by default: the current and next
@@ -394,7 +523,49 @@ if not flag_jupyter:
         'data_path': data_path,
         'model_nprocs': model_nprocs,
         'random_field_method': random_field_method,
+        'execution_mode': int(args.execution_mode) if args.execution_mode is not None else int(_enkf_section.get('execution_mode', 1)),
     })
+
+    # Always start a run from a clean data_path: stale files left behind by
+    # a previous run (e.g. a different ensemble size, an old dense/compact
+    # observation layout) must never leak into a new one. ``rmtree(...,
+    # ignore_errors=True)`` is a risk-free no-op if the path doesn't exist
+    # yet; ``makedirs(..., exist_ok=True)`` then (re)creates it. Refuse to
+    # do this for paths that resolve to the current directory, the user's
+    # home directory, or the filesystem root, to guard against an
+    # accidental catastrophic delete from a misconfigured data_path.
+    _data_path_abs = os.path.abspath(data_path)
+    _unsafe_data_paths = {os.path.abspath(p) for p in (os.getcwd(), os.path.expanduser('~'), '/')}
+    if _data_path_abs in _unsafe_data_paths:
+        raise ValueError(
+            f"Refusing to auto-clean data_path='{data_path}' because it resolves to "
+            f"'{_data_path_abs}', which looks like the current directory, home "
+            "directory, or filesystem root. Point data_path at a dedicated "
+            "subdirectory instead."
+        )
+    # Only rank 0 (or a plain single-process launch) deletes; every rank
+    # then ensures the directory exists. This mirrors the rank-detection
+    # pattern used in run_models_da.py -- MPI isn't explicitly initialized
+    # yet at this point in the import chain, only environment-variable
+    # rank hints are available.
+    _rank_hint = int(
+        next(
+            (
+                os.environ[name]
+                for name in (
+                    "OMPI_COMM_WORLD_RANK",
+                    "PMIX_RANK",
+                    "PMI_RANK",
+                    "MV2_COMM_WORLD_RANK",
+                )
+                if name in os.environ
+            ),
+            "0",
+        )
+    )
+    if _rank_hint == 0:
+        shutil.rmtree(data_path, ignore_errors=True)
+    os.makedirs(data_path, exist_ok=True)
 
     joint_estimated_params = len(icesee_kwargs.get('joint_estimated_params', []))
     if icesee_kwargs['joint_estimation']:
@@ -452,3 +623,9 @@ if not flag_jupyter:
         _modelrun_datasets = icesee_kwargs.get('data_path',None)
         if not os.path.exists(_modelrun_datasets):
             os.makedirs(_modelrun_datasets, exist_ok=True)
+
+    # Apply any generic ``--key=value`` CLI overrides last, after every
+    # YAML-sourced and derived key has been computed, so that a CLI
+    # override always wins and is never silently clobbered by a later
+    # default/derivation step in this loader.
+    icesee_kwargs = apply_generic_cli_overrides(icesee_kwargs, _cli_extra_argv)

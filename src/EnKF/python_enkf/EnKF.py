@@ -20,6 +20,7 @@ from scipy.stats import multivariate_normal
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 from ICESEE.config._utility_imports import icesee_get_index
 from ICESEE.src.run_model_da._error_generation import generate_enkf_field
+from ICESEE.src.utils.random_streams import process_noise_seed
 
 
 # Move `worker` to global scope
@@ -55,6 +56,17 @@ class EnsembleKalmanFilter:
         self.analysis_backend       = analysis_backend
         self.parallel_manager       = parallel_manager
 
+        # Per-member AR(1) process-noise state for the "serial" forecast
+        # backend, shape (state_block_size, Nens). Lazily allocated on the
+        # first forecast_step call (state_block_size/Nens are not known
+        # until then) and kept on this instance -- not threaded through
+        # icesee_kwargs -- so it persists correctly across the driver's
+        # repeated calls on this same EnKFclass object across timesteps,
+        # with one column per member that only that member's update ever
+        # writes to. See src/parallelization/_mpi_forecast_functions.py's
+        # per-member-checkpoint design for the equivalent mode-2 invariant.
+        self._process_noise_state = None
+
     # Forecast step
     def forecast_step(self, ensemble=None, forecast_step_single=None, **icesee_kwargs):
         """
@@ -78,7 +90,8 @@ class EnsembleKalmanFilter:
         alpha         = icesee_kwargs.get("alpha", 0.0)
         dt             = icesee_kwargs.get("dt", 1.0)
         rho           = icesee_kwargs.get("rho", 1.0)
-        noise         = icesee_kwargs.get("noise", None)
+        base_seed      = icesee_kwargs.get("base_seed", 42)
+        k              = int(icesee_kwargs.get("k", 0))
 
 
         if re.match(r"\Aserial\Z", self.analysis_backend, re.IGNORECASE):
@@ -90,6 +103,19 @@ class EnsembleKalmanFilter:
                 hdim = ensemble.shape[0] // icesee_kwargs["num_state_vars"]
             state_block_size = hdim * icesee_kwargs["num_state_vars"]
             vecs, indx_map, dim_per_proc = icesee_get_index(**icesee_kwargs)
+
+            # Independent per-member AR(1) process-noise state. One column
+            # per ensemble member -- updating member `ens` below only ever
+            # writes column `ens`, so members can never inherit each
+            # other's noise history, and iteration order cannot change the
+            # result. Zero-initialized on the first call, matching the AR(1)
+            # process's natural fresh-start condition.
+            if (
+                self._process_noise_state is None
+                or self._process_noise_state.shape != (state_block_size, Nens)
+            ):
+                self._process_noise_state = np.zeros((state_block_size, Nens))
+
             # Loop over the ensemble members
             for ens in range(Nens):
                 updated_state = forecast_step_single(ensemble=ensemble[:, ens], **icesee_kwargs)
@@ -99,17 +125,32 @@ class EnsembleKalmanFilter:
                 # add process noise
                 noise_all = []
                 q0 = []
-                for ii, sig in enumerate(icesee_kwargs["sig_Q"]):
-                    if ii <=icesee_kwargs["num_state_vars"]:
-                        for jj, key in enumerate(icesee_kwargs['vec_inputs']):
-                            if ii == jj:
-                                icesee_kwargs.update({"ii_sig": ii, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": len(indx_map[key]), "hdim":hdim, "num_vars":icesee_kwargs["total_state_param_vars"]})
-                                W = generate_enkf_field(**icesee_kwargs)
-                                noise_ = alpha*noise[indx_map[key]] + np.sqrt(1 - alpha**2)*W
-                                q0.append(noise_)
+                old_rng_state = np.random.get_state()
+                try:
+                    for ii, sig in enumerate(icesee_kwargs["sig_Q"]):
+                        if ii <=icesee_kwargs["num_state_vars"]:
+                            for jj, key in enumerate(icesee_kwargs['vec_inputs']):
+                                if ii == jj:
+                                    seed = process_noise_seed(base_seed, k, ens, ii)
+                                    np.random.seed(seed)
+                                    # Pass "rng" explicitly (not just "seed"): generate_enkf_field's
+                                    # own fallback prefers a pre-existing "base_seed" entry in
+                                    # icesee_kwargs over "seed" when both are present, which would
+                                    # silently defeat this per-(timestep,member,variable) reseed for
+                                    # any application config that sets base_seed explicitly (e.g.
+                                    # ISSM, icepack synthetic_ice_stream). An explicit "rng" bypasses
+                                    # that ambiguity entirely, matching generate_initial_member_increment's
+                                    # own pattern in _error_generation.py.
+                                    icesee_kwargs.update({"ii_sig": ii, "seed": seed, "rng": np.random.default_rng(seed), "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": len(indx_map[key]), "hdim":hdim, "num_vars":icesee_kwargs["total_state_param_vars"]})
+                                    W = generate_enkf_field(**icesee_kwargs)
+                                    previous = self._process_noise_state[indx_map[key], ens]
+                                    noise_ = alpha*previous + np.sqrt(1 - alpha**2)*W
+                                    q0.append(noise_)
 
-                                Z = np.sqrt(dt)*sig*rho*noise_
-                                noise_all.append(Z)
+                                    Z = np.sqrt(dt)*sig*rho*noise_
+                                    noise_all.append(Z)
+                finally:
+                    np.random.set_state(old_rng_state)
 
                 noise_ = np.concatenate(noise_all, axis=0)
 
@@ -119,8 +160,7 @@ class EnsembleKalmanFilter:
                         ensemble[indx_map[key],ens] += noise_[indx_map[key]]
 
                 # ensemble[:state_block_size,ens] += noise_[:state_block_size]
-                noise = np.concatenate(q0, axis=0)
-                icesee_kwargs.update({"noise": noise})
+                self._process_noise_state[:, ens] = np.concatenate(q0, axis=0)
                 del noise_all, q0, noise_, W
 
             return ensemble

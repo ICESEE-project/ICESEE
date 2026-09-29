@@ -61,13 +61,13 @@ class _SingleRankComm:
 
 
 def test_execution_mode_is_the_single_validated_runner_selector():
-    for mode in (0, 1, 2):
+    for mode in (0, 1, 2, 3):
         settings = {"execution_mode": mode}
         assert normalize_execution_mode(settings) == mode
         assert settings["execution_mode"] == mode
 
     with pytest.raises(ValueError, match="execution_mode must be"):
-        normalize_execution_mode({"execution_mode": 3})
+        normalize_execution_mode({"execution_mode": 4})
 
 
 def test_observation_schedule_restores_bed_snapshot_columns(tmp_path):

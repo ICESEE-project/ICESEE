@@ -65,6 +65,13 @@ jobs:
             src/tests/test_full_parallel_large_data.py \
             src/tests/test_bed_update_domain.py
 
+      - name: Test state ownership, MPI failure handling, and mode-2 P>Nens topology
+        run: |
+          pytest -q \
+            src/tests/test_state_ownership.py \
+            src/tests/test_mpi_failure_handling.py \
+            src/tests/test_lorenz96_mode2_p_nens_matrix.py
+
       - name: Upload Lorenz96 figure artifact
         uses: actions/upload-artifact@v4
         with:

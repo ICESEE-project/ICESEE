@@ -462,6 +462,26 @@ def icesee_get_index(vec=None, **icesee_kwargs):
             # fall back to the active layout instead of calling ``len(None)``.
             layout_inputs = icesee_kwargs.get("vec_inputs_old") or vec_inputs
             dim_list = icesee_kwargs.get("dim_list")
+            # A replicated-state model (e.g. Lorenz-96) reports the same
+            # full ``nd`` on every rank of a model communicator -- it is
+            # not a per-rank partition, so it must never be indexed by
+            # ``comm.Get_rank()`` or treated as a cumulative-offset series
+            # below (see src/utils/state_ownership.py for the distinction
+            # this mirrors).
+            replicated = str(
+                icesee_kwargs.get("state_distribution", "distributed")
+            ).strip().lower() == "replicated"
+            # How many ranks the *current* indexing context spans -- mirrors
+            # the exact condition used just below to decide whether a
+            # fallback `dim_list` should be a single-element `[nd]` or a
+            # fresh `comm.allgather(nd)`. Used to detect a `dim_list` that
+            # was published by an earlier call scoped to a different
+            # communicator (see the `hdim` comment below).
+            nranks = (
+                1
+                if (comm is None or icesee_kwargs.get("even_distribution", False) or replicated)
+                else comm.Get_size()
+            )
             if dim_list is None or len(dim_list) == 0:
                 # Simple/default applications can enter initialization before
                 # ``generate_true_wrong_state`` has published ``dim_list``.
@@ -469,7 +489,7 @@ def icesee_get_index(vec=None, **icesee_kwargs):
                 # callers depend on that side effect.  A COMM_SELF subcomm
                 # therefore yields [nd], while a spatial model subcomm yields
                 # the per-rank local state dimensions.
-                if comm is None or icesee_kwargs.get("even_distribution", False):
+                if comm is None or icesee_kwargs.get("even_distribution", False) or replicated:
                     dim_list = [int(nd)]
                 else:
                     dim_list = comm.allgather(int(nd))
@@ -479,7 +499,39 @@ def icesee_get_index(vec=None, **icesee_kwargs):
                 )
             dim_list_param = np.asarray(dim_list, dtype=int) // len(layout_inputs)
             dim_list_param = dim_list_param[:len_vec]
-            hdim = nd // len_vec
+            # `hdim` is the stride between one variable's global block and the
+            # next in the assumed [var0(all ranks) | var1(all ranks) | ...]
+            # layout that `offsets`/`var_start` below index into -- it must
+            # therefore be that variable's *global* (all-ranks) block size,
+            # not this rank's own local `nd`. For a replicated model or any
+            # single-rank model communicator (every configuration shipped
+            # today except the genuinely spatially distributed
+            # ranks_per_model > 1 case) `dim_list` has exactly one entry
+            # equal to `nd`, so `dim_list_param.sum() == nd // len_vec`
+            # exactly -- this is a no-op there. It only differs once more
+            # than one rank contributes a distributed model's per-variable
+            # data, which previously used this rank's own (possibly
+            # unequal, e.g. an uneven Firedrake mesh partition) local size
+            # as the stride, silently reading each later variable's block
+            # from the wrong offset (and, for multi-rank models, from
+            # another rank's slice of an earlier variable) instead.
+            #
+            # `dim_list` can be a *cached* value published by an earlier,
+            # differently-scoped call (e.g. generate_true_wrong_state
+            # publishes one gathered over comm_world) rather than one
+            # freshly gathered over `comm` here -- trustworthy only when
+            # its length actually matches the current communicator's rank
+            # count (`nranks`, already resolved above from this same
+            # `comm`). When it does not match (a stale/wrong-scope cache --
+            # e.g. Lorenz-96's replicated comm_world-sized cache reused
+            # under a size-1 model-group `comm`), summing it would count
+            # ranks that are not part of *this* indexing context at all;
+            # fall back to the original, always-safe `nd // len_vec` there,
+            # exactly as every model behaved before this rank-aware fix.
+            if len(dim_list) == nranks:
+                hdim = int(dim_list_param.sum())
+            else:
+                hdim = nd // len_vec
             # print(f"[ICESEE-debug] len_vec: {len_vec}, dim_list_param: {dim_list_param}, hdim: {hdim}\n")
 
             if comm is None:
@@ -487,7 +539,9 @@ def icesee_get_index(vec=None, **icesee_kwargs):
                 dim = dim_list_param[rank]
                 offsets = [0]
             else:
-                if icesee_kwargs["even_distribution"]:
+                if icesee_kwargs["even_distribution"] or replicated:
+                    # Every rank owns an identical full copy: index as if
+                    # this were the only rank, regardless of comm.Get_rank().
                     rank = 0
                     dim = dim_list_param[rank]
                     offsets = [0]
@@ -1113,6 +1167,51 @@ def load_bed_masks_from_h5(f):
 
     return bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col
 
+
+def load_hu_obs_from_h5(f):
+    """
+    Load the dense synthetic-observation matrix (state_dim x m_obs) from an
+    open ``synthetic_obs.h5`` handle, transparently supporting both storage
+    layouts written by ICESEE:
+      - dense: a full ``hu_obs`` dataset (execution modes 0/1 always write
+        this; mode 2 only writes it when ``synthetic_observation_storage``
+        is set to ``'dense'`` or ``'both'``).
+      - compact (mode 2's default ``synthetic_observation_storage:
+        'compact'``, used to keep per-rank memory bounded for very large
+        state dimensions): ``hu_obs_compact`` + ``obs_indices`` sparse rows,
+        scattered here into a zero-filled dense array of shape
+        ``(state_dimension, m_obs)`` (unobserved entries stay 0.0, matching
+        ICESEE's own dense-export fallback in
+        ``src/parallelization/EnKF_parallel_io.py``).
+
+    Parameters:
+        f (h5py.File or h5py.Group): an already-open handle on
+            ``synthetic_obs.h5``.
+
+    Returns:
+        np.ndarray: dense observation matrix of shape (nd, m_obs).
+    """
+    if "hu_obs" in f:
+        return f["hu_obs"][:]
+
+    if "hu_obs_compact" not in f or "obs_indices" not in f:
+        raise KeyError(
+            "synthetic_obs.h5 contains neither a dense 'hu_obs' dataset nor "
+            "the compact 'hu_obs_compact'/'obs_indices' datasets needed to "
+            "reconstruct it."
+        )
+
+    compact = f["hu_obs_compact"][:]
+    obs_indices = np.asarray(f["obs_indices"][:], dtype=np.int64)
+    m_obs = compact.shape[1]
+    nd = int(f.attrs.get(
+        "state_dimension",
+        (int(obs_indices.max()) + 1) if obs_indices.size else 0,
+    ))
+
+    dense = np.zeros((nd, m_obs), dtype=np.float64)
+    dense[obs_indices, :] = compact
+    return dense
 
 
 def icesee_savefig(

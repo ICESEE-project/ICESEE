@@ -21,6 +21,36 @@ def get_mesh_coordinates(icesee_kwargs):
     leading dimension must follow the model state-vector node ordering.  A
     failed/early lookup is deliberately not cached so that file-backed model
     providers (for example ISSM) can be retried after model initialization.
+
+    **Collective for a genuinely spatially distributed model group**
+    (``ranks_per_model > 1``, e.g. Firedrake/Icepack): a provider like
+    Icepack's returns only the *calling rank's own* local node slice (see
+    ``get_icepack_node_coordinates`` -- it reads ``.dat.data_ro``, the
+    owned-only view), and deriving it involves genuine Firedrake/PETSc
+    collectives (assembling an interpolation onto the mesh). This function
+    therefore gathers every ``subcomm`` rank's own contribution into one
+    global, state-vector-ordered array (mirroring
+    ``combine_member_state``'s gather-then-root pattern) and broadcasts it
+    back so every rank in the model group ends up caching the *same*
+    global array -- not just root -- before returning, so every rank in
+    the model group must call this function together the first time
+    coordinates are needed for a given run (the cache check above makes
+    every later call, from any single rank alone, a no-op read with no
+    further collective). Broadcasting rather than returning root-only/
+    local-elsewhere is deliberate: coordinates are small mesh metadata
+    (not O(Nx*Ne) ensemble state), and callers such as
+    ``add_member_process_noise`` are already called redundantly by every
+    rank with the same seed, expecting to compute the identical field --
+    a per-rank-different coordinate array would silently break that.
+    Calling this from only one rank of a multi-rank model group the
+    *first* time is a caller bug: the gather/broadcast below will hang
+    waiting for the rest of the group, exactly like calling any other
+    Firedrake collective from a single rank would.
+
+    For a replicated model or a single-rank model group (every model
+    registered today except Icepack under Stage 4C's ranks_per_model > 1),
+    ``subcomm`` size is 1 and the gather below degenerates to the previous
+    single-rank behavior exactly -- this is a no-op there.
     """
     if icesee_kwargs.get("mesh_coords") is not None:
         return icesee_kwargs["mesh_coords"]
@@ -54,6 +84,30 @@ def get_mesh_coordinates(icesee_kwargs):
             "Mesh coordinates must have shape (n_nodes,) or "
             f"(n_nodes, n_spatial_dims); got {coords.shape}"
         )
+
+    subcomm = icesee_kwargs.get("subcomm")
+    if subcomm is not None and subcomm.Get_size() > 1:
+        from ICESEE.src.utils.state_ownership import (
+            resolve_state_ownership,
+            combine_member_state,
+        )
+        ownership = resolve_state_ownership(
+            icesee_kwargs, subcomm, local_size=coords.shape[0]
+        )
+        assembled = combine_member_state(ownership, subcomm, coords, root=0)
+        # Broadcast so every rank in the model group ends up with the
+        # SAME global array, not just root -- coordinates are small
+        # mesh metadata (not O(Nx*Ne) ensemble state), and several
+        # callers (e.g. add_member_process_noise, called redundantly by
+        # every rank with the same seed so they compute the identical
+        # field) implicitly assume every rank sees the same coordinate
+        # array for a given global node count. Returning root's array on
+        # root and each rank's own *local* slice everywhere else (an
+        # earlier version of this fix) left those callers requesting a
+        # global-length field against a local-length coordinate array on
+        # non-root ranks.
+        coords = subcomm.bcast(assembled, root=0)
+
     if not np.all(np.isfinite(coords)):
         raise ValueError("Mesh coordinates contain non-finite values")
 

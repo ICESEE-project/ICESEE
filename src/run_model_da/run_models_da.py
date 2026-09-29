@@ -31,17 +31,19 @@ from ICESEE.src.utils.icesee_context import (
 )
 
 _MODE_TO_TARGET = {
-    "serial":  ("ICESEE.src.run_model_da.icesee_da_serial",
-                "icesee_model_data_assimilation_serial"),
-    "partial": ("ICESEE.src.run_model_da.icesee_da_partial_parallel",
-                "icesee_model_data_assimilation_partial_parallel"),
-    "full":    ("ICESEE.src.run_model_da.icesee_da_full_parallel",
-                "icesee_model_data_assimilation_full_parallel"),
+    "serial":      ("ICESEE.src.run_model_da.icesee_da_serial",
+                    "icesee_model_data_assimilation_serial"),
+    "partial":     ("ICESEE.src.run_model_da.icesee_da_partial_parallel",
+                    "icesee_model_data_assimilation_partial_parallel"),
+    "full":        ("ICESEE.src.run_model_da.icesee_da_full_parallel",
+                    "icesee_model_data_assimilation_full_parallel"),
+    "distributed": ("ICESEE.src.run_model_da.icesee_da_distributed",
+                    "icesee_model_data_assimilation_distributed"),
 }
 
 def _resolve_mode(icesee_kwargs) -> str:
     """Resolve the runner exclusively from the canonical integer mode."""
-    return {0: "serial", 1: "partial", 2: "full"}[
+    return {0: "serial", 1: "partial", 2: "full", 3: "distributed"}[
         normalize_execution_mode(icesee_kwargs)
     ]
 
@@ -52,7 +54,12 @@ def icesee_model_data_assimilation(**icesee_kwargs):
 
     Keyword arguments form the single flat ICESEE runtime context.
     ``execution_mode`` is the sole top-level runner selector: 0 is serial,
-    1 is partial parallel, and 2 is fully parallel bounded-memory execution.
+    1 is partial parallel, 2 is fully parallel bounded-memory execution, and
+    3 is spatially distributed. Mode 3 is accepted here for every
+    application, but is only functional for applications that have
+    registered a production runner in
+    ``src.parallelization.distributed_mode3_registry``; unregistered models
+    raise ``NotImplementedError`` from ``icesee_da_distributed.py``.
     """
     icesee_kwargs = normalize_icesee_kwargs(icesee_kwargs)
     mode = _resolve_mode(icesee_kwargs)

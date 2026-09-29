@@ -26,6 +26,9 @@ from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_model imp
 from ICESEE.src.run_model_da.run_models_da import icesee_model_data_assimilation
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 
+# --- Register execution_mode 3 support (import-time side effect) ---
+from ICESEE.applications.icepack_model.examples.idealized_pig import mode3_runner  # noqa: F401
+
 
 # --- Initialize MPI ---
 
@@ -41,8 +44,15 @@ num_years = float(icesee_kwargs["num_years"])
 dt = float(icesee_kwargs["timesteps_per_year"])   # time step size
 nt = int(round(num_years / dt))     # total number of time steps
 
-icesee_kwargs.update({"nt": nt, "dt": dt}) # update the parameter dictionary
-icesee_kwargs.update({"nt": nt, "dt": dt}) # update icesee_kwargs to use in other icepack functions (e.g. BasalMeltRate)
+# Physical-year lookup array (icesee/features convention, 2026-09-28
+# reconciliation): t[k] gives the physical year of timestep k, used by
+# run_model/generate_true_state/generate_nurged_state to match
+# `save_steps` (given in physical years) to timestep indices when
+# dumping flowline profiles. Does not feed BasalMeltRate (which uses
+# `step`/`dt` directly) -- purely an I/O bookkeeping array.
+t = np.linspace(0, int(num_years), nt + 1)
+
+icesee_kwargs.update({"nt": nt, "dt": dt, "t": t}) # update the parameter dictionary
 
 
 
@@ -107,7 +117,17 @@ icesee_kwargs.update({
 
 wrong_bmr = firedrake.Constant(icesee_kwargs["wrong_basal_melt_field"])
 
-bmr_nudged = firedrake.interpolate(icesee_kwargs["basal_melt_field"] + wrong_bmr, icesee_kwargs["Q"])
+# firedrake.interpolate(expr, Q) (the free-function form) now returns a
+# lazy symbolic Interpolate object in the installed Firedrake/UFL version,
+# not an evaluated Function -- Function(Q).interpolate(expr) is the
+# eager-evaluation equivalent (same math). Confirmed this matters here
+# specifically: icesee_kwargs["basal_melt_field"] is itself produced by
+# BasalMeltRate's own interpolate() call, so a lazy result fed into a
+# second interpolate() call is exactly the "Non-contiguous argument
+# numbers in interpolate" failure reproduced while diagnosing this.
+bmr_nudged = firedrake.Function(icesee_kwargs["Q"]).interpolate(
+    icesee_kwargs["basal_melt_field"] + wrong_bmr
+)
 
 icesee_kwargs.update({"bmr_nudged": bmr_nudged})
 

@@ -21,6 +21,9 @@ from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import 
 # --- Lorenz96 model imports ---
 from ICESEE.applications.lorenz_model.examples.lorenz96._lorenz96_model import initialize_model
 
+# --- Register execution_mode 3 support (import-time side effect) ---
+from ICESEE.applications.lorenz_model.lorenz_utils import mode3_runner  # noqa: F401
+
 # --- Initialize MPI ---
 rank, size, comm, _ = ParallelManager().icesee_mpi_init(icesee_kwargs)
 

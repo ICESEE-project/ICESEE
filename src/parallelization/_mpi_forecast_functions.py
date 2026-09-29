@@ -23,6 +23,7 @@ from ICESEE.src.utils.tools import icesee_get_index
 
 from ICESEE.src.run_model_da._error_generation import generate_enkf_field
 from ICESEE.src.utils.utils import UtilsFunctions
+from ICESEE.src.utils.random_streams import process_noise_seed as _process_noise_seed
 
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 # rank_seed, rng = ParallelManager().initialize_seed(MPI.COMM_WORLD)
@@ -56,20 +57,6 @@ def process_noise_is_due(icesee_kwargs, k=None):
         icesee_kwargs.get("number_obs_instants", obs_index.size)
     )
     return bool(np.any(obs_index[:number_obs] == int(k)))
-
-
-def _process_noise_seed(base_seed, timestep, ens_id, variable_index):
-    """Stable member-keyed seed independent of rank and execution order."""
-    words = np.random.SeedSequence(
-        [
-            int(base_seed) & 0xFFFFFFFF,
-            int(timestep) & 0xFFFFFFFF,
-            int(ens_id) & 0xFFFFFFFF,
-            int(variable_index) & 0xFFFFFFFF,
-            0x1CE5EE,
-        ]
-    ).generate_state(1, dtype=np.uint32)
-    return int(words[0])
 
 
 def _forecast_member_seed(base_seed, timestep, ens_id):
@@ -209,13 +196,24 @@ def add_member_process_noise(ensemble_vec, ens_id, icesee_kwargs):
     try:
         for ii in range(num_state_vars):
             start, stop = ii * hdim, (ii + 1) * hdim
-            np.random.seed(_process_noise_seed(base_seed, k, ens_id, ii))
+            seed = _process_noise_seed(base_seed, k, ens_id, ii)
+            np.random.seed(seed)
             noise_kwargs = dict(icesee_kwargs)
             noise_kwargs.update(
                 {
                     "ens_id": int(ens_id),
                     "ii_sig": ii,
-                    "seed": _process_noise_seed(base_seed, k, ens_id, ii),
+                    "seed": seed,
+                    # Pass "rng" explicitly (not just "seed"): generate_enkf_field's
+                    # own fallback prefers a "base_seed" entry in icesee_kwargs over
+                    # "seed" when both are present -- and config/_utility_imports.py
+                    # unconditionally sets icesee_kwargs["base_seed"] (default 42)
+                    # for every application, so this ambiguity was live for every
+                    # mode-2 run, not just configs with an explicit base_seed. An
+                    # explicit "rng" bypasses it entirely, matching the same fix
+                    # already applied to mode 0's forecast step (EnKF.py) and to
+                    # generate_initial_member_increment.
+                    "rng": np.random.default_rng(seed),
                     "Lx_dim": np.sqrt(Lx * Ly),
                     "noise_dim": hdim,
                     "num_vars": total_vars,
@@ -555,7 +553,16 @@ def parallel_forecast_step_default_full_parallel_run(**icesee_kwargs):
     size_world = comm_world.Get_size()
 
     subcomm = icesee_kwargs.get("subcomm", MPI.COMM_SELF)
-    sub_rank = subcomm.Get_rank()
+    # A spare rank under the hierarchical resource plan (resource_plan.py)
+    # is handed MPI.COMM_NULL for subcomm (Get_rank() raises MPI_ERR_COMM
+    # on it); icesee_kwargs["sub_rank"] was already safely computed as
+    # None for that case by icesee_mpi_ens_distribution.
+    if "sub_rank" in icesee_kwargs:
+        sub_rank = icesee_kwargs["sub_rank"]
+    elif subcomm is not None and subcomm != MPI.COMM_NULL:
+        sub_rank = subcomm.Get_rank()
+    else:
+        sub_rank = None
 
     color = icesee_kwargs.get("color", 0)
     rounds = icesee_kwargs.get("rounds", 1)
@@ -594,7 +601,17 @@ def parallel_forecast_step_default_full_parallel_run(**icesee_kwargs):
         "time_forecast_file_writing", 0.0
     )
 
-    vecs, indx_map, dim_per_proc = icesee_get_index(**icesee_kwargs)
+    # A spare rank (color is None -- resource_plan.py) never calls
+    # _run_one_ensemble below (guarded by `if color is not None:`), the
+    # only place `indx_map` is used, so it never dereferences a None
+    # here -- but icesee_get_index itself touches `comm` (this rank's
+    # `subcomm`, which resource_plan.py hands a spare rank as
+    # MPI.COMM_NULL), so the call itself must be skipped for a spare
+    # rank rather than merely its result being unused.
+    if color is not None:
+        vecs, indx_map, dim_per_proc = icesee_get_index(**icesee_kwargs)
+    else:
+        vecs, indx_map, dim_per_proc = None, None, None
 
     def _add_process_noise(ensemble_vec, ens_id, local_kwargs):
         nonlocal time_forecast_noise_generation
@@ -641,6 +658,40 @@ def parallel_forecast_step_default_full_parallel_run(**icesee_kwargs):
         if process_noise_is_due(icesee_kwargs, k):
             time_forecast_noise_generation += MPI.Wtime() - _t_noise
 
+        # A genuinely spatially distributed model (e.g. Firedrake/Icepack
+        # with ranks_per_model > 1) has each rank in `subcomm` update only
+        # its own disjoint slice of `ensemble_vec` above (see `indx_map` /
+        # icesee_get_index) -- every other position is still whatever this
+        # rank read from the shared file at the top of this call. Only
+        # `sub_rank == 0` writes the file below, so without gathering every
+        # rank's own freshly updated slice onto it first, every other
+        # rank's update is silently discarded each timestep and that rank
+        # keeps re-solving from the same stale state forever (a real,
+        # reproduced bug found via Stage 4C's first real
+        # ranks_per_model=2 Icepack validation run -- previously invisible
+        # because every model registered so far is either single-rank-per-
+        # member or, for Lorenz-96's legacy multi-rank case, replicated,
+        # not distributed). Mirrors `combine_member_state`'s identical
+        # gather-then-root-only pattern already used for ensemble
+        # initialization (`_mpi_ensemble_intialization.py`); for a
+        # replicated model (`state_distribution == "replicated"`) this is
+        # unnecessary -- every rank's copy is already the complete,
+        # identical full vector -- so it is skipped there exactly as
+        # `combine_member_state` itself skips it.
+        _replicated = str(
+            local_kwargs.get("state_distribution", "distributed")
+        ).strip().lower() == "replicated"
+        if subcomm.Get_size() > 1 and not _replicated:
+            own_payload = {
+                key: (np.asarray(idx), ensemble_vec[idx])
+                for key, idx in indx_map.items()
+            }
+            gathered = subcomm.gather(own_payload, root=0)
+            if sub_rank == 0:
+                for payload in gathered:
+                    for key, (idx, vals) in payload.items():
+                        ensemble_vec[idx] = vals
+
         # To avoid duplicate writes, only the subcommunicator root writes
         # the completed ensemble member.
         if sub_rank == 0:
@@ -655,22 +706,53 @@ def parallel_forecast_step_default_full_parallel_run(**icesee_kwargs):
 
     _t_forecast = MPI.Wtime()
 
+    # Stage 4B fix for the P>Nens/spare-rank HDF5 hang: read_forecast's own
+    # docstring states its invariant plainly -- "every rank in
+    # self.mpi_comm calls this once per timestep (it is not gated by
+    # sub_rank), which is what makes it safe ... to open/extend the shared
+    # HDF5 window." That invariant held when every rank always belonged to
+    # some model group; it silently broke once resource_plan.py introduced
+    # spare ranks (which never enter the `if color is not None:` loop
+    # below and so never called read_forecast at all) and partial rounds
+    # (`_run_one_ensemble` returns before read_forecast whenever
+    # `ens_id >= Nens` in the final round -- an *active* rank with no
+    # member this round). Both are exactly the mismatched-collective
+    # deadlock the P=10/Nens=4 case reproduced: active ranks blocked
+    # inside read_forecast's collective HDF5 open while spare/idle-this-
+    # round ranks had already moved on to a later comm_world.Barrier().
+    #
+    # Fixed the same way ensemble initialization's equivalent priming call
+    # already was (see enkf_parallel_io._ensure_batch(0) in
+    # _mpi_ensemble_intialization.py, kept unconditional/outside its own
+    # `if color is not None:` guard for the identical reason): every
+    # world rank -- spare or active, with or without a member this round
+    # -- joins this one priming collective, for the same (t_lo, t_hi)
+    # range read_forecast itself would ensure. This makes the *first*
+    # rank to reach the window for timestep k always be literally every
+    # rank in comm_world at once; every subsequent read_forecast call
+    # inside the round loop below (by ranks that do have a member this
+    # round) then finds the window already open and returns immediately
+    # (_ensure_batch_range is idempotent once the window already covers
+    # the requested range) -- a round loop does not change how many times
+    # the actual collective open happens, only how many members' data
+    # move through the window once it is open.
+    enkf_parallel_io._ensure_batch_range(k, min(k + 1, enkf_parallel_io.nt - 1))
+
     # ------------------------------------------------------------------
-    # Case 2: Nens >= size_world
-    # each subcomm processes multiple ensemble members over rounds.
+    # Unified round loop, driven by the centralized resource plan
+    # (resource_plan.py). `rounds` and `subcomm_size_min` (== the plan's
+    # num_model_groups) already correctly represent both the historical
+    # "few ranks, many members" and "many ranks, fewer members" regimes as
+    # special cases, plus any explicit ranks_per_model configuration that
+    # fits neither -- e.g. P=4,Nens=8,ranks_per_model=2 needs 4 rounds
+    # despite Nens >= size_world, which the old two-branch condition could
+    # not express. A spare rank (color is None, subcomm is MPI.COMM_NULL)
+    # belongs to no model group and must not enter any round.
     # ------------------------------------------------------------------
-    if Nens >= size_world:
+    if color is not None:
         for round_id in range(rounds):
             ens_id = color + round_id * subcomm_size_min
             _run_one_ensemble(ens_id)
-
-    # ------------------------------------------------------------------
-    # Case 3: Nens < size_world
-    # one subcommunicator per ensemble member.
-    # ------------------------------------------------------------------
-    else:
-        ens_id = color
-        _run_one_ensemble(ens_id)
 
     time_forecast_ensemble_generation += MPI.Wtime() - _t_forecast
 

@@ -396,23 +396,34 @@ class NativeDistributedMemberPool:
             observed[member_id] = np.ascontiguousarray(values)
         return observed
 
-    def observe_partitioned_with_adapter(
+    def route_observation_ids(
         self,
         global_observation_ids: np.ndarray,
         adapter: NativeDistributedModelAdapter,
         *,
         topology: Any,
         icesee_kwargs: Mapping[str, Any],
-    ) -> NativeObservationShard:
-        """Route and evaluate only observations owned by this spatial rank.
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Partition a canonical global observation-id array to this rank.
 
-        By default, observation IDs are variable-major global state rows and
-        the field registry performs ownership routing.  A nonlinear or
-        non-identity model operator may instead implement
-        ``partition_native_observations`` and return ``(positions, local_ids)``.
-        In either case storage is proportional to the local observation
-        stencil, and the canonical positions allow downstream code to select
-        matching data/error metadata without a complete-member gather.
+        Returns ``(canonical_positions, local_observation_ids)`` without
+        evaluating the observation operator. By default, observation IDs are
+        variable-major global state rows and the field registry performs
+        ownership routing. A nonlinear or non-identity model operator may
+        instead implement ``partition_native_observations`` and return
+        ``(positions, local_ids)`` itself. In either case storage is
+        proportional to the local observation stencil, and the canonical
+        positions allow downstream code to select matching data/error
+        metadata without a complete-member gather.
+
+        Callers that build a :class:`NativeObservationBatch` for
+        ``run_native_global_analysis_cycle`` (whose ``observation_ids`` must
+        already be spatially local -- see that function's own docstring) call
+        this once per canonical observation set, then subset their own
+        values/error arrays by the returned ``canonical_positions`` before
+        constructing the batch. ``observe_partitioned_with_adapter`` uses this
+        same routing internally when a caller wants routing and evaluation in
+        one step instead.
         """
 
         raw_ids = np.asarray(global_observation_ids)
@@ -453,11 +464,32 @@ class NativeDistributedMemberPool:
                 positions.min() < 0 or positions.max() >= observation_ids.size
             ):
                 raise ValueError("routed positions leave the observation array")
-        else:
-            positions, local_ids = representative.fields.partition_owned_rows(
-                observation_ids
-            )
+            return positions, local_ids
+        return representative.fields.partition_owned_rows(observation_ids)
 
+    def observe_partitioned_with_adapter(
+        self,
+        global_observation_ids: np.ndarray,
+        adapter: NativeDistributedModelAdapter,
+        *,
+        topology: Any,
+        icesee_kwargs: Mapping[str, Any],
+    ) -> NativeObservationShard:
+        """Route and evaluate only observations owned by this spatial rank.
+
+        See :meth:`route_observation_ids` for the routing contract. This
+        method both routes and evaluates in one step; callers that need to
+        route once per canonical observation set (e.g. because ownership is
+        static across an entire run) but evaluate every analysis step should
+        call :meth:`route_observation_ids` directly instead.
+        """
+
+        positions, local_ids = self.route_observation_ids(
+            global_observation_ids,
+            adapter,
+            topology=topology,
+            icesee_kwargs=icesee_kwargs,
+        )
         values = self.observe_with_adapter(
             local_ids,
             adapter,
@@ -471,8 +503,20 @@ def initialize_native_member_pool(
     adapter: NativeDistributedModelAdapter,
     topology: Any,
     icesee_kwargs: Mapping[str, Any],
-) -> NativeDistributedMemberPool:
-    """Create scheduled persistent members and validate spatial ownership."""
+):
+    """Create scheduled members and validate spatial ownership.
+
+    Returns a bounded-memory ``StreamingNativeDistributedMemberPool``
+    (src/parallelization/distributed_streaming_runtime.py) instead of the
+    default persistent ``NativeDistributedMemberPool`` when BOTH:
+    (a) ``icesee_kwargs.get("use_member_streaming")`` is truthy (explicit
+    opt-in -- never automatic, so every existing caller is unaffected by
+    default), and (b) the adapter implements ``reactivate_native_member``
+    (duck-typed, exactly like the existing ``partition_native_observations``
+    optional-method convention). Any adapter that does not implement
+    streaming continues to use the persistent pool unconditionally, so this
+    is fully backward compatible.
+    """
 
     validate_native_distributed_adapter(adapter)
     member_ids = members_for_ensemble_slot(
@@ -484,6 +528,30 @@ def initialize_native_member_pool(
         raise ValueError(
             "mode-3 process grid has an ensemble slot with no scheduled member"
         )
+
+    if icesee_kwargs.get("use_member_streaming") and callable(
+        getattr(adapter, "reactivate_native_member", None)
+    ):
+        # Local import: distributed_streaming_runtime.py imports several
+        # names FROM this module, so importing it at module load time here
+        # would be circular. Deferred to call time instead.
+        from .distributed_member_store import build_inactive_member_store
+        from .distributed_streaming_runtime import StreamingNativeDistributedMemberPool
+
+        store = build_inactive_member_store(
+            icesee_kwargs, world_rank=int(topology.world_rank)
+        )
+        pool = StreamingNativeDistributedMemberPool(
+            adapter, topology, icesee_kwargs, member_ids, store=store
+        )
+        if isinstance(pool.layout, DistributedStateLayout):
+            validate_spatial_partition(pool.layout, topology.spatial_comm)
+        elif isinstance(pool.layout, DistributedBlockStateLayout):
+            validate_block_spatial_partition(pool.layout, topology.spatial_comm)
+        else:  # pragma: no cover - registry construction already guarantees this
+            raise TypeError("native member returned an unsupported distributed layout")
+        return pool
+
     pool = NativeDistributedMemberPool(
         {
             member_id: adapter.initialize_native_member(

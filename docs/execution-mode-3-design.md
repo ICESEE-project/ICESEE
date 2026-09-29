@@ -251,3 +251,59 @@ Mode 3 must pass all mode-2 scientific controls plus the following:
 Scientific parity uses the same default numerical gate as mode 2
 (`atol=1e-10`, `rtol=1e-8`) unless a storage backend declares and justifies a
 different precision tolerance.
+
+## Bounded-memory member lifecycle (implemented, 2026-09-26/27)
+
+The sections above describe mode 3's original design target. This section
+documents what is actually implemented and real-Firedrake-verified as of
+2026-09-27, for the Icepack (idealized_pig) application specifically.
+
+**Lifecycle**: SHARED MODEL CONTEXT (mesh, function spaces, solver, static
+forcing fields -- `_SharedPigContext`, cached once per ensemble group,
+never duplicated by rounds) → ACTIVE NATIVE MEMBER (at most one member's
+live Firedrake state resident at a time) → INACTIVE MEMBER STORE (a
+packed owned-state array, backend-neutral) → DURABLE CHECKPOINT (a
+completely separate, unrelated mechanism -- `distributed_checkpoint.py`).
+
+**Two `InactiveMemberStore` backends** (`src/parallelization/
+distributed_member_store.py`, `distributed_member_store_hdf5.py`):
+`MemoryInactiveMemberStore` (default, unchanged behavior) and
+`HDF5MemberMajorStore` (opt-in, one HDF5 file per rank regardless of
+ensemble size, dataset-handle-cached, real-Firedrake-verified bit-for-bit
+equivalent to the memory backend across P=1, genuine spatial
+decomposition, and real rounds scheduling). Selected via
+`build_inactive_member_store(icesee_kwargs, world_rank=...)` -- the only
+place the generic runtime imports a concrete backend; applications never
+import a backend directly. Config: `member_store_backend` (`"memory"` |
+`"hdf5_member_major"`, default `"memory"`), `member_store_root` (default
+`<data_path>/_mode3_member_store/<run_id>/`).
+
+**Store-streaming analysis** (`run_native_store_streaming_analysis_cycle`,
+a sibling to the original `run_native_global_analysis_cycle` -- the
+original is kept, unmodified, as the reference implementation): the
+ensemble-space transform (`X_I^a = X_I^f @ T`) is applied one state-row
+block at a time, pulling/pushing through the store's `get_ensemble_rows`/
+`put_ensemble_rows` bulk primitives instead of requiring every
+round-assigned member's full array simultaneously resident. **Important
+optimization**: this pass is skipped entirely on any timestep with no
+scheduled analysis event, since the ensemble transform is then provably
+(verified bit-for-bit) exactly the identity matrix -- a real Icepack run
+showed this cuts HDF5 operations by 12.5x for a typical sparse-observation
+schedule (1675 -> 134 bulk calls, formula validated in
+`src/parallelization/mode3_projections.py`).
+
+**Temporary-store lifecycle**: created lazily on pool construction; each
+rank cleans up only its own file, after the run's existing final barrier
+(no new synchronization). On abnormal termination (exception before that
+point), the store file is deliberately left on disk for debugging --
+**restart must use the last durable checkpoint, never the temporary
+inactive-state store**, which is not a recovery artifact.
+
+**What this does NOT yet claim**: real-scale (Ne~1000, ~37GB/member)
+performance or memory savings -- only local, small-Ne correctness and a
+measured-and-validated set of operation-count/traffic formulas used to
+project (not claim) larger-scale behavior. See
+`src/parallelization/mode3_projections.py` for the formulas and
+`scripts/benchmarks/mode3_large_state_benchmark.py` for the synthetic
+benchmark harness. PACE validation is required before any scalability
+claim beyond what is stated here.

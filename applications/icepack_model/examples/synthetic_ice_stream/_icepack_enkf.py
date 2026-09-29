@@ -6,6 +6,7 @@
 # ==============================================================================
 
 import numpy as np
+import h5py
 
 # --- import run_simulation function from the available examples ---
 from ICESEE.applications.icepack_model.examples.synthetic_ice_stream._icepack_model import *

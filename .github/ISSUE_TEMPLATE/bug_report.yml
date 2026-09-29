@@ -1,0 +1,50 @@
+name: Bug report
+description: Something in ICESEE is incorrect, crashes, or behaves unexpectedly
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: What you expected instead, and what actually happened.
+    validations:
+      required: true
+  - type: dropdown
+    id: execution_mode
+    attributes:
+      label: Execution mode
+      options:
+        - "0 (serial)"
+        - "1 (partial parallel)"
+        - "2 (full parallel)"
+        - "3 (distributed, experimental)"
+        - "Not execution-mode specific"
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model / application
+      description: e.g. icepack (idealized_pig), issm, lorenz96, flowline_model
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Command line used, relevant params.yaml section, Nens and rank count (-n / --Nens), and a minimal input if possible.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: ICESEE version/commit, Python version, MPI implementation, PETSc/Firedrake/ISSM versions if relevant, OS/HPC system.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output / traceback
+      render: shell

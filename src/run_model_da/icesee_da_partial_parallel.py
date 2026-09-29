@@ -345,6 +345,15 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
         comm_world.Barrier()
         parallel_manager = None # debugging flag for now
 
+    # CLEANUP NOTE (unreachable in this driver): normalize_execution_mode(
+    # icesee_kwargs, expected=1) above already raises ValueError before this
+    # point whenever execution_mode != 1, so this else branch -- including
+    # its own hardcoded size_world=1/rank_world=0 and inline ensemble
+    # re-initialization with unseeded, unscaled noise -- can never execute
+    # from icesee_model_data_assimilation_partial_parallel. Left in place
+    # rather than removed alongside the Mode-0 process-noise fix, to keep
+    # that scientific correction and this dead-code removal as separate,
+    # independently reviewable changes.
     else:
         parallel_manager = None
         model_module = SupportedModels(model=model,verbose=icesee_kwargs.get('verbose')).call_model()

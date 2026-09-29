@@ -423,7 +423,11 @@ class EnKF_fully_parallel_IO:
             self.icesee_kwargs = icesee_kwargs
             self.base_path = base_path
             self.file_prefix = file_prefix
-            self.batch_size = max(1, int(batch_size))
+            # A window of fewer than 2 shards cannot hold both the timestep a
+            # forecast round reads and the timestep it writes at the same
+            # time (see ``_ensure_batch_range``), so the floor is 2 rather
+            # than 1.
+            self.batch_size = max(2, int(batch_size))
             requested_history_mode = str(
                 icesee_kwargs.get("ensemble_history_mode", "auto")
             ).strip().lower()
@@ -439,9 +443,22 @@ class EnKF_fully_parallel_IO:
             self.rank = mpi_comm.Get_rank()
             self.size = mpi_comm.Get_size()
 
-            self.subcomm = subcomm if subcomm is not None else MPI.COMM_SELF
-            self.sub_rank = self.subcomm.Get_rank()
-            self.sub_size = self.subcomm.Get_size()
+            # A spare rank under the hierarchical resource plan
+            # (resource_plan.py) belongs to no model group and is handed
+            # MPI.COMM_NULL, not None, for `subcomm` -- Get_rank()/
+            # Get_size() raise MPI_ERR_COMM on COMM_NULL, so it needs the
+            # same safe-placeholder treatment already given to `None`
+            # here. This object is still constructed by every rank
+            # (including spare ones), since later comm_world-level calls
+            # on it (_ensure_batch, compute_forecast_mean_chunked_v2) are
+            # made by every rank.
+            _subcomm_for_rank_query = (
+                subcomm
+                if subcomm is not None and subcomm != MPI.COMM_NULL
+                else MPI.COMM_SELF
+            )
+            self.sub_rank = _subcomm_for_rank_query.Get_rank()
+            self.sub_size = _subcomm_for_rank_query.Get_size()
             self.subcomm = subcomm
             self.serial_file_creation = serial_file_creation
             self.h5_file_compression = normalize_hdf5_compression(
@@ -953,7 +970,7 @@ class EnKF_fully_parallel_IO:
         fid = h5f.create(bytes(fname, 'utf-8'), flags=h5f.ACC_TRUNC, fapl=fapl)
         return h5py.File(fid)
 
-    def _create_batch_serial(self, t_start):
+    def _create_batch_serial(self, t_start, min_span=1):
         try:
             self._close_batch()
             self.files = []
@@ -964,7 +981,7 @@ class EnKF_fully_parallel_IO:
             if remaining == 0:
                 return
 
-            nfiles = min(self.batch_size, remaining)
+            nfiles = min(max(self.batch_size, min_span), remaining)
 
             if self.mpi_comm.Get_rank() == 0:
                 for t in range(t_start, t_start + nfiles):
@@ -1010,7 +1027,7 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def _create_batch_parallel(self, t_start):
+    def _create_batch_parallel(self, t_start, min_span=1):
         try:
             self._close_batch()
             self.files = []
@@ -1021,7 +1038,7 @@ class EnKF_fully_parallel_IO:
             if remaining == 0:
                 return
 
-            nfiles = min(self.batch_size, remaining)
+            nfiles = min(max(self.batch_size, min_span), remaining)
 
             for t in range(t_start, t_start + nfiles):
                 fname = self._state_file_name(t)
@@ -1089,24 +1106,77 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Abort(1)
 
     def _ensure_batch(self, t):
+        """Collective: ensure ``t`` alone is covered by the open window.
+
+        See ``_ensure_batch_range`` for the collective-safety contract this
+        must satisfy.
+        """
+        self._ensure_batch_range(t, t)
+
+    def _ensure_batch_range(self, t_lo, t_hi):
+        """Collective: ensure ``[t_lo, t_hi]`` is covered by the open window.
+
+        This is the only method that may open/close the shared HDF5 batch
+        (a collective operation on ``self.mpi_comm``, i.e. every world
+        rank).  Every caller of this method must therefore itself be
+        reached identically by every rank in ``self.mpi_comm`` at the same
+        point in program order -- it must never be called from code that
+        only a subcommunicator root (or any other rank subset) executes.
+
+        The forecast read/write pair is the reason ``t_hi`` exists: a
+        forecast round always reads timestep ``t`` (from every rank, via
+        ``read_forecast``) and then writes ``t + 1`` (from the
+        subcommunicator root only, via ``write_forecast``).  Anchoring the
+        window at ``t_lo`` and sizing it to also cover ``t_hi`` means the
+        *read* -- which is always matched across the whole communicator --
+        is what opens/extends the window for the *write* too, so the write
+        path never needs to touch a collective itself; see
+        ``_require_batch``.
+        """
         try:
-            t = int(t)
+            t_lo = max(0, int(t_lo))
+            t_hi = max(t_lo, int(t_hi))
             batch_end = self.current_batch_start + len(self.datasets)
-            if not (self.current_batch_start <= t < batch_end):
-                # A sliding window keeps the input and output timestep open at
-                # once.  Unlike aligned batches, it does not thrash at every
-                # batch boundary during read(k) -> write(k+1).
-                batch_start = max(0, t - self.batch_size + 1)
-                # self._create_batch(batch_start)
-                if self.serial_file_creation:
-                    self._create_batch_serial(batch_start)
-                else:
-                    self._create_batch_parallel(batch_start)
+            if self.current_batch_start <= t_lo and t_hi < batch_end:
+                return
+            batch_start = t_lo
+            min_span = t_hi - t_lo + 1
+            if self.serial_file_creation:
+                self._create_batch_serial(batch_start, min_span=min_span)
+            else:
+                self._create_batch_parallel(batch_start, min_span=min_span)
         except Exception as e:
-            print(f"Error occurred in _ensure_batch: {e}")
+            print(f"Error occurred in _ensure_batch_range: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
+
+    def _require_batch(self, t):
+        """Non-collective: assert ``t`` is already covered by the window.
+
+        Used by write paths that only a rank subset (e.g. a
+        subcommunicator root) executes.  Such a call must never be the one
+        to open/extend the batch -- doing so would only be a collective on
+        the ranks that happen to reach it, which is a mismatched-collective
+        deadlock risk against ``self.mpi_comm``.  The window must instead
+        already have been advanced by a matched call (typically
+        ``read_forecast``, see ``_ensure_batch_range``) earlier in the same
+        timestep.  If it hasn't, that is a caller-ordering bug, and this
+        raises immediately rather than silently attempting a collective
+        that the rest of ``self.mpi_comm`` may never reach.
+        """
+        t = int(t)
+        batch_end = self.current_batch_start + len(self.datasets)
+        if not (self.current_batch_start <= t < batch_end):
+            raise RuntimeError(
+                f"[ICESEE] Timestep {t} is not in the open HDF5 batch "
+                f"window [{self.current_batch_start}, {batch_end}). This "
+                "write path only runs on a rank subset, so it cannot safely "
+                "open/extend the shared window itself. A call reached by "
+                "every rank in self.mpi_comm (e.g. read_forecast for this "
+                "timestep, or an explicit _ensure_batch/_ensure_batch_range) "
+                "must advance the window first."
+            )
 
     def prune_history(self, keep_t):
         """Retain only ``keep_t`` when rolling ensemble history is enabled.
@@ -1156,8 +1226,17 @@ class EnKF_fully_parallel_IO:
 
         This matches _mpi_forecast_functions.py where the MPI model receives
         a complete state vector for one ensemble member.
+
+        Every rank in ``self.mpi_comm`` calls this once per timestep (it is
+        not gated by ``sub_rank``), which is what makes it safe for this
+        call -- and only this call -- to open/extend the shared HDF5
+        window.  It proactively covers ``t + 1`` too, because the paired
+        ``write_forecast(t + 1, ...)`` a moment later runs on the
+        subcommunicator root alone and must find the window already open
+        (see ``_require_batch``).
         """
-        self._ensure_batch(t)
+        t = int(t)
+        self._ensure_batch_range(t, min(t + 1, self.nt - 1))
         batch_idx = t - self.current_batch_start
 
         data = self.datasets[batch_idx][:, ens_idx]
@@ -1170,9 +1249,13 @@ class EnKF_fully_parallel_IO:
         Forecast path: write one full ensemble vector.
 
         This should be called only by sub_rank == 0 from
-        parallel_forecast_step_default_full_parallel_run.
+        parallel_forecast_step_default_full_parallel_run. Because only a
+        rank subset reaches this call, it must never itself open/extend the
+        shared HDF5 window (that is a collective on the full
+        ``self.mpi_comm``, not just the calling ranks). ``read_forecast``
+        for this same timestep already did so; see ``_require_batch``.
         """
-        self._ensure_batch(t)
+        self._require_batch(t)
         batch_idx = t - self.current_batch_start
 
         data = np.asarray(data, dtype=self.storage_dtype).reshape(-1)

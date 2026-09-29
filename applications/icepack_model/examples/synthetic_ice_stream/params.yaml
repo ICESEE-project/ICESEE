@@ -119,7 +119,7 @@ enkf-parameters:
   n_modeltasks: 1                     # number of model tasks (for MPI)
   commandlinerun: "True"              # command line run flag: True, False
   execution_flag: 0                  #`execution flag: 0 ->default, 1 -> sequntial, 2 -> even_distribution_of_problem size, 3 -> even_distribution_of_problem size with load balancing
-  execution_mode: 1                 # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
+  execution_mode: 3                 # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run, 3 -> spatially distributed (application-specific, requires mode-3 registry entry)
   data_path: _modelrun_datasets
   ICESEE_PERFORMANCE_TEST: False
 

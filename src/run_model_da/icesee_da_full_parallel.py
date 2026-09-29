@@ -55,6 +55,7 @@ from ICESEE.src.parallelization._mpi_generate_true_wrong_state import generate_t
 from ICESEE.src.parallelization._mpi_generate_synthetic_observations import synchronize_observation_schedule
 from ICESEE.src.parallelization._mpi_ensemble_intialization import ensemble_initialization_full_parallel_run
 from ICESEE.src.parallelization.EnKF_parallel_io import EnKF_fully_parallel_IO
+from ICESEE.src.utils.state_ownership import resolve_state_ownership
 
 # ======================== Run model with EnKF ========================
 def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
@@ -100,6 +101,34 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
                             "subcomm_size_min": subcomm_size_min,
                             "model_module": model_module,
                             'vec_inputs_old': icesee_kwargs.get('vec_inputs')})
+
+    # --- resolve the true full per-member vector length for shared I/O ----
+    # icesee_kwargs["nd"] (unpacked into the local `nd` above) is, for a
+    # spatially distributed model (e.g. Firedrake/Icepack with
+    # ranks_per_model > 1), one rank's own local partition size -- not the
+    # full per-member vector length EnKF_fully_parallel_IO's shared HDF5
+    # file needs (see src/utils/state_ownership.py's own docstring: "every
+    # ICESEE model adapter shipped today ... already reports a genuine
+    # per-rank local partition size in nd"). Deliberately does NOT
+    # overwrite icesee_kwargs["nd"] itself -- downstream code (the
+    # init_ok/else branch below, and ensemble_initialization_full_parallel_run)
+    # independently re-derives the same global size from that per-rank
+    # local value via its own subcomm.allgather; mutating it here would
+    # double count. This only feeds EnKF_fully_parallel_IO's own
+    # constructor. For ranks_per_model == 1 (every shipped configuration
+    # except Lorenz-96's legacy auto-multi-rank case, which opts into
+    # state_distribution: replicated) local_size == global_size, so this
+    # is a no-op. Broadcast unconditionally from world rank 0 (always an
+    # active rank -- group 0 is block-contiguous from world rank 0) so
+    # every rank, spare included, agrees on the same value before
+    # EnKF_fully_parallel_IO's construction below, which every comm_world
+    # rank calls uniformly (see EnKF_parallel_io.py's own comments).
+    if color is not None:
+        _io_ownership = resolve_state_ownership(icesee_kwargs, subcomm)
+        _nd_for_io = _io_ownership.global_size
+    else:
+        _nd_for_io = nd
+    nd_for_io = comm_world.bcast(_nd_for_io, root=0)
 
     icesee_kwargs['observed_vars_params'] = (icesee_kwargs['observed_vars'] + icesee_kwargs['observed_params'])
     all_observed = icesee_kwargs['observed_vars_params']
@@ -168,7 +197,7 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
     h5_file_compression = icesee_kwargs.get("h5_file_compression",None)
     h5_file_compression_level = icesee_kwargs.get("h5_file_compression_level",4)
     h5_file_chunk_size = icesee_kwargs.get("h5_file_chunk_size",1000)
-    enkf_parallel_io = EnKF_fully_parallel_IO('icesee_enkf_ens', nd, Nens, nt, subcomm, comm_world, \
+    enkf_parallel_io = EnKF_fully_parallel_IO('icesee_enkf_ens', nd_for_io, Nens, nt, subcomm, comm_world, \
                                              icesee_kwargs, serial_file_creation, base_path=_modelrun_datasets, \
                                              batch_size=batch_size, h5_file_compression=h5_file_compression, \
                                              h5_file_compression_level=h5_file_compression_level, \
@@ -414,7 +443,64 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
         len_scale = icesee_kwargs.get("length_scale")
         hdim  = icesee_kwargs["nd"] // icesee_kwargs["total_state_param_vars"]
         icesee_kwargs.update({"hdim": hdim, "Q_rho": Q_rho, "len_scale": len_scale})
-        prepare_random_field_coordinates(icesee_kwargs, expected_nodes=hdim)
+        # `hdim` above is a per-rank LOCAL quantity (icesee_kwargs["nd"] is
+        # deliberately never overwritten to the global size -- see
+        # nd_for_io's own comment above). get_mesh_coordinates (called
+        # inside prepare_random_field_coordinates for random_field_method
+        # == "graph") now returns the GLOBAL, gathered-and-broadcast
+        # coordinate array on EVERY rank of a genuinely distributed model
+        # group (ranks_per_model > 1), so the node count it must be
+        # checked against here is the global one too, not this rank's
+        # own local hdim -- otherwise a correctly distributed Icepack run
+        # raises a spurious "coordinate count does not match" error the
+        # moment coordinates are requested.
+        # A spare rank (color is None -- resource_plan.py) has no model
+        # and therefore no coordinates it could ever register (its
+        # coordinate provider call fails immediately -- no Q/mesh to read
+        # from); it also never calls anything downstream that needs
+        # coordinates (generate_initial_member_increment/
+        # add_member_process_noise are both gated on color is not None).
+        # random_field_method == "graph" makes this call raise instead of
+        # warning-and-continuing when coordinates are unavailable (by
+        # design, for an active rank that genuinely needs them), so a
+        # spare rank must skip the call entirely rather than being
+        # expected to satisfy a coordinate requirement it can never meet.
+        if color is not None:
+            _expected_nodes = (
+                resolve_state_ownership(icesee_kwargs, subcomm).global_size
+                // icesee_kwargs["total_state_param_vars"]
+            )
+            prepare_random_field_coordinates(icesee_kwargs, expected_nodes=_expected_nodes)
+
+        # Prime the shared mesh-coordinate cache here, collectively, for
+        # every rank in this model group together, if a later,
+        # rank-zero-only step will need it. The inference-plugin physics
+        # corrections (physics_smb_inference / physics_bed_inference) call
+        # get_mesh_coordinates() from inside
+        # EnKF_fully_parallel_IO._publish_analysis_file's rank-zero-only
+        # "ensemble-coupled" finalization branch (self.rank == 0, i.e.
+        # world rank 0 alone) -- for a spatially distributed model
+        # (Firedrake/Icepack with ranks_per_model > 1) that provider's own
+        # first call is a genuine Firedrake/PETSc collective (assembling an
+        # interpolation onto the mesh), so calling it from world rank 0
+        # alone -- with the rest of its model group never joining -- hangs
+        # exactly like any other mismatched Firedrake collective. Calling
+        # it here instead, reached identically by every rank in `subcomm`
+        # (not `color is not None`-gated alone would be wrong for a spare
+        # rank, which has no model/mesh to call the provider on at all),
+        # makes that same first call happen while every model-group rank
+        # is still present to join it; get_mesh_coordinates's own cache
+        # (icesee_kwargs["mesh_coords"]) then makes the later rank-zero-
+        # only call a plain, no-collective cache read. A no-op for every
+        # model that does not enable these physics corrections, and for
+        # any model whose provider/gather path is already single-rank-safe
+        # (subcomm size 1).
+        if color is not None and (
+            icesee_kwargs.get("physics_smb_inference", False)
+            or icesee_kwargs.get("physics_bed_inference", False)
+        ):
+            from ICESEE.src.utils.localization import get_mesh_coordinates
+            get_mesh_coordinates(icesee_kwargs)
 
             # --- get the process noise --->
         if icesee_kwargs.get("use_random_fields", False):
@@ -534,17 +620,38 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
         # km = 0
 
         #--- generate inital noise
-        if icesee_kwargs.get("use_random_fields", False):
-            # with h5py.File(_synthetic_obs, 'r') as f:
-            #     error_R = f['error_R'][:]
-            #     Cov_obs = np.cov(error_R)
-            #  --- get the observation noise ---
-            pos_obs, gs_model_obs, L_C_obs = compute_Q_err_random_fields(hdim, icesee_kwargs["total_state_param_vars"], icesee_kwargs["sig_obs"], Q_rho, len_scale)
-        else:
-            N_size = icesee_kwargs["total_state_param_vars"] * hdim
-            # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=0)
-            icesee_kwargs.update({"ii_sig": None, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":icesee_kwargs["total_state_param_vars"]})
-            noise = generate_enkf_field(**icesee_kwargs)
+        # A spare rank (color is None -- resource_plan.py) has no model,
+        # hdim == 0 for it (see icesee_kwargs["nd"] == 0's placeholder
+        # upstream), and this block's own field generators reject a
+        # non-positive hdim outright. A genuinely distributed model group
+        # (ranks_per_model > 1) has the same problem from a different
+        # angle: `hdim` here is this rank's own LOCAL block length, but
+        # get_mesh_coordinates (used for random_field_method == "graph")
+        # now returns the GLOBAL coordinate array on the rank that holds
+        # it -- a local-hdim-sized field request against a global-sized
+        # coordinate array raises a length mismatch. `noise` computed
+        # here is legacy/metadata-only downstream (see
+        # _mpi_forecast_functions.py's own comment on its "noise" kwarg
+        # -- stochastic state is actually maintained per member by
+        # add_member_process_noise and, at initialization, by
+        # generate_initial_member_increment, both already
+        # decomposition-invariant), so it is safely skipped (packed as
+        # None) for both cases; single-rank-per-model behavior (every
+        # application shipped today except Icepack under Stage 4C) is
+        # unchanged.
+        noise = None
+        if color is not None and subcomm.Get_size() <= 1:
+            if icesee_kwargs.get("use_random_fields", False):
+                # with h5py.File(_synthetic_obs, 'r') as f:
+                #     error_R = f['error_R'][:]
+                #     Cov_obs = np.cov(error_R)
+                #  --- get the observation noise ---
+                pos_obs, gs_model_obs, L_C_obs = compute_Q_err_random_fields(hdim, icesee_kwargs["total_state_param_vars"], icesee_kwargs["sig_obs"], Q_rho, len_scale)
+            else:
+                N_size = icesee_kwargs["total_state_param_vars"] * hdim
+                # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=0)
+                icesee_kwargs.update({"ii_sig": None, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":icesee_kwargs["total_state_param_vars"]})
+                noise = generate_enkf_field(**icesee_kwargs)
 
         # Match execution mode 1's inference lifecycle.  The bed/SMB hooks
         # retain private reference fields between analysis cycles; a mode-2
@@ -902,65 +1009,64 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
             None
 
     except Exception as e:
-        # Handle exceptions and print error messages
-        comm_world.Barrier()
-        if rank_world == 0:
-            print(f"[ICESEE] An error occurred on in icesee_model_data_assimilation_full_parallel: {str(e)}")
-            print(f"[ICESEE] You can restart from the previous checkpoint if enabled.")
-
-        try:
-            # Try to salvage k and km if present
-            cur_k = icesee_kwargs.get("k", None)
-            cur_km = icesee_kwargs.get("km", None)
-            if (restart_enabled and history_mode != "rolling"
-                    and rank_world == 0 and cur_k is not None):
-                ck = {
-                    "last_done_k": max(int(cur_k) - 1, -1),  # last fully done; conservative
-                    "km": int(cur_km) if cur_km is not None else None,
-                    "nt": int(icesee_kwargs.get("nt", icesee_kwargs["nt"])),
-                    "nd": int(icesee_kwargs.get("nd", icesee_kwargs["nd"])),
-                    "nens": int(icesee_kwargs.get("Nens", icesee_kwargs["Nens"])),
-                    "dataset_dir": os.path.abspath(_modelrun_datasets),
-                    "timestamp": time.time(),
-                    "base_seed": int(base_seed),
-                    "crash_message": str(e),
-                }
-                save_checkpoint(_modelrun_datasets, **ck)
-                print(f"[ICESEE][RESTART] Checkpoint saved after error; you can restart safely.")
-            elif restart_enabled and history_mode == "rolling" and rank_world == 0:
-                print(
-                    "[ICESEE][RESTART] Retaining the last completed rolling "
-                    "checkpoint after the error."
-                )
-        except Exception as _ckerr:
-            if rank_world == 0:
-                print(f"[ICESEE][WARN] Could not save crash checkpoint: {_ckerr}")
-
-        # close the EnKF I/O handler
-        enkf_parallel_io.close()
-        comm_world.Barrier()
-        if icesee_kwargs.get("create_ensemble_dataset", True):
-            if rank_world == 0:
-                finalize_mode = str(icesee_kwargs.get(
-                    "ensemble_finalize_mode", "vds"
-                )).lower()
-                if history_mode == "rolling":
-                    print(
-                        "[ICESEE] Rolling ensemble history enabled; no "
-                        "full-history recovery view can be created."
-                    )
-                elif finalize_mode not in {"none", "off", "false"}:
-                    print(f"[ICESEE] Creating {finalize_mode} recovery view...")
-                    out_vds = finalize_stack(
-                        _modelrun_datasets, mode=finalize_mode,
-                        dset_name="states",
-                        row_chunk_size=int(icesee_kwargs.get(
-                            "finalize_row_chunk_size", 16384
-                        )),
-                    )
-                    print("Recovery view ready:", out_vds)
-
-            comm_world.Barrier()
+        # An exception here means THIS rank cannot safely continue. There is
+        # no guarantee every other rank raised too (a rank-subset failure is
+        # exactly the common case -- e.g. an out-of-range index computed
+        # from this rank's own local data), so nothing below may assume the
+        # rest of comm_world is still reachable in a matched state. Every
+        # collective this handler used to perform unconditionally --
+        # Barrier(), enkf_parallel_io.close() (closing a collectively-opened
+        # HDF5 handle), and finalize_stack()'s recovery-view build -- was
+        # therefore itself a further collective-mismatch/deadlock risk on
+        # top of whatever raised, and silently swallowed the exception
+        # afterward (no re-raise, no abort, no nonzero exit), so a crashed
+        # run could still exit 0. Fixed to the standard MPI failure
+        # pattern instead: print full diagnostics from every rank that hit
+        # this (do not suppress the original exception), attempt only a
+        # rank-local, non-collective best-effort checkpoint save, then abort
+        # the whole communicator immediately. Do not try to coordinate a
+        # graceful shutdown after an unrecoverable error.
         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
-        print(f"Traceback details:\n{tb_str}")
-        # comm_world.Abort(1)  # Abort all processes in the communicator
+        print(
+            f"[ICESEE][rank {rank_world}] Fatal error in "
+            f"icesee_model_data_assimilation_full_parallel: {e}\n{tb_str}",
+            flush=True,
+        )
+
+        if rank_world == 0:
+            try:
+                # Try to salvage k and km if present. Rank-local file I/O
+                # only -- no collective, so this cannot hang waiting on a
+                # peer that may already be gone.
+                cur_k = icesee_kwargs.get("k", None)
+                cur_km = icesee_kwargs.get("km", None)
+                if (restart_enabled and history_mode != "rolling"
+                        and cur_k is not None):
+                    ck = {
+                        "last_done_k": max(int(cur_k) - 1, -1),  # last fully done; conservative
+                        "km": int(cur_km) if cur_km is not None else None,
+                        "nt": int(icesee_kwargs.get("nt", icesee_kwargs["nt"])),
+                        "nd": int(icesee_kwargs.get("nd", icesee_kwargs["nd"])),
+                        "nens": int(icesee_kwargs.get("Nens", icesee_kwargs["Nens"])),
+                        "dataset_dir": os.path.abspath(_modelrun_datasets),
+                        "timestamp": time.time(),
+                        "base_seed": int(base_seed),
+                        "crash_message": str(e),
+                    }
+                    save_checkpoint(_modelrun_datasets, **ck)
+                    print(f"[ICESEE][RESTART] Checkpoint saved after error; you can restart safely.", flush=True)
+                elif restart_enabled and history_mode == "rolling":
+                    print(
+                        "[ICESEE][RESTART] Retaining the last completed rolling "
+                        "checkpoint after the error.",
+                        flush=True,
+                    )
+            except Exception as _ckerr:
+                print(f"[ICESEE][WARN] Could not save crash checkpoint: {_ckerr}", flush=True)
+
+        # No graceful HDF5 close and no recovery-view build here: both
+        # require every rank in comm_world to participate collectively,
+        # which this handler cannot guarantee. A user who wants a recovery
+        # view from a crashed run's partial output can build one explicitly
+        # afterward (finalize_stack), once the job has actually stopped.
+        comm_world.Abort(1)
