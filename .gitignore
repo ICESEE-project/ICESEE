@@ -234,4 +234,4 @@ slurm-*.out
 *.jpeg
 *.pdf
 *.h5
-*.tex
+*.texsrc/tests/parallel_mpi/parallel_test_*.hdf5
