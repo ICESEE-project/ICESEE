@@ -25,7 +25,7 @@ k = 499;
 % k=1;
 
 % Load the essential data
-results_dir = 'results';
+results_dir = '_modelrun_datasets';
 filter_type = 'true-wrong';
 file_path   = fullfile(results_dir, sprintf('%s-issm.h5', filter_type));
 t           = h5read(file_path,'/t');
@@ -658,4 +658,3 @@ function [md_true, md_nurged, md_ens] = setup_model_states(k, dt, model_true_sta
     md_ens.mask.ocean_levelset = ens_thickness + ens_bed / di;
 
 end
-
