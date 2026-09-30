@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -50,7 +51,7 @@ _MESH_FILE = str(_IDEALIZED_PIG_DIR / "data" / "PigFull2017GeomFull.exp")
 
 _ARGV_BACKUP = sys.argv[:]
 _CWD_BACKUP = os.getcwd()
-sys.argv = [sys.argv[0]]
+sys.argv = [sys.argv[0], "--data_path", tempfile.mkdtemp(prefix="icesee_test_data_path_")]
 os.chdir(_IDEALIZED_PIG_DIR)
 try:
     from applications.icepack_model.examples.idealized_pig import _icepack_model as model

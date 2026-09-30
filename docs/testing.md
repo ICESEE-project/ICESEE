@@ -140,6 +140,116 @@ assertion-rich Level 3 test.
 PYTHONPATH=<repo parent>:<repo root> pytest src/tests -q
 ```
 
-CI (`.github/workflows/ci.yml`) currently runs a curated subset directly by
-filename rather than the whole directory; keep that list in sync when
-adding a new fast, CI-appropriate test file.
+### Isolating `data_path`
+
+`config/_utility_imports.py` removes and recreates `data_path` when it is
+imported. A test that imports an application, or launches one of its
+scripts, from the example directory without its own `--data_path` therefore
+deletes that example's real `_modelrun_datasets` directory. Every such test
+must pass an isolated `--data_path` (`tmp_path` or `tempfile.mkdtemp`).
+`src/tests/conftest.py` fails the run if any
+`applications/*/examples/*/_modelrun_datasets*` directory is deleted,
+recreated, or loses files during the session, and
+`src/tests/test_application_data_isolation.py` checks the isolation pattern
+itself.
+
+## Validation tiers
+
+GitHub CI validates correctness and guards against regressions at small
+sizes. It does not validate production scalability, memory at production
+state sizes, parallel-file-system I/O, or multi-node behavior; those are
+validated on PACE. A green CI run is not evidence that a configuration
+scales.
+
+### 1. Required fast CI (`CI / fast-tests`)
+
+Every module in `src/tests` except those passed to `--ignore` in
+`.github/workflows/ci.yml`: no Firedrake/Icepack, ISSM, external dataset, or
+`mpirun` launch, and deterministic. New modules are included automatically;
+a new module that needs Firedrake, ISSM, external data, or `mpirun` must be
+added to the workflow's ignore list and to the tier below that runs it.
+
+This tier covers, among others: execution-mode 0/1/2/3 dispatch and the
+mode-3 registry (`test_run_models_da_dispatch.py`,
+`test_distributed_mode3_registry.py`); the generic mode-3 runtime staying
+model agnostic (`test_mode3_generic_runtime_has_no_icepack_field_knowledge.py`);
+ResourcePlan groups, rounds, spares, and capabilities (`test_resource_plan.py`,
+`test_resource_plan_state_ownership_orthogonality.py`,
+`test_model_capabilities.py`); replicated vs distributed state ownership
+(`test_state_ownership.py`); deterministic RNG streams and their independence
+from rank and execution order (`test_random_streams.py`,
+`test_enkf_serial_process_noise.py`, `test_mode2_process_noise_seed_precedence.py`,
+`test_ensemble_initialization_modes01.py`, `test_full_parallel_large_data.py`);
+coordinate-keyed perturbations (`test_coordinate_keyed_white_noise.py`,
+`test_random_field_coordinates.py`); distributed analysis and
+observation-row ownership (`test_distributed_analysis.py`,
+`test_distributed_local_analysis.py`); the member-streaming lifecycle and
+store-streaming analysis (`test_distributed_streaming_runtime.py`); memory vs
+HDF5 member-major store equivalence (`test_distributed_member_store_hdf5.py`,
+`test_distributed_member_store_factory.py`); and application-data isolation
+(`test_application_data_isolation.py`).
+
+### 2. Required MPI CI (`CI / mpi-tests`)
+
+Small real multi-rank runs on the GitHub runner, with h5py built against the
+runner's Open MPI and verified to have MPI support:
+
+- the Lorenz96 CI example (`scripts/ci/run_lorenz96_ci.py`, modes 0/1/2);
+- `test_resource_plan_mpi_topology.py` — real communicator topology matches
+  the ResourcePlan; spare ranks never enter group collectives;
+- `test_mpi_failure_handling.py` — an exception on one rank terminates the
+  job instead of leaving the others hanging;
+- `test_lorenz96_mode2_p_nens_matrix.py` — mode 2 across P < Nens, P = Nens,
+  and P > Nens, including spare ranks;
+- `test_enkf_parallel_io_topology.py` — collective HDF5 open/read/write
+  windows complete across batch boundaries and with spare ranks;
+- `test_lorenz_mode3_runner.py` — mode 3 on one and several ranks;
+- `test_mode3_large_state_benchmark.py` — no hidden full-state allocation
+  on any rank (exact owned-byte accounting at tiny sizes).
+
+Every launch has its own subprocess timeout and the step has an outer
+`timeout`, so a communicator regression fails instead of hanging. The job
+fails if any of these tests is skipped: a skip there means no usable launcher
+or parallel HDF5 was found, not that the behavior was verified.
+
+### 3. Optional Firedrake/Icepack CI (future)
+
+Needs a Firedrake + Icepack environment; not a required check. **Next CI
+task:** add a GitHub Actions job running these in a Firedrake container with
+Icepack installed, validate it on GitHub, and then decide whether the
+compact-initialization guard below becomes a required check. Until then
+these tests run locally and on PACE only. They are small and do not need the
+~39GB Idealized PIG dataset:
+
+- `test_icepack_compact_initialization_synthetic.py` — compact
+  initialization selects the final spin-up state, gives initialized fields
+  identical to the full-history path, works without the history file, and
+  does not grow with history length (tiny synthetic checkpoint);
+- `test_icepack_compact_initialization.py` — static checks (its real-dataset
+  comparison skips without the dataset);
+- `test_icepack_checkpoint_communicator.py`, `test_icepack_mode3_runner.py`,
+  `test_icepack_idealized_pig_native.py`,
+  `test_synthetic_ice_stream_h5py_dataset_path.py`,
+  `test_basal_melt_true_wrong_experiment.py`,
+  `test_run_models_da_dispatch.py::test_icepack_real_bootstrap_self_heals_without_a_prior_mode3_runner_import`;
+- `test_icepack_multirank_analysis.py` and `test_icepack_physical_nudge.py`
+  — `ranks_per_model > 1` analysis, spare ranks, and R=1 vs R>1
+  decomposition invariance for Icepack.
+
+`test_icepack_mesh_communicator.py` reads the Idealized PIG mesh file
+(`data/PigFull2017GeomFull.exp`) and runs only where that data is available.
+
+### 4. PACE/HPC validation
+
+Run on PACE, never in GitHub CI:
+
+- real Idealized PIG runs from the production initialization dataset,
+  including the full-history vs compact comparison
+  (`test_icepack_compact_initialization.py::test_compact_file_is_dramatically_smaller_and_equivalent`);
+- strong, weak, and ensemble scaling; large `Nens`; multi-node runs; and
+  `ranks_per_model > 1` at production mesh sizes;
+- parallel-HDF5 bandwidth and collective I/O on a parallel file system, and
+  `hdf5_member_major` store performance at production sizes;
+- peak memory at production state sizes;
+- ISSM runs, including `test_config_extends.py`, which needs the ISMIP_Choi
+  experiment inputs.

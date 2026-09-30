@@ -23,9 +23,12 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
+
+from ICESEE.src.tests._mpi_launcher import find_compatible_mpi_launcher
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKER = Path(__file__).resolve().parent / "parallel_mpi" / "_basal_melt_experiment_worker.py"
@@ -37,8 +40,8 @@ _IDEALIZED_PIG_DIR = _REPO_ROOT / "applications" / "icepack_model" / "examples" 
 
 
 def _run_worker() -> dict:
-    mpirun = "/opt/homebrew/bin/mpirun"
-    if not os.path.exists(mpirun):
+    mpirun = find_compatible_mpi_launcher()
+    if mpirun is None:
         pytest.skip("no compatible mpirun available in this environment")
     try:
         import firedrake  # noqa: F401
@@ -53,8 +56,12 @@ def _run_worker() -> dict:
     # to this subprocess only.
     env["PATH"] = f"/opt/homebrew/bin:{env.get('PATH', '')}"
 
+    # The config loader cleans data_path at import time; without an isolated
+    # data_path the worker would wipe idealized_pig/_modelrun_datasets.
+    data_path = tempfile.mkdtemp(prefix="icesee_basal_melt_test_")
     result = subprocess.run(
-        [mpirun, "--oversubscribe", "-n", "1", sys.executable, str(_WORKER)],
+        [mpirun, "--oversubscribe", "-n", "1", sys.executable, str(_WORKER),
+         f"--data_path={data_path}"],
         capture_output=True, text=True, timeout=180, env=env,
         cwd=str(_IDEALIZED_PIG_DIR),
     )

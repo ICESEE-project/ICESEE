@@ -40,14 +40,16 @@ import h5py
 import numpy as np
 import pytest
 
+from ICESEE.src.tests._mpi_launcher import find_compatible_mpi_launcher
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKER = Path(__file__).resolve().parent / "parallel_mpi" / "_icepack_multirank_worker.py"
 
 
 def _run_worker(tmp_path, world_size, nens, ranks_per_model, base_seed=42,
                  nx=4, ny=4, extra_args=()):
-    mpirun = "/opt/homebrew/bin/mpirun"
-    if not os.path.exists(mpirun):
+    mpirun = find_compatible_mpi_launcher()
+    if mpirun is None:
         pytest.skip("no compatible mpirun available in this environment")
     try:
         import firedrake  # noqa: F401

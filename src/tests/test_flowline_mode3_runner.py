@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+import tempfile
 import types
 from pathlib import Path
 
@@ -35,9 +36,12 @@ for _extra_path in (str(_REPO_ROOT), str(_REPO_ROOT.parent), str(_FLOWLINE_1D_DI
     if _extra_path not in sys.path:
         sys.path.insert(0, _extra_path)
 
+# config._utility_imports deletes/recreates data_path at import time, so point
+# it at a throwaway directory instead of flowline_1d's own _modelrun_datasets.
+_SAFE_DATA_PATH = tempfile.mkdtemp(prefix="icesee_flowline_mode3_runner_test_")
 _ARGV_BACKUP = sys.argv[:]
 _CWD_BACKUP = os.getcwd()
-sys.argv = [sys.argv[0]]
+sys.argv = [sys.argv[0], "--data_path", _SAFE_DATA_PATH]
 os.chdir(_FLOWLINE_1D_DIR)
 try:
     from applications.flowline_model.examples.flowline_1d import mode3_runner as runner

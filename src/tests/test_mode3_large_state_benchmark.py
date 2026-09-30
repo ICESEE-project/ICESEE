@@ -23,14 +23,16 @@ from pathlib import Path
 
 import pytest
 
+from ICESEE.src.tests._mpi_launcher import find_compatible_mpi_launcher
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "benchmarks" / "mode3_large_state_benchmark.py"
 
-_MPIRUN = "/opt/homebrew/bin/mpirun"
+_MPIRUN = find_compatible_mpi_launcher()
 
 
 def _skip_if_unavailable():
-    if not os.path.exists(_MPIRUN):
+    if _MPIRUN is None:
         pytest.skip("no compatible mpirun available in this environment")
 
 

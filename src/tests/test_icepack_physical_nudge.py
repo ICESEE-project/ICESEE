@@ -35,15 +35,17 @@ import h5py
 import numpy as np
 import pytest
 
+from ICESEE.src.tests._mpi_launcher import find_compatible_mpi_launcher
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TAPER_WORKER = Path(__file__).resolve().parent / "parallel_mpi" / "_icepack_nudge_taper_worker.py"
 _WORKER = Path(__file__).resolve().parent / "parallel_mpi" / "_icepack_multirank_worker.py"
 
-_MPIRUN = "/opt/homebrew/bin/mpirun"
+_MPIRUN = find_compatible_mpi_launcher()
 
 
 def _skip_if_unavailable():
-    if not os.path.exists(_MPIRUN):
+    if _MPIRUN is None:
         pytest.skip("no compatible mpirun available in this environment")
     try:
         import firedrake  # noqa: F401

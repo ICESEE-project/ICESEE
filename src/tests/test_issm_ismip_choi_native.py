@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import types
 from pathlib import Path
 
@@ -35,7 +36,7 @@ for _extra_path in (str(_REPO_ROOT), str(_REPO_ROOT.parent), str(_ISMIP_CHOI_DIR
 
 _ARGV_BACKUP = sys.argv[:]
 _CWD_BACKUP = os.getcwd()
-sys.argv = [sys.argv[0]]
+sys.argv = [sys.argv[0], "--data_path", tempfile.mkdtemp(prefix="icesee_test_data_path_")]
 os.chdir(_ISMIP_CHOI_DIR)
 try:
     from applications.issm_model.examples.ISMIP_Choi import _issm_native as native

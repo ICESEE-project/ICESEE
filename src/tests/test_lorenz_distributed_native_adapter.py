@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -24,7 +25,7 @@ for _extra_path in (str(_REPO_ROOT), str(_REPO_ROOT.parent)):
 
 _ARGV_BACKUP = sys.argv[:]
 _CWD_BACKUP = os.getcwd()
-sys.argv = [sys.argv[0]]
+sys.argv = [sys.argv[0], "--data_path", tempfile.mkdtemp(prefix="icesee_test_data_path_")]
 os.chdir(_LORENZ96_DIR)
 try:
     from applications.lorenz_model.lorenz_utils import (

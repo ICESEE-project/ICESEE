@@ -40,6 +40,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from ICESEE.src.tests._mpi_launcher import find_compatible_mpi_launcher
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _IDEALIZED_PIG_DIR = _REPO_ROOT / "applications" / "icepack_model" / "examples" / "idealized_pig"
 for _extra_path in (str(_REPO_ROOT), str(_REPO_ROOT.parent), str(_IDEALIZED_PIG_DIR)):
@@ -128,8 +130,8 @@ def test_independent_spatial_groups_checkpoint_io_real_mpi(tmp_path, scoped):
     script.write_text(_PROBE_SCRIPT)
     mode = "scoped" if scoped else "default"
 
-    mpirun = "/opt/homebrew/bin/mpirun"
-    if not os.path.exists(mpirun):
+    mpirun = find_compatible_mpi_launcher()
+    if mpirun is None:
         pytest.skip("no compatible mpirun available in this environment")
 
     result = subprocess.run(

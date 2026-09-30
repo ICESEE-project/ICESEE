@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from ICESEE.src.tests._mpi_launcher import find_compatible_mpi_launcher
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKER = Path(__file__).resolve().parent / "parallel_mpi" / "_topology_probe_worker.py"
 
@@ -36,8 +38,8 @@ _RESULT_RE = re.compile(
 
 
 def _run_topology_probe(tmp_path, world_size, nens, ranks_per_model):
-    mpirun = "/opt/homebrew/bin/mpirun"
-    if not os.path.exists(mpirun):
+    mpirun = find_compatible_mpi_launcher()
+    if mpirun is None:
         pytest.skip("no compatible mpirun available in this environment")
 
     env = dict(os.environ)

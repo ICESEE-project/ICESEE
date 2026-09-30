@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -123,7 +124,7 @@ def test_compact_file_is_dramatically_smaller_and_equivalent(tmp_path):
         "the idx=N-allocates-proportional-to-N finding"
     )
 
-    sys.argv = [sys.argv[0]]
+    sys.argv = [sys.argv[0], "--data_path", tempfile.mkdtemp(prefix="icesee_test_data_path_")]
     saved_cwd = os.getcwd()
     os.chdir(_IDEALIZED_PIG_DIR)
     # idealized_pig's own "modelfunc" package does a bare (non-relative)
