@@ -89,6 +89,13 @@ while [[ "$REPO_SEARCH" != "/" && ! -f "$REPO_SEARCH/scripts/activate.sh" ]]; do
   REPO_SEARCH="$(dirname "$REPO_SEARCH")"
 done
 ICESEE_REPO_ROOT="$(cd "$IDEALIZED_PIG_DIR/../../../.." && pwd)"
+# ICESEE is imported as a package named after its checkout directory, and
+# run_da_icepack.py relies on PYTHONPATH rather than adjusting sys.path.
+if [[ "$(basename "$ICESEE_REPO_ROOT")" != "ICESEE" ]]; then
+  echo "ERROR: the repository must be checked out in a directory named ICESEE (found $ICESEE_REPO_ROOT)" >&2
+  exit 1
+fi
+export PYTHONPATH="$(dirname "$ICESEE_REPO_ROOT"):$ICESEE_REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 if [[ -f "$REPO_SEARCH/scripts/activate.sh" ]]; then
   module purge || true
   # shellcheck disable=SC1091
@@ -107,6 +114,11 @@ echo "python3: $(which python3)"
 export ICESEE_RUN1_OUTPUT="$IDEALIZED_PIG_DIR/pace_runs/run1_${SLURM_JOB_ID}"
 mkdir -p "$ICESEE_RUN1_OUTPUT"
 echo "output directory: $ICESEE_RUN1_OUTPUT"
+# ICESEE removes and recreates data_path when its configuration is imported,
+# so it gets its own fresh subdirectory; the manifest, log, and summary stay
+# in ICESEE_RUN1_OUTPUT.
+ICESEE_RUN1_DATA="$ICESEE_RUN1_OUTPUT/icesee_data"
+echo "ICESEE data_path (member store, checkpoints): $ICESEE_RUN1_DATA"
 
 # --- Reproducibility manifest (item C) ---
 python3 "$ICESEE_REPO_ROOT/scripts/benchmarks/pace_run_manifest.py" \
@@ -124,6 +136,7 @@ rm -rf "$ICESEE_RUN1_OUTPUT/_run0_precheck"
 # (see this file's header for why); everything else is an ordinary,
 # correctly-applied --key=value CLI override. params.yaml (production) is
 # never touched.
+RUN1_START=$(date +%s)
 srun --mpi=pmix -n "${SLURM_NTASKS}" python3 "$IDEALIZED_PIG_DIR/run_da_icepack.py" \
   --force-params="$SCRIPT_DIR/params_calibration.yaml" \
   --Nens="$NENS" \
@@ -135,14 +148,18 @@ srun --mpi=pmix -n "${SLURM_NTASKS}" python3 "$IDEALIZED_PIG_DIR/run_da_icepack.
   --use_member_streaming=True \
   --use_store_streaming_analysis=True \
   --member_store_backend=hdf5_member_major \
-  --member_store_root="$ICESEE_RUN1_OUTPUT/_mode3_member_store" \
-  --data_path="$ICESEE_RUN1_OUTPUT" \
+  --member_store_root="$ICESEE_RUN1_DATA/_mode3_member_store" \
+  --data_path="$ICESEE_RUN1_DATA" \
   --verbose \
   2>&1 | tee "$ICESEE_RUN1_OUTPUT/run1_stdout.log"
+RUN1_WALL=$(( $(date +%s) - RUN1_START ))
+echo "RUN1 DA wall time: ${RUN1_WALL} s" | tee -a "$ICESEE_RUN1_OUTPUT/run1_stdout.log"
 
 # --- Post-run instrumentation summary (item B's report list) ---
 python3 "$SCRIPT_DIR/summarize_run1.py" \
-  --output-dir "$ICESEE_RUN1_OUTPUT" \
+  --output-dir "$ICESEE_RUN1_DATA" \
+  --summary-dir "$ICESEE_RUN1_OUTPUT" \
+  --wall-seconds "$RUN1_WALL" \
   --log-file "$ICESEE_RUN1_OUTPUT/run1_stdout.log" \
   --job-id "${SLURM_JOB_ID:-unknown}" \
   --nens "$NENS" --model-nprocs "$MODEL_NPROCS" --world-size "$SLURM_NTASKS"

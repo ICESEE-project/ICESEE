@@ -98,6 +98,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--log-file", required=True)
+    parser.add_argument("--summary-dir", default=None, help="where run1_summary.json is written (default: --output-dir)")
+    parser.add_argument("--wall-seconds", type=float, default=None, help="wall time of the DA run itself")
     parser.add_argument("--job-id", default="unknown")
     parser.add_argument("--nens", type=int, required=True)
     parser.add_argument("--model-nprocs", type=int, required=True)
@@ -116,12 +118,14 @@ def main() -> None:
             "ensemble_groups": args.world_size // args.model_nprocs,
             "rounds": -(-args.nens // (args.world_size // args.model_nprocs)),  # ceil division
         },
+        "da_wall_seconds": args.wall_seconds,
+        "data_path": str(out_dir),
         "timing": log_parse,
         "member_store_dir": _dir_stats(out_dir / "_mode3_member_store"),
         "checkpoint_dir": _dir_stats(out_dir / "_mode3_state_history"),
     }
 
-    out_path = out_dir / "run1_summary.json"
+    out_path = Path(args.summary_dir or out_dir) / "run1_summary.json"
     with out_path.open("w") as f:
         json.dump(summary, f, indent=2, default=str)
 

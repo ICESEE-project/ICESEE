@@ -93,6 +93,16 @@ def main() -> None:
         return f"{init_file} ({init_file.stat().st_size / 1e6:.1f} MB)"
     _check("compact-initialization checkpoint accessible", _init_file_check)
 
+    def _run1_inputs_check():
+        # The other inputs RUN1 reads (params_calibration.yaml's paramsFile,
+        # meshFile, SMBFile), relative to the Idealized PIG directory.
+        names = ("extended_beta1000yrs.yaml", "PigFull2017GeomFull.exp", "OLS_Trend_plus_Resid_9b9.tif")
+        missing = [n for n in names if not (_IDEALIZED_PIG_DIR / "data" / n).is_file()]
+        if missing:
+            raise FileNotFoundError(f"missing in {_IDEALIZED_PIG_DIR / 'data'}: {missing}")
+        return ", ".join(names)
+    _check("RUN1 input files accessible", _run1_inputs_check)
+
     def _comm_split_check():
         if size < 2:
             return "world_size=1: split construction not exercised (need >=2 ranks for a real P_model>1 check)"

@@ -56,6 +56,13 @@ done
 # applications/icepack_model/examples/idealized_pig -- computed directly,
 # never assumed to equal wherever ICESEE-Spack's activate.sh was found.
 ICESEE_REPO_ROOT="$(cd "$IDEALIZED_PIG_DIR/../../../.." && pwd)"
+# ICESEE is imported as a package named after its checkout directory, and
+# run_da_icepack.py relies on PYTHONPATH rather than adjusting sys.path.
+if [[ "$(basename "$ICESEE_REPO_ROOT")" != "ICESEE" ]]; then
+  echo "ERROR: the repository must be checked out in a directory named ICESEE (found $ICESEE_REPO_ROOT)" >&2
+  exit 1
+fi
+export PYTHONPATH="$(dirname "$ICESEE_REPO_ROOT"):$ICESEE_REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 if [[ -f "$REPO_SEARCH/scripts/activate.sh" ]]; then
   module purge || true
   # shellcheck disable=SC1091
