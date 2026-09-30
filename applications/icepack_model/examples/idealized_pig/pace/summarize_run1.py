@@ -108,6 +108,14 @@ def main() -> None:
 
     out_dir = Path(args.output_dir)
     log_parse = parse_log(Path(args.log_file))
+    # ICESEE writes the end-of-run performance summary to
+    # <data_path>/performance.json from the same data as the printed report;
+    # its "legacy" block is the historical timing table (null = not measured).
+    performance_json = out_dir / "performance.json"
+    if performance_json.is_file():
+        performance = json.loads(performance_json.read_text())
+        log_parse["timing_table_seconds"] = performance.get("legacy", {})
+        log_parse["performance_json"] = str(performance_json)
 
     summary = {
         "job_id": args.job_id,

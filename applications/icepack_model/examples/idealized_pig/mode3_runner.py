@@ -137,13 +137,20 @@ from ICESEE.src.parallelization.distributed_streaming_runtime import (
 )
 from ICESEE.src.parallelization.distributed_topology import (
     create_distributed_topology,
+    register_topology_run_metadata,
 )
 from ICESEE.src.utils.icesee_context import (
     normalize_execution_mode,
     normalize_icesee_kwargs,
 )
 from ICESEE.src.utils.localization import active_observation_std
-from ICESEE.src.utils.tools import save_all_data, display_timing_verbose
+from ICESEE.src.utils.performance import (
+    emit_performance_report,
+    register_io_provider,
+    register_package_versions,
+    register_run_metadata,
+)
+from ICESEE.src.utils.tools import save_all_data
 from ICESEE.src.utils.utils import UtilsFunctions
 
 _SUPPORTED_ERROR_MODES = {"legacy_prior_anomalies", "stochastic_r"}
@@ -304,7 +311,9 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         world, spatial_ranks=int(icesee_kwargs["model_nprocs"])
     )
     adapter = IDEALIZED_PIG_NATIVE_ADAPTER
+    _t = MPI.Wtime()
     pool = initialize_native_member_pool(adapter, topology, icesee_kwargs)
+    ensemble_init_time = MPI.Wtime() - _t
 
     obs_indices = np.asarray(
         UtilsFunctions(icesee_kwargs).JObs_indices(nd), dtype=np.int64
@@ -352,17 +361,35 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     # --- initial (pre-forecast) native ensemble, written once before the
     # timestep loop -- the mode-3 equivalent of modes 0-2's ensemble column
     # 0 (see module docstring for the checkpoint directory layout). ---
+    # Checkpoint write counters for the performance summary; bytes are the
+    # owned state arrays handed to the checkpoint writer.
+    checkpoint_io = {"bytes_written": 0.0, "write_time_s": 0.0, "writes": 0}
+    register_io_provider("checkpoint", lambda: checkpoint_io)
+
+    def _record_checkpoint(snapshot, seconds):
+        members = getattr(snapshot, "members", None)
+        if isinstance(members, dict):
+            checkpoint_io["bytes_written"] += sum(
+                getattr(array, "nbytes", 0) for array in members.values()
+            )
+        checkpoint_io["write_time_s"] += seconds
+        checkpoint_io["writes"] += 1
+
     init_file_time = 0.0
+    _initial_snapshot = pool.snapshot_owned()
     _t = MPI.Wtime()
     save_distributed_checkpoint(
         initial_root,
         0,
-        pool.snapshot_owned(),
+        _initial_snapshot,
         topology,
         run_id=run_id,
         metadata={"Nens": Nens, "description": "initial (pre-forecast) ensemble"},
     )
     init_file_time = MPI.Wtime() - _t
+    _record_checkpoint(_initial_snapshot, init_file_time)
+    del _initial_snapshot
+    time_analysis_cycle_steps = 0.0
 
     for k in range(nt):
         do_analysis = bool(km < m_obs and k == ind_m[km])
@@ -429,6 +456,8 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         )
         _step_wall = MPI.Wtime() - _t
         time_forecast_step += _step_wall
+        if do_analysis:
+            time_analysis_cycle_steps += _step_wall
         # PACE calibration instrumentation (2026-09-28, additive only --
         # does not affect control flow or any existing metric). JIT/warm-up
         # cost is concentrated in the first forecast step; printing each
@@ -454,7 +483,9 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
                 "did_analysis": do_analysis,
             },
         )
-        time_forecast_file_writing += MPI.Wtime() - _t
+        _checkpoint_s = MPI.Wtime() - _t
+        time_forecast_file_writing += _checkpoint_s
+        _record_checkpoint(result.local_analysis, _checkpoint_s)
 
     world.Barrier()
 
@@ -522,49 +553,43 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     #  End Timer and Aggregate Elapsed Time Across Ranks
     # ─────────────────────────────────────────────────────────────
     global_elapsed_time = MPI.Wtime() - global_start_time
-    total_elapsed_time = world.allreduce(global_elapsed_time, op=MPI.SUM)
-    total_wall_time = world.allreduce(global_elapsed_time, op=MPI.MAX)
-    true_wrong_time = world.allreduce(true_wrong_time, op=MPI.MAX)
-    forecast_step_time = world.allreduce(time_forecast_step, op=MPI.MAX)
-    forecast_file_time = world.allreduce(time_forecast_file_writing, op=MPI.MAX)
-    analysis_file_time = world.allreduce(analysis_file_time, op=MPI.MAX)
-    init_file_time = world.allreduce(init_file_time, op=MPI.MAX)
-    # No ensemble_initialization() call in this runner (see module
-    # docstring), so there is no separate ensemble-mean-computation cost to
-    # report; the initial-checkpoint write time is attributed to
-    # init_file_time above instead.
-    ensemble_init_time = 0.0
-    analysis_step_time = 0.0  # fused into forecast_step_time; see comment above
-    assimilation_time = ensemble_init_time + forecast_step_time + analysis_step_time
-    total_file_time = init_file_time + forecast_file_time + analysis_file_time
 
-    world.Barrier()
-    if world_rank == 0:
-        display_timing_verbose(
-            computational_time=total_elapsed_time,
-            wallclock_time=total_wall_time,
-            true_wrong_time=true_wrong_time,
-            assimilation_time=assimilation_time,
-            forecast_step_time=forecast_step_time,
-            analysis_step_time=analysis_step_time,
-            ensemble_init_time=ensemble_init_time,
-            init_file_time=init_file_time,
-            forecast_file_time=forecast_file_time,
-            analysis_file_time=analysis_file_time,
-            total_file_time=total_file_time,
-            forecast_noise_time=0.0,
-            time_init_ensemble_mean_computation=0.0,
-            time_forecast_ensemble_mean_computation=0.0,
-            time_analysis_ensemble_mean_computation=0.0,
-            comm=world,
-            # Mode 3's `model_nprocs` (topology.spatial_ranks) is already
-            # part of `world`'s own size (no separately spawned children,
-            # unlike modes 1/2's coordinator+worker convention this shared
-            # display function's "(model_nprocs+1)" multiplier was written
-            # for) -- model_nprocs=0 makes that multiplier a no-op so the
-            # header reports the true world size instead of double-counting.
-            model_nprocs=0,
-        )
+    register_run_metadata(
+        execution_mode=icesee_kwargs.get("execution_mode"),
+        model=icesee_kwargs.get("model_name"),
+        forecast_steps=nt,
+        analysis_events=km,
+        checkpoints=checkpoint_io["writes"],
+        member_store_backend=icesee_kwargs.get("member_store_backend", "memory"),
+        store_streaming_analysis=bool(icesee_kwargs.get("use_store_streaming_analysis", False)),
+    )
+    register_topology_run_metadata(topology, Nens)
+    register_package_versions("petsc4py", "firedrake", "icepack")
+    # The native cycle fuses each analysis into its forecast step, so there
+    # is no separate analysis timer: "analysis_step" is not measured when
+    # analyses ran (and has no events when none did), and the steps that
+    # carried an analysis are timed as "forecast_step_with_analysis". There
+    # is no ensemble-mean or forecast-noise phase in this runner.
+    emit_performance_report(
+        world,
+        elapsed_s=global_elapsed_time,
+        phases={
+            "true_wrong_state": true_wrong_time,
+            "ensemble_init": ensemble_init_time,
+            "forecast_step": time_forecast_step,
+            "analysis_step": None if km else 0.0,
+            "forecast_step_with_analysis": time_analysis_cycle_steps,
+            "init_file_io": init_file_time,
+            "forecast_file_io": time_forecast_file_writing,
+            "analysis_file_io": analysis_file_time,
+        },
+        counts={
+            "forecast_step": nt,
+            "analysis_step": km,
+            "forecast_step_with_analysis": km,
+        },
+        output_dir=_modelrun_datasets,
+    )
 
     return icesee_kwargs
 

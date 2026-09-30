@@ -13,6 +13,7 @@ import copy
 import gc
 
 from ICESEE.src.parallelization.parallel_mpi.resource_plan import plan_resources
+from ICESEE.src.utils.performance import register_run_metadata
 from ICESEE.src.parallelization.parallel_mpi.model_capabilities import (
     validate_ranks_per_model_request,
     validate_stochastic_method_for_decomposition,
@@ -263,6 +264,14 @@ class ParallelManager:
             icesee_kwargs["resource_plan"] = plan
             icesee_kwargs["ranks_per_model"] = plan.ranks_per_model
             icesee_kwargs["num_model_groups"] = plan.num_model_groups
+            register_run_metadata(
+                ensemble_size=plan.nens,
+                active_ranks=plan.active_ranks,
+                spare_ranks=plan.spare_ranks,
+                model_groups=plan.num_model_groups,
+                ranks_per_model=plan.ranks_per_model,
+                rounds=plan.num_rounds,
+            )
             if self.rank_world == 0:
                 print(f"[ICESEE] {plan.summary()}")
                 if icesee_kwargs.get("verbose"):

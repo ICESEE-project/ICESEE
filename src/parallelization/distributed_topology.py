@@ -100,3 +100,20 @@ def create_distributed_topology(
         ensemble_groups=ensemble_groups,
         spatial_ranks=spatial_ranks,
     )
+
+
+def register_topology_run_metadata(topology: DistributedTopology, ensemble_size: int) -> None:
+    """Report this run's actual ensemble-by-space layout to the end-of-run
+    performance summary. Uses the same keys as the modes-1/2 resource plan so
+    the values describing the topology that really ran replace those."""
+    from ICESEE.src.utils.performance import register_run_metadata
+
+    ensemble_size = int(ensemble_size)
+    register_run_metadata(
+        ensemble_size=ensemble_size,
+        active_ranks=topology.world_size,
+        spare_ranks=0,
+        model_groups=topology.ensemble_groups,
+        ranks_per_model=topology.spatial_ranks,
+        rounds=-(-ensemble_size // topology.ensemble_groups),
+    )

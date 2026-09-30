@@ -194,6 +194,20 @@ class InstrumentedInactiveMemberStore:
             "bulk_get_bytes": 0, "bulk_put_bytes": 0,
             "read_time_s": 0.0, "write_time_s": 0.0,
         }
+        from ICESEE.src.utils.performance import register_io_provider
+        register_io_provider("member_store", self.io_counters)
+
+    def io_counters(self) -> dict[str, float]:
+        """Cumulative counters in the generic performance-report I/O keys."""
+        stats = self.stats
+        return {
+            "bytes_read": stats["whole_get_bytes"] + stats["row_get_bytes"] + stats["bulk_get_bytes"],
+            "bytes_written": stats["whole_put_bytes"] + stats["row_put_bytes"] + stats["bulk_put_bytes"],
+            "reads": stats["whole_get_count"] + stats["row_get_count"] + stats["bulk_get_count"],
+            "writes": stats["whole_put_count"] + stats["row_put_count"] + stats["bulk_put_count"],
+            "read_time_s": stats["read_time_s"],
+            "write_time_s": stats["write_time_s"],
+        }
 
     def _time(self, key: str):
         import time

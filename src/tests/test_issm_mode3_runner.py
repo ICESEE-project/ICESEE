@@ -147,7 +147,8 @@ def test_run_issm_execution_mode_3_orchestration(tmp_path, monkeypatch):
     setup_calls = []
 
     fake_topology = types.SimpleNamespace(
-        ensemble_slot=0, ensemble_groups=1, spatial_ranks=1, spatial_comm=None
+        ensemble_slot=0, ensemble_groups=1, spatial_ranks=1, spatial_comm=None,
+        world_size=1,
     )
 
     def fake_initialize_rank_server_and_mesh(icesee_kwargs, *, icesee_cwd,
@@ -200,7 +201,7 @@ def test_run_issm_execution_mode_3_orchestration(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "run_native_global_analysis_cycle", fake_run_native_global_analysis_cycle)
     monkeypatch.setattr(runner, "save_distributed_checkpoint", fake_save_distributed_checkpoint)
     monkeypatch.setattr(runner, "save_all_data", lambda *a, **kw: save_all_data_calls.append(kw))
-    monkeypatch.setattr(runner, "display_timing_verbose", lambda *a, **kw: timing_calls.append(kw))
+    monkeypatch.setattr(runner, "emit_performance_report", lambda *a, **kw: timing_calls.append(kw))
 
     icesee_kwargs = _base_kwargs(
         tmp_path,
@@ -242,7 +243,8 @@ def test_run_issm_execution_mode_3_enables_inversion_once_start_time_reached(tmp
     """Same orchestration, but with ``inversion_start_time`` already reached."""
 
     fake_topology = types.SimpleNamespace(
-        ensemble_slot=0, ensemble_groups=1, spatial_ranks=1, spatial_comm=None
+        ensemble_slot=0, ensemble_groups=1, spatial_ranks=1, spatial_comm=None,
+        world_size=1,
     )
 
     def fake_initialize_rank_server_and_mesh(icesee_kwargs, *, icesee_cwd,
@@ -281,7 +283,7 @@ def test_run_issm_execution_mode_3_enables_inversion_once_start_time_reached(tmp
     monkeypatch.setattr(runner, "run_native_global_analysis_cycle", fake_run_native_global_analysis_cycle)
     monkeypatch.setattr(runner, "save_distributed_checkpoint", lambda *a, **kw: None)
     monkeypatch.setattr(runner, "save_all_data", lambda *a, **kw: None)
-    monkeypatch.setattr(runner, "display_timing_verbose", lambda *a, **kw: None)
+    monkeypatch.setattr(runner, "emit_performance_report", lambda *a, **kw: None)
 
     icesee_kwargs = _base_kwargs(
         tmp_path,

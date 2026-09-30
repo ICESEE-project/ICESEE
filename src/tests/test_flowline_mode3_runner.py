@@ -146,7 +146,9 @@ def test_run_flowline_execution_mode_3_orchestration(tmp_path, monkeypatch):
 
     calls = {"true_wrong": 0, "synth_obs": 0}
 
-    fake_topology = types.SimpleNamespace(spatial_ranks=1, spatial_comm=None)
+    fake_topology = types.SimpleNamespace(
+        spatial_ranks=1, spatial_comm=None, world_size=1, ensemble_groups=1
+    )
 
     def fake_generate_true_wrong_state(**kwargs):
         calls["true_wrong"] += 1
@@ -189,7 +191,7 @@ def test_run_flowline_execution_mode_3_orchestration(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "run_native_global_analysis_cycle", fake_run_native_global_analysis_cycle)
     monkeypatch.setattr(runner, "save_distributed_checkpoint", fake_save_distributed_checkpoint)
     monkeypatch.setattr(runner, "save_all_data", lambda *a, **kw: save_all_data_calls.append(kw))
-    monkeypatch.setattr(runner, "display_timing_verbose", lambda *a, **kw: timing_calls.append(kw))
+    monkeypatch.setattr(runner, "emit_performance_report", lambda *a, **kw: timing_calls.append(kw))
 
     icesee_kwargs = _base_kwargs(tmp_path)
 

@@ -144,7 +144,9 @@ def test_run_icepack_execution_mode_3_orchestration(tmp_path, monkeypatch):
         def call_model(self):
             return _FakeModelModule()
 
-    fake_topology = types.SimpleNamespace(spatial_ranks=1, spatial_comm=None)
+    fake_topology = types.SimpleNamespace(
+        spatial_ranks=1, spatial_comm=None, world_size=1, ensemble_groups=1
+    )
 
     class _FakePool:
         member_ids = [0, 1]
@@ -200,7 +202,7 @@ def test_run_icepack_execution_mode_3_orchestration(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "run_native_global_analysis_cycle", fake_run_native_global_analysis_cycle)
     monkeypatch.setattr(runner, "save_distributed_checkpoint", fake_save_distributed_checkpoint)
     monkeypatch.setattr(runner, "save_all_data", lambda *a, **kw: save_all_data_calls.append(kw))
-    monkeypatch.setattr(runner, "display_timing_verbose", lambda *a, **kw: timing_calls.append(kw))
+    monkeypatch.setattr(runner, "emit_performance_report", lambda *a, **kw: timing_calls.append(kw))
 
     icesee_kwargs = dict(
         model_name="icepack",
@@ -238,4 +240,9 @@ def test_run_icepack_execution_mode_3_orchestration(tmp_path, monkeypatch):
     assert cycle_calls == [(0, 0), (1, 1)]
 
     assert len(save_all_data_calls) == 1
+    # Exactly one performance report per run. The fused native cycle has no
+    # separate analysis timer, so the analysis step is reported as not
+    # measured (None) rather than as a fake 0 when an analysis ran.
     assert len(timing_calls) == 1
+    assert timing_calls[0]["phases"]["analysis_step"] is None
+    assert timing_calls[0]["counts"]["analysis_step"] == 1

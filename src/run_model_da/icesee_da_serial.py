@@ -27,7 +27,8 @@ from ICESEE.src.utils import tools, utils                                     # 
 from ICESEE.src.utils.utils import UtilsFunctions
 from ICESEE.src.EnKF.python_enkf.EnKF import EnsembleKalmanFilter as EnKF     # Ensemble Kalman Filter
 from ICESEE.applications.supported_models import SupportedModels              # supported models for data assimilation routine
-from ICESEE.src.utils.tools import icesee_get_index, display_timing_default,display_timing_verbose, save_all_data
+from ICESEE.src.utils.tools import icesee_get_index, save_all_data
+from ICESEE.src.utils.performance import emit_performance_report, register_run_metadata
 from ICESEE.src.EnKF._localization_inflation import  LocalizationInflationUtils
 from ICESEE.src.EnKF._generate_synthetic_observations import generate_synthetic_observations
 from ICESEE.src.EnKF._generate_true_wrong_state import generate_true_wrong_state
@@ -607,22 +608,29 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
 
     # Display elapsed time on rank 0
     comm_world.Barrier()
-    if rank_world == 0:
-        display_timing_verbose(
-            computational_time=total_elapsed_time,
-            wallclock_time=total_wall_time,
-            true_wrong_time=true_wrong_time,
-            assimilation_time=assimilation_time,
-            forecast_step_time=forecast_step_time,
-            analysis_step_time=analysis_step_time,
-            ensemble_init_time=ensemble_init_time,
-            init_file_time=init_file_time,
-            forecast_file_time=forecast_file_time,
-            analysis_file_time=analysis_file_time,
-            total_file_time=total_file_time,
-            forecast_noise_time=forecast_noise_time,
-            time_init_ensemble_mean_computation=time_init_ensemble_mean,
-            time_forecast_ensemble_mean_computation=time_forecast_ensemble_mean,
-            time_analysis_ensemble_mean_computation=time_analysis_ensemble_mean,
-            comm=comm_world,
-        )
+
+    register_run_metadata(
+        execution_mode=icesee_kwargs.get("execution_mode"),
+        model=icesee_kwargs.get("model_name"),
+        ensemble_size=icesee_kwargs.get("Nens"),
+        forecast_steps=icesee_kwargs.get("nt"),
+    )
+    emit_performance_report(
+        comm_world,
+        elapsed_s=global_elapsed_time,
+        phases={
+            "true_wrong_state": time_generation_true_and_wrong_state,
+            "ensemble_init": time_ensemble_initialization,
+            "forecast_step": time_forecast_step,
+            "analysis_step": time_analysis_step,
+            "init_file_io": time_init_file_writing,
+            "forecast_file_io": time_forecast_file_writing,
+            "analysis_file_io": time_analysis_file_writing,
+            "forecast_noise": time_forecast_noise_generation,
+            "init_ensemble_mean": time_init_ensemble_mean_computation,
+            "forecast_ensemble_mean": time_forecast_ensemble_mean_generation,
+            "analysis_ensemble_mean": time_analysis_ensemble_mean_generation,
+        },
+        counts={"forecast_step": icesee_kwargs.get("nt"), "analysis_step": km},
+        output_dir=_modelrun_datasets,
+    )

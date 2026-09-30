@@ -101,13 +101,15 @@ from ICESEE.src.parallelization.distributed_native_runtime import (
 )
 from ICESEE.src.parallelization.distributed_topology import (
     create_distributed_topology,
+    register_topology_run_metadata,
 )
 from ICESEE.src.utils.icesee_context import (
     normalize_execution_mode,
     normalize_icesee_kwargs,
 )
 from ICESEE.src.utils.localization import active_observation_std
-from ICESEE.src.utils.tools import save_all_data, display_timing_verbose
+from ICESEE.src.utils.tools import save_all_data
+from ICESEE.src.utils.performance import emit_performance_report, register_run_metadata
 from ICESEE.src.utils.utils import UtilsFunctions
 
 _SUPPORTED_ERROR_MODES = {"legacy_prior_anomalies", "stochastic_r"}
@@ -353,45 +355,23 @@ def run_lorenz96_execution_mode_3(**icesee_kwargs):
     #  End Timer and Aggregate Elapsed Time Across Ranks
     # ─────────────────────────────────────────────────────────────
     global_elapsed_time = MPI.Wtime() - global_start_time
-    total_elapsed_time = world.allreduce(global_elapsed_time, op=MPI.SUM)
-    total_wall_time = world.allreduce(global_elapsed_time, op=MPI.MAX)
-    true_wrong_time = world.allreduce(true_wrong_time, op=MPI.MAX)
-    ensemble_init_time = world.allreduce(ensemble_init_time, op=MPI.MAX)
-    forecast_step_time = world.allreduce(time_forecast_step, op=MPI.MAX)
-    forecast_file_time = world.allreduce(time_forecast_file_writing, op=MPI.MAX)
-    analysis_file_time = world.allreduce(analysis_file_time, op=MPI.MAX)
-    init_file_time = world.allreduce(init_file_time, op=MPI.MAX)
-    time_init_ensemble_mean = world.allreduce(time_init_ensemble_mean, op=MPI.MAX)
-    analysis_step_time = 0.0  # fused into forecast_step_time; see comment above
-    assimilation_time = ensemble_init_time + forecast_step_time + analysis_step_time
-    total_file_time = init_file_time + forecast_file_time + analysis_file_time
 
-    world.Barrier()
-    if world_rank == 0:
-        display_timing_verbose(
-            computational_time=total_elapsed_time,
-            wallclock_time=total_wall_time,
-            true_wrong_time=true_wrong_time,
-            assimilation_time=assimilation_time,
-            forecast_step_time=forecast_step_time,
-            analysis_step_time=analysis_step_time,
-            ensemble_init_time=ensemble_init_time,
-            init_file_time=init_file_time,
-            forecast_file_time=forecast_file_time,
-            analysis_file_time=analysis_file_time,
-            total_file_time=total_file_time,
-            forecast_noise_time=0.0,
-            time_init_ensemble_mean_computation=time_init_ensemble_mean,
-            time_forecast_ensemble_mean_computation=0.0,
-            time_analysis_ensemble_mean_computation=0.0,
-            comm=world,
-            # See applications/icepack_model/examples/idealized_pig/
-            # mode3_runner.py's identical comment: mode 3's model_nprocs is
-            # already part of world's own size, so model_nprocs=0 avoids
-            # this shared display function's modes-1/2-oriented
-            # "(model_nprocs+1)" rank-count multiplier double-counting it.
-            model_nprocs=0,
-        )
+    register_run_metadata(
+        execution_mode=icesee_kwargs.get("execution_mode"),
+        model=icesee_kwargs.get("model_name"),
+        forecast_steps=nt,
+        analysis_events=km,
+    )
+    register_topology_run_metadata(topology, Nens)
+    # Analyses are fused into the forecast step, so there is no separate
+    # analysis timer: not measured when analyses ran, no events otherwise.
+    emit_performance_report(
+        world,
+        elapsed_s=global_elapsed_time,
+        phases={"true_wrong_state": true_wrong_time, "ensemble_init": ensemble_init_time, "forecast_step": time_forecast_step, "init_file_io": init_file_time, "forecast_file_io": time_forecast_file_writing, "analysis_file_io": analysis_file_time, "init_ensemble_mean": time_init_ensemble_mean, "analysis_step": None if km else 0.0},
+        counts={"forecast_step": nt, "analysis_step": km},
+        output_dir=_modelrun_datasets,
+    )
 
     return icesee_kwargs
 
