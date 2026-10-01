@@ -14,6 +14,11 @@ import numpy as np
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["PETSC_CONFIGURE_OPTIONS"] = "--download-mpich-device=ch3:sock"
 
+# --- ICESEE configuration, before Firedrake: it consumes ICESEE's own
+# command-line arguments, so PETSc (initialized by the Firedrake import)
+# only sees PETSc options. ---
+from ICESEE.config._utility_imports import icesee_kwargs
+
 # --- firedrake imports ---
 import firedrake
 from firedrake.petsc import PETSc
@@ -22,7 +27,6 @@ from modelfunc import myerror
 import modelfunc as mf
 from modelfunc import firedrakeSmooth, flotationHeight, flotationMask
 
-from ICESEE.config._utility_imports import icesee_kwargs
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_model import initialize_model, initialState, initializeMesh
 from ICESEE.src.run_model_da.run_models_da import icesee_model_data_assimilation
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager

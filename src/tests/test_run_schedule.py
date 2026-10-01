@@ -9,7 +9,15 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from ICESEE.src.utils import performance
 from ICESEE.src.utils.run_schedule import resolve_run_schedule, verify_cli_overrides_respected
+
+
+@pytest.fixture(autouse=True)
+def _clean_performance_registry():
+    performance.clear_registry()
+    yield
+    performance.clear_registry()
 
 
 def _kwargs(num_years, dt, obs_start, obs_max, freq_obs=1.0, **extra):
@@ -64,3 +72,14 @@ def test_replaced_cli_value_is_reported():
     verify_cli_overrides_respected({"seed": 5.0, "cli_overrides": {"seed": 5}})
     with pytest.raises(ValueError, match=r"--dt=0\.5 was replaced by 0\.05"):
         verify_cli_overrides_respected({"dt": 0.05, "cli_overrides": {"dt": 0.5}})
+
+
+def test_final_state_snapshot_is_counted_but_not_assimilated(capsys):
+    # 2 yr at dt=0.05 with observations every 0.5 yr from 0.5 to 2: snapshots
+    # at steps 10, 20, 30, 40; step 40 is the final state (nt), so 3 analyses.
+    kwargs = _kwargs(2, 0.05, obs_start=0.5, obs_max=2, freq_obs=0.5)
+    assert resolve_run_schedule(kwargs, rank=0) == 3
+    out = capsys.readouterr().out
+    assert "obs snapshots   = 4 (steps [10, 20, 30, 40])" in out
+    assert "analysis events = 3 (steps [10, 20, 30]); a snapshot at the final state" in out
+    assert performance._RUN_METADATA["observation_snapshots"] == 4

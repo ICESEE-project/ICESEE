@@ -57,8 +57,10 @@ STATIC_FIELDS = ("bed", "grounded", "floating", "fluidity", "extended_beta")
 def build_compact_initialization(source, dest, idx, comm=None):
     """Copy the mesh and the 8 fields ``initializeRun`` needs from
     ``source`` (the full spin-up-history checkpoint) into a new, compact
-    checkpoint at ``dest``, preserving field names and the timestepped
-    fields' ``idx`` slot exactly. Returns a dict of measured timings/sizes.
+    checkpoint at ``dest``, preserving field names and values. The three
+    timestepped fields are read at history index ``idx`` and written
+    without a history index (see the module header), so the destination
+    holds only that one state. Returns a dict of measured timings/sizes.
     """
     import firedrake
 

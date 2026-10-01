@@ -98,6 +98,24 @@ def _coerce_cli_override(raw_value, current_value):
     return parsed_value
 
 
+def _unclaimed_argv(extra_argv):
+    """The leftover CLI tokens that are not ICESEE ``--key[=value]``
+    overrides (same token rules as ``_parse_generic_cli_overrides``), e.g.
+    a solver library's own options such as ``-ksp_type gmres``, in order."""
+    unclaimed = []
+    i = 0
+    while i < len(extra_argv):
+        tok = extra_argv[i]
+        if not tok.startswith('--'):
+            unclaimed.append(tok)
+            i += 1
+        elif '=' not in tok[2:] and i + 1 < len(extra_argv) and not extra_argv[i + 1].startswith('--'):
+            i += 2
+        else:
+            i += 1
+    return unclaimed
+
+
 def apply_generic_cli_overrides(icesee_kwargs, extra_argv):
     """Apply arbitrary ``--key=value`` CLI overrides onto ``icesee_kwargs``.
 
@@ -639,3 +657,8 @@ if not flag_jupyter:
     # override always wins and is never silently clobbered by a later
     # default/derivation step in this loader.
     icesee_kwargs = apply_generic_cli_overrides(icesee_kwargs, _cli_extra_argv)
+
+    # Leave only the arguments ICESEE did not consume in sys.argv, so a
+    # library that reads the command line after this point (e.g. PETSc when
+    # Firedrake is imported) sees its own options but not ICESEE's.
+    sys.argv[1:] = _unclaimed_argv(_cli_extra_argv)

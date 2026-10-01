@@ -389,3 +389,23 @@ def test_phase_run_on_one_rank_keeps_its_operation_count():
     assert truth["operations"] == 1
     assert truth["mean_s_per_operation"] == pytest.approx(4.0)
     assert (truth["min"], truth["max"]) == (0.0, 4.0)
+
+
+def test_subset_phase_is_marked_and_rendered_under_its_parent(tmp_path):
+    records = [
+        _record(10.0, {"forecast_step": 8.0, "forecast_step/with_analysis": 2.0},
+                counts={"forecast_step": 40, "forecast_step/with_analysis": 3}),
+    ]
+    summary = aggregate_rank_records(records)
+    child = summary["time"]["phases"]["forecast_step/with_analysis"]
+    assert child["subset_of"] == "forecast_step"
+    assert "subset_of" not in summary["time"]["phases"]["forecast_step"]
+    text = render_performance_report(summary)
+    lines = text.splitlines()
+    parent_at = next(i for i, l in enumerate(lines) if l.lstrip().startswith("forecast_step "))
+    assert lines[parent_at + 1].lstrip().startswith("of which with_analysis")
+    assert text.count("with_analysis") == 1
+    # A subset adds nothing to totals: Assimilation Time is the forecast alone.
+    assert summary["legacy"]["Assimilation Time"] == 8.0
+    loaded = json.loads(write_performance_json(summary, tmp_path / "p.json").read_text())
+    assert render_performance_report(loaded) == text

@@ -209,6 +209,10 @@ def aggregate_rank_records(records, metadata: Optional[Mapping[str, Any]] = None
             if all(count > 0 for _, count in reported):
                 per_op = [(value or 0.0) / count for value, count in reported]
                 entry["mean_s_per_operation"] = sum(per_op) / len(per_op)
+        # "parent/child" names a subset of the phase "parent" (its time is
+        # already included there).
+        if "/" in name:
+            entry["subset_of"] = name.split("/", 1)[0]
         phases[name] = entry
 
     elapsed = _stats(record.get("elapsed_s", 0.0) for record in records)
@@ -428,20 +432,28 @@ def render_performance_report(summary: Mapping[str, Any]) -> str:
         f"  {'Elapsed (per rank)':<34}{_fmt_s(elapsed.get('min'))}"
         f"{_fmt_s(elapsed.get('mean'))}{_fmt_s(elapsed.get('max'))}"
     )
-    for name, entry in time_block.get("phases", {}).items():
+    def _phase_line(label, entry):
         if entry.get("operations") == 0:
-            lines.append(f"  {name:<34}{'no events':>36}")
-            continue
+            return f"  {label:<34}{'no events':>36}"
         imbalance = entry.get("imbalance")
         line = (
-            f"  {name:<34}{_fmt_s(entry['min'])}{_fmt_s(entry['mean'])}{_fmt_s(entry['max'])}"
+            f"  {label:<34}{_fmt_s(entry['min'])}{_fmt_s(entry['mean'])}{_fmt_s(entry['max'])}"
             f"{'' if imbalance is None else f'{imbalance:8.2f}'}"
         )
         if "mean_s_per_operation" in entry:
             line += f"   ({entry['operations']} ops, {entry['mean_s_per_operation']:.4f} s/op)"
         elif "operations" in entry:
             line += f"   ({entry['operations']} ops)"
-        lines.append(line)
+        return line
+
+    phase_entries = time_block.get("phases", {})
+    for name, entry in phase_entries.items():
+        if entry.get("subset_of") in phase_entries:
+            continue  # rendered under its parent
+        lines.append(_phase_line(name, entry))
+        for child, child_entry in phase_entries.items():
+            if child_entry.get("subset_of") == name:
+                lines.append(_phase_line("  of which " + child.split("/", 1)[1], child_entry))
     lines.append("  " + "-" * (width - 2))
     lines.append(f"  {'Wall-clock time (max over ranks)':<34}{_fmt_s(elapsed.get('max'))}")
     lines.append(f"  {'Computational time (sum over ranks)':<34}{_fmt_s(elapsed.get('sum'))}")

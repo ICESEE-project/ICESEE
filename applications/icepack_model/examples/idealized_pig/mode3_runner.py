@@ -146,6 +146,7 @@ from ICESEE.src.utils.icesee_context import (
 from ICESEE.src.utils.localization import active_observation_std
 from ICESEE.src.utils.performance import (
     emit_performance_report,
+    record_phase,
     register_io_provider,
     register_package_versions,
     register_run_metadata,
@@ -291,8 +292,13 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     observation_time = 0.0
     nd = None
     if world_rank == 0:
+        # The single-rank reference model the truth is generated with is set
+        # up here; it is reported as its own phase so that True/Wrong State
+        # Time covers trajectory generation only, as in modes 0-2.
         _t = MPI.Wtime()
         nd = _build_reference_setup_context(icesee_kwargs)
+        record_phase("truth_model_setup", MPI.Wtime() - _t)
+        _t = MPI.Wtime()
         icesee_kwargs = generate_true_wrong_state(**icesee_kwargs)
         true_wrong_time = MPI.Wtime() - _t
         _t = MPI.Wtime()
@@ -571,7 +577,8 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     # The native cycle fuses each analysis into its forecast step, so there
     # is no separate analysis timer: "analysis_step" is not measured when
     # analyses ran (and has no events when none did), and the steps that
-    # carried an analysis are timed as "forecast_step_with_analysis". There
+    # carried an analysis are timed as "forecast_step/with_analysis", a
+    # subset of "forecast_step". There
     # is no ensemble-mean or forecast-noise phase in this runner.
     emit_performance_report(
         world,
@@ -582,7 +589,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
             "ensemble_init": ensemble_init_time,
             "forecast_step": time_forecast_step,
             "analysis_step": None if km else 0.0,
-            "forecast_step_with_analysis": time_analysis_cycle_steps,
+            "forecast_step/with_analysis": time_analysis_cycle_steps,
             "init_file_io": init_file_time,
             "forecast_file_io": time_forecast_file_writing,
             "analysis_file_io": analysis_file_time,
@@ -590,7 +597,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         counts={
             "forecast_step": nt,
             "analysis_step": km,
-            "forecast_step_with_analysis": km,
+            "forecast_step/with_analysis": km,
         },
         output_dir=_modelrun_datasets,
     )

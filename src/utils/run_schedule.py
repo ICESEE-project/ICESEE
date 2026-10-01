@@ -12,6 +12,8 @@ from typing import Any, Mapping, MutableMapping, Optional
 
 import numpy as np
 
+from ICESEE.src.utils.performance import register_run_metadata
+
 
 def resolve_run_schedule(
     icesee_kwargs: MutableMapping[str, Any],
@@ -47,8 +49,11 @@ def resolve_run_schedule(
             {"obs_t": obs_t, "obs_index": obs_index, "number_obs_instants": count, "m_obs": count}
         )
     obs_index = np.asarray(icesee_kwargs.get("obs_index", []), dtype=int)
+    # An observation at the final state (step nt) is a snapshot of the
+    # truth but is never assimilated: the forecast loop ends at step nt-1.
     analysis_steps = obs_index[obs_index < nt]
     analysis_events = int(analysis_steps.size)
+    register_run_metadata(observation_snapshots=int(obs_index.size))
 
     if rank == 0:
         lines = [
@@ -59,8 +64,12 @@ def resolve_run_schedule(
             f"time range      = [{t[0]:g}, {t[-1]:g}]",
             f"obs window      = [{icesee_kwargs.get('obs_start_time')}, "
             f"{icesee_kwargs.get('obs_max_time')}] every {icesee_kwargs.get('freq_obs')}",
+            f"obs snapshots   = {obs_index.size}"
+            + (f" (steps {obs_index.tolist()})" if obs_index.size <= 12 else ""),
             f"analysis events = {analysis_events}"
-            + (f" (steps {analysis_steps.tolist()})" if analysis_events <= 12 else ""),
+            + (f" (steps {analysis_steps.tolist()})" if analysis_events <= 12 else "")
+            + ("; a snapshot at the final state (step nt) is not assimilated"
+               if analysis_events < obs_index.size else ""),
         ]
         lines += [f"{key:<16}= {value}" for key, value in (details or {}).items()]
         print("[ICESEE] Resolved run schedule:\n  " + "\n  ".join(lines), flush=True)
