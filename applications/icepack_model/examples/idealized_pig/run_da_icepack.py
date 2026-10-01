@@ -7,6 +7,7 @@
 # --- Imports ---
 import sys
 import os
+import time
 import numpy as np
 
 # --- Configuration ---
@@ -25,6 +26,9 @@ from ICESEE.config._utility_imports import icesee_kwargs
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_model import initialize_model, initialState, initializeMesh
 from ICESEE.src.run_model_da.run_models_da import icesee_model_data_assimilation
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
+from ICESEE.src.utils.performance import record_phase
+from ICESEE.src.utils.run_schedule import resolve_run_schedule
+from mpi4py import MPI
 
 # --- Register execution_mode 3 support (import-time side effect) ---
 from ICESEE.applications.icepack_model.examples.idealized_pig import mode3_runner  # noqa: F401
@@ -38,10 +42,19 @@ PETSc.Sys.Print("Fetching the model parameters ...")
 
 
 
-# --- Ensemble Parameters ---
+# --- Time discretization: one authoritative model step (years) ---
+# In this example `timesteps_per_year` is the step length in years, despite
+# its name. `--dt`, when given on the command line, is that same step and
+# takes precedence; both keys then hold the single resolved value.
 
 num_years = float(icesee_kwargs["num_years"])
-dt = float(icesee_kwargs["timesteps_per_year"])   # time step size
+_cli = icesee_kwargs.get("cli_overrides", {})
+if "dt" in _cli and "timesteps_per_year" in _cli and float(_cli["dt"]) != float(_cli["timesteps_per_year"]):
+    raise ValueError(
+        "--dt and --timesteps_per_year both set this example's model step and disagree: "
+        f"{_cli['dt']} vs {_cli['timesteps_per_year']}"
+    )
+dt = float(_cli["dt"]) if "dt" in _cli else float(icesee_kwargs["timesteps_per_year"])
 nt = int(round(num_years / dt))     # total number of time steps
 
 # Physical-year lookup array (icesee/features convention, 2026-09-28
@@ -52,9 +65,24 @@ nt = int(round(num_years / dt))     # total number of time steps
 # `step`/`dt` directly) -- purely an I/O bookkeeping array.
 t = np.linspace(0, int(num_years), nt + 1)
 
-icesee_kwargs.update({"nt": nt, "dt": dt, "t": t}) # update the parameter dictionary
+icesee_kwargs.update({"nt": nt, "dt": dt, "timesteps_per_year": dt, "t": t})
 
-
+# Report the resolved schedule and initialization source, and stop now if
+# the observation window gives no analysis, before any model work.
+_init_file = icesee_kwargs["initFile"]
+_compact = bool(icesee_kwargs.get("compact_initialization", False))
+resolve_run_schedule(
+    icesee_kwargs,
+    rank=MPI.COMM_WORLD.Get_rank(),
+    details={
+        "initialization": (
+            f"{_init_file} ({'compact final spin-up state' if _compact else 'full spin-up history, idx=20000'}"
+            + (f", {os.path.getsize(_init_file) / 1e6:.1f} MB)" if os.path.exists(_init_file) else ", not found)")
+        ),
+        "truth count": 1 if icesee_kwargs.get("generate_true_state", True) else 0,
+        "wrong reference": "enabled" if icesee_kwargs.get("generate_nurged_state", True) else "disabled",
+    },
+)
 
 
 # --- Model initialization ---
@@ -67,14 +95,16 @@ icesee_kwargs.update({
     "paramsFile": icesee_kwargs["paramsFile"],
     "meshFile": icesee_kwargs["meshFile"],
     "SMBFile": icesee_kwargs["SMBFile"],
-    "dt": icesee_kwargs["timesteps_per_year"],
+    "dt": dt,
     "num_years": icesee_kwargs["num_years"],
     "bmr_increase_time": int(icesee_kwargs["bmr_increase_time"]),
     "save_steps": icesee_kwargs["save_steps"],
     #"hThresh": icesee_kwargs["hThresh"]
 })
 
+_t_init = time.perf_counter()
 h, h0, s, s0, u, bed, zF, grounded, floating, A0, beta0, smb, basal_melt_field, Q, V, forward_solver = initialize_model(**icesee_kwargs)
+record_phase("model_initialization", time.perf_counter() - _t_init)
 
 
 

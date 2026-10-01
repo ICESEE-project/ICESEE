@@ -88,6 +88,10 @@ def _coerce_cli_override(raw_value, current_value):
     if isinstance(current_value, bool):
         return bool(parsed_value)
     if isinstance(current_value, int) and not isinstance(parsed_value, bool):
+        # A YAML integer (e.g. obs_start_time: 10) must not truncate a
+        # fractional override such as 0.25 to 0.
+        if isinstance(parsed_value, float) and not parsed_value.is_integer():
+            return parsed_value
         return int(parsed_value)
     if isinstance(current_value, float):
         return float(parsed_value)
@@ -107,6 +111,7 @@ def apply_generic_cli_overrides(icesee_kwargs, extra_argv):
     unused key.
     """
     overrides = _parse_generic_cli_overrides(extra_argv)
+    applied = {}
     for key, raw_value in overrides.items():
         if key not in icesee_kwargs:
             raise ValueError(
@@ -115,7 +120,12 @@ def apply_generic_cli_overrides(icesee_kwargs, extra_argv):
                 "names/keys for a typo)."
             )
         icesee_kwargs[key] = _coerce_cli_override(raw_value, icesee_kwargs[key])
+        applied[key] = icesee_kwargs[key]
         print(f"[ICESEE] CLI override applied: {key} = {icesee_kwargs[key]!r}")
+    # The values the user explicitly requested, so later stages can honor
+    # them and verify that nothing silently replaced them
+    # (src/utils/run_schedule.py::verify_cli_overrides_respected).
+    icesee_kwargs["cli_overrides"] = applied
     return icesee_kwargs
 
 

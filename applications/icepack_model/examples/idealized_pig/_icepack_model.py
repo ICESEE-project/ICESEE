@@ -212,6 +212,21 @@ def readSMB(icesee_kwargs, Q):
 EXPERIMENT_TRUE = "true"    # reference/true trajectory: melt_max ramps 20 -> 100 over the run
 EXPERIMENT_WRONG = "wrong"  # ensemble/forecast trajectory: melt_max held constant at 20
 
+# melt_max changes every step of the true trajectory. Carrying it in one
+# mutable Constant keeps the melt expression identical from step to step, so
+# Firedrake compiles its interpolation kernel once instead of once per step
+# (a changing Python float is a new literal in the form each time).
+_MELT_MAX = None
+
+
+def _melt_max_constant(value):
+    global _MELT_MAX
+    if _MELT_MAX is None:
+        _MELT_MAX = firedrake.Constant(value)
+    else:
+        _MELT_MAX.assign(value)
+    return _MELT_MAX
+
 def BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_TRUE):
 
     if experiment not in (EXPERIMENT_TRUE, EXPERIMENT_WRONG):
@@ -259,6 +274,7 @@ def BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', ex
 
     # Build depth-dependent piecewise melt profile
     z = draft
+    melt_max_c = _melt_max_constant(melt_max)
 
     # Create melt expression
     melt_expr = firedrake.conditional(
@@ -266,8 +282,8 @@ def BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', ex
         0.0,
         firedrake.conditional(
             z <= z_max,
-            melt_max,
-            melt_max * (z_min - z) / (z_min - z_max)
+            melt_max_c,
+            melt_max_c * (z_min - z) / (z_min - z_max)
         )
     )
 

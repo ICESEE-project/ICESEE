@@ -11,19 +11,30 @@ import gc
 import zarr
 import os
 import shutil
+import time
 from mpi4py import MPI
 
 
 from ICESEE.src.utils.tools import icesee_get_index
+from ICESEE.src.utils.performance import record_phase
 from ICESEE.src.utils.state_ownership import (
     resolve_state_ownership,
     combine_member_state,
 )
 
+
+def _timed_phase(phase, generate, icesee_kwargs):
+    """Call a model trajectory generator and record its time for the
+    end-of-run performance summary."""
+    start = time.perf_counter()
+    result = generate(**icesee_kwargs)
+    record_phase(phase, time.perf_counter() - start)
+    return result
+
+
 def generate_true_wrong_state(**icesee_kwargs):
     """"Generate true and nurged states for the ICESEE model.
     """
-
     # unpack icesee_kwargs
     model_module   = icesee_kwargs.get("model_module", None)
     comm_world     = icesee_kwargs.get("comm_world", MPI.COMM_WORLD)
@@ -123,7 +134,7 @@ def generate_true_wrong_state(**icesee_kwargs):
                         d_true = require_dataset("true_state", shape=(nd, ntp1), dtype="f8", chunks=chunk_size)
                         icesee_kwargs["statevec_true"] = d_true  # write target
 
-                        out_true = model_module.generate_true_state(**icesee_kwargs)
+                        out_true = _timed_phase("truth_generation", model_module.generate_true_state, icesee_kwargs)
 
                         # If function returns data, write it (else assume in-place write)
                         if out_true is not None:
@@ -140,7 +151,7 @@ def generate_true_wrong_state(**icesee_kwargs):
                         d_nurged = require_dataset("nurged_state", shape=(nd, ntp1), dtype="f8", chunks=chunk_size)
                         icesee_kwargs["statevec_nurged"] = d_nurged  # write target
 
-                        out_nurged = model_module.generate_nurged_state(**icesee_kwargs)
+                        out_nurged = _timed_phase("wrong_reference_generation", model_module.generate_nurged_state, icesee_kwargs)
 
                         # If function returns data, write it (else assume in-place write)
                         if out_nurged is not None:
@@ -222,7 +233,7 @@ def generate_true_wrong_state(**icesee_kwargs):
                     statevec_true = np.zeros([global_shape, icesee_kwargs.get("nt",icesee_kwargs["nt"]) + 1])
                     icesee_kwargs.update({"statevec_true": statevec_true})
                     # generate the true state
-                    updated_true_state = model_module.generate_true_state(**icesee_kwargs)
+                    updated_true_state = _timed_phase("truth_generation", model_module.generate_true_state, icesee_kwargs)
                     # Replicated: every rank already computed the identical full
                     # state, so this is a no-op (no communication). Distributed:
                     # gathers+concatenates each rank's disjoint slice, exactly as
@@ -269,7 +280,7 @@ def generate_true_wrong_state(**icesee_kwargs):
                     # statevec_nurged = np.zeros([icesee_kwargs['dim_list'][sub_rank], icesee_kwargs.get("nt",icesee_kwargs["nt"]) + 1])
                     statevec_nurged = np.zeros([global_shape, icesee_kwargs.get("nt",icesee_kwargs["nt"]) + 1])
                     icesee_kwargs.update({"statevec_nurged": statevec_nurged})
-                    updated_nurged_state = model_module.generate_nurged_state(**icesee_kwargs)
+                    updated_nurged_state = _timed_phase("wrong_reference_generation", model_module.generate_nurged_state, icesee_kwargs)
                     # Same ownership-aware assembly as the true-state block
                     # above: a no-op for replicated state, gather+concatenate
                     # for distributed.
@@ -315,14 +326,19 @@ def generate_true_wrong_state(**icesee_kwargs):
             statevec_true = np.zeros([icesee_kwargs["global_shape"], icesee_kwargs.get("nt",icesee_kwargs["nt"]) + 1])
             icesee_kwargs.update({"statevec_true": statevec_true})
             # generate the true state
-            ensemble_true_state = model_module.generate_true_state(**icesee_kwargs)
+            ensemble_true_state = _timed_phase("truth_generation", model_module.generate_true_state, icesee_kwargs)
 
             # generate the nurged state
             statevec_nurged = np.zeros([icesee_kwargs["global_shape"], icesee_kwargs.get("nt",icesee_kwargs["nt"]) + 1])
             icesee_kwargs.update({"statevec_nurged": statevec_nurged})
-            ensemble_nurged_state = model_module.generate_nurged_state(**icesee_kwargs)
+            ensemble_nurged_state = _timed_phase("wrong_reference_generation", model_module.generate_nurged_state, icesee_kwargs)
 
     # return new and updated icesee_kwargs
     # icesee_kwargs.update({"dim_list": dim_list, "global_shape": global_shape})
 
+    # Skipped phases are recorded with zero operations ("no events").
+    if not icesee_kwargs.get("generate_true_state", True):
+        record_phase("truth_generation", 0.0, operations=0)
+    if not icesee_kwargs.get("generate_nurged_state", True):
+        record_phase("wrong_reference_generation", 0.0, operations=0)
     return icesee_kwargs

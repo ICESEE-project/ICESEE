@@ -15,7 +15,11 @@ modeling-parameters:
   num_years: 82         # number of years to run the model (icesee/features
   # convention, 2026-09-28 reconciliation: 1935-2017 PIG basal-melt
   # forcing timeline -- see BasalMeltRate's scenario schedule)
-  timesteps_per_year: 0.05   # number of timesteps per year
+  # timesteps_per_year: in this example, the model step length in years
+  # (--dt on the command line sets the same step). Production uses 0.05.
+  # Coarser steps are honored but numerically unsuitable here: at 0.5 the
+  # Icepack velocity solve fails to converge within the first 20 steps.
+  timesteps_per_year: 0.05
   # nt: this application's own already-resolved timestep count
   # (num_years/timesteps_per_year = 82/0.05 = 1640, matching
   # run_da_icepack.py's own nt derivation exactly). Declared explicitly
@@ -25,13 +29,13 @@ modeling-parameters:
   # at what `timesteps_per_year` means generically -- see that file's own
   # comment and test_observation_schedule_uses_correct_nt_convention.py.
   nt: 1640
-  initFile: 'data/extended_beta1000yrs.h5' # input file
-  # compact_initialization: set True (and point initFile at a compact
-  # checkpoint built by tools/build_compact_initialization.py) to read
-  # velocity/thickness/surface in normal (non-timestepping) mode instead
-  # of idx=20000 -- see initializeRun's own comment. False (default)
-  # preserves the full spin-up-history read path exactly unchanged.
-  compact_initialization: false
+  # Initialization: the compact checkpoint (~29 MB) holds the final
+  # spin-up state (history index 20000) of data/extended_beta1000yrs.h5
+  # (~39.5 GB), extracted by tools/build_compact_initialization.py and
+  # verified field-for-field against it. To read the full spin-up history
+  # instead: --compact_initialization=False --initFile=data/extended_beta1000yrs.h5
+  initFile: 'data/extended_beta1000yrs_compact_idx20000.h5' # input file
+  compact_initialization: true
   paramsFile: 'data/extended_beta1000yrs.yaml' # parameter file
   meshFile: 'data/PigFull2017GeomFull.exp' # mesh file
   SMBFile: 'data/OLS_Trend_plus_Resid_9b9.tif' # SMB file
@@ -106,7 +110,11 @@ enkf-parameters:
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state:    1  # Generate true state for synthetic observations
-  generate_nurged_state:  1  # Generate nudged state for synthetic observations
+  # Full no-assimilation wrong/nudged reference trajectory (read_results.ipynb's
+  # "Wrong" curve). Not used by the DA -- ensemble members are initialized from
+  # the wrong initial state directly -- so off by default; --generate_nurged_state=1
+  # to produce it.
+  generate_nurged_state:  0
   initialize_ensemble: 1
   use_ensemble_pertubations: 1 # Use ensemble perturbations for ensemble state
   sequential_ensemble_initialization: 0  # Sequential ensemble initialization (True for sequential, False for parallel)

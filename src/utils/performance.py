@@ -83,6 +83,7 @@ _RUN_METADATA: "OrderedDict[str, Any]" = OrderedDict()
 _METRICS: "OrderedDict[str, OrderedDict[str, Any]]" = OrderedDict()
 _IO_PROVIDERS: "OrderedDict[str, Callable[[], Mapping[str, float]]]" = OrderedDict()
 _EXTRA_VERSION_PACKAGES: "list[str]" = []
+_RECORDED_PHASES: "OrderedDict[str, list]" = OrderedDict()
 
 
 # ------------------------------------------------------------------------------
@@ -115,11 +116,21 @@ def register_package_versions(*names: str) -> None:
             _EXTRA_VERSION_PACKAGES.append(name)
 
 
+def record_phase(name: str, seconds: float, operations: int = 1) -> None:
+    """Accumulate this rank's time for a phase measured inside the pipeline
+    (outside the driver that emits the report). ``operations=0`` records
+    that the phase was skipped, which is reported as "no events"."""
+    entry = _RECORDED_PHASES.setdefault(name, [0.0, 0])
+    entry[0] += float(seconds)
+    entry[1] += int(operations)
+
+
 def clear_registry() -> None:
     _RUN_METADATA.clear()
     _METRICS.clear()
     _IO_PROVIDERS.clear()
     _EXTRA_VERSION_PACKAGES.clear()
+    _RECORDED_PHASES.clear()
 
 
 # ------------------------------------------------------------------------------
@@ -189,12 +200,14 @@ def aggregate_rank_records(records, metadata: Optional[Mapping[str, Any]] = None
         if all(value is None for value in values):
             continue  # not instrumented on any rank: reported as "not measured"
         entry = _stats(0.0 if value is None else value for value in values)
-        if all(isinstance(c, (int, float)) for c in counts):
-            entry["operations"] = int(max(counts))
-            if all(c > 0 for c in counts):
-                per_op = [
-                    (value or 0.0) / count for value, count in zip(values, counts)
-                ]
+        # Counts come from the ranks that report one, so a phase run on a
+        # subset of ranks (e.g. one root rank) keeps its operation count.
+        reported = [(value, count) for value, count in zip(values, counts)
+                    if isinstance(count, (int, float))]
+        if reported:
+            entry["operations"] = int(max(count for _, count in reported))
+            if all(count > 0 for _, count in reported):
+                per_op = [(value or 0.0) / count for value, count in reported]
                 entry["mean_s_per_operation"] = sum(per_op) / len(per_op)
         phases[name] = entry
 
@@ -416,6 +429,9 @@ def render_performance_report(summary: Mapping[str, Any]) -> str:
         f"{_fmt_s(elapsed.get('mean'))}{_fmt_s(elapsed.get('max'))}"
     )
     for name, entry in time_block.get("phases", {}).items():
+        if entry.get("operations") == 0:
+            lines.append(f"  {name:<34}{'no events':>36}")
+            continue
         imbalance = entry.get("imbalance")
         line = (
             f"  {name:<34}{_fmt_s(entry['min'])}{_fmt_s(entry['mean'])}{_fmt_s(entry['max'])}"
@@ -497,12 +513,23 @@ def emit_performance_report(
     local timers. Rank 0 prints the summary and writes
     ``<output_dir>/performance.json``; returns the summary on rank 0 and None
     elsewhere. Adds no barrier beyond the single gather."""
+    # Phases recorded inside the pipeline (record_phase) complete the
+    # driver's own timers and are listed first, in the order they were
+    # recorded; a phase the driver passes explicitly wins.
+    counts = dict(counts or {})
+    merged = {}
+    for name, (seconds, operations) in _RECORDED_PHASES.items():
+        if name not in phases:
+            merged[name] = seconds
+            counts.setdefault(name, operations)
+    merged.update(phases)
+    phases = merged
     record = {
         "elapsed_s": float(elapsed_s),
         "phases": {
             name: None if value is None else float(value) for name, value in phases.items()
         },
-        "counts": dict(counts or {}),
+        "counts": counts,
         "peak_rss_bytes": peak_rss_bytes(),
         "io": _local_io_counters(),
         "host": socket.gethostname(),

@@ -29,6 +29,7 @@ from ICESEE.src.utils.icesee_context import (
     normalize_execution_mode,
     normalize_icesee_kwargs,
 )
+from ICESEE.src.utils.run_schedule import verify_cli_overrides_respected
 
 _MODE_TO_TARGET = {
     "serial":      ("ICESEE.src.run_model_da.icesee_da_serial",
@@ -61,6 +62,9 @@ def icesee_model_data_assimilation(**icesee_kwargs):
     ``src.parallelization.distributed_mode3_registry``; unregistered models
     raise ``NotImplementedError`` from ``icesee_da_distributed.py``.
     """
+    # A command-line value the application replaced would otherwise be
+    # silently ignored for the whole run.
+    verify_cli_overrides_respected(icesee_kwargs)
     icesee_kwargs = normalize_icesee_kwargs(icesee_kwargs)
     mode = _resolve_mode(icesee_kwargs)
     mode_number = icesee_kwargs["execution_mode"]

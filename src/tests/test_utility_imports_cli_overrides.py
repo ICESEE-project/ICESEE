@@ -65,6 +65,13 @@ def test_coerce_int():
     assert isinstance(cli_module._coerce_cli_override("40", 30), int)
 
 
+def test_coerce_fractional_value_is_not_truncated_by_an_integer_default():
+    # e.g. params.yaml obs_start_time: 10 (an int) with --obs_start_time=0.25
+    assert cli_module._coerce_cli_override("0.25", 10) == 0.25
+    assert cli_module._coerce_cli_override("2.0", 10) == 2
+    assert isinstance(cli_module._coerce_cli_override("2.0", 10), int)
+
+
 def test_coerce_float():
     assert cli_module._coerce_cli_override("1.5", 1.0) == 1.5
 
@@ -124,7 +131,12 @@ def test_parse_bare_flag_defaults_to_true():
 def test_apply_overrides_existing_keys_only():
     icesee_kwargs = {"Nens": 30, "verbose": False}
     result = cli_module.apply_generic_cli_overrides(dict(icesee_kwargs), ["--Nens=40", "--verbose"])
-    assert result == {"Nens": 40, "verbose": True}
+    assert result == {
+        "Nens": 40,
+        "verbose": True,
+        # The explicitly requested values are recorded for later checks.
+        "cli_overrides": {"Nens": 40, "verbose": True},
+    }
 
 
 def test_apply_overrides_rejects_unknown_key():

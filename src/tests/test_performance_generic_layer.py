@@ -350,3 +350,42 @@ def test_generic_module_has_no_distributed_topology_vocabulary():
     for word in ("spatial_ranks", "ensemble_groups", "topology", "checkpoint",
                  "execution_mode", "petsc", "rounds"):
         assert word not in code, word
+
+
+# --- phases recorded inside the pipeline --------------------------------------
+def test_recorded_phases_merge_into_the_single_report_and_skips_are_no_events():
+    class SingleRankComm:
+        def gather(self, value, root=0):
+            return [value]
+
+        def Get_rank(self):
+            return 0
+
+    performance.record_phase("truth_generation", 2.0)
+    performance.record_phase("truth_generation", 1.0)
+    performance.record_phase("wrong_reference_generation", 0.0, operations=0)
+    performance.record_phase("forecast_step", 99.0)  # the driver's own value wins
+    printed = []
+    summary = emit_performance_report(
+        SingleRankComm(), elapsed_s=5.0, phases={"forecast_step": 1.5},
+        emit=printed.append,
+    )
+    phases = summary["time"]["phases"]
+    assert phases["truth_generation"]["max"] == 3.0
+    assert phases["truth_generation"]["operations"] == 2
+    assert phases["wrong_reference_generation"]["operations"] == 0
+    assert phases["forecast_step"]["max"] == 1.5
+    assert re.search(r"wrong_reference_generation\s+no events", printed[0])
+    assert not re.search(r"wrong_reference_generation\s+0\.000", printed[0])
+
+
+def test_phase_run_on_one_rank_keeps_its_operation_count():
+    records = [
+        _record(5.0, {"truth_generation": 4.0}, counts={"truth_generation": 1}),
+        _record(5.0, {}),
+        _record(5.0, {}),
+    ]
+    truth = aggregate_rank_records(records)["time"]["phases"]["truth_generation"]
+    assert truth["operations"] == 1
+    assert truth["mean_s_per_operation"] == pytest.approx(4.0)
+    assert (truth["min"], truth["max"]) == (0.0, 4.0)

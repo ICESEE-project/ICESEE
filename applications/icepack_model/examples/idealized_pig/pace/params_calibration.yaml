@@ -34,8 +34,8 @@ modeling-parameters:
   num_years: 2
   timesteps_per_year: 0.05
   nt: 40   # this calibration's own resolved nt (2/0.05) -- see ../params.yaml's own nt comment
-  initFile: 'data/extended_beta1000yrs.h5'
-  compact_initialization: false
+  initFile: 'data/extended_beta1000yrs_compact_idx20000.h5'
+  compact_initialization: true
   paramsFile: 'data/extended_beta1000yrs.yaml'
   meshFile: 'data/PigFull2017GeomFull.exp'
   SMBFile: 'data/OLS_Trend_plus_Resid_9b9.tif'
@@ -68,7 +68,7 @@ enkf-parameters:
 
   generate_synthetic_obs: 1
   generate_true_state:    1
-  generate_nurged_state:  1
+  generate_nurged_state:  0   # wrong reference trajectory is diagnostic only (see ../params.yaml)
   initialize_ensemble: 1
   use_ensemble_pertubations: 1
   sequential_ensemble_initialization: 0
