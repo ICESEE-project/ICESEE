@@ -408,6 +408,7 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
         # Recompute km consistent with your (k+1 == tobserve[km]) condition
         # print(f"\n[ICESEE] Starting at k={k_start} (nt={nt}) on rank {rank_world}.\n")
         km = compute_km_from_tobserve(np.asarray(tobserve), k_start, m_obs)
+        km_at_start = km  # analyses this run = km - km_at_start (performance summary)
         icesee_kwargs.update({"km": km})
 
         # If we’re resuming, let the user know
@@ -988,12 +989,14 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
             model=icesee_kwargs.get("model_name"),
             ensemble_size=icesee_kwargs.get("Nens"),
             forecast_steps=icesee_kwargs.get("nt") - k_start,
+            analysis_events=km - km_at_start,
         )
         emit_performance_report(
             comm_world,
             elapsed_s=global_elapsed_time,
             phases={
                 "true_wrong_state": time_generation_true_and_wrong_state,
+                "observation_generation": time_generation_synthetic_obs,
                 "ensemble_init": time_ensemble_initialization,
                 "forecast_step": time_forecast_step,
                 "analysis_step": time_analysis_step,
@@ -1007,7 +1010,10 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
                 "forecast_ensemble_mean": time_forecast_ensemble_mean_generation,
                 "analysis_ensemble_mean": time_analysis_ensemble_mean_generation,
             },
-            counts={"forecast_step": icesee_kwargs.get("nt") - k_start},
+            counts={
+                "forecast_step": icesee_kwargs.get("nt") - k_start,
+                "analysis_step": km - km_at_start,
+            },
             output_dir=_modelrun_datasets,
         )
 

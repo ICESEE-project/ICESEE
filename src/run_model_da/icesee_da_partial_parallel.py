@@ -844,12 +844,14 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
         model=icesee_kwargs.get("model_name"),
         ensemble_size=icesee_kwargs.get("Nens"),
         forecast_steps=icesee_kwargs.get("nt") - resume_timestep,
+        analysis_events=km - km_at_start,
     )
     emit_performance_report(
         comm_world,
         elapsed_s=global_elapsed_time,
         phases={
             "true_wrong_state": time_generation_true_and_wrong_state,
+            "observation_generation": time_generation_synthetic_obs,
             "ensemble_init": time_ensemble_initialization,
             "forecast_step": time_forecast_step,
             "analysis_step": time_analysis_step,

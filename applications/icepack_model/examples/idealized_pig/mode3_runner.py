@@ -288,13 +288,16 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     _model_nprocs_before_true_wrong_state = icesee_kwargs.get("model_nprocs")
 
     true_wrong_time = 0.0
+    observation_time = 0.0
     nd = None
     if world_rank == 0:
         _t = MPI.Wtime()
         nd = _build_reference_setup_context(icesee_kwargs)
         icesee_kwargs = generate_true_wrong_state(**icesee_kwargs)
-        icesee_kwargs = generate_synthetic_observations(**icesee_kwargs)
         true_wrong_time = MPI.Wtime() - _t
+        _t = MPI.Wtime()
+        icesee_kwargs = generate_synthetic_observations(**icesee_kwargs)
+        observation_time = MPI.Wtime() - _t
     world.Barrier()
 
     icesee_kwargs["model_nprocs"] = _model_nprocs_before_true_wrong_state
@@ -575,6 +578,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         elapsed_s=global_elapsed_time,
         phases={
             "true_wrong_state": true_wrong_time,
+            "observation_generation": observation_time,
             "ensemble_init": ensemble_init_time,
             "forecast_step": time_forecast_step,
             "analysis_step": None if km else 0.0,

@@ -200,13 +200,16 @@ def run_lorenz96_execution_mode_3(**icesee_kwargs):
     # keep these timings at 0.0; the MPI.MAX reduction below picks up
     # root's real value, matching modes 0/1/2's timing-aggregation pattern.
     true_wrong_time = 0.0
+    observation_time = 0.0
     time_init_ensemble_mean = 0.0
     init_file_time = 0.0
     if world_rank == 0:
         _t = MPI.Wtime()
         icesee_kwargs = generate_true_wrong_state(**icesee_kwargs)
-        icesee_kwargs = generate_synthetic_observations(**icesee_kwargs)
         true_wrong_time = MPI.Wtime() - _t
+        _t = MPI.Wtime()
+        icesee_kwargs = generate_synthetic_observations(**icesee_kwargs)
+        observation_time = MPI.Wtime() - _t
 
         _t = MPI.Wtime()
         (
@@ -368,7 +371,7 @@ def run_lorenz96_execution_mode_3(**icesee_kwargs):
     emit_performance_report(
         world,
         elapsed_s=global_elapsed_time,
-        phases={"true_wrong_state": true_wrong_time, "ensemble_init": ensemble_init_time, "forecast_step": time_forecast_step, "init_file_io": init_file_time, "forecast_file_io": time_forecast_file_writing, "analysis_file_io": analysis_file_time, "init_ensemble_mean": time_init_ensemble_mean, "analysis_step": None if km else 0.0},
+        phases={"true_wrong_state": true_wrong_time, "observation_generation": observation_time, "ensemble_init": ensemble_init_time, "forecast_step": time_forecast_step, "init_file_io": init_file_time, "forecast_file_io": time_forecast_file_writing, "analysis_file_io": analysis_file_time, "init_ensemble_mean": time_init_ensemble_mean, "analysis_step": None if km else 0.0},
         counts={"forecast_step": nt, "analysis_step": km},
         output_dir=_modelrun_datasets,
     )

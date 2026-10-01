@@ -25,6 +25,11 @@ from ICESEE.config._utility_imports import icesee_kwargs
 from ICESEE.applications.icepack_model.examples.synthetic_ice_stream._icepack_model import initialize_model
 from ICESEE.src.run_model_da.run_models_da import icesee_model_data_assimilation
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
+from ICESEE.src.utils.performance import register_package_versions
+
+# Record this application's model-stack versions in the end-of-run
+# performance summary (every execution mode).
+register_package_versions("petsc4py", "firedrake", "icepack")
 
 # --- Initialize MPI ---
 rank, size, comm, _ = ParallelManager().icesee_mpi_init(icesee_kwargs)

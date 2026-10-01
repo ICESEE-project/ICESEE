@@ -26,9 +26,13 @@ from ICESEE.config._utility_imports import icesee_kwargs
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_model import initialize_model, initialState, initializeMesh
 from ICESEE.src.run_model_da.run_models_da import icesee_model_data_assimilation
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
-from ICESEE.src.utils.performance import record_phase
+from ICESEE.src.utils.performance import record_phase, register_package_versions
 from ICESEE.src.utils.run_schedule import resolve_run_schedule
 from mpi4py import MPI
+
+# Record this application's model-stack versions in the end-of-run
+# performance summary (every execution mode).
+register_package_versions("petsc4py", "firedrake", "icepack")
 
 # --- Register execution_mode 3 support (import-time side effect) ---
 from ICESEE.applications.icepack_model.examples.idealized_pig import mode3_runner  # noqa: F401
