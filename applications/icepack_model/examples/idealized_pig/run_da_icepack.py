@@ -23,6 +23,13 @@ from ICESEE.config._utility_imports import icesee_kwargs
 import firedrake
 from firedrake.petsc import PETSc
 
+# Multi-rank model groups (model_nprocs > 1) deadlock inside PyOP2's kernel
+# compilation when the group's ranks see different compiled-kernel cache
+# contents (e.g. the world root has already compiled them alone for the
+# truth run); see ICESEE/src/utils/pyop2_compile_cache.py.
+from ICESEE.src.utils.pyop2_compile_cache import install_consistent_compile_cache
+install_consistent_compile_cache()
+
 from modelfunc import myerror
 import modelfunc as mf
 from modelfunc import firedrakeSmooth, flotationHeight, flotationMask
@@ -32,6 +39,7 @@ from ICESEE.src.run_model_da.run_models_da import icesee_model_data_assimilation
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 from ICESEE.src.utils.performance import record_phase, register_package_versions
 from ICESEE.src.utils.run_schedule import resolve_run_schedule
+from ICESEE.src.utils.init_trace import traced_init
 from mpi4py import MPI
 
 # Record this application's model-stack versions in the end-of-run
@@ -111,7 +119,8 @@ icesee_kwargs.update({
 })
 
 _t_init = time.perf_counter()
-h, h0, s, s0, u, bed, zF, grounded, floating, A0, beta0, smb, basal_melt_field, Q, V, forward_solver = initialize_model(**icesee_kwargs)
+with traced_init("model initialization (driver)", comm=comm):
+    h, h0, s, s0, u, bed, zF, grounded, floating, A0, beta0, smb, basal_melt_field, Q, V, forward_solver = initialize_model(**icesee_kwargs)
 record_phase("model_initialization", time.perf_counter() - _t_init)
 
 
@@ -173,4 +182,5 @@ icesee_kwargs.update({"bmr_nudged": bmr_nudged})
 
 # --- Run Data Assimilation ---
 PETSc.Sys.Print("Data assimilation with ICESEE ...")
-icesee_model_data_assimilation(**icesee_kwargs)
+with traced_init("ICESEE dispatch"):
+    icesee_model_data_assimilation(**icesee_kwargs)
