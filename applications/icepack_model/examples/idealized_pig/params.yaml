@@ -140,7 +140,7 @@ enkf-parameters:
   # selector (melt_max ramps 20->100 for the true trajectory, stays
   # constant at 20 for the wrong/ensemble trajectory -- see
   # _icepack_model.py's EXPERIMENT_TRUE/EXPERIMENT_WRONG), not by adding
-  # this scalar to basal_melt_field. Kept at the student's value for
+  # this scalar to basal_melt_field. Kept at the users's value for
   # config compatibility; nothing currently reads it into the active
   # physics path (see run_da_icepack.py's bmr_nudged, which is computed
   # but unused).
