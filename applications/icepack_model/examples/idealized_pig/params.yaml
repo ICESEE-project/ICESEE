@@ -14,14 +14,12 @@ modeling-parameters:
   uThresh: 300
   hThresh: 30                        # minimum ice thickness required in a mesh element with ice (meters)
   tag: '001'
-  experiments: 0                     # experiment 1 for changing timing of basal melt, 1 for changing C, 2 for ... 
   bmr_increase_time: 0               # timing (in years) of when to begin a linear increase in BMR (relative to start of simulation)
   #save_steps: [19, 34, 54, 69, 81]  # years into the simulation at which to save the flowline profile (for a simulation of PIG between 1935 - 2017)
-  save_steps: [34, 69, 81]           # years into the simulation at which to save the flowline profile (OMIT SAVING THE INITIAL STATE that is saved manually)
+  save_steps: [34, 69, 81]           # years into the simulation at which to save the flowline profile (OMIT SAVING THE INITIAL STATE, that is saved manually)
 
 enkf-parameters:
   # Ensemble Kalman Filter parameters
-  #Nens: 40                 # number of ensemble members (now set in the command line)
   freq_obs: 1              # frequency of observations (per year?)
   obs_max_time: 40         # maximum time for observations
   obs_start_time: 10        # start time for observations
@@ -53,6 +51,19 @@ enkf-parameters:
   joint_estimation: 0 # joint estimation flag: True, False
   parameter_estimation: False # parameter estimation flag: True, False
   joint_estimated_params: [] # parameter(s) to be jointly estimated
+
+  
+  
+  # True/Wrong experiment flags
+  wrong_init_state: 0                       # Only the initial state in h, u, v, and s is "wrong"
+ 
+  wrong_init_state_and_bmr_const: 0         # Wrong initial state and basal melt forcing (applied as a constant value)
+  wrong_init_state_and_bmr_transient: 0     # Wrong initial state and basal melt forcing (applied as a CHANGING value)
+
+  wrong_init_state_and_tendency: 0          # Wrong initial state and tendency
+  right_init_state_wrong_tendency: 0        # Correct initial state but incorrect tendency
+
+
 
   # nudged parameters
   wrong_basal_melt_field: 5         # scalar factor to "nudge" the basal melt rate field

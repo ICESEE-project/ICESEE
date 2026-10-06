@@ -183,7 +183,7 @@ def BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', ex
     
         # The period over which BMR increases shortens by 'x' years
         else:
-            melt_max = ((final_bmr - beginning_bmr)/(icesee_kwargs["num_years"] - icesee_kwargs["bmr_increase_time"])) * ((step - (["bmr_increase_time"]/icesee_kwargs["dt"])) * icesee_kwargs["dt"]) + beginning_bmr
+            melt_max = ((final_bmr - beginning_bmr)/(icesee_kwargs["num_years"] - icesee_kwargs["bmr_increase_time"])) * ((step - (icesee_kwargs["bmr_increase_time"]/icesee_kwargs["dt"])) * icesee_kwargs["dt"]) + beginning_bmr
     else:
         melt_max = beginning_bmr
     # "wrong" model where basal melt rate does not change over the entire simulation
