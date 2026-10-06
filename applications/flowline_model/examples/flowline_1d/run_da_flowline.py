@@ -26,6 +26,9 @@ from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import 
 # --- Flowline 1D model imports ---
 from ICESEE.applications.flowline_model.examples.flowline_1d._flowline_model import initialize_model
 
+# --- Register execution_mode 3 support (import-time side effect) ---
+from ICESEE.applications.flowline_model.examples.flowline_1d import mode3_runner  # noqa: F401
+
 # --- Initialize MPI ---
 rank, size, comm, _ = ParallelManager().icesee_mpi_init(icesee_kwargs)
 

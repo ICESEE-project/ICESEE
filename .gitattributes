@@ -1,0 +1,26 @@
+# Normalize line endings for text sources.
+* text=auto eol=lf
+
+*.py text diff=python
+*.md text
+*.yaml text
+*.yml text
+*.cff text
+
+# Scientific data and model-checkpoint formats are binary and should never
+# go through text diff/merge machinery. ICESEE's own history has previously
+# grown very large from committed binary datasets (see docs/architecture/ —
+# large ensemble/state files belong in the data paths ICESEE's own I/O
+# layer manages, or in Git LFS, not in the repository history itself).
+*.h5 binary
+*.hdf5 binary
+*.nc binary
+*.mat binary
+*.npz binary
+*.npy binary
+*.zarr binary
+*.zip binary
+*.tar binary
+*.gz binary
+*.png binary
+*.pdf binary

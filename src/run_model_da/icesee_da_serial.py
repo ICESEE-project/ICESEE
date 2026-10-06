@@ -16,6 +16,7 @@ import h5py
 import numpy as np
 from tqdm import tqdm
 import bigmpi4py as BM # BigMPI for large data transfer and communication
+from mpi4py import MPI
 from scipy.sparse import csr_matrix
 from scipy.sparse import block_diag
 from scipy.stats import multivariate_normal
@@ -26,13 +27,14 @@ from ICESEE.src.utils import tools, utils                                     # 
 from ICESEE.src.utils.utils import UtilsFunctions
 from ICESEE.src.EnKF.python_enkf.EnKF import EnsembleKalmanFilter as EnKF     # Ensemble Kalman Filter
 from ICESEE.applications.supported_models import SupportedModels              # supported models for data assimilation routine
-from ICESEE.src.utils.tools import icesee_get_index, display_timing_default,display_timing_verbose, save_all_data
+from ICESEE.src.utils.tools import icesee_get_index, save_all_data
+from ICESEE.src.utils.performance import emit_performance_report, register_run_metadata
 from ICESEE.src.EnKF._localization_inflation import  LocalizationInflationUtils
 from ICESEE.src.EnKF._generate_synthetic_observations import generate_synthetic_observations
 from ICESEE.src.EnKF._generate_true_wrong_state import generate_true_wrong_state
 from ICESEE.src.EnKF._ensemble_initialization import ensemble_initialization
 from ICESEE.src.utils.localization import prepare_random_field_coordinates
-from ICESEE.src.utils.icesee_context import normalize_icesee_kwargs
+from ICESEE.src.utils.icesee_context import normalize_execution_mode, normalize_icesee_kwargs
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
                               generate_pseudo_random_field_1d, \
@@ -47,10 +49,14 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
 
     # print(f"icesee_kwargs: {icesee_kwargs}")
 
+    # start the timer
+    global_start_time = MPI.Wtime()
+
     # --- unpack the data assimilation arguments
     filter_type       = icesee_kwargs.get("filter_type", "EnKF")      # filter type
     model             = icesee_kwargs.get("model_name",None)          # model name
-    parallel_flag     = icesee_kwargs.get("parallel_flag",False)      # parallel flag
+    normalize_execution_mode(icesee_kwargs, expected=0)
+    analysis_backend  = str(icesee_kwargs.get("analysis_backend", "serial"))
     Q_err             = icesee_kwargs.get("Q_err",None)               # process noise
     commandlinerun    = icesee_kwargs.get("commandlinerun",None)      # run through the terminal
     Lx, Ly            = icesee_kwargs.get("Lx",1.0), icesee_kwargs.get("Ly",1.0)
@@ -79,7 +85,7 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
     start = 0
     stop = 0
     subcomm_size_min = 1
-    comm_world = None
+    comm_world = MPI.COMM_WORLD
     subcomm = None
 
     # pack the global communicator, the subcommunicator and other important parameters
@@ -298,7 +304,7 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
 
 
     # --- Initialize the EnKF class ---
-    EnKFclass = EnKF(parameters=icesee_kwargs, parallel_manager=parallel_manager, parallel_flag = parallel_flag)
+    EnKFclass = EnKF(parameters=icesee_kwargs, parallel_manager=parallel_manager, analysis_backend=analysis_backend)
 
     # tqdm progress bar
     # Initialize progress bar on the root process
@@ -320,6 +326,7 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
     time_forecast_file_writing = 0.0
     time_analysis_file_writing = 0.0
     time_forecast_ensemble_mean_generation = 0.0
+    time_analysis_ensemble_mean_generation = 0.0
 
     # specified decorrelation length scale, tau,
     min_tau = 200
@@ -339,32 +346,17 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
     params_analysis_0 = np.zeros((2, Nens))
     km = 0
 
-    #--- generate inital noise
-    if icesee_kwargs.get("use_random_fields", False):
-        # with h5py.File(_synthetic_obs, 'r') as f:
-        #     error_R = f['error_R'][:]
-        #     Cov_obs = np.cov(error_R)
-        #  --- get the observation noise ---
-        pos_obs, gs_model_obs, L_C_obs = compute_Q_err_random_fields(hdim, icesee_kwargs["total_state_param_vars"], icesee_kwargs["sig_obs"], Q_rho, len_scale)
-    else:
-        N_size = icesee_kwargs["total_state_param_vars"] * hdim
-        # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=0)
-        icesee_kwargs.update({"ii_sig": None, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim, "num_vars":icesee_kwargs["total_state_param_vars"]})
-
-        if (len(icesee_kwargs.get("scalar_inputs", [])) > 0) or (icesee_kwargs.get("var_nd", None) is not None):
-                noise_1 = generate_enkf_field(**icesee_kwargs)
-                ndim = 1 if len(icesee_kwargs.get("scalar_inputs", [])) > 0 else (icesee_kwargs["var_nd"][icesee_kwargs["scalar_inputs"][0]])
-                icesee_kwargs.update({ "noise_dim": ndim})
-                noise_2 = generate_enkf_field(**icesee_kwargs)
-                # concatenate noise_1 and noise_2
-                noise = np.concatenate((noise_1, noise_2))[:-1]
-
-        else:
-            noise = generate_enkf_field(**icesee_kwargs)
+    # Per-member AR(1) process-noise state now lives on EnKFclass itself
+    # (self._process_noise_state, one column per ensemble member) rather
+    # than being generated once here and threaded through icesee_kwargs --
+    # that single shared/unreseeded vector was the root cause of Mode 0's
+    # process noise repeating deterministically and chaining across
+    # ensemble members. See EnsembleKalmanFilter.forecast_step's "serial"
+    # branch in src/EnKF/python_enkf/EnKF.py.
 
     for k in range(icesee_kwargs.get("nt",icesee_kwargs["nt"])):
 
-        icesee_kwargs.update({"k": k, "km":km, "alpha": alpha, "rho": rho, "tau": tau, "dt": dt,"n": n, "noise": noise})
+        icesee_kwargs.update({"k": k, "km":km, "alpha": alpha, "rho": rho, "tau": tau, "dt": dt,"n": n})
         icesee_kwargs.update({"generate_enkf_field": generate_enkf_field}) #save the function to generate the enkf field
 
         input_file = f"{_modelrun_datasets}/icesee_ensemble_data.h5"
@@ -372,14 +364,20 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
             ensemble_vec = f["ensemble"][:,:,k]
 
         # -------------- Forecast step
+        _time_forecast_step = MPI.Wtime()
         ensemble_vec = EnKFclass.forecast_step(ensemble_vec, \
                                             model_module.forecast_step_single, \
                                              **icesee_kwargs)
+        time_forecast_step += MPI.Wtime() - _time_forecast_step
 
         #  compute the ensemble mean
+        _time_forecast_file_writing = MPI.Wtime()
         with h5py.File(input_file, "a") as f:
             f["ensemble"][:,:,k+1] = ensemble_vec
+            _time_forecast_ensemble_mean = MPI.Wtime()
             f["ensemble_mean"][:,k+1] = np.mean(ensemble_vec, axis=1)
+            time_forecast_ensemble_mean_generation += MPI.Wtime() - _time_forecast_ensemble_mean
+        time_forecast_file_writing += MPI.Wtime() - _time_forecast_file_writing
 
         # -------------- Analysis step
         # generate Observation schedule
@@ -390,6 +388,7 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
         icesee_kwargs.update({"number_obs_instants": m_obs, 'obs_index': ind_m})
         icesee_kwargs.update({"m_obs": m_obs, "obs_t": obs_t, "obs_index": ind_m})
         if (km < m_obs) and (k == ind_m[km]):
+            _time_analysis_step = MPI.Wtime()
 
             # read the ensemble mean from file
             with h5py.File(input_file, "r") as f:
@@ -456,7 +455,6 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
             #                 Observation_function=UtilsFunctions(icesee_kwargs, ensemble_vec).Obs_fun, \
             #                 Obs_Jacobian=UtilsFunctions(icesee_kwargs, ensemble_vec).JObs_fun, \
             #                 parameters=  icesee_kwargs,\
-            #                 parallel_flag=   parallel_flag)
 
             # Create default functions object once
             utils = UtilsFunctions(
@@ -497,7 +495,7 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
                 Observation_function = Obs_fun,   # pass function handle
                 Obs_Jacobian         = JObs_fun,  # pass function handle
                 parameters           = icesee_kwargs,
-                parallel_flag        = parallel_flag
+                analysis_backend     = analysis_backend
             )
 
             # Compute the analysis ensemble
@@ -519,8 +517,12 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
                 pass # no post analysis updates present
 
             # save the ensemble mean after analysis
+            _time_analysis_file_writing = MPI.Wtime()
             with h5py.File(input_file, "a") as f:
+                _time_analysis_ensemble_mean = MPI.Wtime()
                 f["ensemble_mean"][:,k+1] = np.mean(ensemble_vec, axis=1)
+                time_analysis_ensemble_mean_generation += MPI.Wtime() - _time_analysis_ensemble_mean
+            time_analysis_file_writing += MPI.Wtime() - _time_analysis_file_writing
 
             # update the ensemble with observations instants
             km += 1
@@ -530,9 +532,13 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
             # ensemble_vec = LocalizationInflationUtils(icesee_kwargs, ensemble_vec).inflate_ensemble(in_place=True)
             # ensemble_vec = UtilsFunctions(icesee_kwargs, ensemble_vec)._inflate_ensemble()
 
+            time_analysis_step += MPI.Wtime() - _time_analysis_step
+
         # Save the ensemble
+        _time_analysis_file_writing_final = MPI.Wtime()
         with h5py.File(input_file, "a") as f:
             f["ensemble"][:,:,k+1] = ensemble_vec
+        time_analysis_file_writing += MPI.Wtime() - _time_analysis_file_writing_final
 
         # update the progress bar
         if rank_world == 0:
@@ -560,61 +566,73 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
     #  End Timer and Aggregate Elapsed Time Across Processors
     # ─────────────────────────────────────────────────────────────
     # --total elapsed time
-    # global_end_time = MPI.Wtime()
-    # global_elapsed_time = global_end_time - global_start_time
-    # # Reduce elapsed time across all processors (sum across ranks)
-    # total_elapsed_time = comm_world.allreduce(global_elapsed_time, op=MPI.SUM)
-    # total_wall_time = comm_world.allreduce(global_elapsed_time, op=MPI.MAX)
+    global_end_time = MPI.Wtime()
+    global_elapsed_time = global_end_time - global_start_time
+    # Reduce elapsed time across all processors (sum across ranks); a no-op
+    # reduction for mode 0's single process, but keeps the aggregation
+    # identical to modes 1/2 so the same display utility can be reused.
+    total_elapsed_time = comm_world.allreduce(global_elapsed_time, op=MPI.SUM)
+    total_wall_time = comm_world.allreduce(global_elapsed_time, op=MPI.MAX)
 
-    # # -- timing true and wrong state generation
-    # true_wrong_time = comm_world.allreduce(time_generation_true_and_wrong_state, op=MPI.MAX)
+    # -- timing true and wrong state generation
+    true_wrong_time = comm_world.allreduce(time_generation_true_and_wrong_state, op=MPI.MAX)
 
-    # # -- timing ensemble initialization
-    # ensemble_init_time = comm_world.allreduce(time_ensemble_initialization, op=MPI.MAX)
+    # -- timing ensemble initialization
+    ensemble_init_time = comm_world.allreduce(time_ensemble_initialization, op=MPI.MAX)
 
-    # # -- timing forecast step
-    # forecast_step_time = comm_world.allreduce(time_forecast_step, op=MPI.MAX)
+    # -- timing forecast step
+    forecast_step_time = comm_world.allreduce(time_forecast_step, op=MPI.MAX)
 
-    # # -- timing forecast noise generation
-    # forecast_noise_time = comm_world.allreduce(time_forecast_noise_generation, op=MPI.MAX)
+    # -- timing forecast noise generation
+    forecast_noise_time = comm_world.allreduce(time_forecast_noise_generation, op=MPI.MAX)
 
-    # # -- timing analysis step
-    # analysis_step_time = comm_world.allreduce(time_analysis_step, op=MPI.MAX)
+    # -- timing analysis step
+    analysis_step_time = comm_world.allreduce(time_analysis_step, op=MPI.MAX)
 
-    # # -- total assimilation time = ensemble init + forecast step + analysis step
-    # assimilation_time = ensemble_init_time + forecast_step_time + analysis_step_time
+    # -- total assimilation time = ensemble init + forecast step + analysis step
+    assimilation_time = ensemble_init_time + forecast_step_time + analysis_step_time
 
-    # # --- time forecast file writing ---
-    # forecast_file_time = comm_world.allreduce(time_forecast_file_writing, op=MPI.MAX)
+    # --- time forecast file writing ---
+    forecast_file_time = comm_world.allreduce(time_forecast_file_writing, op=MPI.MAX)
 
-    # # --- time analysis file writing ---
-    # analysis_file_time = comm_world.allreduce(time_analysis_file_writing, op=MPI.MAX)
+    # --- time analysis file writing ---
+    analysis_file_time = comm_world.allreduce(time_analysis_file_writing, op=MPI.MAX)
 
-    # # total file writing time initialization file writing + forecast file writing + analysis file writing
-    # init_file_time = comm_world.allreduce(time_init_file_writing, op=MPI.MAX)
-    # total_file_time = init_file_time + forecast_file_time + analysis_file_time
+    # total file writing time initialization file writing + forecast file writing + analysis file writing
+    init_file_time = comm_world.allreduce(time_init_file_writing, op=MPI.MAX)
+    total_file_time = init_file_time + forecast_file_time + analysis_file_time
+
+    time_analysis_ensemble_mean = comm_world.allreduce(time_analysis_ensemble_mean_generation, op=MPI.MAX)
+    time_forecast_ensemble_mean = comm_world.allreduce(time_forecast_ensemble_mean_generation, op=MPI.MAX)
+    time_init_ensemble_mean = comm_world.allreduce(time_init_ensemble_mean_computation, op=MPI.MAX)
 
     # Display elapsed time on rank 0
-    # comm_world.Barrier()
-    # if rank_world == 0:
-    #     verbose = icesee_kwargs.get("verbose", False)
-    #     # if verbose:
-    #     if True:
-    #          display_timing_verbose(
-    #         computational_time=total_elapsed_time,
-    #         wallclock_time=total_wall_time,
-    #         true_wrong_time=true_wrong_time,
-    #         assimilation_time=assimilation_time,
-    #         forecast_step_time=forecast_step_time,
-    #         analysis_step_time=analysis_step_time,
-    #         ensemble_init_time=ensemble_init_time,
-    #         init_file_time=init_file_time,
-    #         forecast_file_time=forecast_file_time,
-    #         analysis_file_time=analysis_file_time,
-    #         total_file_time=total_file_time,
-    #         forecast_noise_time=forecast_noise_time, comm=comm_world
-    #     )
-    #     else:
-    #         display_timing_default(total_elapsed_time, total_wall_time)
-    # else:
-    #     None
+    comm_world.Barrier()
+
+    register_run_metadata(
+        execution_mode=icesee_kwargs.get("execution_mode"),
+        model=icesee_kwargs.get("model_name"),
+        ensemble_size=icesee_kwargs.get("Nens"),
+        forecast_steps=icesee_kwargs.get("nt"),
+        analysis_events=km,
+    )
+    emit_performance_report(
+        comm_world,
+        elapsed_s=global_elapsed_time,
+        phases={
+            "true_wrong_state": time_generation_true_and_wrong_state,
+            "observation_generation": time_generation_synthetic_obs,
+            "ensemble_init": time_ensemble_initialization,
+            "forecast_step": time_forecast_step,
+            "analysis_step": time_analysis_step,
+            "init_file_io": time_init_file_writing,
+            "forecast_file_io": time_forecast_file_writing,
+            "analysis_file_io": time_analysis_file_writing,
+            "forecast_noise": time_forecast_noise_generation,
+            "init_ensemble_mean": time_init_ensemble_mean_computation,
+            "forecast_ensemble_mean": time_forecast_ensemble_mean_generation,
+            "analysis_ensemble_mean": time_analysis_ensemble_mean_generation,
+        },
+        counts={"forecast_step": icesee_kwargs.get("nt"), "analysis_step": km},
+        output_dir=_modelrun_datasets,
+    )

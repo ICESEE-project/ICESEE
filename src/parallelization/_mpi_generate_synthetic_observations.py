@@ -14,6 +14,104 @@ from ICESEE.src.utils.utils import UtilsFunctions
 from ICESEE.src.utils.tools import icesee_get_index
 
 
+def synchronize_observation_schedule(icesee_kwargs, obs_file=None):
+    """Load and broadcast the canonical observation schedule.
+
+    Synthetic observations are written by one MPI rank, while every rank
+    evaluates the forecast/analysis schedule.  Returning the rank-local
+    ``icesee_kwargs`` from the generator can therefore leave non-writer ranks
+    with the schedule computed during configuration parsing.  The observation
+    artifact is the authoritative source because its columns were generated
+    with exactly these indices.
+
+    This helper deliberately mutates and returns ``icesee_kwargs`` so both
+    execution modes use identical schedule metadata.
+    """
+    comm = icesee_kwargs.get("comm_world", MPI.COMM_WORLD)
+    rank = comm.Get_rank()
+    path = obs_file or icesee_kwargs.get("synthetic_obs_file")
+
+    payload = None
+    if rank == 0:
+        if not path or not h5py.is_hdf5(path):
+            raise FileNotFoundError(
+                f"Cannot synchronize observation schedule: '{path}' is not a valid HDF5 file"
+            )
+        with h5py.File(path, "r") as f:
+            if "obs_index" in f:
+                obs_index = np.asarray(f["obs_index"][:], dtype=np.int64)
+            elif "ind_m" in f:
+                obs_index = np.asarray(f["ind_m"][:], dtype=np.int64)
+            else:
+                raise KeyError(f"'{path}' contains neither /obs_index nor /ind_m")
+
+            if "obs_t" in f:
+                obs_t = np.asarray(f["obs_t"][:], dtype=float)
+            else:
+                # Older compact files did not retain obs_t.  Recover it from
+                # the configured model time vector without changing indices.
+                model_t = np.asarray(icesee_kwargs.get("t", []), dtype=float)
+                if model_t.size and np.all((obs_index >= 0) & (obs_index < model_t.size)):
+                    obs_t = model_t[obs_index]
+                else:
+                    dt = float(icesee_kwargs.get("dt", 1.0))
+                    obs_t = obs_index.astype(float) * dt
+            if "bed_snap_cols" in f:
+                bed_snap_cols = np.asarray(
+                    f["bed_snap_cols"][:], dtype=np.int64
+                )
+            else:
+                # Backward compatibility for compact mode-2 observation files
+                # written before bed snapshot metadata was persisted.  Only
+                # accept an actual time match: mapping an out-of-range snapshot
+                # to the nearest endpoint would incorrectly activate bed
+                # inference at an unrelated analysis cycle.
+                configured = np.asarray(
+                    icesee_kwargs.get("bed_obs_snapshot", []), dtype=float
+                ).reshape(-1)
+                matched = []
+                if configured.size and obs_t.size:
+                    model_t = np.asarray(
+                        icesee_kwargs.get("t", []), dtype=float
+                    ).reshape(-1)
+                    if model_t.size > 1:
+                        tolerance = 0.5 * float(np.min(np.diff(model_t)))
+                    else:
+                        tolerance = 0.5 * float(icesee_kwargs.get("dt", 1.0))
+                    tolerance = max(tolerance, 32.0 * np.finfo(float).eps)
+                    for snapshot in configured:
+                        column = int(np.argmin(np.abs(obs_t - snapshot)))
+                        if abs(float(obs_t[column]) - float(snapshot)) <= tolerance:
+                            matched.append(column)
+                bed_snap_cols = np.asarray(
+                    sorted(set(matched)), dtype=np.int64
+                )
+        if obs_t.size != obs_index.size:
+            raise ValueError(
+                f"Observation schedule mismatch in '{path}': "
+                f"{obs_index.size} indices but {obs_t.size} times"
+            )
+        payload = (obs_index, obs_t, bed_snap_cols)
+
+    obs_index, obs_t, bed_snap_cols = comm.bcast(payload, root=0)
+    obs_index = np.asarray(obs_index, dtype=np.int64)
+    obs_t = np.asarray(obs_t, dtype=float)
+    bed_snap_cols = np.asarray(bed_snap_cols, dtype=np.int64)
+    m_obs = int(obs_index.size)
+    mapping = {int(step): int(col) for col, step in enumerate(obs_index)}
+    icesee_kwargs.update({
+        "ind_m": obs_index,
+        "obs_index": obs_index,
+        "obs_t": obs_t,
+        "tobserve": obs_index,
+        "m_obs": m_obs,
+        "number_obs_instants": m_obs,
+        "obs_model_to_col": mapping,
+        "bed_snap_cols": bed_snap_cols.tolist(),
+    })
+    return icesee_kwargs
+
+
 def generate_synthetic_observations(**icesee_kwargs):
     """Generate synthetic observations for the ICESEE model.
     """
@@ -100,7 +198,9 @@ def generate_synthetic_observations(**icesee_kwargs):
                     f.create_dataset("obs_index", data=obs_index)
                     f.create_dataset(
                         "obs_max_time",
-                        data=np.asarray([np.max(obs_t)], dtype=float),
+                        data=np.asarray(
+                            [np.max(obs_t) if obs_t.size else 0.0], dtype=float
+                        ),
                     )
 
                     # obs_model_to_col is a dict -> store as parallel arrays

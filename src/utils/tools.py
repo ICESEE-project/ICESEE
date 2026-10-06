@@ -29,7 +29,11 @@ def _extract_time(fname: str) -> int:
     return int(m.group(1))
 
 def _list_sorted_files(input_dir: str):
-    files = glob.glob(os.path.join(input_dir, "icesee_enkf_ens_*.h5"))
+    files = [
+        path
+        for path in glob.glob(os.path.join(input_dir, "icesee_enkf_ens_*.h5"))
+        if re.search(FNAME_PATTERN, os.path.basename(path))
+    ]
     if not files:
         raise RuntimeError(f"No input files found in {input_dir}")
     files.sort(key=_extract_time)
@@ -54,7 +58,8 @@ def h5py_has_mpi():
 def build_vds(input_dir: str,
               dset_name: str | None = None,
               out_file: str | None = None,
-              fillvalue=np.nan) -> str:
+              fillvalue=np.nan,
+              row_chunk_size: int = 16384) -> str:
     files = _list_sorted_files(input_dir)
     if dset_name is None:
         dset_name = _infer_dataset_name(files[0], prefer="states")
@@ -71,13 +76,16 @@ def build_vds(input_dir: str,
     # Build VDS layout
     layout = h5py.VirtualLayout(shape=(nd, nens, nt), dtype=dtype)
     for t, f in enumerate(files):
-        vsrc = h5py.VirtualSource(f, dset_name, shape=(nd, nens))
+        # Absolute source names keep the VDS valid when opened elsewhere.
+        vsrc = h5py.VirtualSource(os.path.abspath(f), dset_name, shape=(nd, nens))
         layout[:, :, t] = vsrc
 
     os.makedirs(os.path.dirname(out_file) or ".", exist_ok=True)
     with h5py.File(out_file, "w", libver="latest") as fout:
         # dset_name='ensemble'
-        fout.create_virtual_dataset(dset_name, layout, fillvalue=fillvalue)
+        states = fout.create_virtual_dataset(dset_name, layout, fillvalue=fillvalue)
+        if dset_name != "ensemble":
+            fout["ensemble"] = states
         fout.attrs.update({
             "nd": nd, "nens": nens, "nt": nt,
             "stack_type": "VDS",
@@ -87,11 +95,13 @@ def build_vds(input_dir: str,
         # Compute ensemble mean (iterate time slices lazily)
         mean_dset = fout.create_dataset(
             "ensemble_mean", shape=(nd, nt), dtype=np.float64,
-            chunks=(nd, 1), fillvalue=np.nan
+            chunks=(min(nd, max(1, int(row_chunk_size))), 1), fillvalue=np.nan
         )
         for t in range(nt):
-            arr = fout[dset_name][:, :, t]
-            mean_dset[:, t] = np.nanmean(arr, axis=1)
+            for row0 in range(0, nd, max(1, int(row_chunk_size))):
+                row1 = min(nd, row0 + max(1, int(row_chunk_size)))
+                arr = fout[dset_name][row0:row1, :, t]
+                mean_dset[row0:row1, t] = np.nanmean(arr, axis=1)
 
     return out_file
 
@@ -102,7 +112,8 @@ def consolidate_h5(input_dir: str,
                    compression: str = "gzip",
                    compression_opts: int = 4,
                    chunks: tuple[int,int,int] | None = None,
-                   allow_missing: bool = False) -> str:
+                   allow_missing: bool = False,
+                   row_chunk_size: int = 16384) -> str:
     files = _list_sorted_files(input_dir)
     if dset_name is None:
         dset_name = _infer_dataset_name(files[0], prefer="states")
@@ -117,7 +128,7 @@ def consolidate_h5(input_dir: str,
     nt = len(files)
     if chunks is None:
         # Good default for time-wise appends and time-slice reads
-        chunks = (nd, nens, 1)
+        chunks = (min(nd, max(1, int(row_chunk_size))), nens, 1)
 
     os.makedirs(os.path.dirname(out_file) or ".", exist_ok=True)
     with h5py.File(out_file, "w") as fout:
@@ -136,7 +147,7 @@ def consolidate_h5(input_dir: str,
         )
         mean_dset = fout.create_dataset(
             "ensemble_mean", shape=(nd, nt), dtype=np.float64,
-            chunks=(nd, 1), compression=compression,
+            chunks=(min(nd, max(1, int(row_chunk_size))), 1), compression=compression,
             compression_opts=compression_opts,
             shuffle=True, fletcher32=True
         )
@@ -147,22 +158,26 @@ def consolidate_h5(input_dir: str,
             "dataset_name": dset_name
         })
 
-        # Copy time slices, one file at a time (low memory)
+        # Copy row chunks, never a complete state x ensemble slice.
         for t, fpath in enumerate(files):
             try:
                 with h5py.File(fpath, "r") as fi:
-                    arr = fi[dset_name][...]
+                    source = fi[dset_name]
+                    if source.shape != (nd, nens):
+                        raise ValueError(
+                            f"Shape mismatch at {fpath}: {source.shape} != {(nd, nens)}"
+                        )
+                    for row0 in range(0, nd, max(1, int(row_chunk_size))):
+                        row1 = min(nd, row0 + max(1, int(row_chunk_size)))
+                        arr = source[row0:row1, :]
+                        dset[row0:row1, :, t] = arr
+                        mean_dset[row0:row1, t] = np.nanmean(arr, axis=1)
             except Exception as e:
                 if allow_missing:
-                    arr = np.full((nd, nens), np.nan, dtype=dtype)
+                    dset[:, :, t] = np.nan
+                    mean_dset[:, t] = np.nan
                 else:
                     raise RuntimeError(f"Failed reading {fpath}: {e}") from e
-
-            if arr.shape != (nd, nens):
-                raise ValueError(f"Shape mismatch at {fpath}: {arr.shape} != {(nd, nens)}")
-
-            dset[:, :, t] = arr
-            mean_dset[:, t] = np.nanmean(arr, axis=1)  # (nd,) → store column
 
     return out_file
 
@@ -224,7 +239,7 @@ def install_requirements(force_install=False, verbose=False):
 def save_arrays_to_h5(
     filter_type=None,
     model=None,
-    parallel_flag=None,
+    execution_mode=0,
     commandlinerun=None,
     data_path=None,
     **datasets,
@@ -235,7 +250,7 @@ def save_arrays_to_h5(
     Parameters:
         filter_type (str): Type of filter used (e.g., 'ENEnKF', 'DEnKF').
         model (str): Name of the model (e.g., 'icepack').
-        parallel_flag (str): Flag to indicate if MPI parallelism is enabled. Default is 'MPI'.
+        execution_mode (int): 0=serial, 1=partial MPI, 2=full MPI.
         commandlinerun (bool): Indicates if the function is triggered by a command-line run. Default is False.
         data_path (str or os.PathLike): Run-output directory. Defaults to
             ``_modelrun_datasets``.
@@ -247,7 +262,7 @@ def save_arrays_to_h5(
     output_dir = Path(data_path or "_modelrun_datasets")
     output_file = output_dir / f"{filter_type}-{model}.h5"
 
-    if parallel_flag == "MPI" or commandlinerun:
+    if int(execution_mode) in (1, 2) or commandlinerun:
         # Create the configured run-output folder if it does not exist.
         if not output_dir.exists():
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -315,7 +330,8 @@ def save_all_data(icesee_kwargs, nofilter=None, data_path=None, **datasets):
     filter_type = "true-wrong" if nofilter else icesee_kwargs["filter_type"]
 
     # --- Local MPI implementation ---
-    if re.match(r"\AMPI\Z", icesee_kwargs["parallel_flag"], re.IGNORECASE) or re.match(r"\AMPI_model\Z", icesee_kwargs["parallel_flag"], re.IGNORECASE):
+    execution_mode = int(icesee_kwargs.get("execution_mode", 0))
+    if execution_mode in (1, 2):
         from mpi4py import MPI
         comm = MPI.COMM_WORLD  # Initialize MPI
         rank = comm.Get_rank()  # Get rank of current MPI process
@@ -326,7 +342,7 @@ def save_all_data(icesee_kwargs, nofilter=None, data_path=None, **datasets):
             save_arrays_to_h5(
                 filter_type=filter_type,  # Use updated or original filter_type
                 model=icesee_kwargs["model_name"],
-                parallel_flag=icesee_kwargs["parallel_flag"],
+                execution_mode=execution_mode,
                 commandlinerun=icesee_kwargs["commandlinerun"],
                 data_path=data_path,
                 **datasets
@@ -337,7 +353,7 @@ def save_all_data(icesee_kwargs, nofilter=None, data_path=None, **datasets):
         save_arrays_to_h5(
             filter_type=filter_type,  # Use updated or original filter_type
             model=icesee_kwargs["model_name"],
-            parallel_flag=icesee_kwargs["parallel_flag"],
+            execution_mode=execution_mode,
             commandlinerun=icesee_kwargs["commandlinerun"],
             data_path=data_path,
             **datasets
@@ -428,6 +444,10 @@ def icesee_get_index(vec=None, **icesee_kwargs):
         else:
             vec_inputs = icesee_kwargs.get("vec_inputs", None)
             nd = icesee_kwargs.get("nd")
+            if not vec_inputs:
+                raise ValueError("vec_inputs must be a non-empty sequence")
+            if nd is None:
+                raise ValueError("nd must be provided")
             # print(f"[ICESEE-debug] vec_inputs: {vec_inputs}, nd: {nd}, icesee_kwargs: {icesee_kwargs}\n")
             if icesee_kwargs["default_run"]:
                 comm = icesee_kwargs.get("subcomm", None)
@@ -436,9 +456,82 @@ def icesee_get_index(vec=None, **icesee_kwargs):
 
             # len_vec = icesee_kwargs["total_state_param_vars"]
             len_vec = len(vec_inputs)
-            dim_list_param = np.array(icesee_kwargs.get('dim_list', None)) // len(icesee_kwargs.get('vec_inputs_old', None))
+            # ``vec_inputs_old`` is populated when a temporary analysis (for
+            # example an inversion) operates on a reduced variable list.  It
+            # is not required by simpler applications such as Lorenz96, so
+            # fall back to the active layout instead of calling ``len(None)``.
+            layout_inputs = icesee_kwargs.get("vec_inputs_old") or vec_inputs
+            dim_list = icesee_kwargs.get("dim_list")
+            # A replicated-state model (e.g. Lorenz-96) reports the same
+            # full ``nd`` on every rank of a model communicator -- it is
+            # not a per-rank partition, so it must never be indexed by
+            # ``comm.Get_rank()`` or treated as a cumulative-offset series
+            # below (see src/utils/state_ownership.py for the distinction
+            # this mirrors).
+            replicated = str(
+                icesee_kwargs.get("state_distribution", "distributed")
+            ).strip().lower() == "replicated"
+            # How many ranks the *current* indexing context spans -- mirrors
+            # the exact condition used just below to decide whether a
+            # fallback `dim_list` should be a single-element `[nd]` or a
+            # fresh `comm.allgather(nd)`. Used to detect a `dim_list` that
+            # was published by an earlier call scoped to a different
+            # communicator (see the `hdim` comment below).
+            nranks = (
+                1
+                if (comm is None or icesee_kwargs.get("even_distribution", False) or replicated)
+                else comm.Get_size()
+            )
+            if dim_list is None or len(dim_list) == 0:
+                # Simple/default applications can enter initialization before
+                # ``generate_true_wrong_state`` has published ``dim_list``.
+                # Recover the layout from the communicator instead of making
+                # callers depend on that side effect.  A COMM_SELF subcomm
+                # therefore yields [nd], while a spatial model subcomm yields
+                # the per-rank local state dimensions.
+                if comm is None or icesee_kwargs.get("even_distribution", False) or replicated:
+                    dim_list = [int(nd)]
+                else:
+                    dim_list = comm.allgather(int(nd))
+            if nd % len_vec:
+                raise ValueError(
+                    f"nd={nd} is not divisible by len(vec_inputs)={len_vec}"
+                )
+            dim_list_param = np.asarray(dim_list, dtype=int) // len(layout_inputs)
             dim_list_param = dim_list_param[:len_vec]
-            hdim = nd // len_vec
+            # `hdim` is the stride between one variable's global block and the
+            # next in the assumed [var0(all ranks) | var1(all ranks) | ...]
+            # layout that `offsets`/`var_start` below index into -- it must
+            # therefore be that variable's *global* (all-ranks) block size,
+            # not this rank's own local `nd`. For a replicated model or any
+            # single-rank model communicator (every configuration shipped
+            # today except the genuinely spatially distributed
+            # ranks_per_model > 1 case) `dim_list` has exactly one entry
+            # equal to `nd`, so `dim_list_param.sum() == nd // len_vec`
+            # exactly -- this is a no-op there. It only differs once more
+            # than one rank contributes a distributed model's per-variable
+            # data, which previously used this rank's own (possibly
+            # unequal, e.g. an uneven Firedrake mesh partition) local size
+            # as the stride, silently reading each later variable's block
+            # from the wrong offset (and, for multi-rank models, from
+            # another rank's slice of an earlier variable) instead.
+            #
+            # `dim_list` can be a *cached* value published by an earlier,
+            # differently-scoped call (e.g. generate_true_wrong_state
+            # publishes one gathered over comm_world) rather than one
+            # freshly gathered over `comm` here -- trustworthy only when
+            # its length actually matches the current communicator's rank
+            # count (`nranks`, already resolved above from this same
+            # `comm`). When it does not match (a stale/wrong-scope cache --
+            # e.g. Lorenz-96's replicated comm_world-sized cache reused
+            # under a size-1 model-group `comm`), summing it would count
+            # ranks that are not part of *this* indexing context at all;
+            # fall back to the original, always-safe `nd // len_vec` there,
+            # exactly as every model behaved before this rank-aware fix.
+            if len(dim_list) == nranks:
+                hdim = int(dim_list_param.sum())
+            else:
+                hdim = nd // len_vec
             # print(f"[ICESEE-debug] len_vec: {len_vec}, dim_list_param: {dim_list_param}, hdim: {hdim}\n")
 
             if comm is None:
@@ -446,7 +539,9 @@ def icesee_get_index(vec=None, **icesee_kwargs):
                 dim = dim_list_param[rank]
                 offsets = [0]
             else:
-                if icesee_kwargs["even_distribution"]:
+                if icesee_kwargs["even_distribution"] or replicated:
+                    # Every rank owns an identical full copy: index as if
+                    # this were the only rank, regardless of comm.Get_rank().
                     rank = 0
                     dim = dim_list_param[rank]
                     offsets = [0]
@@ -465,8 +560,7 @@ def icesee_get_index(vec=None, **icesee_kwargs):
                 index_map[var] = np.arange(start, end)
                 var_start += hdim
 
-            local_size_per_rank = icesee_kwargs.get('dim_list', None)
-            return None, index_map, local_size_per_rank[rank]
+            return None, index_map, int(np.asarray(dim_list, dtype=int)[rank])
     except Exception as e:
         print(f"Error occurred in icesee_get_index: {e}")
         tb_str = "".join(traceback.format_exception(*sys.exc_info()))
@@ -1073,6 +1167,51 @@ def load_bed_masks_from_h5(f):
 
     return bed_mask_map_static, bed_mask_map_cols, bed_snap_cols, obs_model_to_col
 
+
+def load_hu_obs_from_h5(f):
+    """
+    Load the dense synthetic-observation matrix (state_dim x m_obs) from an
+    open ``synthetic_obs.h5`` handle, transparently supporting both storage
+    layouts written by ICESEE:
+      - dense: a full ``hu_obs`` dataset (execution modes 0/1 always write
+        this; mode 2 only writes it when ``synthetic_observation_storage``
+        is set to ``'dense'`` or ``'both'``).
+      - compact (mode 2's default ``synthetic_observation_storage:
+        'compact'``, used to keep per-rank memory bounded for very large
+        state dimensions): ``hu_obs_compact`` + ``obs_indices`` sparse rows,
+        scattered here into a zero-filled dense array of shape
+        ``(state_dimension, m_obs)`` (unobserved entries stay 0.0, matching
+        ICESEE's own dense-export fallback in
+        ``src/parallelization/EnKF_parallel_io.py``).
+
+    Parameters:
+        f (h5py.File or h5py.Group): an already-open handle on
+            ``synthetic_obs.h5``.
+
+    Returns:
+        np.ndarray: dense observation matrix of shape (nd, m_obs).
+    """
+    if "hu_obs" in f:
+        return f["hu_obs"][:]
+
+    if "hu_obs_compact" not in f or "obs_indices" not in f:
+        raise KeyError(
+            "synthetic_obs.h5 contains neither a dense 'hu_obs' dataset nor "
+            "the compact 'hu_obs_compact'/'obs_indices' datasets needed to "
+            "reconstruct it."
+        )
+
+    compact = f["hu_obs_compact"][:]
+    obs_indices = np.asarray(f["obs_indices"][:], dtype=np.int64)
+    m_obs = compact.shape[1]
+    nd = int(f.attrs.get(
+        "state_dimension",
+        (int(obs_indices.max()) + 1) if obs_indices.size else 0,
+    ))
+
+    dense = np.zeros((nd, m_obs), dtype=np.float64)
+    dense[obs_indices, :] = compact
+    return dense
 
 
 def icesee_savefig(

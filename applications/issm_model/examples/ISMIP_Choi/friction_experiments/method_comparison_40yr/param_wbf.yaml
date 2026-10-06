@@ -1,0 +1,12 @@
+# WBF: deliberately wrong basal friction remains fixed.
+extends: param.yaml
+
+enkf-parameters:
+  data_path: _modelrun_datasets_method_comparison_40yr_wbf
+  inversion_flag: 0
+  inversion_start_time: 2.0
+  frozen_analysis_vars: [coefficient]
+  localized_vars: [bed]
+  localization_radius:
+    bed: 15000
+

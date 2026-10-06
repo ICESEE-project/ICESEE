@@ -26,8 +26,9 @@ from ICESEE.src.utils import tools, utils                                     # 
 from ICESEE.src.utils.utils import UtilsFunctions
 from ICESEE.src.EnKF.python_enkf.EnKF import EnsembleKalmanFilter as EnKF     # Ensemble Kalman Filter
 from ICESEE.applications.supported_models import SupportedModels              # supported models for data assimilation routine
-from ICESEE.src.utils.tools import icesee_get_index, display_timing_default,display_timing_verbose, save_all_data, \
+from ICESEE.src.utils.tools import icesee_get_index, save_all_data, \
                                    load_bed_masks_from_h5
+from ICESEE.src.utils.performance import emit_performance_report, register_run_metadata
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
                               generate_enkf_field
@@ -35,8 +36,9 @@ from ICESEE.src.utils.localization import prepare_random_field_coordinates
 
 from ICESEE.src.utils.inference_plugin import (
     reset_inference_plugin_state,
+    resolve_analysis_cycle_time,
 )
-from ICESEE.src.utils.icesee_context import normalize_icesee_kwargs
+from ICESEE.src.utils.icesee_context import normalize_execution_mode, normalize_icesee_kwargs
 
 # ======================== Run model with EnKF ========================
 def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
@@ -47,7 +49,7 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
     # --- unpack the data assimilation arguments
     filter_type       = icesee_kwargs.get("filter_type", "EnKF")      # filter type
     model             = icesee_kwargs.get("model_name",None)          # model name
-    parallel_flag     = icesee_kwargs.get("parallel_flag",False)      # parallel flag
+    execution_mode    = normalize_execution_mode(icesee_kwargs, expected=1)
     Q_err             = icesee_kwargs.get("Q_err",None)               # process noise
     commandlinerun    = icesee_kwargs.get("commandlinerun",None)      # run through the terminal
     Lx, Ly            = icesee_kwargs.get("Lx",1.0), icesee_kwargs.get("Ly",1.0)
@@ -56,7 +58,7 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
     resume_timestep   = 0
 
     # --- call the ICESEE mpi parallel manager ---
-    if re.match(r"\AMPI_model\Z", parallel_flag, re.IGNORECASE):
+    if execution_mode == 1:
         from mpi4py import MPI
         from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
         from ICESEE.src.parallelization._mpi_analysis_functions import analysis_enkf_update, EnKF_X5, DEnKF_X5, \
@@ -69,7 +71,10 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
                                             parallel_write_vector_from_root, parallel_write_full_ensemble_from_root, \
                                             parallel_write_ensemble_scattered, gather_and_broadcast_data_default_run
         from ICESEE.src.parallelization._mpi_generate_true_wrong_state import generate_true_wrong_state
-        from ICESEE.src.parallelization._mpi_generate_synthetic_observations import generate_synthetic_observations
+        from ICESEE.src.parallelization._mpi_generate_synthetic_observations import (
+            generate_synthetic_observations,
+            synchronize_observation_schedule,
+        )
         from ICESEE.src.parallelization._mpi_ensemble_intialization import ensemble_initialization
 
         # start the timer
@@ -111,7 +116,11 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
         icesee_kwargs.update({"true_nurged_file": _true_nurged, "synthetic_obs_file": _synthetic_obs})
 
         # --- initialize seed for reproducibility ---
-        ParallelManager().initialize_seed(comm_world, base_seed=0)
+        # Modes 1 and 2 must start from the same global seed.  Individual
+        # forecast/process-noise streams are member keyed downstream, so this
+        # seed controls initialization without depending on MPI placement.
+        base_seed = int(icesee_kwargs.get("base_seed", 42))
+        ParallelManager().initialize_seed(comm_world, base_seed=base_seed)
 
         # fetch model nprocs
         model_nprocs = icesee_kwargs.get("model_nprocs", 1)
@@ -185,6 +194,10 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
         time_generation_synthetic_obs = MPI.Wtime()
         # call the generate_synthetic_observations function
         icesee_kwargs =  generate_synthetic_observations(**icesee_kwargs)
+        # The writer rank updates the schedule while constructing observations;
+        # reload it from the artifact and broadcast it so every analysis rank
+        # follows the exact same model-step schedule.
+        icesee_kwargs = synchronize_observation_schedule(icesee_kwargs)
         # --- time generation of synthetic observations ---
         time_generation_synthetic_obs = MPI.Wtime() - time_generation_synthetic_obs
 
@@ -333,6 +346,15 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
         comm_world.Barrier()
         parallel_manager = None # debugging flag for now
 
+    # CLEANUP NOTE (unreachable in this driver): normalize_execution_mode(
+    # icesee_kwargs, expected=1) above already raises ValueError before this
+    # point whenever execution_mode != 1, so this else branch -- including
+    # its own hardcoded size_world=1/rank_world=0 and inline ensemble
+    # re-initialization with unseeded, unscaled noise -- can never execute
+    # from icesee_model_data_assimilation_partial_parallel. Left in place
+    # rather than removed alongside the Mode-0 process-noise fix, to keep
+    # that scientific correction and this dead-code removal as separate,
+    # independently reviewable changes.
     else:
         parallel_manager = None
         model_module = SupportedModels(model=model,verbose=icesee_kwargs.get('verbose')).call_model()
@@ -452,6 +474,7 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
         km = int(np.searchsorted(obs_index, resume_timestep, side="left"))
     else:
         km = 0
+    km_at_start = km
 
     if icesee_kwargs.get("use_random_fields", False):
         pos_obs, gs_model_obs, L_C_obs = compute_Q_err_random_fields(hdim, icesee_kwargs["total_state_param_vars"], icesee_kwargs["sig_obs"], Q_rho, len_scale)
@@ -469,7 +492,7 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
         icesee_kwargs.update({"k": k, "km":km, "alpha": alpha, "rho": rho, "tau": tau, "dt": dt,"n": n})
         icesee_kwargs.update({"generate_enkf_field": generate_enkf_field})
 
-        if re.match(r"\AMPI_model\Z", parallel_flag, re.IGNORECASE):
+        if execution_mode == 1:
             _time_forecast_step = MPI.Wtime()
 
             icesee_kwargs.update({"_modelrun_datasets": _modelrun_datasets,
@@ -522,7 +545,9 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
                         inversion_start_time = float(
                             icesee_kwargs.get("inversion_start_time", 0.0)
                         )
-                        cycle_time = float(np.asarray(icesee_kwargs["t"])[k])
+                        cycle_time, model_cycle_time = resolve_analysis_cycle_time(
+                            icesee_kwargs, k, km
+                        )
                         inversion_flag = (
                             inversion_enabled
                             and cycle_time + 1.0e-12 >= inversion_start_time
@@ -536,8 +561,15 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
                         if rank_world == 0 and inversion_enabled and not inversion_flag:
                             print(
                                 "[ICESEE] Deferring friction inversion at "
-                                f"t={cycle_time:g} yr; configured start is "
+                                f"observation t={cycle_time:g} yr "
+                                f"(model t={model_cycle_time:g} yr); configured start is "
                                 f"{inversion_start_time:g} yr."
+                            )
+                        elif rank_world == 0 and inversion_flag:
+                            print(
+                                "[ICESEE] Friction inversion enabled at "
+                                f"observation t={cycle_time:g} yr "
+                                f"(model t={model_cycle_time:g} yr)."
                             )
                         nd_old = icesee_kwargs.get("nd", nd)
                         icesee_kwargs.update({"nd_old": nd_old})
@@ -806,28 +838,34 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
     time_init_ensemble_mean = comm_world.allreduce(time_init_ensemble_mean_computation, op=MPI.MAX)
 
     comm_world.Barrier()
-    if rank_world == 0:
-        verbose = icesee_kwargs.get("verbose", False)
-        if True:
-             display_timing_verbose(
-            computational_time=total_elapsed_time,
-            wallclock_time=total_wall_time,
-            true_wrong_time=true_wrong_time,
-            assimilation_time=assimilation_time,
-            forecast_step_time=forecast_step_time,
-            analysis_step_time=analysis_step_time,
-            ensemble_init_time=ensemble_init_time,
-            init_file_time=init_file_time,
-            forecast_file_time=forecast_file_time,
-            analysis_file_time=analysis_file_time,
-            total_file_time=total_file_time,
-            forecast_noise_time=forecast_noise_time,
-            time_init_ensemble_mean_computation=time_init_ensemble_mean,
-            time_forecast_ensemble_mean_computation=time_forecast_ensemble_mean,
-            time_analysis_ensemble_mean_computation=time_analysis_ensemble_mean,
-            comm=comm_world
-        )
-        else:
-            display_timing_default(total_elapsed_time, total_wall_time)
-    else:
-        None
+
+    register_run_metadata(
+        execution_mode=icesee_kwargs.get("execution_mode"),
+        model=icesee_kwargs.get("model_name"),
+        ensemble_size=icesee_kwargs.get("Nens"),
+        forecast_steps=icesee_kwargs.get("nt") - resume_timestep,
+        analysis_events=km - km_at_start,
+    )
+    emit_performance_report(
+        comm_world,
+        elapsed_s=global_elapsed_time,
+        phases={
+            "true_wrong_state": time_generation_true_and_wrong_state,
+            "observation_generation": time_generation_synthetic_obs,
+            "ensemble_init": time_ensemble_initialization,
+            "forecast_step": time_forecast_step,
+            "analysis_step": time_analysis_step,
+            "init_file_io": time_init_file_writing,
+            "forecast_file_io": time_forecast_file_writing,
+            "analysis_file_io": time_analysis_file_writing,
+            "forecast_noise": time_forecast_noise_generation,
+            "init_ensemble_mean": time_init_ensemble_mean_computation,
+            "forecast_ensemble_mean": time_forecast_ensemble_mean_generation,
+            "analysis_ensemble_mean": time_analysis_ensemble_mean_generation,
+        },
+        counts={
+            "forecast_step": icesee_kwargs.get("nt") - resume_timestep,
+            "analysis_step": km - km_at_start,
+        },
+        output_dir=_modelrun_datasets,
+    )

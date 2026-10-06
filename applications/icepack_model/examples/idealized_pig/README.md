@@ -7,6 +7,31 @@ This example showcases synthetic ice stream modeling with various ensemble Kalma
 
 ---
 
+## Initialization data
+
+Data assimilation starts from the final state (history index 20000) of the
+1000-year spin-up stored in `data/extended_beta1000yrs.h5` (~39.5 GB). By
+default (`compact_initialization: true` in `params.yaml`) the model reads that
+state from a compact checkpoint, `data/extended_beta1000yrs_compact_idx20000.h5`
+(~29 MB): the mesh, `velocity`/`thickness`/`surface` at index 20000, and
+`bed`, `grounded`, `floating`, `fluidity`, `extended_beta`, copied unchanged.
+
+Build the compact checkpoint once from the spin-up history, from this
+directory:
+
+```bash
+python tools/build_compact_initialization.py \
+    --source data/extended_beta1000yrs.h5 \
+    --dest data/extended_beta1000yrs_compact_idx20000.h5 \
+    --idx 20000
+```
+
+The full spin-up history is needed only to build the compact checkpoint, or to
+initialize directly from it with
+`--compact_initialization=False --initFile=data/extended_beta1000yrs.h5`.
+
+---
+
 ## Running via `run_da_icepack.py`
 
 Follow these steps to execute the [run_da_icepack.py](./run_da_icepack.py) script. All parameters are managed in the [params.yaml](./params.yaml) file for easy configuration.

@@ -3,6 +3,7 @@ import os
 import sys
 import shutil
 import subprocess
+import tempfile
 
 import matplotlib
 matplotlib.use("Agg")
@@ -10,6 +11,8 @@ matplotlib.use("Agg")
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import h5py
+import numpy as np
+import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -19,19 +22,42 @@ DATA_DIR = LORENZ_DIR / "_modelrun_datasets"
 FIGURE_DIR = DATA_DIR / "figures"
 
 
-def run_lorenz96_example():
-    print("Running Lorenz96 example...")
-    print(f"Working directory: {LORENZ_DIR}")
+def _mode_config(mode, temporary_directory):
+    source = LORENZ_DIR / "params.yaml"
+    with source.open("r", encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    output = DATA_DIR / f"ci_mode_{mode}"
+    enkf = config["enkf-parameters"]
+    enkf["execution_mode"] = mode
+    enkf["data_path"] = str(output)
+    enkf["restart_enabled"] = False
+    enkf["force_fresh_start"] = True
+    destination = Path(temporary_directory) / f"lorenz_mode_{mode}.yaml"
+    with destination.open("w", encoding="utf-8") as stream:
+        yaml.safe_dump(config, stream, sort_keys=False)
+    return destination, output
 
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96",
-        ],
-        cwd=LORENZ_DIR,
-        check=True,
-    )
+
+def run_lorenz96_modes():
+    print(f"Running Lorenz96 modes 0, 1, and 2 in {LORENZ_DIR}")
+    outputs = {}
+    with tempfile.TemporaryDirectory(prefix="icesee-lorenz-ci-") as temporary:
+        for mode in (0, 1, 2):
+            config, output = _mode_config(mode, temporary)
+            command = [
+                sys.executable, "-m",
+                "ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96",
+                "-F", str(config),
+            ]
+            if mode in (1, 2):
+                launcher = shutil.which("mpirun") or shutil.which("mpiexec")
+                if launcher is None:
+                    raise RuntimeError("MPI launcher is required for execution modes 1 and 2")
+                command = [launcher, "-np", "2"] + command
+            print(f"[ICESEE CI] mode {mode}: {' '.join(command)}")
+            subprocess.run(command, cwd=LORENZ_DIR, check=True)
+            outputs[mode] = output
+    return outputs
 
 
 def read_h5_dataset(file_path):
@@ -42,8 +68,7 @@ def read_h5_dataset(file_path):
     return data
 
 
-def load_lorenz_outputs():
-    data_dir = DATA_DIR
+def load_lorenz_outputs(data_dir):
 
     tw_file = data_dir / "true-wrong-lorenz.h5"
     ensemble_file = data_dir / "icesee_ensemble_data.h5"
@@ -64,7 +89,27 @@ def load_lorenz_outputs():
         ensemble_nurged_state = f["nurged_state"][:]
 
     with h5py.File(obs_file, "r") as f:
-        w = f["hu_obs"][:]
+        if "hu_obs" in f:
+            # Execution modes 0 and 1 retain the historical dense layout.
+            w = f["hu_obs"][:]
+        elif "hu_obs_compact" in f:
+            # Execution mode 2 stores only observed state rows.  Reconstruct
+            # the dense view expected by this small CI plotting routine; the
+            # production analysis continues to consume the compact layout.
+            compact = f["hu_obs_compact"][:]
+            observed = np.asarray(f["obs_indices"][:], dtype=np.int64)
+            active = np.asarray(f["obs_active"][:], dtype=bool)
+            w = np.full(
+                (ensemble_true_state.shape[0], compact.shape[1]),
+                np.nan,
+                dtype=compact.dtype,
+            )
+            compact = np.where(active, compact, np.nan)
+            w[observed, :] = compact
+        else:
+            raise KeyError(
+                f"{obs_file} contains neither 'hu_obs' nor 'hu_obs_compact'"
+            )
 
     return {
         "t": tw["t"],
@@ -75,6 +120,28 @@ def load_lorenz_outputs():
         "ensemble_vec_mean": ensemble_vec_mean,
         "w": w,
     }
+
+
+def validate_mode_outputs(outputs):
+    loaded = {mode: load_lorenz_outputs(path) for mode, path in outputs.items()}
+    for mode, data in loaded.items():
+        mean = np.asarray(data["ensemble_vec_mean"])
+        if mean.size == 0 or not np.all(np.isfinite(mean)):
+            raise AssertionError(f"execution mode {mode} produced an invalid ensemble mean")
+        print(f"[ICESEE CI] mode {mode}: valid ensemble mean {mean.shape}")
+
+    # Modes 1 and 2 implement the same stochastic filter and are the strict
+    # numerical-parity pair. Mode 0 is a separate serial filter path and is a
+    # smoke/finite-output check here.
+    partial = np.asarray(loaded[1]["ensemble_vec_mean"])
+    full = np.asarray(loaded[2]["ensemble_vec_mean"])
+    if partial.shape != full.shape:
+        raise AssertionError(f"mode 1/2 output shapes differ: {partial.shape} vs {full.shape}")
+    max_difference = float(np.max(np.abs(partial - full)))
+    if not np.allclose(partial, full, rtol=1e-7, atol=1e-7):
+        raise AssertionError(f"mode 1/2 parity failed: max difference={max_difference:.6g}")
+    print(f"[ICESEE CI] mode 1/2 parity max difference: {max_difference:.6g}")
+    return loaded
 
 
 def plot_lorenz_outputs(data):
@@ -132,9 +199,9 @@ def main():
     if str(parent) not in sys.path:
         sys.path.insert(0, str(parent))
 
-    run_lorenz96_example()
-    data = load_lorenz_outputs()
-    plot_lorenz_outputs(data)
+    outputs = run_lorenz96_modes()
+    loaded = validate_mode_outputs(outputs)
+    plot_lorenz_outputs(loaded[2])
 
 
 if __name__ == "__main__":

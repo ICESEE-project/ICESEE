@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose new ICESEE functionality or an architectural change
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What scientific or engineering problem does this solve? Link related issues/discussions if any.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: What would change. For shared-infrastructure or architectural proposals (new abstractions, communicator topology, state-management strategy), consider drafting an ADR in docs/architecture/ instead of/alongside this issue.
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - Single model/application
+        - Shared ICESEE infrastructure (affects all models)
+        - Execution-mode / MPI architecture
+        - Documentation / Wiki
+        - Tooling / CI / packaging
+    validations:
+      required: true
+  - type: textarea
+    id: compat
+    attributes:
+      label: Scientific-behavior / compatibility impact
+      description: Could this change existing numerical results or the icesee_kwargs contract? If so, how would equivalence be validated?

@@ -12,9 +12,30 @@
 
 modeling-parameters:
   # Model parameters
-  num_years: 5         # number of years to run the model
-  timesteps_per_year: 0.2   # number of timesteps per year
-  initFile: 'data/extended_beta1000yrs.h5' # input file
+  num_years: 82         # number of years to run the model (icesee/features
+  # convention, 2026-09-28 reconciliation: 1935-2017 PIG basal-melt
+  # forcing timeline -- see BasalMeltRate's scenario schedule)
+  # timesteps_per_year: in this example, the model step length in years
+  # (--dt on the command line sets the same step). Production uses 0.05.
+  # Coarser steps are honored but numerically unsuitable here: at 0.5 the
+  # Icepack velocity solve fails to converge within the first 20 steps.
+  timesteps_per_year: 0.05
+  # nt: this application's own already-resolved timestep count
+  # (num_years/timesteps_per_year = 82/0.05 = 1640, matching
+  # run_da_icepack.py's own nt derivation exactly). Declared explicitly
+  # (2026-09-28, second pass) so the generic config loader's one-time
+  # internal observation-schedule time grid (config/_utility_imports.py)
+  # uses Idealized PIG's own resolved discretization instead of guessing
+  # at what `timesteps_per_year` means generically -- see that file's own
+  # comment and test_observation_schedule_uses_correct_nt_convention.py.
+  nt: 1640
+  # Initialization: the compact checkpoint (~29 MB) holds the final
+  # spin-up state (history index 20000) of data/extended_beta1000yrs.h5
+  # (~39.5 GB), extracted by tools/build_compact_initialization.py and
+  # verified field-for-field against it. To read the full spin-up history
+  # instead: --compact_initialization=False --initFile=data/extended_beta1000yrs.h5
+  initFile: 'data/extended_beta1000yrs_compact_idx20000.h5' # input file
+  compact_initialization: true
   paramsFile: 'data/extended_beta1000yrs.yaml' # parameter file
   meshFile: 'data/PigFull2017GeomFull.exp' # mesh file
   SMBFile: 'data/OLS_Trend_plus_Resid_9b9.tif' # SMB file
@@ -27,23 +48,73 @@ modeling-parameters:
   experiments: 0                     # experiment 1 for changing timing of basal melt, 1 for changing C, 2 for ... 
   bmr_increase_time: 0               # timing (in years) of when to begin a linear increase in BMR (relative to start of simulation)
   #save_steps: [19, 34, 54, 69, 81]  # years into the simulation at which to save the flowline profile (for a simulation of PIG between 1935 - 2017)
-  save_steps: [0, 2, 3, 4]              # years into the simulation at which to save the flowline profile
+  save_steps: [34, 69, 81]           # years into the simulation at which to save the flowline profile (icesee/features convention; initial state is saved separately)
 
 enkf-parameters:
   # Ensemble Kalman Filter parameters
+  # model_nprocs: Mode-3's own spatial-decomposition rank count
+  # (create_distributed_topology's spatial_ranks in mode3_runner.py) --
+  # a SEPARATE concept from the generic ResourcePlan's ranks_per_model;
+  # overriding --ranks_per_model alone does NOT affect Mode-3 spatial
+  # decomposition for icepack. Default 0 -> mode3_runner.py's own
+  # `icesee_kwargs.get("model_nprocs") or 1` falls back to 1 (no spatial
+  # partitioning, one rank per ensemble group), preserving existing
+  # behavior exactly.
+  model_nprocs: 0
+  # use_member_streaming: opt-in, bounded-memory round scheduling (Option B
+  # -- StreamingNativeDistributedMemberPool, src/parallelization/
+  # distributed_streaming_runtime.py). Keeps at most ONE round-assigned
+  # member's native Firedrake state resident at a time instead of all of
+  # them simultaneously (see initialize_native_member_pool). Default False
+  # preserves the existing, extensively-validated persistent-pool behavior
+  # exactly; set True (e.g. --use_member_streaming=True) to opt in.
+  use_member_streaming: False
+  # use_store_streaming_analysis: opt-in, requires use_member_streaming=True
+  # too. Selects run_native_store_streaming_analysis_cycle (state-row-block
+  # streaming through the InactiveMemberStore) instead of the original
+  # transform_local_members path. Default False preserves existing behavior.
+  use_store_streaming_analysis: False
+  # member_store_backend: InactiveMemberStore backend selected by
+  # build_inactive_member_store (src/parallelization/distributed_member_store.py).
+  # "memory" (default, unchanged behavior) | "hdf5_member_major" (Option-C
+  # out-of-core prototype, one HDF5 file per rank under member_store_root).
+  member_store_backend: memory
+  # member_store_root: directory for a file-backed backend. Empty string
+  # (default) resolves to <data_path>/_mode3_member_store/<run_id> -- never
+  # /tmp, never a hardcoded HPC path.
+  member_store_root: ""
   Nens: 40                 # number of ensemble members (now set in the command line)
   freq_obs: 1              # frequency of observations (per year?)
-  obs_max_time: 4         # maximum time for observations
-  obs_start_time: 2        # start time for observations
+  # obs_start_time/obs_max_time: icesee/features convention (2026-09-28
+  # reconciliation, adopted after fixing the nt-formula bug in
+  # config/_utility_imports.py that previously collapsed any window to a
+  # single degenerate observation regardless of these values -- see
+  # test_observation_schedule_uses_correct_nt_convention.py). Produces
+  # observation years 10..40 (31 analysis events) at num_years=82,
+  # timesteps_per_year=0.05 (nt=1640) -- exact timestep indices are
+  # 200, 220, 240, ..., 800 (step = freq_obs/timesteps_per_year = 20).
+  obs_max_time: 40         # maximum time for observations
+  obs_start_time: 10        # start time for observations
 
-  num_state_vars: 4      # number of state variables  [h,u,v]
-  num_param_vars: 1       # number of parameter variables [bmr]
+  # num_state_vars/num_param_vars: icesee/features convention (2026-09-28
+  # reconciliation) -- basal_melt_field is bookkept as an ordinary state
+  # variable (5+0), not a jointly-estimated parameter (was 4+1). The
+  # packed vector itself is unchanged in either convention: [h,u,v,s,
+  # basal_melt_field] (see config/_utility_imports.py's vec_inputs
+  # truncation logic and total_state_param_vars derivation).
+  num_state_vars: 5      # number of state variables  [h,u,v,s,basal_melt_field]
+  num_param_vars: 0       # number of parameter variables (none -- basal_melt_field moved to state)
   vec_inputs: ['h','u','v', 's', 'basal_melt_field']
   observed_params: ['s']  # surface elevation
+  random_field_method: graph   # graph (decomposition-invariant) or fft
 
   generate_synthetic_obs: 1  # Generate synthetic observations for testing
   generate_true_state:    1  # Generate true state for synthetic observations
-  generate_nurged_state:  1  # Generate nudged state for synthetic observations
+  # Full no-assimilation wrong/nudged reference trajectory (read_results.ipynb's
+  # "Wrong" curve). Not used by the DA -- ensemble members are initialized from
+  # the wrong initial state directly -- so off by default; --generate_nurged_state=1
+  # to produce it.
+  generate_nurged_state:  0
   initialize_ensemble: 1
   use_ensemble_pertubations: 1 # Use ensemble perturbations for ensemble state
   sequential_ensemble_initialization: 0  # Sequential ensemble initialization (True for sequential, False for parallel)
@@ -59,19 +130,27 @@ enkf-parameters:
   localization_flag: False      # localization flag: True, False
 
   # estimation flags
-  joint_estimation: 1 # joint estimation flag: True, False
-  parameter_estimation: True # parameter estimation flag: True, False
-  joint_estimated_params: ['basal_melt_field']  # parameter(s) to be jointly estimated
+  joint_estimation: 0 # joint estimation flag: True, False (icesee/features convention -- basal_melt_field is state, not a joint-estimated parameter)
+  parameter_estimation: False # parameter estimation flag: True, False
+  joint_estimated_params: []  # parameter(s) to be jointly estimated (none under the current convention)
 
   # nudged parameters
-  wrong_basal_melt_field: 2         # scalar factor to "nudge" the basal melt rate field
+  # wrong_basal_melt_field: currently VESTIGIAL/INERT. The true-vs-wrong
+  # basal-melt divergence is now produced by BasalMeltRate's experiment
+  # selector (melt_max ramps 20->100 for the true trajectory, stays
+  # constant at 20 for the wrong/ensemble trajectory -- see
+  # _icepack_model.py's EXPERIMENT_TRUE/EXPERIMENT_WRONG), not by adding
+  # this scalar to basal_melt_field. Kept at the student's value for
+  # config compatibility; nothing currently reads it into the active
+  # physics path (see run_da_icepack.py's bmr_nudged, which is computed
+  # but unused).
+  wrong_basal_melt_field: 5         # scalar factor formerly used to "nudge" the basal melt rate field
 
   # enkf model parameters
   model_name: "icepack"               # name of the model
   model_solver: "solver_weertman"     # name of the solver
   filter_type: "EnKF"               # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
   local_analysis: False           # local analysis flag: True, False, global analysis is default
-  parallel_flag: "MPI_model"             # parallel flag: Serial, MPI, MPI_model
   n_modeltasks: 1                     # number of model tasks (for MPI)
   commandlinerun: "True"              # command line run flag: True, False
   execution_flag: 0                  #`execution flag: 0 ->default, 1 -> sequntial, 2 -> even_distribution_of_problem size, 3 -> even_distribution_of_problem size with load balancing

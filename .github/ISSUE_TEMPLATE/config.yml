@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Usage question
+    url: https://github.com/ICESEE-project/ICESEE/wiki
+    about: Check the Wiki (Installation, Usage, Short Tutorials, Common Issues and Solutions) before filing a usage question as an issue.
+  - name: Security vulnerability
+    url: https://github.com/ICESEE-project/ICESEE/security/advisories/new
+    about: Report privately per SECURITY.md — do not open a public issue for a suspected vulnerability.

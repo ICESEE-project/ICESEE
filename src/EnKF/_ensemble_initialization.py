@@ -13,11 +13,7 @@ import os
 import time
 
 from ICESEE.src.utils.tools import icesee_get_index, env_flag
-from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
-                              compute_noise_random_fields, \
-                              generate_pseudo_random_field_1d, \
-                              generate_pseudo_random_field_2D, \
-                              generate_enkf_field
+from ICESEE.src.run_model_da._error_generation import generate_initial_member_increment
 
 def ensemble_initialization(**icesee_kwargs):
     """Initialize the ensemble for the ICESEE model.
@@ -74,38 +70,24 @@ def ensemble_initialization(**icesee_kwargs):
             for key, value in data.items():
                 ensemble_vec[indx_map[key],ens] = value
 
-            # --->
-            # noise = compute_noise_random_fields(ens, hdim, pos, gs_model, icesee_kwargs["total_state_param_vars"], L_C)
-            # ensemble_vec[:,ens] += noise
-            #----->
+            # Every member draws its initial-perturbation noise from the
+            # same canonical, member-keyed generator used by modes 1/2
+            # (generate_initial_member_increment in
+            # src/run_model_da/_error_generation.py), so an application's
+            # initial ensemble no longer depends on which execution mode
+            # produced it. This gives every member an independent
+            # reproducible stream per variable block (fixing a prior bug
+            # where every member shared one RNG re-seeded from the same
+            # base seed, collapsing the ensemble to zero spread) and scales
+            # each block by sig_Q (fixing a prior bug where the raw,
+            # unscaled field -- whose magnitude is set by length_scale, not
+            # sig_Q -- was added directly).
             _time_init_noise_generation = time.time()
-            N_size = icesee_kwargs["total_state_param_vars"] * hdim
-            # noise = generate_pseudo_random_field_1d(N_size,np.sqrt(Lx*Ly), len_scale, verbose=True)
-            icesee_kwargs.update({"ii_sig": None, "hdim":hdim, "num_vars":icesee_kwargs["total_state_param_vars"]})
-            # noise = generate_enkf_field(**icesee_kwargs)
-
-            if (len(icesee_kwargs.get("scalar_inputs", [])) > 0) or (icesee_kwargs.get("var_nd", None) is not None):
-                icesee_kwargs.update({"ii_sig": None, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim})
-                noise_1 = generate_enkf_field(**icesee_kwargs)
-                ndim = 1 if len(icesee_kwargs.get("scalar_inputs", [])) > 0 else (icesee_kwargs["var_nd"][icesee_kwargs["scalar_inputs"][0]])
-                icesee_kwargs.update({ "noise_dim": ndim})
-                noise_2 = generate_enkf_field(**icesee_kwargs)
-                # concatenate noise_1 and noise_2
-                noise = np.concatenate((noise_1, noise_2))[:-1]
-
-            else:
-                icesee_kwargs.update({"ii_sig": None, "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": hdim})
-                noise = generate_enkf_field(**icesee_kwargs)
-
+            increment, _ = generate_initial_member_increment(
+                hdim, icesee_kwargs, ens, ensemble_vec.shape[0]
+            )
             time_init_noise_generation += time.time() - _time_init_noise_generation
-            # print(f"\nensemble_vec[:,{ens}]: {ensemble_vec[:,ens]} noise: {noise}, hdim: {hdim} Lx: {Lx}, Ly: {Ly}, len_scale: {len_scale}, total_params: {icesee_kwargs['total_state_param_vars']}\n")
-            ensemble_vec[:,ens] += noise
-            # for ii, sig in enumerate(icesee_kwargs["sig_Q"]):
-            #     if ii <=icesee_kwargs["num_state_vars"]:
-            #         start_idx = ii * hdim
-            #         end_idx = start_idx + hdim
-            #         ensemble_vec[start_idx:end_idx, ens] += noise[start_idx:end_idx] * sig
-            # print(f"\nensemble_vec[:,{ens}]: {ensemble_vec[:,ens]}\n")
+            ensemble_vec[:, ens] += increment
         shape_ens = np.array(ensemble_vec.shape,dtype=np.int32)
 
     # now reset the model_nprocs

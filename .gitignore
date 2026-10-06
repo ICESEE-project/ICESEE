@@ -169,6 +169,18 @@ venv/
 **/_modelrun_datasets_*/
 **/_modelrun_*/
 **/_reviewer_*/
+# The same names without a trailing slash: a rule ending in "/" matches only
+# real directories, so a symlink to a local results/dataset directory would
+# otherwise be committed.
+**/_modelrun_datasets
+**/_modelrun_datasets_*
+**/_modelrun_*
+**/_reviewer_*
+# Machine-local input datasets (often symlinked into the example directories)
+applications/icepack_model/examples/idealized_pig/data
+applications/issm_model/examples/ISMIP_Choi/spinup/data_new
+# Per-job PACE calibration/validation outputs
+**/pace_runs/
 **/results/
 **/icesee_perf_outputs/
 **/None/
@@ -222,4 +234,4 @@ slurm-*.out
 *.jpeg
 *.pdf
 *.h5
-*.tex
+*.texsrc/tests/parallel_mpi/parallel_test_*.hdf5

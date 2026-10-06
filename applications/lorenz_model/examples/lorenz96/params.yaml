@@ -47,8 +47,11 @@ enkf-parameters:
   # enkf model parameters
   model_name: "lorenz"         # name of the model
   filter_type: "EnKF"           # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
-  parallel_flag: "serial"             # parallel flag: Serial, MPI, MPI_model
-  execution_mode: 0                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
+  execution_mode: 2                  # execution mode: 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
+  # Every rank in a model communicator computes/holds the same full state
+  # (num_state_vars is a fixed constant, not a per-rank partition) -- see
+  # src/utils/state_ownership.py. Required whenever ranks_per_model > 1.
+  state_distribution: replicated
   commandlinerun: "True"         # command line run flag: True, False
   data_path: _modelrun_datasets
  

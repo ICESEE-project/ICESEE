@@ -1,0 +1,616 @@
+# ==============================================================================
+# ICESEE Multi-Node Apptainer Definition File
+# ==============================================================================
+#
+#  Bundled science stack:
+#    ├── Firedrake (FEM framework)          – Python, PETSc-based
+#    ├── Icepack   (glacier dynamics)       – built on Firedrake
+#    ├── ISSM      (Ice Sheet System Model) – MATLAB + Python interfaces
+#    └── ICESEE    (ensemble explorer)      – Python scientific framework
+#
+#  MPI strategy  — CIQ / PMI2 approach (ABI-agnostic multi-node):
+#    OpenMPI 5.0.7 is baked into the image with PMI2 + PMIx + UCX + libfabric.
+#    Slurm's "srun --mpi=pmi2" wires processes across nodes; the in-container
+#    OpenMPI handles all inter-rank communication.  No host MPI version match
+#    required.  See: https://ciq.com/blog/a-new-approach-to-mpi-in-apptainer/
+#
+#  PETSc for Firedrake : 3.24.0 via Spack  (linked against our OpenMPI)
+#  PETSc for ISSM      : 3.22   via ISSM externalpackages (same OpenMPI)
+#
+#  MATLAB              : bind-mounted at runtime from host – NOT baked in.
+#                        MATLAB must also be present on the BUILD host so that
+#                        ISSM's MATLAB/mex interface can be compiled.
+#
+# ------------------------------------------------------------------------------
+#  BUILD (MATLAB present on build host)
+# ------------------------------------------------------------------------------
+#   export MATLAB_HOST=/cluster/matlab/R2024b        # adjust to your path
+#   apptainer build \
+#       --bind ${MATLAB_HOST}:/opt/matlab/R2024b \
+#       icesee-multinode.sif  icesee-multinode.def
+#
+# ------------------------------------------------------------------------------
+#  RUN — single-node interactive
+# ------------------------------------------------------------------------------
+#   apptainer shell \
+#       --bind ${MATLAB_HOST}:/opt/matlab/R2024b \
+#       icesee-multinode.sif
+#
+# ------------------------------------------------------------------------------
+#  RUN — multi-node MPI (Slurm)
+# ------------------------------------------------------------------------------
+#   #!/bin/bash
+#   #SBATCH --nodes=4
+#   #SBATCH --ntasks-per-node=32
+#   #SBATCH --job-name=icesee_run
+#   export MATLAB_HOST=/cluster/matlab/R2024b
+#   export MLM_LICENSE_FILE=1711@matlablic.ecs.gatech.edu
+#   srun --mpi=pmi2 \
+#        apptainer exec \
+#          --bind ${MATLAB_HOST}:/opt/matlab/R2024b \
+#          icesee-multinode.sif \
+#          python3 my_icepack_script.py
+#
+#   # For ISSM/MATLAB workloads replace the last line with:
+#   #   apptainer run --app issm  --bind ... icesee-multinode.sif  my_issm.m
+#
+#  Slurm --mpi alternatives (cluster-dependent):
+#    --mpi=pmi2    (most common; Slurm ≥ 18 + OpenMPI ≥ 4)
+#    --mpi=pmix    (preferred on Slurm ≥ 21 + PMIx-enabled OpenMPI)
+# ==============================================================================
+
+Bootstrap: docker
+From: ubuntu:22.04
+
+# ------------------------------------------------------------------------------
+%labels
+# ------------------------------------------------------------------------------
+    Author          Brian Kyanjo
+    ContactEmail    bkyanjo3@gatech.edu
+    Name            ICESEE-MultiNode
+    Version         2.0
+    Description     Multi-node Apptainer: Firedrake/Icepack + ISSM + ICESEE
+    MPI_Strategy    CIQ-PMI2  (srun --mpi=pmi2; ABI-agnostic multi-node)
+    OpenMPI         5.0.7  PMI2 + PMIx + UCX + OFI/libfabric
+    PETSc_Firedrake 3.24.0  (Spack-managed)
+    PETSc_ISSM      3.22    (ISSM externalpackage, same OpenMPI)
+    Base            ubuntu:22.04
+
+# ------------------------------------------------------------------------------
+%help
+# ------------------------------------------------------------------------------
+    ICESEE Multi-Node Scientific Container
+    =======================================
+    Firedrake + Icepack  FEM glacier dynamics (Python)
+    ISSM                 Ice Sheet System Model (MATLAB + Python)
+    ICESEE               Ensemble framework (Python)
+    OpenMPI 5.0.7        PMI2/PMIx/UCX multi-node MPI
+
+    Apps
+    ----
+    apptainer run --app firedrake  image.sif  script.py     # Firedrake/Python
+    apptainer run --app issm       image.sif  script.m      # ISSM/MATLAB
+    apptainer run --app python     image.sif  script.py     # bare Python
+
+    Multi-node Slurm (CIQ/PMI2)
+    ----------------------------
+    srun --mpi=pmi2 -N 4 -n 128 \
+         apptainer exec \
+           --bind /cluster/matlab/R2024b:/opt/matlab/R2024b \
+           icesee-multinode.sif \
+           python3 script.py
+
+    MATLAB license (set in your Slurm script before apptainer exec)
+    ---------------------------------------------------------------
+    export MLM_LICENSE_FILE=1711@matlablic.ecs.gatech.edu
+
+    MATLAB must be bind-mounted: --bind /host/matlab/R2024b:/opt/matlab/R2024b
+    Both at BUILD time (for ISSM mex compilation) and at RUN time.
+
+# ==============================================================================
+%post
+# ==============================================================================
+    set -euo pipefail
+    export DEBIAN_FRONTEND=noninteractive
+
+    # ── key installation paths (all baked into image) ─────────────────────────
+    OMPI_VERSION=5.0.7
+    OMPI_PREFIX=/opt/openmpi
+
+    ISSM_DIR=/opt/ISSM
+    ICESEE_DIR=/opt/ICESEE
+    FIREDRAKE_VENV=/opt/firedrake-venv
+    ICEPACK_SRC=/opt/icepack-src
+
+    SPACK_ROOT=/opt/spack
+    SPACK_STORE=/opt/spack-store
+
+    # MATLAB must be bind-mounted here at build time (--bind /path/matlab:/opt/matlab/R2024b)
+    MATLAB_DIR=/opt/matlab/R2024b
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PHASE 1 — System packages
+    # ══════════════════════════════════════════════════════════════════════════
+    echo ">>> PHASE 1: System packages"
+
+    # Timezone pre-seed (avoids interactive prompt)
+    echo "tzdata tzdata/Areas select America"          > /tmp/tz.preseed
+    echo "tzdata tzdata/Zones/America select New_York" >> /tmp/tz.preseed
+    debconf-set-selections /tmp/tz.preseed && rm /tmp/tz.preseed
+
+    apt-get update -y
+    apt-get install -y --no-install-recommends \
+        \
+        `# ── Build toolchain ───────────────────────────────────────────` \
+        build-essential gcc g++ gfortran \
+        cmake autoconf automake libtool \
+        git curl wget ca-certificates \
+        pkg-config patch zip unzip \
+        \
+        `# ── Python ────────────────────────────────────────────────────` \
+        python3 python3-dev python3-pip python3-venv \
+        \
+        `# ── SSL / compression ──────────────────────────────────────────` \
+        libssl-dev libffi-dev zlib1g-dev \
+        \
+        `# ── Math / BLAS / LAPACK ───────────────────────────────────────` \
+        libblas-dev liblapack-dev libgfortran5 \
+        \
+        `# ── UCX  (high-perf transport: InfiniBand, RoCE, shared-mem) ──` \
+        libucx-dev ucx-utils \
+        \
+        `# ── libfabric / OFI  (Cray Slingshot, Intel Omni-Path) ─────────` \
+        libfabric-dev \
+        \
+        `# ── hwloc  (CPU/NUMA topology-aware binding) ────────────────────` \
+        libhwloc-dev hwloc \
+        \
+        `# ── libevent  (OpenMPI async I/O) ─────────────────────────────` \
+        libevent-dev \
+        \
+        `# ── PMIx  (process-management interface, Slurm ≥19) ────────────` \
+        libpmix-dev pmix \
+        \
+        `# ── PMI2  (Slurm PMI2 headers – required for --mpi=pmi2) ───────` \
+        `# libslurm-dev provides /usr/include/slurm/pmi2.h + libpmi2.so   ` \
+        libslurm-dev \
+        \
+        `# ── InfiniBand verbs  (UCX IB transport) ──────────────────────` \
+        libibverbs-dev librdmacm-dev \
+        \
+        `# ── HDF5 system headers  (used by Spack bootstrap) ──────────────` \
+        libhdf5-dev \
+        \
+        `# ── Misc tools ─────────────────────────────────────────────────` \
+        fakeroot vim less \
+
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PHASE 2 — Build OpenMPI 5.0.7  (CIQ PMI2 / ABI-agnostic approach)
+    # ══════════════════════════════════════════════════════════════════════════
+    # The entire multi-node strategy hinges on this OpenMPI build:
+    #   --with-pmi2   → links libpmi2 (Slurm PMI2 client; srun --mpi=pmi2)
+    #   --with-pmix   → links libpmix  (PMIx client;  srun --mpi=pmix)
+    #   --with-ucx    → UCX transport (IB, RoCE, shared-mem) via UCX
+    #   --with-ofi    → libfabric transport (Slingshot, Omni-Path)
+    # All science codes in this image (Firedrake, ISSM, ICESEE) link against
+    # this single OpenMPI, ensuring uniform MPI ABI across the whole stack.
+    # ══════════════════════════════════════════════════════════════════════════
+    echo ">>> PHASE 2: Building OpenMPI ${OMPI_VERSION} with PMI2/PMIx/UCX/OFI"
+
+    cd /tmp
+    curl -fsSL \
+        "https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-${OMPI_VERSION}.tar.bz2" \
+        -o openmpi.tar.bz2
+    tar xjf openmpi.tar.bz2
+    cd "openmpi-${OMPI_VERSION}"
+
+    ./configure \
+        --prefix="${OMPI_PREFIX}"           \
+        --enable-shared                     \
+        --enable-static=no                  \
+        --disable-man-pages                 \
+        --enable-mpi-fortran=yes            \
+        --enable-mpi1-compatibility         \
+        --with-pmi                          \
+        --with-pmi2                         \
+        --with-pmix                         \
+        --with-ucx                          \
+        --with-ofi                          \
+        --with-hwloc                        \
+        --with-libevent                     \
+        --with-verbs                        \
+        2>&1 | tail -30
+
+    make -j"$(nproc)" install
+    cd /tmp && rm -rf openmpi*
+
+    # Expose OpenMPI for all subsequent build phases
+    export PATH="${OMPI_PREFIX}/bin:${PATH}"
+    export LD_LIBRARY_PATH="${OMPI_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
+    export MANPATH="${OMPI_PREFIX}/share/man:${MANPATH:-}"
+    export MPICC="${OMPI_PREFIX}/bin/mpicc"
+    export MPICXX="${OMPI_PREFIX}/bin/mpicxx"
+    export MPIFC="${OMPI_PREFIX}/bin/mpifort"
+    export CC="${MPICC}"
+    export CXX="${MPICXX}"
+    export FC="${MPIFC}"
+
+    echo ">>> OpenMPI ${OMPI_VERSION} ready:  $(mpicc --version | head -1)"
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PHASE 3 — Spack bootstrap  (manages PETSc + Python scientific stack)
+    # ══════════════════════════════════════════════════════════════════════════
+    # Spack is used to reproducibly build PETSc 3.24 against our custom
+    # OpenMPI.  The hand-built OpenMPI is registered as a Spack "external" so
+    # Spack will NOT rebuild it and all Spack packages will link against our
+    # PMI2/UCX-capable library.
+    # ══════════════════════════════════════════════════════════════════════════
+    echo ">>> PHASE 3: Bootstrapping Spack"
+
+    git clone -c feature.manyFiles=true --depth=1 \
+        https://github.com/spack/spack.git "${SPACK_ROOT}"
+
+    export PATH="${SPACK_ROOT}/bin:${PATH}"
+    . "${SPACK_ROOT}/share/spack/setup-env.sh"
+    spack compiler find --scope site
+
+    # Register our OpenMPI as a Spack external (no rebuild; ABI-uniform)
+    mkdir -p /root/.spack
+    GCC_FULL="$(gcc -dumpfullversion -dumpversion 2>/dev/null | head -1 || echo 11)"
+
+    cat > /root/.spack/packages.yaml <<PKGYAML
+packages:
+  all:
+    compiler: [gcc@${GCC_FULL}]
+  mpi:
+    buildable: false
+  openmpi:
+    buildable: false
+    externals:
+    - spec: openmpi@${OMPI_VERSION}+pmi+pmi2+pmix+ucx+ofi
+      prefix: ${OMPI_PREFIX}
+PKGYAML
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PHASE 4 — Spack environment: Python 3.11 · PETSc 3.24 · HDF5 · h5py
+    # ══════════════════════════════════════════════════════════════════════════
+    echo ">>> PHASE 4: Spack environment – Python 3.11, PETSc 3.24, HDF5"
+
+    # Optionally add ICESEE custom Spack repo (provides py-icesee package)
+    if git clone --depth=1 \
+           https://github.com/ICESEE-project/ICESEE-Spack.git /opt/icesee-spack-repo \
+           2>/dev/null; then
+        spack repo add /opt/icesee-spack-repo/icesee-spack 2>/dev/null || true
+    fi
+
+    spack env create icesee - <<'SPACK_YAML'
+spack:
+  view: false
+  concretizer:
+    unify: when_possible
+  config:
+    install_tree:
+      root: /opt/spack-store
+  specs:
+  # ── Python ──────────────────────────────────────────────────────────
+  - python@3.11 +pip +setuptools
+  - py-numpy@1.26.4      ^python@3.11
+  - py-cython            ^python@3.11
+  - py-setuptools        ^python@3.11
+  - py-wheel             ^python@3.11
+  - py-pip               ^python@3.11
+  - py-pkgconfig         ^python@3.11
+  # ── HDF5 + parallel h5py ────────────────────────────────────────────
+  - hdf5@1.14.5 +mpi +shared +fortran +cxx
+  - py-h5py@3.12.1 +mpi  ^python@3.11
+  # ── PETSc 3.24 (linked against our OpenMPI external) ────────────────
+  - petsc@3.24.0 +mpi +shared +double complex=False debug=False
+                +fortran +cxx +hdf5
+                +metis +mumps +hypre +scalapack +superlu-dist
+                ^python@3.11
+  - py-petsc4py@3.24.0   ^python@3.11
+  # ── MPI Python bindings ─────────────────────────────────────────────
+  - py-mpi4py@4.0.1      ^python@3.11
+  # ── Build helpers ───────────────────────────────────────────────────
+  - ninja
+  - pkgconf
+SPACK_YAML
+
+    spack env activate icesee
+    spack concretize -f  2>&1 | tail -40
+    spack install -j"$(nproc)"  2>&1
+
+    # Capture environment loads for runtime sourcing (no Spack binary needed)
+    spack env loads --sh -r icesee > /etc/spack-icesee-loads.sh
+    echo ">>> Spack icesee environment installed."
+
+    # Locate Spack-managed paths for subsequent phases
+    SPACK_PYTHON="$(spack location -i python)/bin/python3"
+    PETSC_SPACK="$(spack location -i petsc)"
+    HDF5_SPACK="$(spack location -i hdf5)"
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PHASE 5 — Firedrake + Icepack  (Python venv, Spack PETSc)
+    # ══════════════════════════════════════════════════════════════════════════
+    echo ">>> PHASE 5: Firedrake + Icepack"
+
+    export PETSC_DIR="${PETSC_SPACK}"
+    unset  PETSC_ARCH
+    export HDF5_MPI=ON
+    export OMP_NUM_THREADS=1
+    export OPENBLAS_NUM_THREADS=1
+
+    # Create Firedrake venv on top of Spack's Python (--system-site-packages
+    # makes petsc4py, mpi4py, h5py from Spack immediately available)
+    "${SPACK_PYTHON}" -m venv --system-site-packages "${FIREDRAKE_VENV}"
+    . "${FIREDRAKE_VENV}/bin/activate"
+
+    # Pin to Firedrake-compatible versions before the Firedrake pip install
+    pip install -U pip "setuptools<81" "numpy<2" wheel
+
+    # Install Firedrake (respects PETSC_DIR; will NOT rebuild PETSc)
+    pip install --no-cache-dir "firedrake[check]"
+
+    # Install Icepack (glacier dynamics model)
+    git clone --depth=1 https://github.com/icepack/icepack.git "${ICEPACK_SRC}"
+    pip install --no-cache-dir --editable "${ICEPACK_SRC}"
+
+    # Install ICESEE
+    git clone --depth=1 https://github.com/ICESEE-project/ICESEE.git "${ICESEE_DIR}"
+    pip install --no-cache-dir --editable "${ICESEE_DIR}"
+
+    # Full scientific Python stack (shared by both Firedrake and ISSM modes)
+    pip install --no-cache-dir \
+        siphash24 pyyaml bigmpi4py numexpr \
+        "scipy>=1.15.1"  "matplotlib>=3.10.0"  "pandas>=2.2.3" \
+        jax==0.5.3  jaxlib==0.5.3  jaxopt==0.8.3  jaxtyping==0.3.0 \
+        ray Cython dask "psutil==6.1.1" "tqdm==4.67.1" \
+        gstools ipykernel gmsh nose
+
+    deactivate
+
+    # Per-job cache-directory setup script (mirrors existing icepack image)
+    cat > "${FIREDRAKE_VENV}/set_cache_dirs.sh" <<'CACHEOF'
+#!/bin/sh
+# Sets Firedrake JIT-cache directories to a writeable per-job location.
+# Called automatically by the runscript / apprun targets.
+if [ -d "/scratch" ]; then
+    PERSISTENT_DIR="/scratch/icepack_cache"
+else
+    PERSISTENT_DIR="/tmp/icepack_cache"
+fi
+mkdir -p "${PERSISTENT_DIR}/pyop2"  \
+         "${PERSISTENT_DIR}/tsfc"   \
+         "${PERSISTENT_DIR}/xdg"
+export PYOP2_CACHE_DIR="${PERSISTENT_DIR}/pyop2"
+export FIREDRAKE_TSFC_KERNEL_CACHE_DIR="${PERSISTENT_DIR}/tsfc"
+export XDG_CACHE_HOME="${PERSISTENT_DIR}/xdg"
+CACHEOF
+    chmod +x "${FIREDRAKE_VENV}/set_cache_dirs.sh"
+    echo ">>> Firedrake + Icepack installed."
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PHASE 6 — ISSM  (MATLAB interface; same OpenMPI as Firedrake)
+    # ══════════════════════════════════════════════════════════════════════════
+    # ISSM uses its own tested PETSc 3.22 (ISSM externalpackage) for full
+    # compatibility.  All MPI calls go through the same OpenMPI 5.0.7 that
+    # Firedrake uses — this is the critical link for uniform multi-node MPI.
+    #
+    # MATLAB must be bind-mounted at BUILD time:
+    #   apptainer build --bind /cluster/matlab/R2024b:/opt/matlab/R2024b ...
+    # ══════════════════════════════════════════════════════════════════════════
+    echo ">>> PHASE 6: ISSM"
+
+    git clone --depth=1 https://github.com/ISSMteam/ISSM.git "${ISSM_DIR}"
+    . "${ISSM_DIR}/etc/environment.sh"
+
+    # MPI flags for ISSM configure (points to our OpenMPI, not ISSM's bundled MPI)
+    ISSM_MPI_INC="${OMPI_PREFIX}/include"
+    ISSM_MPI_LIBS="-L${OMPI_PREFIX}/lib -lmpi -lmpi_mpifh -lmpi_cxx"
+
+    # ── ISSM external packages ─────────────────────────────────────────────
+    # Skip ISSM's internal autotools/cmake — use system packages instead.
+    # Only build triangle and m1qn3 (no system equivalents).
+    cd "${ISSM_DIR}/externalpackages/triangle"
+    ./install-linux.sh
+
+    cd "${ISSM_DIR}/externalpackages/m1qn3"
+    ./install-linux.sh
+
+    . "${ISSM_DIR}/etc/environment.sh"
+
+    # ── ISSM PETSc 3.22 ───────────────────────────────────────────────────
+    # Build ISSM's pinned PETSc against our OpenMPI (which is on PATH).
+    # The install script detects mpicc/mpicxx/mpifort from PATH automatically.
+    cd "${ISSM_DIR}/externalpackages/petsc"
+    ./install-3.22-linux.sh
+
+    . "${ISSM_DIR}/etc/environment.sh"
+    ISSM_PETSC="${ISSM_DIR}/externalpackages/petsc/install"
+
+    # ── ISSM compile ──────────────────────────────────────────────────────
+    cd "${ISSM_DIR}"
+    autoreconf -ivf
+
+    cat > "${ISSM_DIR}/configure.sh" <<ISSMCFG
+#!/bin/sh
+# ISSM configure — generated at build time.
+# MPI: OpenMPI ${OMPI_VERSION} (PMI2/UCX/OFI, shared with Firedrake)
+./configure \\
+   --prefix=${ISSM_DIR} \\
+   --with-numthreads=$(nproc) \\
+   --with-matlab-dir="${MATLAB_DIR}" \\
+   --with-fortran-lib="-L/usr/lib/x86_64-linux-gnu -lgfortran" \\
+   --with-mpi-include="${ISSM_MPI_INC}" \\
+   --with-mpi-libflags="${ISSM_MPI_LIBS}" \\
+   --with-metis-dir="${ISSM_PETSC}" \\
+   --with-parmetis-dir="${ISSM_PETSC}" \\
+   --with-blas-lapack-dir="${ISSM_PETSC}" \\
+   --with-scalapack-dir="${ISSM_PETSC}" \\
+   --with-mumps-dir="${ISSM_PETSC}" \\
+   --with-petsc-dir="${ISSM_PETSC}" \\
+   --with-triangle-dir="${ISSM_DIR}/externalpackages/triangle/install" \\
+   --with-m1qn3-dir="${ISSM_DIR}/externalpackages/m1qn3/install"
+ISSMCFG
+    chmod +x "${ISSM_DIR}/configure.sh"
+    "${ISSM_DIR}/configure.sh"
+    make -j"$(nproc)"
+    make install
+    echo ">>> ISSM installed."
+
+    # ── ISSM Python bindings in Firedrake venv ────────────────────────────
+    . "${FIREDRAKE_VENV}/bin/activate"
+    # mpi4py and h5py are already installed; add any ISSM-specific Python deps
+    pip install --no-cache-dir \
+        "scipy>=1.15.1" \
+        "nose"
+    deactivate
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PHASE 7 — Write /etc/icesee-env.sh  (sourced at runtime by %environment)
+    # ══════════════════════════════════════════════════════════════════════════
+    echo ">>> PHASE 7: Writing runtime environment file"
+
+    # Resolve Spack paths once (at build time) so runtime does not need Spack
+    SPACK_PYTHON_FINAL="$(spack location -i python 2>/dev/null || echo /usr)"
+    PETSC_SPACK_FINAL="$(spack location -i petsc  2>/dev/null || echo /usr)"
+    HDF5_SPACK_FINAL="$(spack location -i hdf5   2>/dev/null || echo /usr)"
+
+    cat > /etc/icesee-env.sh <<ENVEOF
+# =============================================================================
+# ICESEE Multi-Node Container — Runtime Environment
+# Auto-generated at image build time.  Do NOT edit manually.
+# =============================================================================
+
+# ── OpenMPI 5.0.7 (CIQ PMI2/ABI-agnostic) ───────────────────────────────────
+export OMPI_PREFIX=/opt/openmpi
+export PATH=\${OMPI_PREFIX}/bin:\${PATH}
+export LD_LIBRARY_PATH=\${OMPI_PREFIX}/lib:\${LD_LIBRARY_PATH:-}
+# Use UCX as point-to-point messaging layer (IB, RoCE, shared-mem)
+export OMPI_MCA_pml=ucx
+export OMPI_MCA_osc=ucx
+# Disable legacy openib BTL (UCX covers it; avoids spurious warnings)
+export OMPI_MCA_btl=^openib
+# Suppress UCX warnings for transports not available at runtime
+export UCX_WARN_UNUSED_ENV_VARS=n
+# PMIx component (used with srun --mpi=pmix)
+export OMPI_MCA_pmix=pmix
+
+# ── Spack environment loads (PETSc, HDF5, Python 3.11) ───────────────────────
+. /etc/spack-icesee-loads.sh 2>/dev/null || true
+
+# ── Firedrake / Icepack ───────────────────────────────────────────────────────
+export PETSC_DIR=${PETSC_SPACK_FINAL}
+export SLEPC_DIR=${PETSC_SPACK_FINAL}    # adjust if SLEPc is installed separately
+export HDF5_DIR=${HDF5_SPACK_FINAL}
+export HDF5_MPI=ON
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+# Put Firedrake venv Python first on PATH (activates venv without sourcing)
+export PATH=/opt/firedrake-venv/bin:\${PATH}
+# Firedrake JIT cache (overridden per-job by set_cache_dirs.sh)
+export PERSISTENT_DIR=/tmp/icepack_cache
+export PYOP2_CACHE_DIR=\${PERSISTENT_DIR}/pyop2
+export FIREDRAKE_TSFC_KERNEL_CACHE_DIR=\${PERSISTENT_DIR}/tsfc
+export XDG_CACHE_HOME=\${PERSISTENT_DIR}/xdg
+
+# ── ISSM ──────────────────────────────────────────────────────────────────────
+export ISSM_DIR=/opt/ISSM
+export PATH=\${ISSM_DIR}/bin:\${PATH}
+. \${ISSM_DIR}/etc/environment.sh 2>/dev/null || true
+
+# ── MATLAB (bind-mounted at runtime) ─────────────────────────────────────────
+# Required: apptainer exec --bind /cluster/matlab/R2024b:/opt/matlab/R2024b
+export MATLAB_DIR=/opt/matlab/R2024b
+export PATH=\${MATLAB_DIR}/bin:\${PATH}
+export LD_LIBRARY_PATH=\${MATLAB_DIR}/runtime/glnxa64:\${MATLAB_DIR}/bin/glnxa64:\${LD_LIBRARY_PATH:-}
+# MATLAB license server (override in Slurm job script as needed)
+export MLM_LICENSE_FILE=1711@matlablic.ecs.gatech.edu
+
+# ── ICESEE ────────────────────────────────────────────────────────────────────
+export ICESEE=/opt/ICESEE
+export PYTHONPATH=/opt:\${PYTHONPATH:-}
+ENVEOF
+
+    echo ">>> /etc/icesee-env.sh written."
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PHASE 8 — Cleanup  (reduce image size)
+    # ══════════════════════════════════════════════════════════════════════════
+    echo ">>> PHASE 8: Cleanup"
+
+    apt-get clean
+    rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache /tmp/tz.preseed 2>/dev/null || true
+
+    # Strip debug symbols from OpenMPI shared libs (~30% size reduction)
+    find "${OMPI_PREFIX}/lib" -name '*.so*' \
+        -exec strip --strip-unneeded {} + 2>/dev/null || true
+
+    # Remove Spack build-stage caches (keep installed packages)
+    "${SPACK_ROOT}/bin/spack" clean --all 2>/dev/null || true
+    rm -rf "${SPACK_STORE}"/.spack/build_stage 2>/dev/null || true
+
+    echo ">>> Build complete."
+
+# ==============================================================================
+%environment
+# ==============================================================================
+    # Source the environment file written at build time.
+    # This sets all paths for OpenMPI, Firedrake, ISSM, MATLAB, and ICESEE.
+    . /etc/icesee-env.sh
+
+# ==============================================================================
+# %apprun firedrake — Firedrake / Icepack / Python mode
+# ==============================================================================
+%apprun firedrake
+    # Set per-job JIT-cache directories and activate the Firedrake venv
+    . /opt/firedrake-venv/set_cache_dirs.sh
+    . /opt/firedrake-venv/bin/activate
+    exec python3 "$@"
+
+# ==============================================================================
+# %apprun issm — ISSM / MATLAB mode
+# ==============================================================================
+%apprun issm
+    . /opt/ISSM/etc/environment.sh 2>/dev/null || true
+    if [ -n "${1:-}" ]; then
+        exec /opt/matlab/R2024b/bin/matlab \
+             -nodesktop -nosplash \
+             -r "addpath /opt/ISSM/bin /opt/ISSM/lib; run('${1}')"
+    else
+        exec /opt/matlab/R2024b/bin/matlab \
+             -nodesktop -nosplash \
+             -r "addpath /opt/ISSM/bin /opt/ISSM/lib"
+    fi
+
+# ==============================================================================
+# %apprun python — bare Python (no Firedrake activation needed for light tasks)
+# ==============================================================================
+%apprun python
+    . /opt/firedrake-venv/set_cache_dirs.sh
+    . /opt/firedrake-venv/bin/activate
+    exec python3 "$@"
+
+# ==============================================================================
+# %runscript — default entrypoint (Firedrake / Python)
+# ==============================================================================
+%runscript
+    # Default mode: activate Firedrake venv and run a Python script.
+    # This is the mode used by "srun --mpi=pmi2 apptainer exec image.sif ..."
+    . /opt/firedrake-venv/set_cache_dirs.sh
+    . /opt/firedrake-venv/bin/activate
+    exec python3 "$@"
+
+# ==============================================================================
+# %startscript — executed when instance starts (apptainer instance start)
+# ==============================================================================
+%startscript
+    echo "ICESEE Multi-Node container instance started."
+    echo "  Firedrake venv : /opt/firedrake-venv"
+    echo "  ISSM dir       : /opt/ISSM"
+    echo "  OpenMPI        : /opt/openmpi"
+    echo "  MATLAB (bind)  : /opt/matlab/R2024b (must be bind-mounted)"
+

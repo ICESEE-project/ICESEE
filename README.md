@@ -93,6 +93,17 @@ Explore the Wiki to find:
 - Debugging and troubleshooting guides
 - HPC deployment recommendations
 
+For memory- and storage-bounded execution of large ensembles, including rolling
+history, compact observations, restart behavior, and capacity limits, see the
+[large-scale execution guide](docs/large-scale-execution.md).
+The validated mode-2 parity contract and proposed spatially distributed mode-3
+architecture are documented in the
+[mode-2 development contract](docs/execution-mode-2-development.md) and
+[mode-3 design](docs/execution-mode-3-design.md), respectively.
+Architectural decisions and their status (Proposed/Accepted) are tracked in
+[`docs/architecture/`](docs/architecture/README.md); the model-adapter
+boundary target is described in [`docs/model-adapter.md`](docs/model-adapter.md).
+
 ---
 
 ## Key Features
@@ -133,7 +144,10 @@ These capabilities are under active development and are not yet part of the stab
 
 ## Contributing
 
-Contributions are welcome. Please open an issue or submit a pull request through the GitHub repository.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+development setup, the `icesee_kwargs` convention, model-integration and
+MPI/HPC guidance, and testing expectations. Please open an issue or submit
+a pull request through the GitHub repository.
 
 For questions, suggestions, or collaboration opportunities:
 

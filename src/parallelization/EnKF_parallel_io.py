@@ -14,6 +14,7 @@
 import h5py
 import numpy as np
 from mpi4py import MPI
+import copy
 import os
 import re
 import glob
@@ -31,8 +32,342 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from typing import Callable, Optional, TypeVar, Any
 from ICESEE.src.utils.tools import icesee_get_index
+from ICESEE.src.utils.localization import iter_generated_observation_columns
+from ICESEE.src.utils.utils import cross_flow_track_mask
 
 T = TypeVar("T")
+
+
+def normalize_hdf5_compression(value):
+    """Return a valid h5py compression selector from configuration input.
+
+    YAML 1.1 loaders do not consistently interpret the spelling ``None`` as
+    a null value.  Several ICESEE application files historically use that
+    spelling, so mode 2 may receive the literal string ``"None"``.  Passing
+    it to h5py asks HDF5 for a filter named ``None`` and fails while creating
+    the first streamed state shard.
+    """
+    if value is None or value is False:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"", "none", "null", "false", "off"}:
+            return None
+        if normalized in {"gzip", "lzf", "szip"}:
+            return normalized
+    raise ValueError(
+        "h5_file_compression must be None, 'gzip', 'lzf', or 'szip'; "
+        f"received {value!r}."
+    )
+
+
+def hdf5_compression_options(compression, level):
+    """Return filter options accepted by h5py for ICESEE's configuration."""
+    if compression == "gzip":
+        level = int(level)
+        if not 0 <= level <= 9:
+            raise ValueError("h5_file_compression_level must be in [0, 9].")
+        return level
+    # lzf accepts no options.  For szip, let h5py use its portable default;
+    # an integer gzip-style level is not a valid szip option tuple.
+    return None
+
+
+def _partition_1d(n, size, rank):
+    """Return a balanced half-open interval for ``rank``."""
+    q, r = divmod(int(n), int(size))
+    start = rank * q + min(rank, r)
+    return start, start + q + (1 if rank < r else 0)
+
+
+def resolve_row_chunk_size(nrows, nens, budget_mb=256.0, explicit_rows=0,
+                           working_buffers=3):
+    """Choose a row chunk that bounds the main dense working set.
+
+    The estimate is intentionally conservative: it accounts for several
+    ``rows x ensemble`` float64 buffers that BLAS and NumPy may hold at once.
+    """
+    nrows = int(nrows)
+    if nrows <= 0:
+        return 0
+    explicit_rows = int(explicit_rows or 0)
+    if explicit_rows > 0:
+        return max(1, min(nrows, explicit_rows))
+    bytes_per_row = max(1, int(nens)) * 8 * max(1, int(working_buffers)) + 8
+    budget = max(1.0, float(budget_mb)) * 1024.0 * 1024.0
+    return max(1, min(nrows, int(budget // bytes_per_row)))
+
+
+def legacy_transform_from_gram(gram, rhs, energy_fraction=0.999):
+    """Compute the legacy ICESEE ensemble transform from streamed products.
+
+    ``gram`` is ``A.T @ A`` and ``rhs`` is ``A.T @ D`` for
+    ``A = 2 * Yprime``.  This is algebraically equivalent to the previous
+    observation-space SVD, but only stores ``Nens x Nens`` arrays.
+    """
+    gram = 0.5 * (np.asarray(gram) + np.asarray(gram).T)
+    rhs = np.asarray(rhs)
+    values, vectors = np.linalg.eigh(gram)
+    order = np.argsort(values)[::-1]
+    values = np.maximum(values[order], 0.0)
+    vectors = vectors[:, order]
+    total = float(values.sum())
+    inverse = np.zeros_like(values)
+    if total > 0.0:
+        cumulative = np.cumsum(values)
+        nkeep = int(np.searchsorted(cumulative, energy_fraction * total,
+                                    side="left") + 1)
+        tolerance = np.finfo(values.dtype).eps * max(gram.shape) * values[0]
+        keep = (np.arange(values.size) < nkeep) & (values > tolerance)
+        inverse[keep] = 1.0 / values[keep]
+    gram_pinv = (vectors * inverse) @ vectors.T
+    # HAprime.T = A.T / 2 in the legacy_prior_anomalies mode.
+    return np.eye(gram.shape[0], dtype=gram.dtype) + 0.5 * gram_pinv @ rhs
+
+
+def ensemble_transform_from_products(cross, gram, rhs,
+                                     energy_fraction=0.999):
+    """Compute the Evensen transform from streamed ensemble-space products.
+
+    For ``A = Y' + Eta`` the three inputs are ``Y'.T @ A``, ``A.T @ A``
+    and ``A.T @ D'``.  The identity
+
+    ``(A A.T)^dagger = A (A.T A)^dagger (A.T A)^dagger A.T``
+
+    makes this algebraically equivalent to the observation-space SVD while
+    retaining only ``Nens x Nens`` matrices.  This is valid for both the
+    standard stochastic and legacy analysis-factor modes.
+    """
+    cross = np.asarray(cross, dtype=np.float64)
+    gram = np.asarray(gram, dtype=np.float64)
+    rhs = np.asarray(rhs, dtype=np.float64)
+    gram = 0.5 * (gram + gram.T)
+    values, vectors = np.linalg.eigh(gram)
+    order = np.argsort(values)[::-1]
+    values = np.maximum(values[order], 0.0)
+    vectors = vectors[:, order]
+    total = float(values.sum())
+    inverse = np.zeros_like(values)
+    if total > 0.0:
+        cumulative = np.cumsum(values)
+        nkeep = int(np.searchsorted(
+            cumulative, float(energy_fraction) * total, side="left"
+        ) + 1)
+        tolerance = np.finfo(values.dtype).eps * max(gram.shape) * values[0]
+        keep = (np.arange(values.size) < nkeep) & (values > tolerance)
+        inverse[keep] = 1.0 / values[keep]
+    gram_pinv = (vectors * inverse) @ vectors.T
+    return np.eye(gram.shape[0]) + cross @ gram_pinv @ gram_pinv @ rhs
+
+
+def _read_rows_preserve_order(dataset, indices, column_slice=slice(None)):
+    """Read arbitrary HDF5 rows, preserving duplicates and caller order."""
+    indices = np.asarray(indices, dtype=np.int64)
+    if indices.size == 0:
+        shape = (0,) + tuple(dataset.shape[1:])
+        return np.empty(shape, dtype=dataset.dtype)
+    unique, inverse = np.unique(indices, return_inverse=True)
+    return np.asarray(dataset[unique, column_slice])[inverse]
+
+
+def _global_variable_index_map(nd, vec_inputs, var_nd=None):
+    """Build state-vector variable indices without rank-local MPI slicing."""
+    vec_inputs = list(vec_inputs or [])
+    if not vec_inputs:
+        return {}
+    if isinstance(var_nd, dict):
+        sizes = [int(var_nd[name]) for name in vec_inputs]
+    elif isinstance(var_nd, (list, tuple, np.ndarray)) and len(var_nd) == len(vec_inputs):
+        sizes = [int(value) for value in var_nd]
+    else:
+        q, r = divmod(int(nd), len(vec_inputs))
+        sizes = [q + (1 if i < r else 0) for i in range(len(vec_inputs))]
+    if sum(sizes) != int(nd):
+        raise ValueError(
+            f"State block sizes sum to {sum(sizes)}, but the state dimension is {nd}."
+        )
+    result = {}
+    offset = 0
+    for name, size in zip(vec_inputs, sizes):
+        result[name] = np.arange(offset, offset + size, dtype=np.int64)
+        offset += size
+    return result
+
+
+def _inversion_variable_info(nd, icesee_kwargs):
+    """Resolve the full-state friction block used by hybrid inversion.
+
+    Mode 1 temporarily removes this block from the EnKF state.  Mode 2 keeps
+    the file-backed state shape fixed and obtains the same result by excluding
+    its observations and restoring its forecast rows before inversion.
+    """
+    if not bool(icesee_kwargs.get("inversion_flag", False)):
+        return None
+    vec_inputs = list(
+        icesee_kwargs.get("vec_inputs_old")
+        or icesee_kwargs.get("vec_inputs")
+        or []
+    )
+    if not vec_inputs:
+        raise ValueError("Hybrid inversion requires vec_inputs_old or vec_inputs.")
+    friction_idx = icesee_kwargs.get("friction_idx")
+    if friction_idx is None:
+        aliases = {
+            "coefficient", "friction", "friction_coefficient", "fcoef",
+            "frictioncoefficient",
+        }
+        matches = [
+            index for index, name in enumerate(vec_inputs)
+            if str(name).lower() in aliases
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "Hybrid inversion could not uniquely identify the friction "
+                "block; set friction_idx explicitly."
+            )
+        friction_idx = matches[0]
+    friction_idx = int(friction_idx)
+    if friction_idx < 0 or friction_idx >= len(vec_inputs):
+        raise IndexError(
+            f"friction_idx={friction_idx} is outside {len(vec_inputs)} blocks."
+        )
+    variable_map = _global_variable_index_map(
+        nd, vec_inputs, icesee_kwargs.get("var_nd_old", icesee_kwargs.get("var_nd"))
+    )
+    name = vec_inputs[friction_idx]
+    indices = variable_map[name]
+    if not indices.size:
+        raise ValueError(f"The inversion block {name!r} is empty.")
+    return {
+        "name": name,
+        "index": friction_idx,
+        "indices": indices,
+        "start": int(indices[0]),
+        "stop": int(indices[-1]) + 1,
+    }
+
+
+def finalize_hybrid_analysis_like_mode1(
+    analysis_full,
+    forecast_full,
+    timestep,
+    icesee_kwargs,
+    finalizer,
+):
+    """Apply the exact mode-1 reduced-state hybrid finalization contract.
+
+    Mode 1 removes basal friction before the EnKF analysis, finalizes the
+    remaining state/parameter blocks, merges those blocks into the saved full
+    forecast member, and subsequently obtains friction from inversion.  Merely
+    freezing friction rows in a full-state mode-2 analysis is not equivalent:
+    post-analysis inference and geometry hooks also depend on the configured
+    state layout.  This helper keeps mode 2's fixed-size on-disk shards while
+    reproducing mode 1's five-block finalization exactly.
+    """
+    analysis_full = np.asarray(analysis_full)
+    forecast_full = np.asarray(forecast_full)
+    if analysis_full.shape != forecast_full.shape or analysis_full.ndim != 2:
+        raise ValueError(
+            "Hybrid analysis and forecast must be equal 2-D full-state arrays."
+        )
+
+    info = _inversion_variable_info(analysis_full.shape[0], icesee_kwargs)
+    if info is None:
+        return finalizer(
+            analysis_vec=analysis_full,
+            forecast_vec=forecast_full,
+            timestep=timestep,
+            icesee_kwargs=icesee_kwargs,
+        )
+
+    full_names = list(
+        icesee_kwargs.get("vec_inputs_old")
+        or icesee_kwargs.get("vec_inputs")
+        or []
+    )
+    variable_map = _global_variable_index_map(
+        analysis_full.shape[0],
+        full_names,
+        icesee_kwargs.get("var_nd_old", icesee_kwargs.get("var_nd")),
+    )
+    kept_names = [
+        name for index, name in enumerate(full_names)
+        if index != info["index"]
+    ]
+    kept_rows = np.concatenate([variable_map[name] for name in kept_names])
+    analysis_reduced = np.asarray(analysis_full[kept_rows, :]).copy()
+
+    if bool(icesee_kwargs.get("execution_parity_trace", False)):
+        print(
+            "[ICESEE][mode2-parity] Applying mode-1 hybrid handoff at "
+            f"stored timestep {int(timestep)}: full_rows="
+            f"{analysis_full.shape[0]}, reduced_rows={kept_rows.size}, "
+            f"excluded={info['name']!r}.",
+            flush=True,
+        )
+
+    # This mirrors parallel_write_ensemble_scattered: mode 1 supplies the
+    # forecast to the finalizer only when the bed-domain gate needs it.  The
+    # saved full forecast is nevertheless always the merge base.
+    forecast_reduced = None
+    if str(icesee_kwargs.get("bed_update_domain", "all")).lower() != "all":
+        forecast_reduced = np.asarray(forecast_full[kept_rows, :]).copy()
+
+    reduced_kwargs = dict(icesee_kwargs)
+    reduced_kwargs.update({
+        "vec_inputs": kept_names,
+        "vec_inputs_new": kept_names,
+        "total_state_param_vars": len(kept_names),
+        "nd": int(kept_rows.size),
+        "nd_old": int(analysis_full.shape[0]),
+        "excluded_indices": [int(info["index"])],
+    })
+    var_nd = icesee_kwargs.get("var_nd_old", icesee_kwargs.get("var_nd"))
+    if isinstance(var_nd, dict):
+        reduced_kwargs["var_nd"] = {
+            name: int(var_nd[name]) for name in kept_names
+        }
+    elif isinstance(var_nd, (list, tuple, np.ndarray)) and len(var_nd) == len(full_names):
+        reduced_kwargs["var_nd"] = [
+            int(value) for index, value in enumerate(var_nd)
+            if index != info["index"]
+        ]
+
+    finalized_reduced = finalizer(
+        analysis_vec=analysis_reduced,
+        forecast_vec=forecast_reduced,
+        timestep=timestep,
+        icesee_kwargs=reduced_kwargs,
+    )
+    if np.asarray(finalized_reduced).shape != analysis_reduced.shape:
+        raise ValueError(
+            "Reduced hybrid finalizer returned an incompatible shape: "
+            f"{np.asarray(finalized_reduced).shape} instead of "
+            f"{analysis_reduced.shape}."
+        )
+
+    # Mode 1 starts with ensemble_before_analysis and injects only the updated
+    # non-friction blocks.  In particular, no pre-inversion friction analysis
+    # can leak into the model handed to inverse_step_single.
+    merged = np.asarray(forecast_full).copy()
+    merged[kept_rows, :] = finalized_reduced
+
+    # ``finalizer`` stores temporal inference state in its kwargs mapping.
+    # Preserve those mutations even though a reduced compatibility mapping was
+    # needed for the call above.
+    for key, value in reduced_kwargs.items():
+        if key.startswith(("_bed_", "_smb_")):
+            icesee_kwargs[key] = value
+    return merged
+
+
+def _exclude_inversion_observations(obs_indices, icesee_kwargs, nd):
+    """Return the observation-row mask matching mode-1 state reduction."""
+    info = _inversion_variable_info(nd, icesee_kwargs)
+    obs_indices = np.asarray(obs_indices, dtype=np.int64)
+    if info is None:
+        return np.ones(obs_indices.size, dtype=bool)
+    return (obs_indices < info["start"]) | (obs_indices >= info["stop"])
 
 def retry_on_failure(
     max_attempts: int = 5,
@@ -81,11 +416,25 @@ class EnKF_fully_parallel_IO:
         try:
             self.nd = nd
             self.nens = nens
-            self.nt = nt
+            # ``nt`` is the number of model advances.  Ensemble history also
+            # contains the initial condition, so valid state shards are
+            # 0, ..., nt (nt + 1 snapshots), matching execution mode 1.
+            self.nt = int(nt) + 1
             self.icesee_kwargs = icesee_kwargs
             self.base_path = base_path
             self.file_prefix = file_prefix
-            self.batch_size = batch_size
+            # A window of fewer than 2 shards cannot hold both the timestep a
+            # forecast round reads and the timestep it writes at the same
+            # time (see ``_ensure_batch_range``), so the floor is 2 rather
+            # than 1.
+            self.batch_size = max(2, int(batch_size))
+            requested_history_mode = str(
+                icesee_kwargs.get("ensemble_history_mode", "auto")
+            ).strip().lower()
+            if requested_history_mode not in {"auto", "full", "rolling"}:
+                raise ValueError(
+                    "ensemble_history_mode must be 'auto', 'full', or 'rolling'."
+                )
             self.mpi_comm = mpi_comm
             # self.comm = subcomm if nens >= mpi_comm.Get_size() else mpi_comm
             # self.rank = self.comm.Get_rank() if nens >= mpi_comm.Get_size() else mpi_comm.Get_rank()
@@ -94,21 +443,48 @@ class EnKF_fully_parallel_IO:
             self.rank = mpi_comm.Get_rank()
             self.size = mpi_comm.Get_size()
 
-            self.subcomm = subcomm if subcomm is not None else MPI.COMM_SELF
-            self.sub_rank = self.subcomm.Get_rank()
-            self.sub_size = self.subcomm.Get_size()
+            # A spare rank under the hierarchical resource plan
+            # (resource_plan.py) belongs to no model group and is handed
+            # MPI.COMM_NULL, not None, for `subcomm` -- Get_rank()/
+            # Get_size() raise MPI_ERR_COMM on COMM_NULL, so it needs the
+            # same safe-placeholder treatment already given to `None`
+            # here. This object is still constructed by every rank
+            # (including spare ones), since later comm_world-level calls
+            # on it (_ensure_batch, compute_forecast_mean_chunked_v2) are
+            # made by every rank.
+            _subcomm_for_rank_query = (
+                subcomm
+                if subcomm is not None and subcomm != MPI.COMM_NULL
+                else MPI.COMM_SELF
+            )
+            self.sub_rank = _subcomm_for_rank_query.Get_rank()
+            self.sub_size = _subcomm_for_rank_query.Get_size()
             self.subcomm = subcomm
             self.serial_file_creation = serial_file_creation
-            self.h5_file_compression = h5_file_compression
+            self.h5_file_compression = normalize_hdf5_compression(
+                h5_file_compression
+            )
             self.h5_file_compression_level = h5_file_compression_level
+            self.h5_file_compression_options = hdf5_compression_options(
+                self.h5_file_compression,
+                h5_file_compression_level,
+            )
             self.h5_file_chunk_size = h5_file_chunk_size
+            self.storage_dtype = np.dtype(
+                icesee_kwargs.get("ensemble_storage_dtype", "float64")
+            )
+            if self.storage_dtype not in (np.dtype("float32"), np.dtype("float64")):
+                raise ValueError(
+                    "ensemble_storage_dtype must be 'float32' or 'float64'."
+                )
+            self.reuse_existing = bool(
+                icesee_kwargs.get("restart_enabled", True)
+                and not icesee_kwargs.get("force_fresh_start", False)
+            )
 
             # collective I/O threshold (32 is a reasonable default for many systems)
             self.collective_threshold = int(icesee_kwargs.get("collective_threshold", 16))
             self.use_collective_io = (self.mpi_comm.Get_size() >= self.collective_threshold)
-
-            def _state_file_name(self, t):
-                return f"{self.base_path}/{self.file_prefix}_{t:04d}.h5"
 
             def partition_1d(n, size, rank):
                 q, r = divmod(n, size)
@@ -122,34 +498,467 @@ class EnKF_fully_parallel_IO:
             self.nd_start_world, self.nd_end_world = partition_1d(self.nd, size_world, rank_world)
             self.nd_local_world = self.nd_end_world - self.nd_start_world
 
-            # Create directory and clean up old files
+            # Create directory.  Existing shards are retained for restart;
+            # force_fresh_start is the explicit opt-in for deleting them.
             if mpi_comm.Get_rank() == 0:
                 os.makedirs(base_path, exist_ok=True)
-                patterns = [f"{self.base_path}/{self.file_prefix}_*.h5"]
-                for pattern in patterns:
-                    for file_path in glob.glob(pattern):
-                        try:
-                            os.remove(file_path)
-                        except OSError as e:
-                            print(f"Error deleting {file_path}: {e}")
+                if not self.reuse_existing:
+                    patterns = [f"{self.base_path}/{self.file_prefix}_*.h5"]
+                    for pattern in patterns:
+                        for file_path in glob.glob(pattern):
+                            try:
+                                os.remove(file_path)
+                            except OSError as e:
+                                print(f"Error deleting {file_path}: {e}")
             self.mpi_comm.Barrier()
+
+            bytes_per_step = self.nd * self.nens * self.storage_dtype.itemsize
+            safety = float(icesee_kwargs.get("storage_safety_factor", 1.10))
+            if self.rank == 0:
+                free_bytes = shutil.disk_usage(self.base_path).free
+                full_history_bytes = bytes_per_step * self.nt
+                if requested_history_mode == "auto":
+                    selected_history_mode = (
+                        "full"
+                        if full_history_bytes * safety <= free_bytes
+                        else "rolling"
+                    )
+                    if selected_history_mode == "rolling":
+                        print(
+                            "[ICESEE][full_parallel] Full ensemble history requires "
+                            f"about {full_history_bytes / 2**30:.2f} GiB; selecting "
+                            "rolling history automatically."
+                        )
+                else:
+                    selected_history_mode = requested_history_mode
+            else:
+                free_bytes = None
+                selected_history_mode = None
+
+            self.history_mode = self.mpi_comm.bcast(
+                selected_history_mode, root=0
+            )
+            icesee_kwargs["ensemble_history_mode"] = self.history_mode
+
+            if self.rank == 0:
+                retained_steps = self.nt if self.history_mode == "full" else min(2, self.nt)
+                history_bytes = bytes_per_step * retained_steps
+                print(
+                    "[ICESEE][full_parallel] File-backed ensemble: "
+                    f"{bytes_per_step / 2**30:.2f} GiB per time step; "
+                    f"about {history_bytes / 2**30:.2f} GiB retained in "
+                    f"{self.history_mode!r} history mode ({self.storage_dtype.name})."
+                )
+                if history_bytes * safety > free_bytes:
+                    message = (
+                        "[ICESEE][full_parallel] Estimated ensemble history exceeds "
+                        f"available storage ({free_bytes / 2**30:.2f} GiB free). "
+                        "Use a larger data_path, ensemble_history_mode: rolling, "
+                        "ensemble_storage_dtype: float32, or reduce the run size."
+                    )
+                    if icesee_kwargs.get("fail_on_insufficient_storage", False):
+                        raise OSError(message)
+                    print("WARNING: " + message)
 
             # Initialize file and dataset lists
             self.files = []
             self.datasets = []
             self.current_batch_start = -1
 
-            # Create initial batch
-            # self._create_batch(0)
-            if self.serial_file_creation:
-                self._create_batch_serial(0)
-            else:
-                self._create_batch_parallel(0)
+            # Timestep shards are opened lazily.  This is essential on restart:
+            # a rolling-history run may legitimately no longer contain step 0.
         except Exception as e:
             print(f"Error occurred in __init__: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
+
+    def _state_file_name(self, timestep):
+        """Return the canonical path for one ensemble-state shard."""
+        return os.path.join(
+            self.base_path,
+            f"{self.file_prefix}_{int(timestep):04d}.h5",
+        )
+
+    def _analysis_file_name(self, timestep):
+        """Return the unpublished, transactional analysis-shard path."""
+        return self._state_file_name(timestep) + ".analysis.tmp"
+
+    def _create_analysis_file(self, timestep):
+        """Create and collectively open a temporary analysis shard."""
+        path = self._analysis_file_name(timestep)
+        self.mpi_comm.Barrier()
+        if self.rank == 0:
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+            with h5py.File(path, "w") as handle:
+                handle.create_dataset(
+                    "states",
+                    shape=(self.nd, self.nens),
+                    chunks=(max(1, min(self.h5_file_chunk_size, self.nd)), 1),
+                    compression=self.h5_file_compression,
+                    compression_opts=self.h5_file_compression_options,
+                    dtype=self.storage_dtype,
+                )
+        self.mpi_comm.Barrier()
+        handle = h5py.File(path, "r+", driver="mpio", comm=self.mpi_comm)
+        return path, handle, handle["states"]
+
+    @staticmethod
+    def _requires_shared_finalization(icesee_kwargs):
+        """Whether publishing requires the shared ensemble-level contract."""
+        if str(icesee_kwargs.get("model_name", "")).lower() == "issm":
+            return True
+        if icesee_kwargs.get("inference_plugin_enabled", False):
+            return True
+        if icesee_kwargs.get("physics_bed_inference", False):
+            return True
+        if str(icesee_kwargs.get("bed_update_domain", "all")).lower() != "all":
+            return True
+        return bool(icesee_kwargs.get("bed_observation_anchor_enabled", False))
+
+    @staticmethod
+    def _requires_ensemble_coupled_finalization(icesee_kwargs):
+        """Return whether post-analysis physics couples ensemble columns.
+
+        The ordinary ISSM geometry projection, bed support gate, and direct
+        observation anchors are member-local.  The optional bed/SMB inference
+        routines retain ensemble-valued temporal/reference state and must see
+        the complete ensemble to reproduce execution mode 1 exactly.
+        """
+        if not bool(icesee_kwargs.get("inference_plugin_enabled", False)):
+            return False
+        return bool(
+            icesee_kwargs.get("physics_bed_inference", False)
+            or icesee_kwargs.get("physics_smb_inference", False)
+        )
+
+    _FINALIZATION_STATE_PREFIXES = (
+        "_bed_",
+        "_smb_",
+    )
+
+    def _restore_finalization_state(self, icesee_kwargs):
+        """Restore mutable inference state lost by ``**kwargs`` expansion.
+
+        Execution mode 1 passes one runtime dictionary through consecutive
+        analysis cycles.  Mode 2's method API expands that dictionary with
+        ``**icesee_kwargs``, which creates a new mapping on every call.  The
+        post-analysis inference hooks retain private temporal/reference state
+        in that mapping, so silently discarding it changes the numerical
+        algorithm at the first non-trivial bed/SMB update.
+        """
+        persistent = getattr(self, "_finalization_state", {})
+        for key, value in persistent.items():
+            # The class-owned state is authoritative.  ``icesee_kwargs`` may
+            # still contain a stale value returned by an earlier ``**kwargs``
+            # expansion, so checking only for key absence is insufficient.
+            icesee_kwargs[key] = (
+                value.copy() if isinstance(value, np.ndarray)
+                else copy.deepcopy(value)
+            )
+
+    def _save_finalization_state(self, icesee_kwargs):
+        """Persist private post-analysis state for the next mode-2 cycle."""
+        state = {
+            key: (
+                value.copy() if isinstance(value, np.ndarray)
+                else copy.deepcopy(value)
+            )
+            for key, value in icesee_kwargs.items()
+            if key.startswith(self._FINALIZATION_STATE_PREFIXES)
+        }
+        self._finalization_state = state
+
+    def _finalize_analysis_member_slabs(
+        self, canonical, temp_path, timestep, icesee_kwargs
+    ):
+        """Finalize member-local physics with bounded rank-zero memory."""
+        from ICESEE.src.parallelization._parallel_i_o import (
+            finalize_analysis_ensemble,
+        )
+
+        budget = float(
+            icesee_kwargs.get("analysis_finalize_memory_budget_mb", 2048.0)
+        ) * 1024.0 * 1024.0
+        # Forecast, analysis, and finalized float64 work arrays may coexist.
+        bytes_per_member = max(1, 3 * self.nd * np.dtype(np.float64).itemsize)
+        derived = max(1, int(budget // bytes_per_member))
+        requested = int(
+            icesee_kwargs.get("analysis_finalize_member_chunk_size", 0) or 0
+        )
+        member_chunk = min(
+            self.nens,
+            requested if requested > 0 else derived,
+        )
+        if member_chunk < 1 or bytes_per_member > budget:
+            raise MemoryError(
+                "One member cannot fit within the exact analysis-finalization "
+                f"budget: approximately {bytes_per_member / 2**30:.2f} GiB "
+                "is required. Increase analysis_finalize_memory_budget_mb or "
+                "provide a model-native spatially partitioned finalizer."
+            )
+
+        with h5py.File(canonical, "r") as forecast_handle, h5py.File(
+            temp_path, "r+"
+        ) as analysis_handle:
+            forecast_states = forecast_handle["states"]
+            analysis_states = analysis_handle["states"]
+            for member0 in range(0, self.nens, member_chunk):
+                member1 = min(self.nens, member0 + member_chunk)
+                forecast = np.asarray(
+                    forecast_states[:, member0:member1], dtype=np.float64
+                )
+                analysis = np.asarray(
+                    analysis_states[:, member0:member1], dtype=np.float64
+                )
+                # Member-local finalization must not leak mutable diagnostic
+                # state from one slab into the next.
+                slab_kwargs = dict(icesee_kwargs)
+                if bool(icesee_kwargs.get("inversion_flag", False)):
+                    finalized = finalize_hybrid_analysis_like_mode1(
+                        analysis,
+                        forecast,
+                        timestep,
+                        slab_kwargs,
+                        finalize_analysis_ensemble,
+                    )
+                else:
+                    finalized = finalize_analysis_ensemble(
+                        analysis_vec=analysis,
+                        forecast_vec=forecast,
+                        timestep=timestep,
+                        icesee_kwargs=slab_kwargs,
+                    )
+                analysis_states[:, member0:member1] = np.asarray(
+                    finalized, dtype=self.storage_dtype
+                )
+            analysis_handle.flush()
+
+    def _publish_analysis_file(self, timestep, temp_path, icesee_kwargs):
+        """Finalize and atomically publish one completed analysis shard.
+
+        The forecast shard is never modified until every enabled analysis
+        control and physical projection has succeeded.  Ensemble-coupled
+        finalization currently uses a bounded rank-zero gather; exceeding the
+        configured budget is an explicit unsupported capability rather than a
+        silent change of algorithm.
+        """
+        canonical = self._state_file_name(timestep)
+        self._close_batch()
+        self.current_batch_start = -1
+        self.mpi_comm.Barrier()
+
+        error = None
+        if self.rank == 0:
+            try:
+                if self._requires_shared_finalization(icesee_kwargs):
+                    if not self._requires_ensemble_coupled_finalization(
+                        icesee_kwargs
+                    ):
+                        self._finalize_analysis_member_slabs(
+                            canonical, temp_path, timestep, icesee_kwargs
+                        )
+                        return_error = None
+                    else:
+                        return_error = "ensemble-coupled"
+                else:
+                    return_error = None
+
+                if return_error == "ensemble-coupled":
+                    itemsize = np.dtype(self.storage_dtype).itemsize
+                    required = 2 * self.nd * self.nens * itemsize
+                    budget = float(icesee_kwargs.get(
+                        "analysis_finalize_memory_budget_mb", 2048.0
+                    )) * 1024.0 * 1024.0
+                    if required > budget:
+                        raise MemoryError(
+                            "Exact mode-1 ensemble-coupled inference requires "
+                            "forecast and analysis ensembles together, but "
+                            "their estimated "
+                            f"working set is {required / 2**30:.2f} GiB and "
+                            f"analysis_finalize_memory_budget_mb permits "
+                            f"{budget / 2**30:.2f} GiB. Increase the budget or "
+                            "disable the ensemble-coupled hook; ICESEE will not "
+                            "silently publish a non-equivalent mode-2 analysis."
+                        )
+                    from ICESEE.src.parallelization._parallel_i_o import (
+                        finalize_analysis_ensemble,
+                    )
+                    with h5py.File(canonical, "r") as forecast_handle:
+                        forecast = np.asarray(forecast_handle["states"])
+                    with h5py.File(temp_path, "r+") as analysis_handle:
+                        analysis = np.asarray(analysis_handle["states"])
+                        if bool(icesee_kwargs.get("inversion_flag", False)):
+                            analysis = finalize_hybrid_analysis_like_mode1(
+                                analysis,
+                                forecast,
+                                timestep,
+                                icesee_kwargs,
+                                finalize_analysis_ensemble,
+                            )
+                        else:
+                            analysis = finalize_analysis_ensemble(
+                                analysis_vec=analysis,
+                                forecast_vec=forecast,
+                                timestep=timestep,
+                                icesee_kwargs=icesee_kwargs,
+                            )
+                        analysis_handle["states"][:, :] = analysis
+                        analysis_handle.flush()
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
+
+        error = self.mpi_comm.bcast(error, root=0)
+        self.mpi_comm.Barrier()
+        if error is not None:
+            raise RuntimeError(
+                "Transactional full-parallel analysis was not published: " + error
+            )
+
+        # The temporary shard is now physically valid but remains unpublished.
+        # Hybrid inversion is applied member by member to this shard.  A failed
+        # inversion therefore leaves the canonical forecast and restart point
+        # untouched.
+        if bool(icesee_kwargs.get("inversion_flag", False)):
+            self._apply_memberwise_inversion(temp_path, timestep, icesee_kwargs)
+
+        error = None
+        if self.rank == 0:
+            try:
+                os.replace(temp_path, canonical)
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
+        error = self.mpi_comm.bcast(error, root=0)
+        self.mpi_comm.Barrier()
+        if error is not None:
+            raise RuntimeError(
+                "Transactional full-parallel analysis was not published: " + error
+            )
+
+    def _apply_memberwise_inversion(self, temp_path, timestep, icesee_kwargs):
+        """Apply mode-1-equivalent inversion without broadcasting the ensemble."""
+        info = _inversion_variable_info(self.nd, icesee_kwargs)
+        model_module = icesee_kwargs.get("model_module")
+        inverse_step = getattr(model_module, "inverse_step_single", None)
+        if inverse_step is None:
+            raise RuntimeError(
+                "inversion_flag is active, but model_module.inverse_step_single "
+                "is unavailable."
+            )
+
+        local_updates = []
+        local_error = None
+        try:
+            # Independent read-only member access avoids the mode-1 full-state
+            # broadcast. Each rank retains only one member plus its recovered
+            # friction values at a time.
+            with h5py.File(temp_path, "r") as handle:
+                states = handle["states"]
+                for ens_id in range(self.rank, self.nens, self.size):
+                    member = np.asarray(states[:, ens_id], dtype=np.float64)
+                    inv_kwargs = dict(icesee_kwargs)
+                    inv_kwargs.update({
+                        "comm": MPI.COMM_SELF,
+                        "ens_id": ens_id,
+                        "nd": self.nd,
+                        "nd_old": self.nd,
+                        "vec_inputs": list(
+                            icesee_kwargs.get("vec_inputs_old")
+                            or icesee_kwargs.get("vec_inputs")
+                        ),
+                    })
+                    trace_dir = None
+                    if icesee_kwargs.get("execution_parity_trace", False):
+                        trace_dir = os.path.join(
+                            icesee_kwargs.get("data_path", "."),
+                            "_execution_parity_trace",
+                        )
+                        os.makedirs(trace_dir, exist_ok=True)
+                        np.save(
+                            os.path.join(
+                                trace_dir,
+                                f"inversion_{int(timestep):06d}_member_{ens_id:06d}_input.npy",
+                            ),
+                            member,
+                        )
+
+                    result = inverse_step(ensemble=member, **inv_kwargs)
+                    if result is None:
+                        raise RuntimeError(
+                            "inverse_step_single returned no result for "
+                            f"ensemble member {ens_id}; inspect the preceding "
+                            "model-adapter/ISSM error."
+                        )
+                    if not hasattr(result, "items"):
+                        raise TypeError(
+                            "inverse_step_single must return a mapping, got "
+                            f"{type(result).__name__} for ensemble member {ens_id}."
+                        )
+                    value = None
+                    for key, candidate in result.items():
+                        if str(key).lower() in {
+                            "coefficient", "friction", "friction_coefficient",
+                            "fcoef", "frictioncoefficient",
+                            str(info["name"]).lower(),
+                        }:
+                            value = np.asarray(candidate, dtype=np.float64).reshape(-1)
+                            break
+                    if value is None:
+                        raise KeyError(
+                            "inverse_step_single did not return a recognized "
+                            "friction/coefficient field."
+                        )
+                    if value.size != info["stop"] - info["start"]:
+                        raise ValueError(
+                            f"Inversion returned {value.size} friction values; "
+                            f"expected {info['stop'] - info['start']}."
+                        )
+                    if trace_dir is not None:
+                        np.save(
+                            os.path.join(
+                                trace_dir,
+                                f"inversion_{int(timestep):06d}_member_{ens_id:06d}_friction.npy",
+                            ),
+                            value,
+                        )
+                    local_updates.append((ens_id, value))
+        except Exception as exc:
+            local_error = (
+                f"rank {self.rank}: {type(exc).__name__}: {exc}\n"
+                + traceback.format_exc()
+            )
+
+        errors = self.mpi_comm.allgather(local_error)
+        failures = [message for message in errors if message]
+        if failures:
+            raise RuntimeError(
+                "Member-wise hybrid inversion failed before publication:\n"
+                + "\n".join(failures)
+            )
+
+        self.mpi_comm.Barrier()
+        if self.size == 1:
+            handle = h5py.File(temp_path, "r+")
+        else:
+            handle = h5py.File(
+                temp_path, "r+", driver="mpio", comm=self.mpi_comm
+            )
+        try:
+            states = handle["states"]
+            for ens_id, value in local_updates:
+                states[info["start"]:info["stop"], ens_id] = value
+            handle.flush()
+        finally:
+            handle.close()
+        self.mpi_comm.Barrier()
+        if self.rank == 0:
+            print(
+                "[ICESEE][inversion] Completed member-wise friction inversion "
+                f"for {self.nens} members at stored timestep {timestep}."
+            )
 
     def _create_file_collective(self, fname):
         import h5py, h5py.h5p as h5p, h5py.h5f as h5f, h5py.h5fd as h5fd
@@ -161,7 +970,7 @@ class EnKF_fully_parallel_IO:
         fid = h5f.create(bytes(fname, 'utf-8'), flags=h5f.ACC_TRUNC, fapl=fapl)
         return h5py.File(fid)
 
-    def _create_batch_serial(self, t_start):
+    def _create_batch_serial(self, t_start, min_span=1):
         try:
             self._close_batch()
             self.files = []
@@ -172,28 +981,34 @@ class EnKF_fully_parallel_IO:
             if remaining == 0:
                 return
 
-            nfiles = min(self.batch_size, remaining)
+            nfiles = min(max(self.batch_size, min_span), remaining)
 
             if self.mpi_comm.Get_rank() == 0:
                 for t in range(t_start, t_start + nfiles):
                     fname = self._state_file_name(t)
 
-                    with h5py.File(fname, "w") as f:
+                    # Fresh-start cleanup is performed once in __init__.  From
+                    # this point onward an existing shard belongs to the
+                    # current run and must never be truncated when the sliding
+                    # window reopens it.
+                    mode = "a" if os.path.exists(fname) else "w"
+                    with h5py.File(fname, mode) as f:
                         row_chunk = max(1, min(self.h5_file_chunk_size, self.nd))
                         col_chunk = 1
-
-                        f.create_dataset(
-                            "states",
-                            shape=(self.nd, self.nens),
-                            chunks=(row_chunk, col_chunk),
-                            compression=self.h5_file_compression,
-                            compression_opts=(
-                                self.h5_file_compression_level
-                                if self.h5_file_compression is not None
-                                else None
-                            ),
-                            dtype="f8",
-                        )
+                        if "states" not in f:
+                            f.create_dataset(
+                                "states",
+                                shape=(self.nd, self.nens),
+                                chunks=(row_chunk, col_chunk),
+                                compression=self.h5_file_compression,
+                                compression_opts=self.h5_file_compression_options,
+                                dtype=self.storage_dtype,
+                            )
+                        elif tuple(f["states"].shape) != (self.nd, self.nens):
+                            raise ValueError(
+                                f"Restart shard {fname} has shape {f['states'].shape}; "
+                                f"expected {(self.nd, self.nens)}. Use force_fresh_start."
+                            )
 
             self.mpi_comm.Barrier()
 
@@ -212,7 +1027,7 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def _create_batch_parallel(self, t_start):
+    def _create_batch_parallel(self, t_start, min_span=1):
         try:
             self._close_batch()
             self.files = []
@@ -223,29 +1038,38 @@ class EnKF_fully_parallel_IO:
             if remaining == 0:
                 return
 
-            nfiles = min(self.batch_size, remaining)
+            nfiles = min(max(self.batch_size, min_span), remaining)
 
             for t in range(t_start, t_start + nfiles):
                 fname = self._state_file_name(t)
 
-                f = h5py.File(fname, "w", driver="mpio", comm=self.mpi_comm)
+                exists = os.path.exists(fname) if self.rank == 0 else None
+                exists = self.mpi_comm.bcast(exists, root=0)
+                # As in the serial-creation path, reopening a shard during the
+                # same run must preserve data regardless of restart settings.
+                mode = "a" if exists else "w"
+                f = h5py.File(fname, mode, driver="mpio", comm=self.mpi_comm)
                 f.atomic = False
 
                 row_chunk = max(1, min(self.h5_file_chunk_size, self.nd))
                 col_chunk = 1
 
-                dset = f.create_dataset(
-                    "states",
-                    shape=(self.nd, self.nens),
-                    chunks=(row_chunk, col_chunk),
-                    compression=self.h5_file_compression,
-                    compression_opts=(
-                        self.h5_file_compression_level
-                        if self.h5_file_compression is not None
-                        else None
-                    ),
-                    dtype="f8",
-                )
+                if "states" not in f:
+                    dset = f.create_dataset(
+                        "states",
+                        shape=(self.nd, self.nens),
+                        chunks=(row_chunk, col_chunk),
+                        compression=self.h5_file_compression,
+                        compression_opts=self.h5_file_compression_options,
+                        dtype=self.storage_dtype,
+                    )
+                else:
+                    dset = f["states"]
+                    if tuple(dset.shape) != (self.nd, self.nens):
+                        raise ValueError(
+                            f"Restart shard {fname} has shape {dset.shape}; "
+                            f"expected {(self.nd, self.nens)}. Use force_fresh_start."
+                        )
 
                 self.files.append(f)
                 self.datasets.append(dset)
@@ -265,31 +1089,6 @@ class EnKF_fully_parallel_IO:
         dxpl.set_dxpl_mpio(mode)
         return dxpl
 
-    @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD)  # Reduce retries/delays for efficiency
-    def _create_batch(self, t_start):
-        self._close_batch()
-        self.files = []
-        self.datasets = []
-        self.current_batch_start = t_start
-        nfiles = min(self.batch_size, self.nt - t_start)
-
-        # All ranks collectively create files and datasets
-        for t in range(t_start, t_start + nfiles):
-            fname = f"{self.base_path}/{self.file_prefix}_{t:04d}.h5"
-            f = h5py.File(fname, 'w', driver='mpio', comm=self.mpi_comm)
-            f.atomic = True  # Enable atomic writes for consistency
-            row_chunk = min(1024, self.nd_local)  # Align with local partition
-            col_chunk = min(32, self.nens)  # Chunk ensembles for better access
-            dset = f.create_dataset(
-                'states', (self.nd, self.nens),
-                chunks=(row_chunk, col_chunk),
-                compression=None,  # Disable for now; test blosc if space is needed
-                dtype='f8'
-            )
-            self.files.append(f)
-            self.datasets.append(dset)
-        self.mpi_comm.Barrier()  # Single barrier after all creations
-
     def _close_batch(self):
         try:
             for f in self.files:
@@ -307,19 +1106,104 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Abort(1)
 
     def _ensure_batch(self, t):
+        """Collective: ensure ``t`` alone is covered by the open window.
+
+        See ``_ensure_batch_range`` for the collective-safety contract this
+        must satisfy.
+        """
+        self._ensure_batch_range(t, t)
+
+    def _ensure_batch_range(self, t_lo, t_hi):
+        """Collective: ensure ``[t_lo, t_hi]`` is covered by the open window.
+
+        This is the only method that may open/close the shared HDF5 batch
+        (a collective operation on ``self.mpi_comm``, i.e. every world
+        rank).  Every caller of this method must therefore itself be
+        reached identically by every rank in ``self.mpi_comm`` at the same
+        point in program order -- it must never be called from code that
+        only a subcommunicator root (or any other rank subset) executes.
+
+        The forecast read/write pair is the reason ``t_hi`` exists: a
+        forecast round always reads timestep ``t`` (from every rank, via
+        ``read_forecast``) and then writes ``t + 1`` (from the
+        subcommunicator root only, via ``write_forecast``).  Anchoring the
+        window at ``t_lo`` and sizing it to also cover ``t_hi`` means the
+        *read* -- which is always matched across the whole communicator --
+        is what opens/extends the window for the *write* too, so the write
+        path never needs to touch a collective itself; see
+        ``_require_batch``.
+        """
         try:
-            batch_start = (t // self.batch_size) * self.batch_size
-            if batch_start != self.current_batch_start:
-                # self._create_batch(batch_start)
-                if self.serial_file_creation:
-                    self._create_batch_serial(batch_start)
-                else:
-                    self._create_batch_parallel(batch_start)
+            t_lo = max(0, int(t_lo))
+            t_hi = max(t_lo, int(t_hi))
+            batch_end = self.current_batch_start + len(self.datasets)
+            if self.current_batch_start <= t_lo and t_hi < batch_end:
+                return
+            batch_start = t_lo
+            min_span = t_hi - t_lo + 1
+            if self.serial_file_creation:
+                self._create_batch_serial(batch_start, min_span=min_span)
+            else:
+                self._create_batch_parallel(batch_start, min_span=min_span)
         except Exception as e:
-            print(f"Error occurred in _ensure_batch: {e}")
+            print(f"Error occurred in _ensure_batch_range: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
+
+    def _require_batch(self, t):
+        """Non-collective: assert ``t`` is already covered by the window.
+
+        Used by write paths that only a rank subset (e.g. a
+        subcommunicator root) executes.  Such a call must never be the one
+        to open/extend the batch -- doing so would only be a collective on
+        the ranks that happen to reach it, which is a mismatched-collective
+        deadlock risk against ``self.mpi_comm``.  The window must instead
+        already have been advanced by a matched call (typically
+        ``read_forecast``, see ``_ensure_batch_range``) earlier in the same
+        timestep.  If it hasn't, that is a caller-ordering bug, and this
+        raises immediately rather than silently attempting a collective
+        that the rest of ``self.mpi_comm`` may never reach.
+        """
+        t = int(t)
+        batch_end = self.current_batch_start + len(self.datasets)
+        if not (self.current_batch_start <= t < batch_end):
+            raise RuntimeError(
+                f"[ICESEE] Timestep {t} is not in the open HDF5 batch "
+                f"window [{self.current_batch_start}, {batch_end}). This "
+                "write path only runs on a rank subset, so it cannot safely "
+                "open/extend the shared window itself. A call reached by "
+                "every rank in self.mpi_comm (e.g. read_forecast for this "
+                "timestep, or an explicit _ensure_batch/_ensure_batch_range) "
+                "must advance the window first."
+            )
+
+    def prune_history(self, keep_t):
+        """Retain only ``keep_t`` when rolling ensemble history is enabled.
+
+        The ensemble mean time series is stored separately and is not removed.
+        All ranks close the active HDF5 window before rank zero unlinks older
+        shards, making the retained shard a complete restart point.
+        """
+        if self.history_mode != "rolling":
+            return
+        keep_t = int(keep_t)
+        self._close_batch()
+        self.current_batch_start = -1
+        self.mpi_comm.Barrier()
+        if self.rank == 0:
+            keep_name = os.path.abspath(self._state_file_name(keep_t))
+            pattern = f"{self.base_path}/{self.file_prefix}_*.h5"
+            for path in glob.glob(pattern):
+                # The mean file shares the prefix but is not a state shard.
+                if os.path.abspath(path) == keep_name or path.endswith("_mean.h5"):
+                    continue
+                if re.search(r"_\d+\.h5$", os.path.basename(path)):
+                    try:
+                        os.remove(path)
+                    except FileNotFoundError:
+                        pass
+        self.mpi_comm.Barrier()
 
     def _rw_select(self, ds, start_row, nrows, col0, ncols, buf=None, write=False):
         import numpy as np, h5py.h5s as h5s
@@ -331,7 +1215,7 @@ class EnKF_fully_parallel_IO:
         if write:
             ds.id.write(mem_space, file_space, np.ascontiguousarray(buf), dxpl=dxpl)
         else:
-            out = np.empty(mem_shape, dtype='f8', order='C')
+            out = np.empty(mem_shape, dtype=self.storage_dtype, order='C')
             ds.id.read(mem_space, file_space, out, dxpl=dxpl)
             return out
 
@@ -342,8 +1226,17 @@ class EnKF_fully_parallel_IO:
 
         This matches _mpi_forecast_functions.py where the MPI model receives
         a complete state vector for one ensemble member.
+
+        Every rank in ``self.mpi_comm`` calls this once per timestep (it is
+        not gated by ``sub_rank``), which is what makes it safe for this
+        call -- and only this call -- to open/extend the shared HDF5
+        window.  It proactively covers ``t + 1`` too, because the paired
+        ``write_forecast(t + 1, ...)`` a moment later runs on the
+        subcommunicator root alone and must find the window already open
+        (see ``_require_batch``).
         """
-        self._ensure_batch(t)
+        t = int(t)
+        self._ensure_batch_range(t, min(t + 1, self.nt - 1))
         batch_idx = t - self.current_batch_start
 
         data = self.datasets[batch_idx][:, ens_idx]
@@ -356,12 +1249,16 @@ class EnKF_fully_parallel_IO:
         Forecast path: write one full ensemble vector.
 
         This should be called only by sub_rank == 0 from
-        parallel_forecast_step_default_full_parallel_run.
+        parallel_forecast_step_default_full_parallel_run. Because only a
+        rank subset reaches this call, it must never itself open/extend the
+        shared HDF5 window (that is a collective on the full
+        ``self.mpi_comm``, not just the calling ranks). ``read_forecast``
+        for this same timestep already did so; see ``_require_batch``.
         """
-        self._ensure_batch(t)
+        self._require_batch(t)
         batch_idx = t - self.current_batch_start
 
-        data = np.asarray(data, dtype=np.float64).reshape(-1)
+        data = np.asarray(data, dtype=self.storage_dtype).reshape(-1)
 
         if data.size != self.nd:
             raise ValueError(
@@ -370,6 +1267,57 @@ class EnKF_fully_parallel_IO:
             )
 
         self.datasets[batch_idx][:, ens_idx] = data
+
+    def write_forecast_from_root(self, t, data, ens_idx, root=0):
+        """Collectively write one member initialized on ``root``.
+
+        Sequential model initialization is useful when a model instance is
+        expensive or not safe to construct concurrently.  The old mode-2 path
+        let rank zero call :meth:`write_forecast` alone, which deadlocked in
+        the collective batch-opening barriers.  This routine keeps only one
+        full member on the root, scatters disjoint row slabs, and has every
+        world rank participate in the parallel-HDF5 write.
+        """
+        self._ensure_batch(t)
+        batch_idx = int(t) - self.current_batch_start
+        counts = np.asarray(
+            [
+                (self.nd // self.size) + (1 if rank < self.nd % self.size else 0)
+                for rank in range(self.size)
+            ],
+            dtype=np.int64,
+        )
+        displacements = np.zeros(self.size, dtype=np.int64)
+        if self.size > 1:
+            displacements[1:] = np.cumsum(counts[:-1])
+
+        if self.rank == root:
+            source = np.asarray(data, dtype=np.float64).reshape(-1)
+            if source.size != self.nd:
+                raise ValueError(
+                    f"write_forecast_from_root expected {self.nd} values, "
+                    f"got {source.size}"
+                )
+        else:
+            source = None
+
+        local = np.empty(int(counts[self.rank]), dtype=np.float64)
+        self.mpi_comm.Scatterv(
+            [source, counts, displacements, MPI.DOUBLE] if self.rank == root else None,
+            local,
+            root=root,
+        )
+        if local.size:
+            self._rw_select(
+                self.datasets[batch_idx],
+                int(displacements[self.rank]),
+                int(local.size),
+                int(ens_idx),
+                1,
+                buf=local.astype(self.storage_dtype, copy=False),
+                write=True,
+            )
+        self.mpi_comm.Barrier()
 
     @retry_on_failure(max_attempts=3, delay=0.5, mpi_comm=MPI.COMM_WORLD)
     def read_analysis(self, t, ens_idx):
@@ -395,7 +1343,7 @@ class EnKF_fully_parallel_IO:
         self._ensure_batch(t)
         batch_idx = t - self.current_batch_start
 
-        data = np.asarray(data, dtype=np.float64).reshape(-1)
+        data = np.asarray(data, dtype=self.storage_dtype).reshape(-1)
 
         expected = self.nd_local_world
         if data.size != expected:
@@ -481,7 +1429,8 @@ class EnKF_fully_parallel_IO:
                     # ALL ranks call create_dataset with identical args (collective)
                     chunk_rows = min(self.nd, 4096)
                     f.create_dataset('mean', (self.nd, self.nt),
-                                    chunks=(chunk_rows, 1), dtype='f8')
+                                    chunks=(chunk_rows, 1),
+                                    dtype=self.storage_dtype)
                     # Ensure all ranks see the new metadata
                     comm.Barrier()
                 else:
@@ -514,6 +1463,7 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Abort(1)
 
     def compare_forecast_means(self, t, ens_chunk_size=1, rtol=1e-5, atol=1e-8):
+        """Debug check without materializing the state-by-ensemble matrix."""
         try:
             comm = self.mpi_comm
             rank = comm.Get_rank()
@@ -523,10 +1473,26 @@ class EnKF_fully_parallel_IO:
                 file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
                 self._ensure_batch(t)
                 batch_idx = t - self.current_batch_start
-                ens_mean = self.datasets[batch_idx][:,:]
-                mean_original = np.mean(ens_mean, axis=1)
+                mean_original = np.empty(self.nd, dtype=np.float64)
+                rows = max(1, resolve_row_chunk_size(
+                    self.nd,
+                    self.nens,
+                    explicit_rows=int(self.icesee_kwargs.get(
+                        "analysis_row_chunk_size", 0
+                    )),
+                    memory_budget_mb=float(self.icesee_kwargs.get(
+                        "analysis_memory_budget_mb", 256.0
+                    )),
+                ))
+                for row0 in range(0, self.nd, rows):
+                    row1 = min(self.nd, row0 + rows)
+                    block = np.asarray(
+                        self.datasets[batch_idx][row0:row1, :],
+                        dtype=np.float64,
+                    )
+                    mean_original[row0:row1] = np.mean(block, axis=1)
 
-            self.compute_forecast_mean_chunked(t, ens_chunk_size=ens_chunk_size)
+            self.compute_forecast_mean_chunked_v2(t)
             mean_chunked = None
             if rank == 0:
                 with h5py.File(file_path, 'r') as f:
@@ -626,6 +1592,13 @@ class EnKF_fully_parallel_IO:
                 bed_time_to_col[bed_time] = j
             bed_snap_cols = sorted(set(bed_snap_cols))
 
+        # The snapshot columns are analysis metadata, not a writer-local
+        # implementation detail.  Persist them in both dictionaries before
+        # rank 0 writes the observations so every later analysis/restart path
+        # sees the same gate schedule as execution mode 1.
+        icesee_kwargs["bed_snap_cols"] = list(bed_snap_cols)
+        self.icesee_kwargs["bed_snap_cols"] = list(bed_snap_cols)
+
         if rank == 0:
             try:
                 print("[ICESEE] Generating synthetic observations ...")
@@ -637,20 +1610,20 @@ class EnKF_fully_parallel_IO:
 
                 obs_file = f"{self.base_path}/synthetic_obs.h5"
 
-                # Load true state
-                with h5py.File(f"{self.base_path}/true_nurged_states.h5", "r") as f:
-                    statevec_true = f["true_state"][:]  # (nd, nt or nt+1)
-
                 # Build index map once
-                _, indx_map, _ = icesee_get_index(**icesee_kwargs)
                 vec_inputs = list(icesee_kwargs["vec_inputs"])
+                indx_map = _global_variable_index_map(
+                    nd, vec_inputs, icesee_kwargs.get("var_nd")
+                )
 
                 # Helpers / options
                 num_state_vars = icesee_kwargs.get("num_state_vars", self.icesee_kwargs.get("num_state_vars"))
                 observed_params = set(icesee_kwargs.get("observed_params", []))
 
                 bed_aliases = {"bed", "bedrock", "bed_topography", "bedtopo", "bedtopography"}
-                key_is_bed = {k: (k in bed_aliases) for k in vec_inputs}
+                key_is_bed = {
+                    k: (str(k).lower() in bed_aliases) for k in vec_inputs
+                }
                 key_idx_map = {k: np.asarray(indx_map[k], dtype=int) for k in vec_inputs}
 
                 # ---- Bed sparsity controls (accept BOTH naming conventions safely) ----
@@ -666,6 +1639,9 @@ class EnKF_fully_parallel_IO:
                 bed_spacing_pts = icesee_kwargs.get("bed_obs_spacing", None)
                 bed_indices_user = icesee_kwargs.get("bed_obs_indices", None)
                 bed_mask_user = icesee_kwargs.get("bed_obs_mask", None)
+                bed_track_half_width_m = icesee_kwargs.get(
+                    "bed_obs_track_half_width_m", 1000.0
+                )
 
                 # ---- Build bed_mask_map using the SAME priority/shape handling as partial ----
                 bed_mask_map = {}
@@ -710,8 +1686,6 @@ class EnKF_fully_parallel_IO:
                     # Priority 4: LiDAR-like / stride in km (2D grid or ISSM mesh)
                     elif (bed_stride_km is not None) and (Lx is not None) and (Ly is not None):
                         if re.match(r"(?i)^issm$", str(model_name)):
-                            import h5py  # already imported, but harmless
-
                             icesee_path = icesee_kwargs.get("icesee_path")
                             data_path = icesee_kwargs.get("data_path")
 
@@ -719,35 +1693,25 @@ class EnKF_fully_parallel_IO:
                             try:
                                 with h5py.File(file_path, "r") as f:
                                     x_param = f["/fric_x"][:]
-                                    y_param = f["/fric_y"][:]
                             except FileNotFoundError:
                                 raise FileNotFoundError(
                                     f"ISSM mesh file '{file_path}' not found. "
                                     "Please generate the mesh indicies before running ICESEE."
                                 )
 
-                            y_param = np.asarray(y_param / 1000.0, dtype=float).reshape(-1)
-                            x_param = np.asarray(x_param / 1000.0, dtype=float).reshape(-1)
+                            # Use the same units and implementation as mode 1:
+                            # mesh x is in metres, stride is configured in km,
+                            # and track width is an independent metre value.
+                            mask = cross_flow_track_mask(
+                                x_param,
+                                stride_km=bed_stride_km,
+                                half_width_m=bed_track_half_width_m,
+                            )
 
-                            y_min, y_max = np.min(y_param), np.max(y_param)
-                            x_min, x_max = np.min(x_param), np.max(x_param)
-
-                            local_len = x_param.size
-                            bed_stride_km_local = float(bed_stride_km) / 1000.0  # keep your partial conversion
-
-                            x_lines = np.arange(x_min, x_max + 1e-6, bed_stride_km_local)
-
-                            if x_lines.size > 1:
-                                dx_nom = (x_max - x_min) / (x_lines.size - 1)
-                            else:
-                                dx_nom = bed_stride_km_local
-                            band = 0.5 * dx_nom
-
-                            mask = np.zeros(local_len, dtype=bool)
-                            for x_line in x_lines:
-                                mask |= np.abs(x_param - x_line) <= band
-
-                            print(f"[ICESEE<-ISSM] bed LiDAR mask for '{k}': {mask.sum()} of {local_len} points observed")
+                            print(
+                                f"[ICESEE<-ISSM] bed LiDAR mask for '{k}': "
+                                f"{mask.sum()} of {x_param.size} points observed"
+                            )
 
                         else:
                             # 2D grid assumption like partial
@@ -774,72 +1738,216 @@ class EnKF_fully_parallel_IO:
 
                     bed_mask_map[k] = mask
 
+                # H_matrix and the streamed analysis must see the same masks.
+                self.icesee_kwargs["bed_mask_map"] = bed_mask_map
+                icesee_kwargs["bed_mask_map"] = bed_mask_map
+
                 # ---- Create / overwrite output datasets ----
                 with h5py.File(obs_file, "a") as f:
-                    if "hu_obs" in f or "error_R" in f:
-                        print(f"[ICESEE] Warning: {obs_file} already contains 'hu_obs' or 'error_R'. Overwriting datasets.")
-                        if "hu_obs" in f:
-                            del f["hu_obs"]
-                        if "error_R" in f:
-                            del f["error_R"]
+                    for name in (
+                        "hu_obs", "error_R", "hu_obs_compact", "obs_indices",
+                        "obs_std", "obs_active", "obs_index", "obs_t", "obs_max_time",
+                        "bed_snap_cols",
+                    ):
+                        if name in f:
+                            del f[name]
 
-                    hu_obs = f.create_dataset(
-                        "hu_obs", (nd, m_obs),
-                        chunks=(min(1000, nd), min(50, m_obs)),
-                        dtype="f8"
-                    )
-                    error_R = f.create_dataset(
-                        "error_R", (nd, m_obs * 2 + 1),
-                        chunks=(min(1000, nd), min(50, m_obs * 2 + 1)),
-                        dtype="f8"
-                    )
-
-                    # Fill error_R by blocks (same idea)
                     sig_obs = np.asarray(self.icesee_kwargs["sig_obs"]).reshape(-1)
-                    if sig_obs.size < total_state_param_vars:
-                        sig_obs = np.pad(sig_obs, (0, total_state_param_vars - sig_obs.size), mode="edge")
-                    elif sig_obs.size > total_state_param_vars:
-                        sig_obs = sig_obs[:total_state_param_vars]
+                    if sig_obs.size < len(vec_inputs):
+                        sig_obs = np.pad(
+                            sig_obs, (0, len(vec_inputs) - sig_obs.size), mode="edge"
+                        )
 
-                    for i, sig in enumerate(sig_obs):
-                        s = i * hdim
-                        e = s + hdim
-                        error_R[s:e, :] = sig
+                    observed = list(dict.fromkeys(
+                        list(icesee_kwargs.get("observed_vars", []))
+                        + list(icesee_kwargs.get("observed_params", []))
+                    ))
+                    thickness_key = next(
+                        (
+                            key for key in vec_inputs
+                            if str(key).lower() in {
+                                "h", "thickness", "ice_thickness"
+                            }
+                        ),
+                        None,
+                    )
+                    obs_indices_parts = []
+                    obs_std_parts = []
+                    obs_is_bed_parts = []
+                    bed_thickness_indices_parts = []
+                    for key in observed:
+                        if key not in key_idx_map:
+                            raise KeyError(f"Observed key '{key}' is not in vec_inputs")
+                        idx = key_idx_map[key]
+                        bed_flag = key_is_bed.get(key, False)
+                        if bed_flag:
+                            if thickness_key is None:
+                                raise ValueError(
+                                    "Grounded-only bed observations require a "
+                                    "thickness variable in vec_inputs."
+                                )
+                            thickness_idx = key_idx_map[thickness_key]
+                            if thickness_idx.size != idx.size:
+                                raise ValueError(
+                                    "Bed and thickness blocks must be pointwise "
+                                    "aligned for grounded-only bed observations."
+                                )
+                            static_mask = bed_mask_map.get(
+                                key, np.ones(idx.size, dtype=bool)
+                            )
+                            idx = idx[static_mask]
+                            bed_thickness_indices_parts.append(
+                                thickness_idx[static_mask]
+                            )
+                        else:
+                            bed_thickness_indices_parts.append(
+                                np.full(idx.size, -1, dtype=np.int64)
+                            )
+                        sigma = float(sig_obs[vec_inputs.index(key)])
+                        obs_indices_parts.append(idx)
+                        obs_std_parts.append(np.full(idx.size, sigma, dtype=np.float64))
+                        obs_is_bed_parts.append(np.full(idx.size, bed_flag, dtype=bool))
 
-                    # ==== Main observation loop (columns km), aligned to partial ====
-                    obs_set = set(icesee_kwargs.get("observed_vars", [])) | set(icesee_kwargs.get("observed_params", []))
+                    obs_indices = np.concatenate(obs_indices_parts).astype(np.int64)
+                    obs_std = np.concatenate(obs_std_parts)
+                    obs_is_bed = np.concatenate(obs_is_bed_parts)
+                    bed_thickness_indices = np.concatenate(
+                        bed_thickness_indices_parts
+                    ).astype(np.int64)
+                    nobs = int(obs_indices.size)
+                    col_chunk = max(1, min(50, m_obs))
+                    row_chunk = max(1, min(
+                        nobs,
+                        resolve_row_chunk_size(
+                            nobs, max(1, m_obs),
+                            budget_mb=icesee_kwargs.get(
+                                "analysis_memory_budget_mb", 256.0
+                            ),
+                            explicit_rows=icesee_kwargs.get(
+                                "observation_row_chunk_size", 0
+                            ),
+                            working_buffers=2,
+                        ),
+                    ))
+                    if m_obs:
+                        hu_obs = f.create_dataset(
+                            "hu_obs_compact", (nobs, m_obs),
+                            chunks=(row_chunk, col_chunk), dtype="f8"
+                        )
+                        active = f.create_dataset(
+                            "obs_active", (nobs, m_obs),
+                            # Store the mask as an ordinary byte rather than
+                            # HDF5's enum-backed boolean type.  MATLAB h5read
+                            # exposes the latter as a cell array on some
+                            # releases, which breaks the ISSM inversion
+                            # adapter's logical indexing.  NumPy/h5py still
+                            # converts this dataset to bool transparently.
+                            chunks=(row_chunk, col_chunk), dtype="u1"
+                        )
+                    else:
+                        # HDF5 chunks may not exceed a zero-length axis.  A
+                        # contiguous empty dataset preserves mode-1 semantics
+                        # for shortened/no-observation benchmark runs.
+                        hu_obs = f.create_dataset(
+                            "hu_obs_compact",
+                            data=np.empty((nobs, 0), dtype=np.float64),
+                        )
+                        active = f.create_dataset(
+                            "obs_active",
+                            data=np.empty((nobs, 0), dtype=np.uint8),
+                        )
+                    f.create_dataset("obs_indices", data=obs_indices, dtype="i8")
+                    f.create_dataset("obs_std", data=obs_std, dtype="f8")
+                    f.create_dataset("obs_index", data=ind_m, dtype="i8")
+                    f.create_dataset("obs_t", data=obs_t, dtype="f8")
+                    f.create_dataset(
+                        "bed_snap_cols",
+                        data=np.asarray(bed_snap_cols, dtype=np.int64),
+                        dtype="i8",
+                    )
+                    f.create_dataset("obs_max_time", data=np.asarray([obs_t[-1] if obs_t.size else 0.0]))
+                    f.attrs["observation_storage"] = "compact_rows"
+                    f.attrs["state_dimension"] = int(nd)
 
-                    km = 0
-                    for step in range(nt):
-                        if km >= m_obs:
-                            break
+                    # Synthetic observations must be an execution-mode
+                    # invariant.  Do not inherit the process-global RNG (or a
+                    # rank-local forecast RNG), because modes 1 and 2 consume
+                    # those streams in a different order before reaching this
+                    # routine.
+                    observation_seed = int(
+                        icesee_kwargs.get(
+                            "synthetic_observation_seed",
+                            int(
+                                icesee_kwargs.get(
+                                    "base_seed", icesee_kwargs.get("seed", 42)
+                                )
+                            )
+                            + 2000003,
+                        )
+                    )
+                    observation_rng = np.random.default_rng(observation_seed)
+                    self.icesee_kwargs["synthetic_observation_seed"] = observation_seed
+                    with h5py.File(
+                        f"{self.base_path}/true_nurged_states.h5", "r"
+                    ) as true_file:
+                        truth = true_file["true_state"]
+                        for km, step in enumerate(ind_m):
+                            # Match the partial-parallel observation contract:
+                            # ``ind_m`` contains zero-based columns of the
+                            # stored reference trajectory.
+                            tcol = int(step)
+                            # Match execution mode 1 exactly: bed data are
+                            # available only at configured snapshot columns
+                            # and only where the reference state is grounded.
+                            # The compact row registry contains the static
+                            # survey support; the dynamic grounded gate must
+                            # still be evaluated separately at every snapshot.
+                            active_col = ~obs_is_bed
+                            if km in bed_snap_cols and np.any(obs_is_bed):
+                                bed_positions = np.flatnonzero(obs_is_bed)
+                                bed_rows = obs_indices[bed_positions]
+                                thickness_rows = bed_thickness_indices[
+                                    bed_positions
+                                ]
+                                bed_values = _read_rows_preserve_order(
+                                    truth, bed_rows, tcol
+                                )
+                                thickness_values = _read_rows_preserve_order(
+                                    truth, thickness_rows, tcol
+                                )
+                                di = float(icesee_kwargs.get("di", 0.8930))
+                                active_col[bed_positions] = (
+                                    thickness_values + bed_values / di > 0.0
+                                )
+                            active[:, km] = active_col
+                            for start in range(0, nobs, row_chunk):
+                                stop = min(nobs, start + row_chunk)
+                                use = active_col[start:stop]
+                                values = np.zeros(stop - start, dtype=np.float64)
+                                if np.any(use):
+                                    rows = obs_indices[start:stop][use]
+                                    values[use] = _read_rows_preserve_order(
+                                        truth, rows, tcol
+                                    ) + observation_rng.normal(
+                                        0.0, obs_std[start:stop][use]
+                                    )
+                                hu_obs[start:stop, km] = values
 
-                        if step == ind_m[km]:
-                            # guard for nt vs nt+1 storage
-                            tcol = step + 1 if (step + 1) < statevec_true.shape[1] else step
-
-                            for ii, key in enumerate(vec_inputs):
-                                idx = key_idx_map[key]
-                                bed_flag = key_is_bed.get(key, False)
-
-                                # ---- non-bed vars: normal obs at every obs time ----
-                                if (key in obs_set) and (not bed_flag):
-                                    sigma = error_R[idx, km]
-                                    hu_obs[idx, km] = statevec_true[idx, tcol] + \
-                                                    np.random.normal(0.0, sigma, size=idx.size)
-                                else:
-                                    hu_obs[idx, km] = 0.0
-
-                                # ---- bed vars: only at bed snapshot columns, on masked subset ----
-                                if bed_flag and (km in bed_snap_cols):
-                                    mask = bed_mask_map.get(key, np.ones(idx.size, dtype=bool))
-                                    idx_obs = idx[mask]
-                                    if idx_obs.size > 0:
-                                        sigma_obs = error_R[idx_obs, km]
-                                        hu_obs[idx_obs, km] = statevec_true[idx_obs, tcol] + \
-                                                            np.random.normal(0.0, sigma_obs, size=idx_obs.size)
-
-                            km += 1
+                    if str(icesee_kwargs.get(
+                        "synthetic_observation_storage", "compact"
+                    )).lower() in {"dense", "both"}:
+                        dense = f.create_dataset(
+                            "hu_obs", (nd, m_obs),
+                            chunks=(min(4096, nd), col_chunk), dtype="f8",
+                            fillvalue=0.0,
+                        )
+                        for start in range(0, nobs, row_chunk):
+                            stop = min(nobs, start + row_chunk)
+                            dense[obs_indices[start:stop], :] = hu_obs[start:stop, :]
+                        print(
+                            "[ICESEE] Warning: dense synthetic-observation export "
+                            "is enabled and scales with the full state dimension."
+                        )
 
             except Exception as e:
                 print(f"[ICESEE] Error in full-parallel _create_synthetic_observations: {e}")
@@ -863,10 +1971,10 @@ class EnKF_fully_parallel_IO:
             observed = icesee_kwargs["all_observed"]  # e.g. ['h','u','v','smb','bed']
             vec_inputs = icesee_kwargs.get("vec_inputs", [])
 
-            # --- Recompute index map (same as partial parallel) ---
-            vecs, indx_map, _ = icesee_get_index(**icesee_kwargs)
-
             nd = int(self.nd)  # state size
+            indx_map = _global_variable_index_map(
+                nd, vec_inputs, icesee_kwargs.get("var_nd")
+            )
 
             # --- Retrieve bed masks (must already exist) ---
             bed_mask_map = icesee_kwargs.get("bed_mask_map", {})
@@ -874,36 +1982,35 @@ class EnKF_fully_parallel_IO:
             bed_aliases = {"bed", "bedrock", "bed_topography", "bedtopo", "bedtopography"}
             key_is_bed = {k: (k in bed_aliases) for k in vec_inputs}
 
-            # --- Collect observation indices, applying masks to bed ---
-            all_obs_indices = []
-            for key in observed:
-                if key not in indx_map:
-                    raise KeyError(f"Observed key '{key}' not found in indx_map")
-
-                idx = np.asarray(indx_map[key], dtype=int)
-
-                # Apply bed mask if present (keep behavior consistent with your partial-parallel code)
-                if key == "bed" and key in bed_mask_map:
-                    mask = np.asarray(bed_mask_map[key], dtype=bool)
-
-                    # tolerate mask stored as shape (1, n) like your partial version
-                    if mask.ndim > 1 and mask.shape[0] == 1:
-                        mask = mask[0]
-                    else:
-                        mask = mask.ravel()
-
-                    if mask.size != idx.size:
-                        raise ValueError(
-                            f"bed_mask_map['{key}'] length {mask.size} does not "
-                            f"match bed vector length {idx.size}"
+            compact_file = f"{self.base_path}/synthetic_obs.h5"
+            if os.path.exists(compact_file):
+                with h5py.File(compact_file, "r") as obs_handle:
+                    if "obs_indices" in obs_handle:
+                        obs_indices = np.asarray(
+                            obs_handle["obs_indices"], dtype=np.int64
                         )
+                    else:
+                        obs_indices = None
+            else:
+                obs_indices = None
 
-                    idx = idx[mask]
-
-                all_obs_indices.append(idx)
-
-            # Flatten
-            obs_indices = np.concatenate(all_obs_indices).astype(int)
+            if obs_indices is None:
+                # Legacy observation files: reconstruct the selection operator.
+                all_obs_indices = []
+                for key in observed:
+                    if key not in indx_map:
+                        raise KeyError(f"Observed key '{key}' not found in indx_map")
+                    idx = np.asarray(indx_map[key], dtype=int)
+                    if key_is_bed.get(key, False) and key in bed_mask_map:
+                        mask = np.asarray(bed_mask_map[key], dtype=bool).ravel()
+                        if mask.size != idx.size:
+                            raise ValueError(
+                                f"bed_mask_map['{key}'] length {mask.size} does "
+                                f"not match bed vector length {idx.size}"
+                            )
+                        idx = idx[mask]
+                    all_obs_indices.append(idx)
+                obs_indices = np.concatenate(all_obs_indices).astype(np.int64)
 
             if obs_indices.size == 0:
                 raise ValueError("No observation indices found (obs_indices is empty).")
@@ -922,7 +2029,6 @@ class EnKF_fully_parallel_IO:
 
             rank = self.mpi_comm.Get_rank()
             if rank == 0:
-                import os
                 out_dir = os.path.dirname(H_matrix_file)
                 if out_dir:
                     os.makedirs(out_dir, exist_ok=True)
@@ -931,62 +2037,28 @@ class EnKF_fully_parallel_IO:
                 except FileNotFoundError:
                     pass
 
-                # Tunables (safe defaults)
-                row_chunk = int(icesee_kwargs.get("H_row_chunk", min(512, m)))
-                col_chunk = int(icesee_kwargs.get("H_col_chunk", min(2048, nd)))
-                block_rows = int(icesee_kwargs.get("H_write_block_rows", row_chunk))
-
-                row_chunk = max(1, min(row_chunk, m))
-                col_chunk = max(1, min(col_chunk, nd))
-                block_rows = max(1, min(block_rows, m))
-
                 with h5py.File(H_matrix_file, "w") as f:
-                    # Dense dataset, but unwritten entries are 0
-                    dset = f.create_dataset(
-                        "H",
-                        shape=(m, nd),
-                        dtype="f8",
-                        chunks=(row_chunk, col_chunk),
-                        fillvalue=0.0
-                    )
-
-                    # Save indices too (very useful)
                     f.create_dataset("obs_indices", data=obs_indices, dtype="i8")
+                    f.attrs["state_dimension"] = nd
+                    f.attrs["operator_format"] = "row_indices"
 
-                    # --- Stream-writing the ones ---
-                    # Process rows in blocks
-                    for r0 in range(0, m, block_rows):
-                        r1 = min(m, r0 + block_rows)
-                        cols = obs_indices[r0:r1]  # length (r1-r0)
-
-                        # Determine which column-chunk each row's 1 lands in
-                        chunk_ids = (cols // col_chunk).astype(np.int64)
-
-                        # For each unique column-chunk in this row-block:
-                        for cid in np.unique(chunk_ids):
-                            c0 = int(cid * col_chunk)
-                            c1 = int(min(nd, c0 + col_chunk))
-
-                            # rows that belong to this col-chunk
-                            mask = (chunk_ids == cid)
-                            rows_sub = np.nonzero(mask)[0]  # indices within [r0,r1)
-                            if rows_sub.size == 0:
-                                continue
-
-                            # Build a small dense block: (#rows_sub, c1-c0)
-                            buf = np.zeros((rows_sub.size, c1 - c0), dtype=np.float64)
-
-                            # Place ones at local column offsets
-                            local_cols = (cols[rows_sub] - c0).astype(np.int64)
-                            buf[np.arange(rows_sub.size), local_cols] = 1.0
-
-                            # Write this hyperslab
-                            # Target rows are (r0 + rows_sub), contiguous? not necessarily.
-                            # h5py cannot write scattered rows in one hyperslab, so write in small loops
-                            # BUT rows_sub is typically small; still safe.
-                            for ii, rr_off in enumerate(rows_sub):
-                                rr = int(r0 + rr_off)
-                                dset[rr, c0:c1] = buf[ii, :]
+                    # Dense H is retained only as an opt-in compatibility export.
+                    storage = str(icesee_kwargs.get(
+                        "observation_operator_storage", "indices"
+                    )).lower()
+                    if storage in {"dense", "both"}:
+                        row_chunk = max(1, min(
+                            int(icesee_kwargs.get("H_row_chunk", min(512, m))), m
+                        ))
+                        col_chunk = max(1, min(
+                            int(icesee_kwargs.get("H_col_chunk", min(2048, nd))), nd
+                        ))
+                        dset = f.create_dataset(
+                            "H", shape=(m, nd), dtype="f8",
+                            chunks=(row_chunk, col_chunk), fillvalue=0.0
+                        )
+                        for row, column in enumerate(obs_indices):
+                            dset[row, column] = 1.0
 
             self.mpi_comm.Barrier()
         except Exception as e:
@@ -996,95 +2068,190 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Abort(1)
 
     def compute_X5_utils_(self, **icesee_kwargs):
-        # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
-        # Dprime[:ens_idx] = d - Hmean
+        """Accumulate exact mode-1 analysis products in bounded memory.
+
+        Because ICESEE's observation operator selects state-vector rows, the
+        dense ``m x nd`` matrix is unnecessary.  Observation rows are divided
+        among MPI ranks and streamed from the timestep and observation files.
+        Only three ``Nens x Nens`` products are globally reduced.  Standard
+        stochastic observation perturbations are stored as an observation-
+        sized temporary factor so every MPI partition consumes the exact same
+        seeded sequence as mode 1 without replicating the state ensemble.
+        """
         k = icesee_kwargs.get('k')
         k = k + 1 if k < self.nt - 1 else k
         km = icesee_kwargs.get('km')
         try:
-            # H_matrix_zarr_path = icesee_kwargs.get('H_matrix_zarr_path', f"{self.base_path}/H_matrix.zarr")
-            # synthetic_obs_zarr_path = icesee_kwargs.get('synthetic_obs_zarr_path', f"{self.base_path}/synthetic_obs.zarr")
-            m = icesee_kwargs.get('m_obs')
             Nens = self.nens
-
-            # --- Open H (read-only) once and slice local columns
-            # H_matrix = zarr.open_array(H_matrix_zarr_path, mode='r')
-            # H has shape (m, nd_total); we take our local column block
-            # H_local = H_matrix[:, self.nd_start_world:self.nd_end_world]  # (m, local_nd)
-
-            with h5py.File(f"{self.base_path}/H_matrix.h5", 'r', driver='mpio', comm=self.mpi_comm) as f:
-                    H_matrix = f['H']  # (m, nd_total)
-                    H_local = H_matrix[:, self.nd_start_world:self.nd_end_world]
-
-            local_nd = self.nd_end_world - self.nd_start_world
-
-            # --- Read ensemble mean ONCE (parallel)
-            mean_file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-            with h5py.File(mean_file_path, 'r', driver='mpio', comm=self.mpi_comm) as f:
-                ens_mean_local = f['mean'][self.nd_start_world:self.nd_end_world, k ]  # (local_nd,)
-
-            # --- Synthetic obs (once)
-            # synthetic_obs = zarr.open_array(synthetic_obs_zarr_path, mode='r')
-            # synthetic_obs_local = synthetic_obs[self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
-
-            # *--with open synthetic obs h5file *---rememdy for now---*
-            obs_file = f"{self.base_path}/synthetic_obs.h5"
-            with h5py.File(obs_file, 'r', driver='mpio', comm=self.mpi_comm) as f:
-                synthetic_obs_local = f['hu_obs'][self.nd_start_world:self.nd_end_world, km]  # (local_nd,)
-            # *---rememdy for now---*
-
-            # print(f"\n[Rank {self.mpi_comm.Get_rank()}] H_local norm : {np.linalg.norm(H_local)}, ens_mean_local norm: {np.linalg.norm(ens_mean_local)}, synthetic_obs_local norm: {np.linalg.norm(synthetic_obs_local)}\n")
-
-            # --- d = H * y_obs (one GEMV + one Allreduce)
-            d_local = H_local @ synthetic_obs_local              # (m,)
-            d_global = np.empty_like(d_local)
-            self.mpi_comm.Allreduce(d_local, d_global, op=MPI.SUM)  # 1st collective
-
-            # --- Hmean = H * ens_mean (one GEMV + (no extra open calls))
-            Hmean_local = H_local @ ens_mean_local               # (m,)
-            Hmean_global = np.empty_like(Hmean_local)
-            self.mpi_comm.Allreduce(Hmean_local, Hmean_global, op=MPI.SUM)  # 2nd collective
-
-            # --- Read all ensemble states locally and batch into a matrix
-            _local_analysis_time = MPI.Wtime()
-            # Shape: (local_nd, Nens)
-            # States_local = np.empty((local_nd, Nens), dtype=H_local.dtype, order='C')
-            States_local =zarr.zeros((local_nd, Nens), dtype=H_local.dtype, store=f"{self.base_path}/States_local_{self.mpi_comm.Get_rank()}.zarr", chunks=(local_nd, 1), overwrite=True)
-            for j in range(Nens):
-                # States_local[:, j] = self.read_analysis(k, j)  # each returns local slice (local_nd,)
-                States_local[:, j] = self.read_analysis(k, j)  # each returns local slice (local_nd,)
-            _local_analysis_time = MPI.Wtime() - _local_analysis_time
-            icesee_kwargs["time_analysis_file_writing"] += _local_analysis_time
-
-
-            # --- HA for all ensemble members in one GEMM + one Allreduce on the whole matrix
-            # local (m, local_nd) @ (local_nd, Nens) -> (m, Nens)
-            HA_local = H_local @ States_local                   # matrix-matrix multiply
-            # Single Allreduce over full (m, Nens) buffer
-            HA = np.empty_like(HA_local, order='C')
-            # Allreduce on a contiguous buffer; flatten for safety
-            self.mpi_comm.Allreduce(
-                [HA_local, MPI.DOUBLE],
-                [HA, MPI.DOUBLE],
-                op=MPI.SUM
+            with h5py.File(f"{self.base_path}/H_matrix.h5", "r") as handle:
+                obs_indices = np.asarray(handle["obs_indices"], dtype=np.int64)
+            m = obs_indices.size
+            inversion_keep_all = _exclude_inversion_observations(
+                obs_indices, icesee_kwargs, self.nd
+            )
+            rank = self.mpi_comm.Get_rank()
+            size = self.mpi_comm.Get_size()
+            obs_start, obs_end = _partition_1d(m, size, rank)
+            local_indices = obs_indices[obs_start:obs_end]
+            chunk_rows = resolve_row_chunk_size(
+                local_indices.size, Nens,
+                icesee_kwargs.get("analysis_memory_budget_mb", 256),
+                icesee_kwargs.get("observation_row_chunk_size", 0),
+                working_buffers=4,
             )
 
+            error_mode = str(icesee_kwargs.get(
+                "enkf_observation_error_mode", "stochastic_R"
+            )).lower()
+            if error_mode not in {
+                "stochastic_r", "legacy_prior_anomalies", "generated_r"
+            }:
+                raise ValueError(
+                    "enkf_observation_error_mode must be stochastic_R, "
+                    "legacy_prior_anomalies, or generated_R"
+                )
 
-            #     # --- Eta = HA - Hmean[:, None]
-            #     Eta = HA - Hmean_global[:, None]             # (m, Nens)
+            cross_local = np.zeros((Nens, Nens), dtype=np.float64)
+            gram_local = np.zeros((Nens, Nens), dtype=np.float64)
+            rhs_local = np.zeros((Nens, Nens), dtype=np.float64)
+            batch_idx = k - self.current_batch_start
+            state_dset = self.datasets[batch_idx]
+            obs_file = f"{self.base_path}/synthetic_obs.h5"
+            io_start = MPI.Wtime()
+            with h5py.File(obs_file, "r") as obs_handle:
+                compact = "hu_obs_compact" in obs_handle
+                obs_dset = obs_handle[
+                    "hu_obs_compact" if compact else "hu_obs"
+                ]
+                local_positions = np.arange(obs_start, obs_end, dtype=np.int64)
+                if compact and "obs_active" in obs_handle:
+                    keep = np.asarray(
+                        obs_handle["obs_active"][obs_start:obs_end, int(km)],
+                        dtype=bool,
+                    )
+                    local_positions = local_positions[keep]
+                    local_indices = local_indices[keep]
+                keep_inversion = inversion_keep_all[local_positions]
+                local_positions = local_positions[keep_inversion]
+                local_indices = local_indices[keep_inversion]
 
-            #     # --- D' = (d - Hmean)[:, None], same for all ensemble members
-            #     # Dprime = (d_global - Hmean_global)[:, None] * np.ones((1, Nens), dtype=HA.dtype)
-            #     Dprime = d_global[:, None] - HA
+                eta_handle = None
+                eta_dset = None
+                eta_path = os.path.join(
+                    self.base_path, f"analysis_eta_{int(km):04d}.h5"
+                )
+                if error_mode in {"stochastic_r", "generated_r"}:
+                    # Rank zero writes the compact perturbation factor once.
+                    # Drawing active rows in canonical order reproduces the
+                    # mode-1 global RNG call exactly and is chunk invariant.
+                    if rank == 0:
+                        with h5py.File(obs_file, "r") as source:
+                            active_all = (
+                                np.asarray(source["obs_active"][:, int(km)], dtype=bool)
+                                if compact and "obs_active" in source
+                                else np.ones(m, dtype=bool)
+                            )
+                            active_all &= inversion_keep_all
+                            sigma_all = (
+                                np.asarray(source["obs_std"][:], dtype=float)
+                                if "obs_std" in source
+                                else None
+                            )
+                        if error_mode == "stochastic_r" and sigma_all is None:
+                            raise ValueError(
+                                "stochastic_R in execution_mode=2 requires "
+                                "compact obs_std metadata"
+                            )
+                        try:
+                            os.remove(eta_path)
+                        except FileNotFoundError:
+                            pass
+                        active_positions = np.flatnonzero(active_all)
+                        with h5py.File(eta_path, "w") as eta_file:
+                            eta_out = eta_file.create_dataset(
+                                "eta", (m, Nens), dtype="f8",
+                                chunks=(max(1, min(1024, m)), Nens),
+                                fillvalue=0.0,
+                            )
+                            if error_mode == "stochastic_r":
+                                seed = int(icesee_kwargs.get("base_seed", 42)) + 1000003 * (
+                                    int(km) + 1
+                                )
+                                rng = np.random.default_rng(seed)
+                                draw_rows = max(1, min(
+                                    int(icesee_kwargs.get(
+                                        "observation_perturbation_row_chunk_size", 1024
+                                    )), active_positions.size or 1
+                                ))
+                                for draw0 in range(0, active_positions.size, draw_rows):
+                                    positions = active_positions[draw0:draw0 + draw_rows]
+                                    eta = rng.standard_normal((positions.size, Nens))
+                                    eta *= sigma_all[positions, None]
+                                    eta -= eta.mean(axis=1, keepdims=True)
+                                    eta_out[positions, :] = eta
+                                eta_file.attrs["seed"] = seed
+                            else:
+                                selected_rows = obs_indices[active_positions]
+                                for member, column in iter_generated_observation_columns(
+                                    icesee_kwargs, selected_rows, Nens, self.nd, km
+                                ):
+                                    eta_out[active_positions, member] = column
+                                center_rows = max(1, min(
+                                    int(icesee_kwargs.get(
+                                        "observation_perturbation_row_chunk_size", 1024
+                                    )), active_positions.size or 1
+                                ))
+                                for row0 in range(0, active_positions.size, center_rows):
+                                    positions = active_positions[row0:row0 + center_rows]
+                                    values = np.asarray(eta_out[positions, :])
+                                    values -= values.mean(axis=1, keepdims=True)
+                                    eta_out[positions, :] = values
+                    self.mpi_comm.Barrier()
+                    eta_handle = h5py.File(eta_path, "r")
+                    eta_dset = eta_handle["eta"]
 
-            #     return Dprime, Eta, Eta, icesee_kwargs
+                local_terms = [] if icesee_kwargs.get("local_analysis", False) else None
+                try:
+                    for row0 in range(0, local_indices.size, max(1, chunk_rows)):
+                        rows = local_indices[row0:row0 + chunk_rows]
+                        positions = local_positions[row0:row0 + chunk_rows]
+                        forecast = _read_rows_preserve_order(state_dset, rows)
+                        if compact:
+                            observations = _read_rows_preserve_order(
+                                obs_dset, positions, int(km)
+                            ).reshape(-1)
+                        else:
+                            observations = _read_rows_preserve_order(
+                                obs_dset, rows, int(km)
+                            ).reshape(-1)
+                        yprime = forecast - forecast.mean(axis=1, keepdims=True)
+                        if error_mode == "legacy_prior_anomalies":
+                            eta = yprime.copy()
+                            innovations = observations[:, None] - forecast
+                        else:
+                            eta = _read_rows_preserve_order(eta_dset, positions)
+                            innovations = observations[:, None] + eta - forecast
+                        factor = yprime + eta
+                        cross_local += yprime.T @ factor
+                        gram_local += factor.T @ factor
+                        rhs_local += factor.T @ innovations
+                        if local_terms is not None:
+                            local_terms.append((
+                                rows.copy(), yprime.copy(), eta.copy(),
+                                innovations.copy()
+                            ))
+                finally:
+                    if eta_handle is not None:
+                        eta_handle.close()
+            icesee_kwargs["time_analysis_file_writing"] += MPI.Wtime() - io_start
 
-            HAprime = HA - Hmean_global[:, None]
-            Eta = HAprime
-
-            Dprime = d_global[:, None] - HA
-
-            return Dprime, Eta, HAprime, icesee_kwargs
+            cross = np.empty_like(cross_local)
+            gram = np.empty_like(gram_local)
+            rhs = np.empty_like(rhs_local)
+            self.mpi_comm.Allreduce(cross_local, cross, op=MPI.SUM)
+            self.mpi_comm.Allreduce(gram_local, gram, op=MPI.SUM)
+            self.mpi_comm.Allreduce(rhs_local, rhs, op=MPI.SUM)
+            return cross, gram, rhs, local_terms, icesee_kwargs
         except Exception as e:
             print(f"Error in compute_X5_utils: {e}")
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
@@ -1095,86 +2262,50 @@ class EnKF_fully_parallel_IO:
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
         try:
-            Nens = self.nens
+            cross, gram, rhs, local_terms, icesee_kwargs = self.compute_X5_utils_(
+                **icesee_kwargs
+            )
+            X5 = ensemble_transform_from_products(
+                cross, gram, rhs,
+                float(icesee_kwargs.get("analysis_svd_energy", 0.999)),
+            )
+            if not np.allclose(np.sum(X5, axis=0), 1.0, rtol=1e-8, atol=1e-8):
+                print(f"\n[ICESEE] X5 column sums differ from 1: {np.sum(X5, axis=0)}\n")
 
-            # Dprime, Eta, HA, icesee_kwargs = self.compute_X5_utils_(km, **icesee_kwargs)
-            Dprime, Eta, HAprime, icesee_kwargs  = self.compute_X5_utils_(**icesee_kwargs)
-            # print(f"\n [Rank {self.mpi_comm.Get_rank()}] Dprime norm: {np.linalg.norm(Dprime)}, Eta norm: {np.linalg.norm(Eta)}, HA norm: {np.linalg.norm(HA)} \n")
-            # Dprime, Eta, HA = self.compute_X5_utils_batch(**icesee_kwargs)
+            local_patches = None
+            if icesee_kwargs.get("local_analysis", False):
+                gathered = self.mpi_comm.gather(local_terms, root=0)
+                if self.rank == 0:
+                    flattened = [item for rank_terms in gathered for item in rank_terms]
+                    local_rows = sum(item[0].size for item in flattened)
+                    required = local_rows * self.nens * 8 * 3
+                    budget = float(icesee_kwargs.get(
+                        "local_analysis_memory_budget_mb", 2048.0
+                    )) * 1024.0 * 1024.0
+                    if required > budget:
+                        raise MemoryError(
+                            "Exact grouped local analysis needs its active "
+                            "observation factors on rank zero; estimated "
+                            f"working set {required / 2**30:.2f} GiB exceeds "
+                            f"local_analysis_memory_budget_mb="
+                            f"{budget / 2**20:.0f}."
+                        )
+                    obs_rows = np.concatenate([item[0] for item in flattened])
+                    yprime = np.vstack([item[1] for item in flattened])
+                    eta = np.vstack([item[2] for item in flattened])
+                    innovations = np.vstack([item[3] for item in flattened])
+                    from ICESEE.src.utils.localization import compute_local_patches_X5
+                    local_patches = compute_local_patches_X5(
+                        vec_inputs=icesee_kwargs.get("vec_inputs", []),
+                        hdim=self.nd // icesee_kwargs["total_state_param_vars"],
+                        HAprime=yprime, Eta=eta,
+                        Dprime=innovations, Nens=self.nens,
+                        obs_indices=obs_rows,
+                        icesee_kwargs=icesee_kwargs,
+                    )
+                local_patches = self.mpi_comm.bcast(local_patches, root=0)
 
-            # compute the HAbar
-            # HAbar = np.mean(HA, axis=1)
-            # HAprime = HA - HAbar[:, np.newaxis]
-            # one_N = np.ones((Nens,Nens))/Nens
-            # HAprime= HA@(np.eye(Nens) - one_N) # mxNens
-
-            # get m
-            m = HAprime.shape[0]
-
-            # compute HAprime + Eta
-            HAprime_Eta = HAprime + Eta
-            # HAprime_Eta = Eta  # since HAprime = Eta
-
-            # print(f"\n[Rank {self.mpi_comm.Get_rank()}] HAprime_Eta norm: {np.linalg.norm(HAprime_Eta)}, shape: {HAprime_Eta.shape}\n")
-            # print(f"\n [Rank {self.mpi_comm.Get_rank()}] Dprime_local shape: {Dprime_local.shape} HAprime_local shape: {HAprime_local.shape} HAprime_Eta_local shape: {HAprime_Eta_local.shape}\n ")
-
-            # compute SVD of HAprime_Eta
-            U, sig, Vt = np.linalg.svd(HAprime_Eta, full_matrices=False)
-
-            # get the min (m Nens)
-            nrmin = min(Nens, m)
-
-            # convert S to eigenvalues
-            sig = sig**2
-
-            sigsum = np.sum(sig[:nrmin])
-            # print(f"[Rank {self.mpi_comm.Get_rank()}] sigsum: {sigsum}, sig: {sig[:nrmin]}")
-            sigsum1 = 0.0
-            nrsigma = 0
-            if sigsum == 0:
-                print(f"[Rank {self.mpi_comm.Get_rank()}] Warning: sigsum is zero, setting nrsigma to 0")
-                nrsigma = 0
-                sig[:] = 0.0
-            else:
-                for i in range(nrmin):
-                    if sigsum1 / sigsum < 0.999:
-                        nrsigma += 1
-                        sigsum1 += sig[i]
-                        sig[i] = 1.0 / sig[i]
-                    else:
-                        sig[i:nrmin] = 0.0
-                        break
-
-            # compute X1 = sig*UT (Nens x m)
-            X1 = np.empty((nrmin, m))
-            for j in range(m):
-                for i in range(nrmin):
-                    X1[i,j] =sig[i]*U[j,i]
-
-            # compute X2 = X1*Dprime # Nens x Nens
-            X2 = np.dot(X1, Dprime)
-            # Dprime_mat = np.broadcast_to(Dprime, (m, Nens))
-            # X2 = X1 @ Dprime_mat
-
-            #  compute X3 = U*X2 # m_obs x Nens
-            X3 = np.dot(U, X2)
-
-            # print(f"[ICESEE] Rank: {rank_world} X3 shape: {X3.shape}")
-            # compute X4 = (HAprime.T)*X3 # Nens x Nens
-            X4 = np.dot(HAprime.T, X3)
-            # del X2, X3, U, HAprime, HA, Eta, Dprime
-            del X2, X3, U, HAprime, HAprime_Eta, Eta, Dprime
-            gc.collect()
-
-            # compute X5 = X4 + I
-            X5 = X4 + np.eye(Nens)
-            # sum of each column of X5 should be 1
-            if np.sum(X5, axis=0).all() != 1.0:
-                print(f"\n[ICESEE] Sum of each X5 column is not 1.0: {np.sum(X5, axis=0)}\n")
-            # print(f"[ICESEE] Rank: {self.mpi_comm.Get_rank()} X5 sum: {np.sum(X5, axis=0)}")
-            del X4; gc.collect()
-
-            return X5, icesee_kwargs
+            return X5, local_patches, icesee_kwargs
 
         except Exception as e:
             print(f"Error in compute_X5_modified: {e}")
@@ -1186,10 +2317,24 @@ class EnKF_fully_parallel_IO:
     # compute analysis mean
     def compute_analysis_update(self, **icesee_kwargs):
         # Compute the analysis update for each rank
+        self._restore_finalization_state(icesee_kwargs)
         k = icesee_kwargs.get('k')
         k = k + 1 if k < self.nt - 1 else k
         nt = self.nt
+        frozen_was_configured = "frozen_analysis_vars" in icesee_kwargs
+        configured_frozen = copy.deepcopy(
+            icesee_kwargs.get("frozen_analysis_vars", None)
+        )
         try:
+            # Mode 1 removes friction from the EnKF state at hybrid cycles.
+            # Keep mode 2's fixed file shape, but freeze the same rows after
+            # deriving the transform from non-friction observations.
+            if bool(icesee_kwargs.get("inversion_flag", False)):
+                inversion_info = _inversion_variable_info(self.nd, icesee_kwargs)
+                frozen = list(icesee_kwargs.get("frozen_analysis_vars", []) or [])
+                if inversion_info["name"] not in frozen:
+                    frozen.append(inversion_info["name"])
+                icesee_kwargs["frozen_analysis_vars"] = frozen
             self._ensure_batch(k)
             comm = self.mpi_comm
             rank = comm.Get_rank()
@@ -1201,105 +2346,100 @@ class EnKF_fully_parallel_IO:
 
             # call the compute X5 function
             # X5 = self.compute_X5_(k, **icesee_kwargs)
-            X5, icesee_kwargs = self.compute_X5_modified(**icesee_kwargs)
+            X5, local_patches, icesee_kwargs = self.compute_X5_modified(
+                **icesee_kwargs
+            )
             # compute column sums for X5
 
-            # ---
             local_dim = self.nd_end_world - self.nd_start_world
             Nens = self.nens
-
-            # ----works----
-            # Read all ensemble data at once
-            # all_states = np.zeros((local_dim, Nens))
-            # write all_states to zarr file *--------------------------------
-            # allstates_sate_zarr_path = f"{self.base_path}/all_states_rank_{rank}.zarr"
-            # mean_params_zarr_path = f"{self.base_path}/mean_params_rank_{rank}.zarr"
-            # pertubations_zarr_path = f"{self.base_path}/pertubations_rank_{rank}.zarr"
-            # analysis_updates_zarr_path = f"{self.base_path}/analysis_updates_rank_{rank}.zarr"
-
-            # for path in [mean_params_zarr_path, pertubations_zarr_path, analysis_updates_zarr_path]:
-            #     if os.path.exists(path):
-            #         shutil.rmtree(path)
-
-            # if os.path.exists(allstates_sate_zarr_path):
-            #     shutil.rmtree(allstates_sate_zarr_path)
-            # all_states_zarr = zarr.create_array(store=allstates_sate_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
-            # mean_params = zarr.create_array(store=mean_params_zarr_path, shape=(local_dim, 1), chunks=(min(1000, local_dim), 1), dtype='f8', overwrite=True)
-            # pertubations = zarr.create_array(store=pertubations_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
-            # analysis_updates = zarr.create_array(store=analysis_updates_zarr_path, shape=(local_dim, Nens), chunks=(min(1000, local_dim), min(50, Nens)), dtype='f8', overwrite=True)
-
-            all_states = np.empty((local_dim, Nens), dtype=np.float64, order="F")
-
-            _local_analysis_time0 = MPI.Wtime()
-            for i in range(Nens):
-                # all_states_zarr[:, i] = self.read_analysis(k, i)
-                all_states[:, i] = self.read_analysis(k, i)
-            _local_analysis_time0 = MPI.Wtime() - _local_analysis_time0
-
-            # Compute analysis updates for all paucall ensembles using matrix multiplication
-            analysis_updates = all_states @ X5  # Matrix multiplication
-
-            # performm inflation
-            # inflation_factor = self.icesee_kwargs.get('inflation_factor', 1.0)
-            # ndim = analysis_updates.shape[0]//self.icesee_kwargs["total_state_param_vars"]
-            # state_block_size = ndim * self.icesee_kwargs["num_state_vars"]
-            # mean_params = np.mean(analysis_updates[state_block_size:, :], axis=1).reshape(-1, 1)
-            # pertubations = analysis_updates[state_block_size:, :] - mean_params
-            # # inflated_pertubations = pertubations * inflation_factor
-            # analysis_updates[state_block_size:, :] = mean_params + (pertubations * inflation_factor)
-
-            inflation_factor = self.icesee_kwargs.get("inflation_factor", 1.0)
-
-            mean_all = np.mean(analysis_updates, axis=1).reshape(-1, 1)
-            perturbations = analysis_updates - mean_all
-            analysis_updates = mean_all + perturbations * inflation_factor
-
-            # check for negative thicknes and set to 1e-3 if vec_input contains h
-            # Define valid thickness variable names
+            from ICESEE.src.parallelization._mpi_analysis_functions import (
+                apply_analysis_controls_local,
+            )
+            from ICESEE.src.utils.localization import apply_local_patches
             THICKNESS_VARS = {
                 "h", "ice_thickness", "thickness", "ice_thick",
                 "hi", "h_ice", "h_ice_thickness", "H"
             }
             min_thickness = 1
-            vec_inputs = icesee_kwargs.get("vec_inputs", None)
+            variable_map = _global_variable_index_map(
+                self.nd, icesee_kwargs.get("vec_inputs", []),
+                icesee_kwargs.get("var_nd"),
+            )
+            thickness_ranges = []
+            for name, indices in variable_map.items():
+                if name in THICKNESS_VARS and indices.size:
+                    thickness_ranges.append((int(indices[0]), int(indices[-1]) + 1))
 
-            for i, input_var in enumerate(vec_inputs or []):
-                if input_var in THICKNESS_VARS:
-                    start = i * ndim
-                    end = start + ndim
-                    analysis_updates[start:end, :] = np.maximum(analysis_updates[start:end, :], min_thickness)
+            row_chunk = resolve_row_chunk_size(
+                local_dim, Nens,
+                icesee_kwargs.get("analysis_memory_budget_mb", 256),
+                icesee_kwargs.get("analysis_row_chunk_size", 0),
+                working_buffers=3,
+            )
+            io_start = MPI.Wtime()
+            state_dset = self.datasets[batch_idx]
+            temp_path, temp_handle, temp_dset = self._create_analysis_file(k)
+            try:
+                for local0 in range(0, local_dim, max(1, row_chunk)):
+                    global0 = self.nd_start_world + local0
+                    global1 = min(self.nd_end_world, global0 + row_chunk)
+                    states = np.asarray(state_dset[global0:global1, :])
+                    raw_analysis = states @ X5
+                    raw_analysis = apply_local_patches(
+                        raw_analysis, states,
+                        np.arange(global0, global1, dtype=np.int64),
+                        local_patches,
+                    )
+                    updated = apply_analysis_controls_local(
+                        analysis_vec=raw_analysis,
+                        forecast_vec=states,
+                        global_rows=np.arange(global0, global1, dtype=np.int64),
+                        icesee_kwargs=icesee_kwargs,
+                    )
+                    # Generic mode-1 analysis does not impose a thickness
+                    # floor here; model-specific geometry projection happens
+                    # in the shared finalization stage. Retain the former
+                    # mode-2 safeguard only as an explicit opt-in.
+                    if icesee_kwargs.get("analysis_project_min_thickness", False):
+                        for thick0, thick1 in thickness_ranges:
+                            clip0, clip1 = max(global0, thick0), min(global1, thick1)
+                            if clip0 < clip1:
+                                updated[clip0-global0:clip1-global0, :] = np.maximum(
+                                    updated[clip0-global0:clip1-global0, :], min_thickness
+                                )
+                    temp_dset[global0:global1, :] = updated
+                temp_handle.flush()
+            finally:
+                temp_handle.close()
 
-            # Write back all analysis updates
-            _local_analysis_time1 = MPI.Wtime()
-            # _k = k + 1 if k < self.nt - 1 else k
-            for j in range(Nens):
-                self.write_analysis(k, analysis_updates[:, j], j)
-            _local_analysis_time1 = MPI.Wtime() - _local_analysis_time1
-            icesee_kwargs["time_analysis_file_writing"] += (_local_analysis_time0 + _local_analysis_time1)
+            self._publish_analysis_file(k, temp_path, icesee_kwargs)
+            self._save_finalization_state(icesee_kwargs)
 
-            # compute the anlysis mean and write to h5 file
-            _time_analysis_mean = MPI.Wtime()
-            if icesee_kwargs.get('compute_analysis_mean', False):
-                yi = np.sum(X5, axis=1)
-                analysis_mean = np.dot(all_states, yi) / Nens
-                # print(f"[Rank {self.mpi_comm.Get_rank()}]  shape: {analysis_mean.shape} shape_ {self.nd_end_world - self.nd_start_world}")
+            # Means are derived only after the finalized analysis is published;
+            # otherwise diagnostics and restart state can describe different
+            # ensembles when geometry/inference modifies the raw transform.
+            if bool(icesee_kwargs.get("compute_analysis_mean", False)):
+                self._ensure_batch(k)
+                published_dset = self.datasets[k - self.current_batch_start]
                 file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-                with h5py.File(file_path, 'a', driver='mpio', comm=self.mpi_comm) as f:
-                    exists_local = "mean" in f
-                    exists_any = comm.allreduce(1 if exists_local else 0, op=MPI.SUM) > 0
-
-                    if not exists_any:
-                        f.create_dataset(
-                            "mean",
-                            (self.nd, self.nt),
-                            chunks=(min(self.nd, 1000), 1),
-                            dtype="f8",
+                with h5py.File(file_path, "a", driver="mpio", comm=comm) as mean_handle:
+                    if "mean" not in mean_handle:
+                        mean_handle.create_dataset(
+                            "mean", (self.nd, self.nt),
+                            chunks=(min(self.nd, 1000), 1), dtype="f8"
                         )
-
-                    comm.Barrier()
-                    # _k = k + 1 if k < self.nt - 1 else k
-                    f['mean'][self.nd_start_world:self.nd_end_world, k] = analysis_mean
-            icesee_kwargs["time_analysis_ensemble_mean_generation"] += (MPI.Wtime() - _time_analysis_mean)
+                    mean_handle["mean"][self.nd_start_world:self.nd_end_world, k] = (
+                        np.asarray(
+                            published_dset[
+                                self.nd_start_world:self.nd_end_world, :
+                            ]
+                        ).mean(axis=1)
+                    )
+                    mean_handle.flush()
+            elapsed_io = MPI.Wtime() - io_start
+            icesee_kwargs["time_analysis_file_writing"] += elapsed_io
+            icesee_kwargs["time_analysis_ensemble_mean_generation"] += 0.0
             # print(f"\n[ICESEE] Rank {rank} completed analysis update for time step {k+1}/{nt} analysis_mean norm {np.linalg.norm(analysis_mean)}\n")
 
             # clean up zarr file
@@ -1312,6 +2452,13 @@ class EnKF_fully_parallel_IO:
             self.mpi_comm.Barrier()
             # del all_states_zarr
             gc.collect()
+            # ``coefficient`` is frozen only for the hybrid cycle whose EnKF
+            # update is followed by inversion.  Do not leak that temporary
+            # control into later ordinary EnKF cycles.
+            if frozen_was_configured:
+                icesee_kwargs["frozen_analysis_vars"] = configured_frozen
+            else:
+                icesee_kwargs.pop("frozen_analysis_vars", None)
             return icesee_kwargs
             # ----**** --------------------------------------------------------
 
@@ -1329,4 +2476,3 @@ class EnKF_fully_parallel_IO:
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
-

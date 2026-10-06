@@ -58,7 +58,9 @@
 | `even_distribution` | Parameter for even distribution in dictionary | bool | True | No | None | Dictionary |
 | `example_name` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `execution_flag` | Controls execution flag behavior in script logic | int | 0 | No | None | Dictionary |
-| `execution_mode` | --- Ensemble Parameters --- | Unknown | Computed | No | None | Dictionary |
+| `execution_mode` | Re-apply normalized and command-line-resolved values after the raw YAML update.  Without this step, e.g. ``--Nens=40`` is silently replaced by the YAML value while constructing the canonical dictionary. | Unknown | Unknown | No | None | Dictionary |
+| `fail_on_insufficient_storage` | Parameter for fail on insufficient storage in dictionary | Unknown | Computed | No | None | Dictionary |
+| `finalize_row_chunk_size` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `flag_jupyter` | leave entire routine | bool | True | No | None | Internal |
 | `force_fresh_start` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `freq_obs` | --- Ensemble Parameters --- | Unknown | Computed | No | None | Dictionary |
@@ -123,7 +125,7 @@
 | `scalar_inputs` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `sequential_ensemble_initialization` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `sequential_run` | Parameter for sequential run in dictionary | bool | True | No | None | Dictionary |
-| `serial_file_creation` | --- Ensemble Parameters --- | Unknown | Computed | No | None | Dictionary |
+| `serial_file_creation` | --- Ensemble Parameters --- nt (2026-09-28, second pass): different applications interpret `timesteps_per_year` differently -- Icepack/Lorenz96/ISSM's own run_da_*.py all self-derive nt=num_years/timesteps_per_year (dt in years), but this generic loader has no way to know that convention holds for every application (confirmed: it does not -- see docs/execution-mode-3-design.md's reconciliation notes). Generically assuming EITHER formula here was the actual bug, not just which formula was chosen: a one-time internal nt/t is built here (used only to feed the generic generate_observation_schedule() call below, BEFORE any application gets a chance to self-derive its own nt in its own run_da_*.py) and there is no application-agnostic way to compute it correctly for every application from num_years/ timesteps_per_year alone.  Fix: let the application's own YAML declare its already-resolved `nt` directly (`modeling-parameters.nt`) when the num_years* timesteps_per_year default below is not what that application's own nt actually is -- an explicit, application-owned value, not a generic reinterpretation of what `timesteps_per_year` means. Falls back to the ORIGINAL historical formula (num_years * timesteps_per_year) when `nt` is not given, so every existing configuration that does not opt in is completely unaffected -- this generic loader never assumes, derives, or special-cases any application's own time-discretization convention. See applications/icepack_model/examples/idealized_pig/params.yaml's own `nt: 1640` for the one application currently opting in, and test_observation_schedule_uses_correct_nt_convention.py. | Unknown | Computed | No | None | Dictionary |
 | `sig_Q` | Parameter for sig q in dictionary | Unknown | Computed | No | None | Dictionary |
 | `sig_model` | Parameter for sig model in dictionary | Unknown | Computed | No | None | Dictionary |
 | `sig_obs` | Parameter for sig obs in dictionary | Unknown | Computed | No | None | Dictionary |
