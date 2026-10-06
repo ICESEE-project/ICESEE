@@ -1,0 +1,12 @@
+# Principal 100-year IBF experiment using the reference MISMIP sliding-law
+# exponents p=3 and q=0.  Inherit the accepted seaward-GL prior so the
+# initial geometry includes the 500-m bump over a 40-km half-width.
+extends: ../seaward_gl_prior/param_ibf.yaml
+
+enkf-parameters:
+  # Keep the completed run made without the seaward-GL prior untouched.
+  data_path: _modelrun_p3_
+  force_fresh_start: 1
+
+  random_field_method: graph
+  generate_true_wrong_state_only: true

@@ -18,7 +18,211 @@ from ICESEE.src.utils.inference_plugin import (
     apply_bed_observation_anchor_global,
     apply_bed_domain_gate_global,
     apply_global_inference_hook,
+    resolve_bed_update_schedule,
 )
+
+
+def finalize_analysis_ensemble(
+    analysis_vec,
+    forecast_vec,
+    timestep,
+    icesee_kwargs,
+):
+    """Apply the model-independent and model-specific post-analysis contract.
+
+    Both execution modes must call this function after the algebraic EnKF
+    update and before publishing an analysis as the next forecast state.  The
+    function deliberately contains the physical/support gates, inference
+    hooks, and ISSM geometry projection that historically lived only in the
+    partial-parallel writer.
+
+    Parameters are ordinary in-memory arrays so the same routine can be used
+    by mode 1 on a gathered ensemble and by mode 2 on a bounded file-backed
+    slab.  Callers that enable ensemble-coupled inference must pass all
+    ensemble columns together.
+    """
+    analysis_vec = np.asarray(analysis_vec)
+    if analysis_vec.ndim != 2:
+        raise ValueError("analysis_vec must have shape (state, ensemble)")
+    if forecast_vec is not None:
+        forecast_vec = np.asarray(forecast_vec)
+        if forecast_vec.shape != analysis_vec.shape:
+            raise ValueError(
+                "forecast_vec and analysis_vec must have identical shapes"
+            )
+
+    vec_inputs = list(icesee_kwargs.get("vec_inputs", []))
+    if not vec_inputs:
+        return analysis_vec
+    if analysis_vec.shape[0] % len(vec_inputs) != 0:
+        raise ValueError(
+            "Shared analysis finalization currently requires equal-sized "
+            "state/parameter blocks."
+        )
+    hdim = analysis_vec.shape[0] // len(vec_inputs)
+    slices = {
+        str(name).lower(): slice(i * hdim, (i + 1) * hdim)
+        for i, name in enumerate(vec_inputs)
+    }
+
+    def find_slice(aliases):
+        for name, block_slice in slices.items():
+            if name in aliases:
+                return block_slice
+        return None
+
+    thickness_idx = find_slice({"thickness", "ice_thickness", "h"})
+    surface_idx = find_slice({"surface", "ice_surface", "s"})
+    bed_idx = find_slice(
+        {"bed", "bedrock", "bedtopography", "bed_topography", "bed_elevation"}
+    )
+    model_dt = float(icesee_kwargs.get("dt", 1.0))
+    current_model_time = float(timestep) * model_dt
+
+    # Resolve the bed schedule at the global-finalization boundary itself.
+    # Do not rely on private state set earlier by a row-local kwargs copy.
+    bed_active, bed_is_snapshot, _ = resolve_bed_update_schedule(icesee_kwargs)
+    icesee_kwargs["_bed_update_active"] = bed_active
+    icesee_kwargs["_bed_is_snapshot"] = bed_is_snapshot
+
+    def trace_stage(stage, values):
+        """Persist parity-only finalization stages for mode diagnostics."""
+        if not icesee_kwargs.get("execution_parity_trace", False):
+            return
+        trace_dir = os.path.join(
+            icesee_kwargs.get("data_path", "."), "_execution_parity_trace"
+        )
+        os.makedirs(trace_dir, exist_ok=True)
+        np.save(
+            os.path.join(
+                trace_dir,
+                f"finalize_{int(timestep):06d}_{stage}.npy",
+            ),
+            np.asarray(values),
+        )
+
+    if icesee_kwargs.get("execution_parity_trace", False):
+        trace_dir = os.path.join(
+            icesee_kwargs.get("data_path", "."), "_execution_parity_trace"
+        )
+        os.makedirs(trace_dir, exist_ok=True)
+        np.savez(
+            os.path.join(
+                trace_dir, f"finalize_{int(timestep):06d}_schedule.npz"
+            ),
+            km=np.array([-1 if icesee_kwargs.get("km") is None
+                         else int(icesee_kwargs["km"])], dtype=np.int64),
+            bed_active=np.array([bed_active], dtype=np.uint8),
+            bed_is_snapshot=np.array([bed_is_snapshot], dtype=np.uint8),
+            bed_snap_cols=np.asarray(
+                icesee_kwargs.get("bed_snap_cols", []), dtype=np.int64
+            ),
+        )
+
+    trace_stage("00_forecast", forecast_vec)
+    trace_stage("01_input", analysis_vec)
+
+    analysis_vec = apply_bed_domain_gate_global(
+        analysis_vec=analysis_vec,
+        forecast_vec=forecast_vec,
+        vec_inputs=vec_inputs,
+        hdim=hdim,
+        icesee_kwargs=icesee_kwargs,
+    )
+    analysis_vec = apply_bed_observation_anchor_global(
+        analysis_vec=analysis_vec,
+        vec_inputs=vec_inputs,
+        hdim=hdim,
+        icesee_kwargs=icesee_kwargs,
+        stage="pre",
+    )
+    trace_stage("02_gated_anchored", analysis_vec)
+    if bed_idx is not None and forecast_vec is not None:
+        icesee_kwargs["_bed_forecast_reference"] = np.asarray(
+            forecast_vec[bed_idx, :], dtype=float
+        ).copy()
+
+    analysis_vec = apply_global_inference_hook(
+        analysis_vec=analysis_vec,
+        vec_inputs=vec_inputs,
+        hdim=hdim,
+        icesee_kwargs=icesee_kwargs,
+        timestep=timestep,
+        model_time=current_model_time,
+        stage="pre_geometry",
+    )
+    trace_stage("03_inference", analysis_vec)
+    analysis_vec = apply_bed_domain_gate_global(
+        analysis_vec=analysis_vec,
+        forecast_vec=forecast_vec,
+        vec_inputs=vec_inputs,
+        hdim=hdim,
+        icesee_kwargs=icesee_kwargs,
+    )
+    analysis_vec = apply_bed_observation_anchor_global(
+        analysis_vec=analysis_vec,
+        vec_inputs=vec_inputs,
+        hdim=hdim,
+        icesee_kwargs=icesee_kwargs,
+        stage="post",
+    )
+    trace_stage("04_post_gate_anchor", analysis_vec)
+    if icesee_kwargs.get("physics_bed_inference", False) and bed_idx is not None:
+        icesee_kwargs["_bed_previous_applied"] = np.asarray(
+            analysis_vec[bed_idx, :], dtype=float
+        ).copy()
+
+    if str(icesee_kwargs.get("model_name", "")).lower() == "issm":
+        if thickness_idx is None or surface_idx is None or bed_idx is None:
+            raise ValueError(
+                "ISSM analysis finalization requires thickness, surface, and bed blocks"
+            )
+        density_ratio = float(icesee_kwargs.get("di", 0.8930))
+        rho_ice = float(icesee_kwargs.get("rho_ice", 917.0))
+        rho_sw = float(icesee_kwargs.get("rho_sw", 1028.0))
+        thickness = np.asarray(analysis_vec[thickness_idx, :], dtype=float).copy()
+        surface = np.asarray(analysis_vec[surface_idx, :], dtype=float).copy()
+        bed = np.asarray(analysis_vec[bed_idx, :], dtype=float)
+        projection_mode = str(
+            icesee_kwargs.get("geometry_projection_mode", "preserve_thickness")
+        ).lower()
+        if projection_mode not in {"preserve_thickness", "preserve_surface"}:
+            raise ValueError(
+                "geometry_projection_mode must be 'preserve_thickness' or "
+                "'preserve_surface'"
+            )
+        if projection_mode == "preserve_surface":
+            grounded_before = thickness + bed / density_ratio >= 0.0
+            floating_before = ~grounded_before
+            thickness[grounded_before] = (
+                surface[grounded_before] - bed[grounded_before]
+            )
+            thickness[floating_before] = (
+                surface[floating_before] * rho_sw / (rho_sw - rho_ice)
+            )
+        thickness[thickness < 1.0] = 1.0
+        ocean_levelset = thickness + bed / density_ratio
+        floating = ocean_levelset < 0.0
+        surface[floating] = thickness[floating] * (
+            (rho_sw - rho_ice) / rho_sw
+        )
+        base = surface - thickness
+        grounded = ocean_levelset > 0.0
+        base[grounded] = bed[grounded]
+        analysis_vec[surface_idx, :] = base + thickness
+        analysis_vec[thickness_idx, :] = thickness
+
+    analysis_vec = apply_global_inference_hook(
+        analysis_vec=analysis_vec,
+        vec_inputs=vec_inputs,
+        hdim=hdim,
+        icesee_kwargs=icesee_kwargs,
+        timestep=timestep,
+        model_time=current_model_time,
+        stage="post_geometry",
+    )
+    trace_stage("05_post_geometry", analysis_vec)
+    return analysis_vec
 
 
 # def parallel_write_ensemble_scattered(timestep, ensemble_mean, icesee_kwargs, ensemble_chunk, comm, icesee_kwargs, output_file="icesee_ensemble_data.h5"):
@@ -375,203 +579,11 @@ def parallel_write_ensemble_scattered(
             dset = f["ensemble"]
             ens_mean_ds = f["ensemble_mean"]
 
-            # ---------------- index lookup for current recvbuf layout ----------------
-            vecs, indx_map, dim_per_proc = icesee_get_index(**icesee_kwargs)
-
-            thickness_idx = 0
-            surface_idx = 0
-            bed_idx = 0
-
-            for ii, vec in enumerate(icesee_kwargs.get("vec_inputs", [])):
-                vec_l = vec.lower()
-                if vec_l in ["thickness", "ice_thickness", "h"]:
-                    thickness_idx = indx_map[vec]
-                if vec_l in ["surface", "ice_surface", "s"]:
-                    surface_idx = indx_map[vec]
-                if vec_l in ["bed", "bedrock", "base", "bedtopography"]:
-                    bed_idx = indx_map[vec]
-
-            # ---------------- bed relaxation ----------------
-            if False: #TODO: for test runs
-                for ii, vec in enumerate(icesee_kwargs.get("vec_inputs", [])):
-                    vec_l = vec.lower()
-                    if vec_l in ["bed", "bedrock", "base", "bedtopography"]:
-                        bed_prior = dset[indx_map[vec], :, timestep - 1]
-                        bed_now = recvbuf[indx_map[vec], :]
-
-                        thickness = recvbuf[thickness_idx, :]
-                        di = 0.8930
-                        ocean_levelset = thickness + (recvbuf[bed_idx, :] / di)
-
-                        dt = icesee_kwargs.get("dt", icesee_kwargs["dt"])
-                        t = timestep * dt
-
-                        do_bed_snap = False
-                        for bed_snap in icesee_kwargs.get("bed_obs_snapshot", []):
-                            if np.isclose(t, bed_snap, rtol=0, atol=1e-12):
-                                do_bed_snap = True
-                                break
-
-                        do_bed_snap = False #TODO: for test runs
-                        if do_bed_snap:
-                            eta = 1.0
-                            rho = icesee_kwargs.get("rho", 1.0)
-                            sigma = 1e-3
-                            X5 = icesee_kwargs.get("X5", None)
-                            beta_t = icesee_kwargs.get("initial_bed_bias", 0.0015)
-
-                            if X5 is not None:
-                                for i in range(X5.shape[0]):
-                                    for j in range(X5.shape[0]):
-                                        beta_t *= X5[j, i]
-
-                            for i_sig, sig in enumerate(icesee_kwargs["sig_Q"]):
-                                if i_sig == ii:
-                                    sigma = sig
-
-                            relaxation_factor = (eta + beta_t) * dt + np.sqrt(dt) * sigma * rho
-                            if relaxation_factor > 1.5:
-                                relaxation_factor = np.sqrt(dt) * sigma * rho
-                            relaxation_factor = min(relaxation_factor, 0.5)
-
-                            recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
-                        else:
-                            relaxation_factor = icesee_kwargs.get("bed_relaxation_factor", 0.05)
-                            recvbuf[indx_map[vec], :] = bed_prior + relaxation_factor * (bed_now - bed_prior)
-
-            vec_inputs = icesee_kwargs.get("vec_inputs", [])
-
-            if vec_inputs:
-                hdim = recvbuf.shape[0] // len(vec_inputs)
-                model_dt = icesee_kwargs.get("dt", icesee_kwargs["dt"])
-                current_model_time = timestep * model_dt
-
-                recvbuf = apply_bed_domain_gate_global(
-                    analysis_vec=recvbuf,
-                    forecast_vec=forecast_recvbuf,
-                    vec_inputs=vec_inputs,
-                    hdim=hdim,
-                    icesee_kwargs=icesee_kwargs,
-                )
-                recvbuf = apply_bed_observation_anchor_global(
-                    analysis_vec=recvbuf,
-                    vec_inputs=vec_inputs,
-                    hdim=hdim,
-                    icesee_kwargs=icesee_kwargs,
-                    stage="pre",
-                )
-                if bed_idx is not None and forecast_recvbuf is not None:
-                    icesee_kwargs["_bed_forecast_reference"] = np.asarray(
-                        forecast_recvbuf[bed_idx, :], dtype=float
-                    ).copy()
-
-                recvbuf = apply_global_inference_hook(
-                    analysis_vec=recvbuf,
-                    vec_inputs=vec_inputs,
-                    hdim=hdim,
-                    icesee_kwargs=icesee_kwargs,
-                    timestep=timestep,
-                    model_time=current_model_time,
-                    stage="pre_geometry",  # bed only
-                )
-
-                # Spatial regularization can spread an increment across the
-                # graph. Reapply the support gate so no smoothed correction
-                # leaks beneath unobserved floating ice.
-                recvbuf = apply_bed_domain_gate_global(
-                    analysis_vec=recvbuf,
-                    forecast_vec=forecast_recvbuf,
-                    vec_inputs=vec_inputs,
-                    hdim=hdim,
-                    icesee_kwargs=icesee_kwargs,
-                )
-                # Re-anchor the actual survey nodes after graph smoothing. The
-                # preceding gate still prevents inferred corrections beneath
-                # unobserved floating ice.
-                recvbuf = apply_bed_observation_anchor_global(
-                    analysis_vec=recvbuf,
-                    vec_inputs=vec_inputs,
-                    hdim=hdim,
-                    icesee_kwargs=icesee_kwargs,
-                    stage="post",
-                )
-                if (
-                    icesee_kwargs.get("physics_bed_inference", False)
-                    and bed_idx is not None
-                ):
-                    icesee_kwargs["_bed_previous_applied"] = np.asarray(
-                        recvbuf[bed_idx, :], dtype=float
-                    ).copy()
-
-            # ---------------- ISSM physical fixes ----------------
-            if True:
-                if icesee_kwargs.get("model_name", "").lower() == "issm":
-                    di = 0.8930
-                    rho_ice = 917.0
-                    rho_sw = 1028.0
-
-                    thickness = recvbuf[thickness_idx, :]
-                    surface = recvbuf[surface_idx, :]
-                    bed = recvbuf[bed_idx, :]
-
-                    projection_mode = str(
-                        icesee_kwargs.get(
-                            "geometry_projection_mode", "preserve_thickness"
-                        )
-                    ).lower()
-                    if projection_mode not in {
-                        "preserve_thickness",
-                        "preserve_surface",
-                    }:
-                        raise ValueError(
-                            "geometry_projection_mode must be "
-                            "'preserve_thickness' or 'preserve_surface'"
-                        )
-
-                    if projection_mode == "preserve_surface":
-                        # Surface is the observed geometry variable in this
-                        # profile. Diagnose H from S and b while retaining the
-                        # forecast grounding classification for this projection.
-                        grounded_before = thickness + (bed / di) >= 0.0
-                        floating_before = ~grounded_before
-                        thickness[grounded_before] = (
-                            surface[grounded_before] - bed[grounded_before]
-                        )
-                        thickness[floating_before] = (
-                            surface[floating_before]
-                            * rho_sw
-                            / (rho_sw - rho_ice)
-                        )
-
-                    pos = np.where(thickness < 1)
-                    thickness[pos] = 1.0
-
-                    ocean_levelset = thickness + (bed / di)
-
-                    # floating ice
-                    pos_float = np.where(ocean_levelset < 0)
-                    surface[pos_float] = thickness[pos_float] * ((rho_sw - rho_ice) / rho_sw)
-
-                    recvbuf[surface_idx, :] = surface
-                    base = surface - thickness
-
-                    pos_grounded = np.where(ocean_levelset > 0)
-                    base[pos_grounded] = bed[pos_grounded]
-
-                    recvbuf[surface_idx, :] = base + thickness
-                    recvbuf[thickness_idx, :] = thickness
-
-                    del thickness, surface, bed, ocean_levelset, pos, pos_float, base, pos_grounded
-                    gc.collect()
-
-            recvbuf = apply_global_inference_hook(
+            recvbuf = finalize_analysis_ensemble(
                 analysis_vec=recvbuf,
-                vec_inputs=vec_inputs,
-                hdim=hdim,
-                icesee_kwargs=icesee_kwargs,
+                forecast_vec=forecast_recvbuf,
                 timestep=timestep,
-                model_time=current_model_time,
-                stage="post_geometry",  # SMB only
+                icesee_kwargs=icesee_kwargs,
             )
 
             # Don't write yet if inversion is enabled. We'll do inversion first.
@@ -651,7 +663,33 @@ def parallel_write_ensemble_scattered(
         inv_kwargs_member = dict(inv_kwargs)
         inv_kwargs_member["ens_id"] = ens_id
 
+        trace_dir = None
+        if icesee_kwargs.get("execution_parity_trace", False):
+            trace_dir = os.path.join(
+                icesee_kwargs.get("data_path", "."),
+                "_execution_parity_trace",
+            )
+            os.makedirs(trace_dir, exist_ok=True)
+            np.save(
+                os.path.join(
+                    trace_dir,
+                    f"inversion_{int(timestep):06d}_member_{ens_id:06d}_input.npy",
+                ),
+                member,
+            )
+
         data = model_module.inverse_step_single(ensemble=member, **inv_kwargs_member)
+
+        if data is None:
+            raise RuntimeError(
+                "inverse_step_single returned no result for ensemble member "
+                f"{ens_id}; inspect the preceding model-adapter/ISSM error."
+            )
+        if not hasattr(data, "items"):
+            raise TypeError(
+                "inverse_step_single must return a mapping, got "
+                f"{type(data).__name__} for ensemble member {ens_id}."
+            )
 
         update_dict = {"ens_id": ens_id}
 
@@ -661,6 +699,15 @@ def parallel_write_ensemble_scattered(
             if key_l in ["coefficient", "friction", "friction_coefficient", "fcoef", "frictioncoefficient"]:
                 update_dict["friction_idx"] = indx_map_inv[key]
                 update_dict["friction_val"] = np.asarray(value).copy()
+
+                if trace_dir is not None:
+                    np.save(
+                        os.path.join(
+                            trace_dir,
+                            f"inversion_{int(timestep):06d}_member_{ens_id:06d}_friction.npy",
+                        ),
+                        np.asarray(value),
+                    )
 
             # elif key_l in ["vx", "velocity_x", "vel_x", "v_x"]:
             #     update_dict["vx_idx"] = indx_map_inv[key]
@@ -705,6 +752,11 @@ def parallel_write_ensemble_scattered(
             if icesee_kwargs.get("DEnKF_flag", False):
                 mean_now = np.mean(dset[:, :, timestep], axis=1)
                 dset[:, :, timestep] += mean_now[:, np.newaxis]
+
+        print(
+            "[ICESEE][inversion] Completed member-wise friction inversion "
+            f"for {Nens} members at stored timestep {timestep}."
+        )
 
         del data_before_arr
         gc.collect()
@@ -1520,9 +1572,9 @@ def write_analysis_partitioned(k, X5, local_patches, h5_path, timestep_forecast,
     ensemble anywhere."""
     import h5py
     import numpy as np
-    from ICESEE.src.utils.localization import (
-        apply_local_patches,
-        restore_frozen_analysis_vars,
+    from ICESEE.src.utils.localization import apply_local_patches
+    from ICESEE.src.parallelization._mpi_analysis_functions import (
+        apply_analysis_controls_local,
     )
 
     rank = comm.Get_rank()
@@ -1542,48 +1594,12 @@ def write_analysis_partitioned(k, X5, local_patches, h5_path, timestep_forecast,
             if icesee_kwargs.get("local_analysis", False):
                 analysis_local = apply_local_patches(analysis_local, prior_local, global_rows, local_patches)
 
-            vec_inputs = icesee_kwargs.get("vec_inputs", [])
-            hdim = nd // len(vec_inputs)
-            state_inflation = icesee_kwargs.get("state_inflation_factor", icesee_kwargs.get("inflation_factor", 1.0))
-            param_inflation = icesee_kwargs.get("param_inflation_factor", icesee_kwargs.get("inflation_factor", 1.0))
-            bed_inflation = icesee_kwargs.get("bed_inflation_factor", param_inflation)
-
-            inflation_vec = np.ones(local_nd) * param_inflation
-            for ii, key in enumerate(vec_inputs):
-                start, end = ii * hdim, ii * hdim + hdim
-                local_mask = (global_rows >= start) & (global_rows < end)
-                if not np.any(local_mask):
-                    continue
-                key_l = key.lower()
-                if ii < icesee_kwargs["num_state_vars"]:
-                    inflation_vec[local_mask] = state_inflation
-                elif key_l in ["bed", "bedrock", "bedtopography", "bed_topography"]:
-                    inflation_vec[local_mask] = bed_inflation
-                else:
-                    inflation_vec[local_mask] = param_inflation
-
-            local_mean = np.mean(analysis_local, axis=1, keepdims=True)
-            local_pert = analysis_local - local_mean
-            analysis_local = local_mean + inflation_vec[:, None] * local_pert
-            analysis_local = restore_frozen_analysis_vars(
-                analysis_local,
-                prior_local,
-                global_rows,
-                vec_inputs,
-                hdim,
-                icesee_kwargs.get("frozen_analysis_vars", []),
+            analysis_local = apply_analysis_controls_local(
+                analysis_vec=analysis_local,
+                forecast_vec=prior_local,
+                global_rows=global_rows,
+                icesee_kwargs=icesee_kwargs,
             )
-
-            km = icesee_kwargs.get("km", None)
-            bed_snap_cols = set(icesee_kwargs.get("bed_snap_cols", []))
-            if km is not None and int(km) not in bed_snap_cols:
-                for ii, key in enumerate(vec_inputs):
-                    if key.lower() not in ["bed", "bedrock", "bedtopography", "bed_topography"]:
-                        continue
-                    start, end = ii * hdim, ii * hdim + hdim
-                    local_mask = (global_rows >= start) & (global_rows < end)
-                    if np.any(local_mask):
-                        analysis_local[local_mask, :] = prior_local[local_mask, :]
 
             dset[row_start:row_stop, :, k + 1] = analysis_local
 

@@ -14,6 +14,39 @@ import numpy as np
 
 _LEGACY_CONTEXT_KEYS = ("params", "model_kwargs", "kwargs")
 
+EXECUTION_MODE_NAMES = {
+    0: "serial",
+    1: "partial parallel",
+    2: "fully parallel, bounded-memory",
+    3: "spatially distributed (application-specific)",
+}
+
+
+def normalize_execution_mode(context, expected=None):
+    """Return and validate ICESEE's sole top-level execution selector.
+
+    Mode 3 is recognized here as a value, not as a globally available
+    capability: unlike modes 0-2, which every application supports, mode 3's
+    runner (``ICESEE.src.run_model_da.icesee_da_distributed``) requires the
+    selected application/model to have registered a production mode-3
+    adapter via ``src/parallelization/distributed_mode3_registry.py``. An
+    application that selects ``execution_mode: 3`` without having registered
+    support gets a clear, model-named error from that runner, not from this
+    generic normalizer.
+    """
+    mode = int(context.get("execution_mode", 1))
+    if mode not in EXECUTION_MODE_NAMES:
+        raise ValueError(
+            "execution_mode must be 0 (serial), 1 (partial), 2 (full), or "
+            "3 (spatially distributed, application-specific)"
+        )
+    if expected is not None and mode != int(expected):
+        raise ValueError(
+            f"runner for execution_mode={expected} received execution_mode={mode}"
+        )
+    context["execution_mode"] = mode
+    return mode
+
 
 def normalize_icesee_kwargs(context=None, **values):
     """Return one flat ICESEE runtime context.

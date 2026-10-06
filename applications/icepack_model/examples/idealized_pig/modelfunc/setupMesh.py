@@ -4,7 +4,7 @@ from modelfunc.myerror import myerror
 
 
 def setupMesh(meshFile, degree=2, meshOversample=None, savegmsh=False,
-              newMesh=None):
+              newMesh=None, comm=None):
     """
     Read argus mesh file and return mesh alongw ith function spaces
 
@@ -14,6 +14,12 @@ def setupMesh(meshFile, degree=2, meshOversample=None, savegmsh=False,
         argus meshfile name
     degree : int, optional
         degree of function spaces, by default 2
+    comm : mpi4py.MPI.Comm, optional
+        Communicator to build the (discarded-unless-newMesh-is-None)
+        Argus mesh on. See argusToFiredrakeMesh's own docstring for the
+        Mode-3 hang this forwarding fixes -- previously silently dropped
+        here, defaulting the call three levels down to COMM_WORLD
+        regardless of the caller's actual intended scope.
 
     Returns
     -------
@@ -24,7 +30,7 @@ def setupMesh(meshFile, degree=2, meshOversample=None, savegmsh=False,
     """
     # Input the mesh
     maxOversample = 4  # Arbitrary could be increased
-    mesh1, opts = argusToFiredrakeMesh(meshFile, savegmsh=savegmsh)
+    mesh1, opts = argusToFiredrakeMesh(meshFile, savegmsh=savegmsh, comm=comm)
 
     if meshOversample is not None and newMesh is None:
         numLevels = meshOversample - 1

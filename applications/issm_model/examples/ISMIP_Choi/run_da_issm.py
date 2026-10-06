@@ -29,6 +29,9 @@ from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_model import initi
 from ICESEE.applications.issm_model.issm_utils.matlab2python.mat2py_utils import add_issm_dir_to_sys_path, MatlabServer, setup_example_directory
 from ICESEE.applications.issm_model.issm_utils.matlab2python.server_utils import run_icesee_with_server, setup_server_shutdown
 
+# --- Register execution_mode 3 support (import-time side effect) ---
+from ICESEE.applications.issm_model.examples.ISMIP_Choi import mode3_runner  # noqa: F401
+
 # --- Initialize MPI ---
 icesee_rank, icesee_size, icesee_comm, ens_id = ParallelManager().icesee_mpi_init(icesee_kwargs)
 

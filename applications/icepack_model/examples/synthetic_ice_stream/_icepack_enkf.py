@@ -6,10 +6,61 @@
 # ==============================================================================
 
 import numpy as np
+import h5py
 
 # --- import run_simulation function from the available examples ---
 from ICESEE.applications.icepack_model.examples.synthetic_ice_stream._icepack_model import *
 from ICESEE.config._utility_imports import icesee_get_index
+
+
+def _physical_nudge_expr(x, Lx, amplitude, threshold_fraction):
+    """Physical-coordinate-based nudging taper (Stage 4C decomposition-
+    invariance fix, Option A -- see model_capabilities.py's icepack
+    notes for the investigation this resolves).
+
+    Returns a UFL expression: a linear ramp from ``-amplitude`` at
+    ``x=0`` to ``0`` at ``x = Lx * threshold_fraction``, and exactly
+    ``0`` beyond that -- the same mathematical taper shape the historical
+    implementation used (``np.linspace(-amplitude, 0, h_indx)`` applied
+    to "the first ``h_indx`` entries"), just parametrized by physical
+    x-position instead of local Firedrake array-index position.
+
+    Array-index position is decomposition-dependent: the same physical
+    mesh, partitioned across a different number of ranks
+    (``ranks_per_model``), assigns a different array position to the
+    same physical node, so "the first ``h_indx`` array entries" selects
+    a different, arbitrary set of physical nodes depending on
+    decomposition -- confirmed empirically (Stage 4C investigation) to
+    not even correspond to a clean physical region at single-rank R=1
+    (only ~59% overlap with "the lowest-x nodes" for the test mesh).
+    ``nurged_entries_percentage`` is therefore interpreted here as the
+    fraction of the physical x-domain (``x in [0, Lx * fraction]``) the
+    nudge occupies, not a fraction of the flattened state-vector index
+    range -- this changes the *set of physical nodes* the nudge selects
+    relative to the historical, accidentally-decomposition-dependent
+    behavior (an intentional correction, not a bug fix that must
+    reproduce old numbers -- see the accompanying report).
+
+    ``amplitude == 0`` or ``threshold_fraction <= 0`` returns an exact
+    zero field, matching the original code's own outer
+    ``if u_nurge_ic != 0 or h_nurge_ic != 0`` gate never running the
+    bump at all in that case.
+
+    Evaluated via Firedrake's own ``.interpolate()`` (by the caller),
+    which evaluates purely from each rank's own locally owned physical
+    coordinates -- no global gather, no explicit halo synchronization
+    needed (interpolate onto a Function already produces a consistent,
+    correctly-owned result the same way every other Function
+    construction in this codebase does).
+    """
+    if amplitude == 0 or threshold_fraction <= 0:
+        return firedrake.Constant(0.0)
+    xi = x / Lx
+    return conditional(
+        xi <= threshold_fraction,
+        -amplitude * (1.0 - xi / threshold_fraction),
+        0.0,
+    )
 
 
 # --- Forecast step ---
@@ -65,6 +116,12 @@ def generate_true_state(**icesee_kwargs):
         if icesee_kwargs["joint_estimation"]:
             statevec_true[indx_map["smb"],k+1] = a.dat.data_ro
 
+    # In fully parallel mode the trajectory has already been written to HDF5.
+    # Do not read the complete file-backed state back into memory to return it.
+    if isinstance(statevec_true, h5py.Dataset):
+        statevec_true.flush()
+        return None
+
     update_state = {'h': statevec_true[indx_map["h"],:],
                     'u': statevec_true[indx_map["u"],:],
                     'v': statevec_true[indx_map["v"],:]}
@@ -98,35 +155,23 @@ def initialize_ensemble(ens, **icesee_kwargs):
 
 
     # initialize the ensemble members
-    # hdim = vecs['h'].shape[0]
-    hdim = h0.dat.data_ro.size
-    # h_indx = int(np.ceil(nurged_entries_percentage*hdim+1))
-
-    # # # create a bump -100 to 0
-    # h_bump = np.linspace(-h_nurge_ic,0,h_indx)
-    # h_with_bump = h_bump + h0.dat.data_ro[:h_indx]
-    # h_perturbed = np.concatenate((h_with_bump, h0.dat.data_ro[h_indx:]))
-    # statevec_ens[:hdim,ens] = h_perturbed
-    # h_perturbed = h0.dat.data_ro
-
     if u_nurge_ic != 0 or h_nurge_ic != 0:
-        h_indx = int(np.ceil(nurged_entries_percentage*hdim+1))
-
-        # u_indx = int(np.ceil(u_nurge_ic+1))
-        u_indx = 1
-        h_bump = np.linspace(-h_nurge_ic,0,h_indx)
-        u_bump = np.linspace(-u_nurge_ic,0,h_indx)
-        # h_bump = np.random.uniform(-h_nurge_ic,0,h_indx)
-        # u_bump = np.random.uniform(-u_nurge_ic,0,h_indx)
-        # print(f"hdim: {hdim}, h_indx: {h_indx}")
-        # print(f"[Debug]: h_bump shape: {h_bump.shape} h0_index: {h0.dat.data_ro[:h_indx].shape}")
-        h_with_bump = h_bump + h0.dat.data_ro[:h_indx]
-        u_with_bump = u_bump + u0.dat.data_ro[:h_indx,0]
-        v_with_bump = u_bump + u0.dat.data_ro[:h_indx,1]
-
-        h_perturbed = np.concatenate((h_with_bump, h0.dat.data_ro[h_indx:]))
-        u_perturbed = np.concatenate((u_with_bump, u0.dat.data_ro[h_indx:,0]))
-        v_perturbed = np.concatenate((v_with_bump, u0.dat.data_ro[h_indx:,1]))
+        # Physical-coordinate-based nudging (Stage 4C Option A): the
+        # taper is a function of this rank's own locally owned x-
+        # coordinates, evaluated via Firedrake's own .interpolate() --
+        # no global gather, no manual index slicing. Same taper shape
+        # (linear ramp from -amplitude to 0) and the same reuse of one
+        # bump field for both u and v as the historical implementation
+        # (v was never given an independent bump -- preserved exactly).
+        h_bump_fn = Function(Q).interpolate(
+            _physical_nudge_expr(x, Lx, h_nurge_ic, nurged_entries_percentage)
+        )
+        u_bump_fn = Function(Q).interpolate(
+            _physical_nudge_expr(x, Lx, u_nurge_ic, nurged_entries_percentage)
+        )
+        h_perturbed = h0.dat.data_ro + h_bump_fn.dat.data_ro
+        u_perturbed = u0.dat.data_ro[:, 0] + u_bump_fn.dat.data_ro
+        v_perturbed = u0.dat.data_ro[:, 1] + u_bump_fn.dat.data_ro
 
         h = Function(Q)
         u = Function(V)
@@ -219,23 +264,18 @@ def generate_nurged_state(**icesee_kwargs):
 
     # if velocity is nurged, then run to get a solution to be used as am initial guess for velocity.
     if u_nurge_ic != 0.0 or h_nurge_ic != 0.0:
-        h_indx = int(np.ceil(nurged_entries_percentage*hdim+1))
-
-        # u_indx = int(np.ceil(u_nurge_ic+1))
-        u_indx = 1
-        h_bump = np.linspace(-h_nurge_ic,0,h_indx)
-        u_bump = np.linspace(-u_nurge_ic,0,h_indx)
-        # h_bump = np.random.uniform(-h_nurge_ic,0,h_indx)
-        # u_bump = np.random.uniform(-u_nurge_ic,0,h_indx)
-        # print(f"hdim: {hdim}, h_indx: {h_indx}")
-        # print(f"[Debug]: h_bump shape: {h_bump.shape} h0_index: {h0.dat.data_ro[:h_indx].shape}")
-        h_with_bump = h_bump + h0.dat.data_ro[:h_indx]
-        u_with_bump = u_bump + u0.dat.data_ro[:h_indx,0]
-        v_with_bump = u_bump + u0.dat.data_ro[:h_indx,1]
-
-        h_perturbed = np.concatenate((h_with_bump, h0.dat.data_ro[h_indx:]))
-        u_perturbed = np.concatenate((u_with_bump, u0.dat.data_ro[h_indx:,0]))
-        v_perturbed = np.concatenate((v_with_bump, u0.dat.data_ro[h_indx:,1]))
+        # Physical-coordinate-based nudging (Stage 4C Option A) -- see
+        # _physical_nudge_expr's own docstring and initialize_ensemble's
+        # identical fix above.
+        h_bump_fn = Function(Q).interpolate(
+            _physical_nudge_expr(x, Lx, h_nurge_ic, nurged_entries_percentage)
+        )
+        u_bump_fn = Function(Q).interpolate(
+            _physical_nudge_expr(x, Lx, u_nurge_ic, nurged_entries_percentage)
+        )
+        h_perturbed = h0.dat.data_ro + h_bump_fn.dat.data_ro
+        u_perturbed = u0.dat.data_ro[:, 0] + u_bump_fn.dat.data_ro
+        v_perturbed = u0.dat.data_ro[:, 1] + u_bump_fn.dat.data_ro
 
         h = Function(Q)
         u = Function(V)
@@ -285,6 +325,10 @@ def generate_nurged_state(**icesee_kwargs):
             da_  = firedrake.Constant(daa)
             a    = firedrake.Function(Q).interpolate(a_in + da_ * x / Lx)
             statevec_nurged[indx_map["smb"],k+1] = a.dat.data_ro
+
+    if isinstance(statevec_nurged, h5py.Dataset):
+        statevec_nurged.flush()
+        return None
 
     updated_state = {'h': statevec_nurged[indx_map["h"],:],
                     'u': statevec_nurged[indx_map["u"],:],

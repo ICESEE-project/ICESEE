@@ -1,5 +1,7 @@
 """Model-agnostic coordinate registry and patch-based local EnKF analysis."""
 
+import os
+
 import numpy as np
 from scipy.spatial import cKDTree
 
@@ -19,6 +21,36 @@ def get_mesh_coordinates(icesee_kwargs):
     leading dimension must follow the model state-vector node ordering.  A
     failed/early lookup is deliberately not cached so that file-backed model
     providers (for example ISSM) can be retried after model initialization.
+
+    **Collective for a genuinely spatially distributed model group**
+    (``ranks_per_model > 1``, e.g. Firedrake/Icepack): a provider like
+    Icepack's returns only the *calling rank's own* local node slice (see
+    ``get_icepack_node_coordinates`` -- it reads ``.dat.data_ro``, the
+    owned-only view), and deriving it involves genuine Firedrake/PETSc
+    collectives (assembling an interpolation onto the mesh). This function
+    therefore gathers every ``subcomm`` rank's own contribution into one
+    global, state-vector-ordered array (mirroring
+    ``combine_member_state``'s gather-then-root pattern) and broadcasts it
+    back so every rank in the model group ends up caching the *same*
+    global array -- not just root -- before returning, so every rank in
+    the model group must call this function together the first time
+    coordinates are needed for a given run (the cache check above makes
+    every later call, from any single rank alone, a no-op read with no
+    further collective). Broadcasting rather than returning root-only/
+    local-elsewhere is deliberate: coordinates are small mesh metadata
+    (not O(Nx*Ne) ensemble state), and callers such as
+    ``add_member_process_noise`` are already called redundantly by every
+    rank with the same seed, expecting to compute the identical field --
+    a per-rank-different coordinate array would silently break that.
+    Calling this from only one rank of a multi-rank model group the
+    *first* time is a caller bug: the gather/broadcast below will hang
+    waiting for the rest of the group, exactly like calling any other
+    Firedrake collective from a single rank would.
+
+    For a replicated model or a single-rank model group (every model
+    registered today except Icepack under Stage 4C's ranks_per_model > 1),
+    ``subcomm`` size is 1 and the gather below degenerates to the previous
+    single-rank behavior exactly -- this is a no-op there.
     """
     if icesee_kwargs.get("mesh_coords") is not None:
         return icesee_kwargs["mesh_coords"]
@@ -52,6 +84,30 @@ def get_mesh_coordinates(icesee_kwargs):
             "Mesh coordinates must have shape (n_nodes,) or "
             f"(n_nodes, n_spatial_dims); got {coords.shape}"
         )
+
+    subcomm = icesee_kwargs.get("subcomm")
+    if subcomm is not None and subcomm.Get_size() > 1:
+        from ICESEE.src.utils.state_ownership import (
+            resolve_state_ownership,
+            combine_member_state,
+        )
+        ownership = resolve_state_ownership(
+            icesee_kwargs, subcomm, local_size=coords.shape[0]
+        )
+        assembled = combine_member_state(ownership, subcomm, coords, root=0)
+        # Broadcast so every rank in the model group ends up with the
+        # SAME global array, not just root -- coordinates are small
+        # mesh metadata (not O(Nx*Ne) ensemble state), and several
+        # callers (e.g. add_member_process_noise, called redundantly by
+        # every rank with the same seed so they compute the identical
+        # field) implicitly assume every rank sees the same coordinate
+        # array for a given global node count. Returning root's array on
+        # root and each rank's own *local* slice everywhere else (an
+        # earlier version of this fix) left those callers requesting a
+        # global-length field against a local-length coordinate array on
+        # non-root ranks.
+        coords = subcomm.bcast(assembled, root=0)
+
     if not np.all(np.isfinite(coords)):
         raise ValueError("Mesh coordinates contain non-finite values")
 
@@ -201,6 +257,87 @@ def stochastic_observation_terms(HA, d, sigma, seed):
     return ha_prime, eta, d_prime
 
 
+def iter_generated_observation_columns(
+    icesee_kwargs, obs_indices, nens, state_dimension, k_obs
+):
+    """Yield deterministic ``generated_R`` columns at observed state rows.
+
+    The generator order is member-major and then variable-major.  Both MPI
+    execution engines use this iterator, making the generated observation
+    factor independent of rank placement and allowing mode 2 to write one
+    column at a time instead of materializing a state-sized factor.
+    """
+    from ICESEE.src.run_model_da._error_generation import generate_enkf_field
+
+    obs_indices = np.asarray(obs_indices, dtype=np.int64).ravel()
+    total_vars = int(icesee_kwargs["total_state_param_vars"])
+    state_vars = int(icesee_kwargs["num_state_vars"])
+    divisor = total_vars if (
+        icesee_kwargs.get("joint_estimation", False)
+        or icesee_kwargs.get("localization_flag", False)
+    ) else state_vars
+    hdim, remainder = divmod(int(state_dimension), divisor)
+    if remainder:
+        raise ValueError(
+            f"State dimension {state_dimension} is not divisible by {divisor}"
+        )
+
+    sigma_blocks = list(icesee_kwargs["sig_obs"])
+    if icesee_kwargs.get("inversion_flag", False):
+        friction_idx = int(icesee_kwargs.get("friction_idx", -1))
+        sigma_blocks = [
+            value for index, value in enumerate(sigma_blocks)
+            if index != friction_idx
+        ]
+
+    lx = float(icesee_kwargs.get("Lx", 1.0))
+    ly = float(icesee_kwargs.get("Ly", 1.0))
+    seed = int(icesee_kwargs.get("base_seed", 42)) + 1000003 * (
+        int(k_obs) + 1
+    )
+    rng = np.random.default_rng(seed)
+    for member in range(int(nens)):
+        blocks = []
+        for block_index, block_sigma in enumerate(sigma_blocks):
+            field_kwargs = dict(icesee_kwargs)
+            field_kwargs.update(
+                ii_sig=block_index,
+                Lx_dim=np.sqrt(lx * ly),
+                noise_dim=hdim,
+                num_vars=total_vars,
+                rng=rng,
+            )
+            blocks.append(
+                float(block_sigma) * np.asarray(
+                    generate_enkf_field(**field_kwargs), dtype=np.float64
+                ).ravel()
+            )
+        full_column = np.concatenate(blocks)
+        if obs_indices.size and int(obs_indices.max()) >= full_column.size:
+            raise ValueError(
+                "generated_R field is shorter than the active observation "
+                f"index range ({full_column.size} values)"
+            )
+        yield member, full_column[obs_indices]
+
+
+def generated_observation_terms(
+    HA, d, icesee_kwargs, obs_indices, state_dimension, k_obs
+):
+    """Build mode-independent generated observation-error analysis terms."""
+    HA = np.asarray(HA, dtype=np.float64)
+    d = np.asarray(d, dtype=np.float64).ravel()
+    eta = np.empty_like(HA)
+    for member, column in iter_generated_observation_columns(
+        icesee_kwargs, obs_indices, HA.shape[1], state_dimension, k_obs
+    ):
+        eta[:, member] = column
+    eta -= eta.mean(axis=1, keepdims=True)
+    ha_prime = HA - HA.mean(axis=1, keepdims=True)
+    d_prime = d[:, None] + eta - HA
+    return ha_prime, eta, d_prime
+
+
 def build_obs_coords(obs_indices, node_coords, vec_inputs, hdim):
     """Map global observation rows to per-block physical coordinates."""
     del vec_inputs  # retained in the public signature for compatibility
@@ -295,6 +432,26 @@ def compute_local_patches_X5(
             "skipping.",
         )
         return {}
+
+    # Keep parity diagnostics entirely opt-in.  These arrays identify whether
+    # execution modes disagree before neighborhood construction (coordinates,
+    # active observation ordering, or observation-space analysis terms).
+    if icesee_kwargs.get("execution_parity_trace", False):
+        trace_dir = os.path.join(
+            icesee_kwargs.get("data_path", "."),
+            "_execution_parity_trace",
+        )
+        os.makedirs(trace_dir, exist_ok=True)
+        timestep = int(icesee_kwargs.get("k", -1)) + 1
+        np.savez(
+            os.path.join(trace_dir, f"local_terms_{timestep:06d}.npz"),
+            node_coords=np.asarray(node_coords),
+            obs_indices=np.asarray(obs_indices),
+            obs_coords=np.asarray(obs_coords),
+            HAprime=np.asarray(HAprime),
+            Eta=np.asarray(Eta),
+            Dprime=np.asarray(Dprime),
+        )
 
     manual_radius = icesee_kwargs.get("localization_radius")
     obs_tree = cKDTree(obs_coords)

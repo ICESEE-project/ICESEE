@@ -6,6 +6,9 @@ code. With ``inference_plugin_enabled=False`` (the default), the local bed gate
 reproduces the legacy freeze behavior and the global hook is a no-op.
 """
 
+import os
+
+import h5py
 import numpy as np
 
 from .stable_bed_inference import apply_bed_regularized_correction
@@ -25,10 +28,69 @@ _BED_ALIASES = {
 }
 
 
+def resolve_analysis_cycle_time(icesee_kwargs, k, km):
+    """Return the scheduled assimilation time and its mapped model time.
+
+    Observation schedules retain both the requested times (``obs_t``) and the
+    nearest model indices (``obs_index``).  Controls such as
+    ``inversion_start_time`` describe the observation schedule, so they must
+    be evaluated against ``obs_t[km]`` rather than the slightly offset model
+    grid time ``t[k]``.  The latter is returned as well for transparent logs.
+    """
+    model_time = float(np.asarray(icesee_kwargs["t"], dtype=float)[int(k)])
+    observation_times = np.asarray(
+        icesee_kwargs.get("obs_t", []), dtype=float
+    ).reshape(-1)
+    if 0 <= int(km) < observation_times.size:
+        return float(observation_times[int(km)]), model_time
+    return model_time, model_time
+
+
 def _local_block_mask(global_rows, block_index, hdim):
     start = block_index * hdim
     end = start + hdim
     return (global_rows >= start) & (global_rows < end)
+
+
+def resolve_bed_update_schedule(icesee_kwargs):
+    """Return ``(active, is_snapshot, mode)`` for the current analysis cycle.
+
+    This is intentionally a pure calculation.  Earlier code communicated the
+    result from row-local analysis to global finalization through private keys
+    in ``icesee_kwargs``.  That is unsafe because several execution-mode-2
+    boundaries copy the dictionary; global finalization could consequently
+    see a stale or missing ``_bed_update_active`` value and skip the direct bed
+    anchor.  Both execution modes now resolve the same schedule independently
+    from the public configuration and current observation column.
+    """
+    enabled = bool(icesee_kwargs.get("inference_plugin_enabled", False))
+    mode = str(icesee_kwargs.get("bed_update_mode", "legacy")).lower()
+    if not enabled:
+        mode = "legacy"
+
+    if mode not in {"legacy", "snapshots", "continuous"}:
+        raise ValueError(
+            "bed_update_mode must be 'legacy', 'snapshots', or 'continuous'"
+        )
+
+    km = icesee_kwargs.get("km")
+    snapshot_columns = {
+        int(value) for value in icesee_kwargs.get("bed_snap_cols", [])
+    }
+    is_snapshot = km is not None and int(km) in snapshot_columns
+
+    if mode == "legacy":
+        active = not (km is not None and not is_snapshot)
+    elif mode == "snapshots":
+        if not snapshot_columns:
+            raise ValueError(
+                "bed_update_mode='snapshots' requires nonempty bed_snap_cols"
+            )
+        active = is_snapshot
+    else:
+        active = True
+
+    return bool(active), bool(is_snapshot), mode
 
 
 def apply_bed_update_gate_local(
@@ -55,34 +117,10 @@ def apply_bed_update_gate_local(
     If the plugin itself is disabled, ``legacy`` is forced regardless of the
     configured new mode.
     """
-    enabled = bool(icesee_kwargs.get("inference_plugin_enabled", False))
-    mode = str(icesee_kwargs.get("bed_update_mode", "legacy")).lower()
-    if not enabled:
-        mode = "legacy"
+    active, is_snapshot, mode = resolve_bed_update_schedule(icesee_kwargs)
+    freeze_bed = not active
 
-    if mode not in {"legacy", "snapshots", "continuous"}:
-        raise ValueError(
-            "bed_update_mode must be 'legacy', 'snapshots', or 'continuous'"
-        )
-
-    km = icesee_kwargs.get("km")
-    snapshot_columns = {
-        int(value) for value in icesee_kwargs.get("bed_snap_cols", [])
-    }
-    is_snapshot = km is not None and int(km) in snapshot_columns
-
-    if mode == "legacy":
-        freeze_bed = km is not None and not is_snapshot
-    elif mode == "snapshots":
-        if not snapshot_columns:
-            raise ValueError(
-                "bed_update_mode='snapshots' requires nonempty bed_snap_cols"
-            )
-        freeze_bed = not is_snapshot
-    else:
-        freeze_bed = False
-
-    icesee_kwargs["_bed_update_active"] = not freeze_bed
+    icesee_kwargs["_bed_update_active"] = active
     icesee_kwargs["_bed_is_snapshot"] = is_snapshot
 
     if not freeze_bed:
@@ -212,7 +250,12 @@ def apply_bed_observation_anchor_global(
     its own innovation.  Unobserved nodes are untouched here and are handled by
     the regularized/localized increment plus the physical domain gate.
     """
-    if not bool(icesee_kwargs.get("_bed_update_active", False)):
+    active, is_snapshot, _ = resolve_bed_update_schedule(icesee_kwargs)
+    # Keep these keys only as diagnostics/backward-compatible plugin state;
+    # correctness no longer depends on a mutation surviving a kwargs copy.
+    icesee_kwargs["_bed_update_active"] = active
+    icesee_kwargs["_bed_is_snapshot"] = is_snapshot
+    if not active:
         return analysis_vec
 
     stage = str(stage).lower()
@@ -230,12 +273,8 @@ def apply_bed_observation_anchor_global(
         raise ValueError(f"{factor_key} must be in [0, 1]")
 
     km = icesee_kwargs.get("km")
-    observations = icesee_kwargs.get("hu_obs_loaded")
-    if km is None or observations is None:
+    if km is None:
         return analysis_vec
-    observations = np.asarray(observations, dtype=float)
-    if observations.ndim != 2 or int(km) >= observations.shape[1]:
-        raise ValueError("bed observation array has an incompatible shape")
 
     bed_block = None
     for block_index, key in enumerate(vec_inputs):
@@ -246,9 +285,65 @@ def apply_bed_observation_anchor_global(
         return analysis_vec
 
     bed_slice = slice(bed_block * hdim, (bed_block + 1) * hdim)
-    if bed_slice.stop > observations.shape[0]:
-        raise ValueError("bed observation block is outside hu_obs_loaded")
-    target = observations[bed_slice, int(km)]
+    observations = icesee_kwargs.get("hu_obs_loaded")
+    if observations is not None:
+        observations = np.asarray(observations, dtype=float)
+        if observations.ndim != 2 or int(km) >= observations.shape[1]:
+            raise ValueError("bed observation array has an incompatible shape")
+        if bed_slice.stop > observations.shape[0]:
+            raise ValueError("bed observation block is outside hu_obs_loaded")
+        target = observations[bed_slice, int(km)]
+    else:
+        # Fully parallel mode stores observations in compact form to avoid an
+        # O(full-state-size * observation-times) dense array.  Resolve only
+        # the current bed column here so the shared finalization contract is
+        # numerically identical to partial-parallel mode without sacrificing
+        # the compact-storage design.
+        obs_path = icesee_kwargs.get("synthetic_obs_file")
+        if not obs_path:
+            obs_path = os.path.join(
+                str(icesee_kwargs.get("data_path", ".")), "synthetic_obs.h5"
+            )
+        if not os.path.exists(obs_path):
+            raise FileNotFoundError(
+                "Bed observation anchoring requires synthetic_obs.h5; "
+                f"not found at {obs_path}"
+            )
+        with h5py.File(obs_path, "r") as handle:
+            if not {"hu_obs_compact", "obs_indices"}.issubset(handle.keys()):
+                raise ValueError(
+                    "synthetic_obs.h5 contains neither hu_obs_loaded nor the "
+                    "required compact observation datasets"
+                )
+            values_dset = handle["hu_obs_compact"]
+            if values_dset.ndim != 2 or int(km) >= values_dset.shape[1]:
+                raise ValueError(
+                    "compact bed observation array has an incompatible shape"
+                )
+            global_rows = np.asarray(handle["obs_indices"], dtype=np.int64).reshape(-1)
+            if global_rows.size != values_dset.shape[0]:
+                raise ValueError(
+                    "obs_indices and hu_obs_compact have incompatible shapes"
+                )
+            in_bed = (global_rows >= bed_slice.start) & (global_rows < bed_slice.stop)
+            positions = np.flatnonzero(in_bed)
+            target = np.full(hdim, np.nan, dtype=float)
+            if positions.size:
+                values = np.asarray(values_dset[positions, int(km)], dtype=float)
+                if "obs_active" in handle:
+                    active_dset = handle["obs_active"]
+                    if active_dset.shape != values_dset.shape:
+                        raise ValueError(
+                            "obs_active and hu_obs_compact have incompatible shapes"
+                        )
+                    compact_active = np.asarray(
+                        active_dset[positions, int(km)], dtype=bool
+                    )
+                else:
+                    compact_active = np.isfinite(values)
+                local_rows = global_rows[positions] - bed_slice.start
+                target[local_rows[compact_active]] = values[compact_active]
+
     active = np.isfinite(target)
     if not np.any(active):
         return analysis_vec
@@ -335,6 +430,7 @@ def reset_inference_plugin_state(icesee_kwargs):
         "_bed_is_snapshot",
         "_bed_initial_reference",
         "_bed_previous_applied",
+        "_bed_forecast_reference",
         "_bed_regularization_cache",
         "_bed_inference_call_count",
         "_smb_inference_history",

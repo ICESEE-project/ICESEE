@@ -1,0 +1,43 @@
+
+%ensure hydrostatic equilibrium on ice shelf: 
+di=md.materials.rho_ice/md.materials.rho_water;
+
+%Get the node numbers of floating nodes
+pos=find(md.mask.groundedice_levelset<0); 
+
+%apply a flotation criterion on the precedingly defined nodes and
+%redefine base and thickness accordingly
+md.geometry.thickness(pos)=1/(1-di)*md.geometry.surface(pos);
+md.geometry.base(pos)=md.geometry.surface(pos)-md.geometry.thickness(pos);
+md.geometry.hydrostatic_ratio=ones(md.mesh.numberofvertices,1); %For Dakota
+
+%Set min thickness to 1 meter
+pos0=find(md.geometry.thickness<=1);
+md.geometry.thickness(pos0)=1;
+md.geometry.surface=md.geometry.thickness+md.geometry.base;
+
+disp('   Set Pressure');
+md.initialization.pressure=md.materials.rho_ice*md.constants.g*md.geometry.thickness;
+
+%Friction and inversion set up
+disp('   Construct basal friction parameters');
+md.friction.coefficient=mean_friction*ones(md.mesh.numberofvertices,1);
+md.friction.p=ones(md.mesh.numberofelements,1);
+md.friction.q=ones(md.mesh.numberofelements,1);
+
+%no friction applied on floating ice
+pos=find(md.mask.groundedice_levelset<0);
+md.friction.coefficient(pos)=0;
+md.groundingline.migration='SubelementMigration';
+
+md.inversion=m1qn3inversion();
+md.inversion.vx_obs=md.initialization.vx;
+md.inversion.vy_obs=md.initialization.vy;
+md.inversion.vel_obs=md.initialization.vel;
+
+disp('   Set boundary conditions');
+md=SetMarineIceSheetBC(md);
+md.basalforcings.floatingice_melting_rate = zeros(md.mesh.numberofvertices,1);
+md.basalforcings.groundedice_melting_rate = zeros(md.mesh.numberofvertices,1);
+md.thermal.spctemperature                 = md.initialization.temperature;
+md.masstransport.spcthickness             = NaN*ones(md.mesh.numberofvertices,1);

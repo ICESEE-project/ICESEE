@@ -1,0 +1,99 @@
+# ==============================================================================
+# PACE RUN 1 calibration config (2026-09-28). A full, separate copy of
+# ../params.yaml with ONLY num_years/obs_start_time/obs_max_time changed
+# (production dt/timesteps_per_year=0.05 is kept -- deliberately NOT
+# changed, per the numerical-safety finding: Icepack's nonlinear solver
+# diverges at a coarser dt=1.0yr).
+#
+# This is a SEPARATE file, not a --key=value CLI override, because
+# config/_utility_imports.py computes its own internal nt/t/obs_index
+# ONCE from this file's modeling-parameters/enkf-parameters sections
+# before any generic CLI override is applied -- overriding num_years/
+# timesteps_per_year/obs_start_time/obs_max_time/freq_obs via CLI does
+# NOT recompute them (confirmed directly). Using a whole separate
+# --force_params=pace/params_calibration.yaml file makes the schedule
+# self-consistent for this shortened run.
+#
+# Ne/model_nprocs/execution_mode/use_member_streaming/member_store_backend
+# etc. remain ordinary CLI overrides in run1_pig_calibration.sbatch (those
+# ARE applied correctly, since they aren't schedule inputs) -- not
+# duplicated here.
+#
+# num_years/obs_start_time/obs_max_time changed relative to ../params.yaml:
+#   num_years: 82 -> 2        (real nt = 2/0.05 = 40, within the ~20-50
+#                               forecast-step calibration target)
+#   obs_start_time: 10 -> 1   (a single, genuine, mid-run analysis event
+#   obs_max_time: 40 -> 1      at year 1 = timestep 20 of 40 -- NOT the
+#                              t=0 degenerate-schedule workaround used in
+#                              this reconciliation's first calibration
+#                              attempt, now that the nt-formula bug is
+#                              fixed)
+# Everything else below is identical to ../params.yaml.
+# ==============================================================================
+modeling-parameters:
+  num_years: 2
+  timesteps_per_year: 0.05
+  nt: 40   # this calibration's own resolved nt (2/0.05) -- see ../params.yaml's own nt comment
+  initFile: 'data/extended_beta1000yrs_compact_idx20000.h5'
+  compact_initialization: true
+  paramsFile: 'data/extended_beta1000yrs.yaml'
+  meshFile: 'data/PigFull2017GeomFull.exp'
+  SMBFile: 'data/OLS_Trend_plus_Resid_9b9.tif'
+  water_to_ice: 1.087241003
+  water_density: 1028
+  GLThresh: 41
+  uThresh: 300
+  hThresh: 30
+  tag: '001'
+  experiments: 0
+  bmr_increase_time: 0
+  save_steps: [34, 69, 81]
+
+enkf-parameters:
+  model_nprocs: 0
+  use_member_streaming: False
+  use_store_streaming_analysis: False
+  member_store_backend: memory
+  member_store_root: ""
+  Nens: 40
+  freq_obs: 1
+  obs_max_time: 1
+  obs_start_time: 1
+
+  num_state_vars: 5
+  num_param_vars: 0
+  vec_inputs: ['h','u','v', 's', 'basal_melt_field']
+  observed_params: ['s']
+  random_field_method: graph
+
+  generate_synthetic_obs: 1
+  generate_true_state:    1
+  generate_nurged_state:  0   # wrong reference trajectory is diagnostic only (see ../params.yaml)
+  initialize_ensemble: 1
+  use_ensemble_pertubations: 1
+  sequential_ensemble_initialization: 0
+
+  sig_model: [0.1,0.1,0.1,0.1,0.1]
+  sig_obs: [5,0.5,0.1,0.1,0.1]
+  sig_Q: [0.8,0.4,0.01,0.08,0.1]
+  length_scale: [96,96,90,80,80]
+
+  seed: 1
+  inflation_factor: 1.15
+  localization_flag: False
+
+  joint_estimation: 0
+  parameter_estimation: False
+  joint_estimated_params: []
+
+  wrong_basal_melt_field: 5
+
+  model_name: "icepack"
+  model_solver: "solver_weertman"
+  filter_type: "EnKF"
+  local_analysis: False
+  n_modeltasks: 1
+  commandlinerun: "True"
+  execution_flag: 0
+  execution_mode: 1
+  data_path: _modelrun_datasets

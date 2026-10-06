@@ -952,14 +952,13 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         % read in bed roughness data
         % filename = fullfile(icesee_path,'data/', 'synthetic_obs_0.h5');
         filename = fullfile(icesee_path, data_path, sprintf('synthetic_obs.h5'));
-        obs_u = h5read(filename, '/hu_obs');
         nsize = md.mesh.numberofvertices;  % or: nsize = size(md.initialization.vx, 1);
 
         disp(['--- Ensemble ID: ', num2str(ens_id), '  Inverse Assimilation step: ', num2str(k)]);
-        obs_col = obs_u(km,:)';            
-     
-        vx_obs = obs_col(vel_idx*nsize + 1 : (vel_idx+1)*nsize); 
-        vy_obs = obs_col((vel_idx+1)*nsize + 1 : (vel_idx+2)*nsize);
+        [vx_obs, vy_obs, obs_storage] = read_inversion_velocity_observations( ...
+            filename, km, vel_idx, nsize);
+        disp(['[ICESEE] Inversion observations read from ', obs_storage, ...
+              ' storage (column ', num2str(km), ').']);
         vel_obs = sqrt(vx_obs.^2 + vy_obs.^2);  
 
         % fetch the updated, vx, vy, h, s, bed, and base
@@ -1070,6 +1069,129 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         
         writeToHDF5(filename, data);
     end
+end
+
+function [vx_obs, vy_obs, storage] = read_inversion_velocity_observations(filename, km, vel_idx, nsize)
+%READ_INVERSION_VELOCITY_OBSERVATIONS Read either ICESEE observation schema.
+% Execution modes 0/1 historically write a full-state /hu_obs array, while
+% memory-scalable execution mode 2 writes /hu_obs_compact together with the
+% zero-based global state rows in /obs_indices and an /obs_active mask.  The
+% inversion needs only Vx and Vy, so reconstruct those vectors rather than a
+% full dense state-observation column.
+
+    info = h5info(filename);
+    dataset_names = string({info.Datasets.Name});
+
+    if any(dataset_names == "hu_obs")
+        obs_u = h5read(filename, '/hu_obs');
+        if km > size(obs_u, 1)
+            error('[ICESEE] Observation column %d exceeds /hu_obs columns (%d).', ...
+                  km, size(obs_u, 1));
+        end
+        obs_col = obs_u(km,:)';
+        vx_obs = obs_col(vel_idx*nsize + 1 : (vel_idx+1)*nsize);
+        vy_obs = obs_col((vel_idx+1)*nsize + 1 : (vel_idx+2)*nsize);
+        storage = 'dense';
+        return;
+    end
+
+    required = ["hu_obs_compact", "obs_indices"];
+    if ~all(ismember(required, dataset_names))
+        error(['[ICESEE] %s contains neither /hu_obs nor the compact ', ...
+               '/hu_obs_compact + /obs_indices schema.'], filename);
+    end
+
+    compact = h5read(filename, '/hu_obs_compact');
+    obs_indices = double(h5read(filename, '/obs_indices'));
+    obs_indices = obs_indices(:);  % Python writes zero-based global rows.
+    nobs = numel(obs_indices);
+
+    % h5py and MATLAB expose the two HDF5 dimensions in opposite orders on
+    % the current interface.  Accept either orientation so files remain
+    % portable across HDF5/MATLAB versions.
+    if size(compact, 2) == nobs
+        if km > size(compact, 1)
+            error('[ICESEE] Observation column %d exceeds compact columns (%d).', ...
+                  km, size(compact, 1));
+        end
+        compact_col = compact(km,:)';
+    elseif size(compact, 1) == nobs
+        if km > size(compact, 2)
+            error('[ICESEE] Observation column %d exceeds compact columns (%d).', ...
+                  km, size(compact, 2));
+        end
+        compact_col = compact(:,km);
+    else
+        error(['[ICESEE] /hu_obs_compact shape [%d %d] is incompatible ', ...
+               'with %d /obs_indices entries.'], ...
+              size(compact, 1), size(compact, 2), nobs);
+    end
+    compact_col = compact_col(:);
+
+    active_col = true(nobs, 1);
+    if any(dataset_names == "obs_active")
+        active = h5read(filename, '/obs_active');
+        if size(active, 2) == nobs
+            active_col = normalize_hdf5_boolean(active(km,:)');
+        elseif size(active, 1) == nobs
+            active_col = normalize_hdf5_boolean(active(:,km));
+        else
+            error(['[ICESEE] /obs_active shape [%d %d] is incompatible ', ...
+                   'with %d /obs_indices entries.'], ...
+                  size(active, 1), size(active, 2), nobs);
+        end
+        active_col = active_col(:);
+    end
+
+    vx_obs = NaN(nsize, 1);
+    vy_obs = NaN(nsize, 1);
+    vx_start0 = vel_idx*nsize;
+    vy_start0 = (vel_idx+1)*nsize;
+
+    vx_rows = active_col & obs_indices >= vx_start0 & ...
+              obs_indices < vx_start0 + nsize;
+    vy_rows = active_col & obs_indices >= vy_start0 & ...
+              obs_indices < vy_start0 + nsize;
+    vx_local = obs_indices(vx_rows) - vx_start0 + 1;
+    vy_local = obs_indices(vy_rows) - vy_start0 + 1;
+    vx_obs(vx_local) = compact_col(vx_rows);
+    vy_obs(vy_local) = compact_col(vy_rows);
+
+    if ~any(vx_rows) || ~any(vy_rows)
+        error(['[ICESEE] Compact observations at column %d do not contain ', ...
+               'active Vx and Vy rows required by the inversion.'], km);
+    end
+    storage = 'compact';
+end
+
+function values = normalize_hdf5_boolean(values)
+%NORMALIZE_HDF5_BOOLEAN Convert numeric or enum-backed HDF5 masks.
+% h5py normally stores NumPy booleans as an HDF5 enum.  Depending on the
+% MATLAB/HDF5 release, h5read may expose that enum as a numeric/logical array
+% or as a cell array containing labels such as 'TRUE' and 'FALSE'.
+
+    if iscell(values)
+        converted = false(size(values));
+        for i = 1:numel(values)
+            item = values{i};
+            if ischar(item) || isstring(item)
+                label = lower(strtrim(char(item)));
+                converted(i) = any(strcmp(label, {'true', '1', 'yes', 'on'}));
+            elseif isnumeric(item) || islogical(item)
+                converted(i) = logical(item);
+            else
+                error('[ICESEE] Unsupported /obs_active cell value of class %s.', ...
+                      class(item));
+            end
+        end
+        values = converted;
+    elseif isnumeric(values) || islogical(values)
+        values = logical(values);
+    else
+        error('[ICESEE] Unsupported /obs_active representation of class %s.', ...
+              class(values));
+    end
+    values = values(:);
 end
 
 function md = apply_configured_initial_geometry(md, bed_candidate, icesee_kwargs)

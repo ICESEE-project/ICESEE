@@ -34,6 +34,18 @@ enkf-parameters:
   freq_obs: 8              # frequency used by the known-good experiment
   obs_max_time: 80        # maximum time for observations
   obs_start_time: 8             # start time for observations
+  # graph or fft. fft's covariance is defined over flat state-vector
+  # ARRAY-INDEX distance (an intentional, documented index-space model,
+  # see sample_periodic_exp_cov's docstring), not physical coordinates --
+  # it is NOT decomposition-invariant under ranks_per_model > 1. 'graph'
+  # is coordinate-based and IS decomposition-invariant (verified to
+  # machine precision, see model_capabilities.py's icepack notes).
+  # ranks_per_model > 1 combined with a nonzero sig_Q and this left at
+  # 'fft' is rejected at startup by validate_stochastic_method_for_
+  # decomposition (model_capabilities.py) -- switch to 'graph', or pass
+  # --acknowledge_index_space_stochastic_multirank=True to explicitly
+  # accept fft's topology-dependent semantics anyway. A deterministic
+  # (sig_Q all-zero) run is never rejected regardless of this setting.
   random_field_method: fft   # graph or fft
 
   num_state_vars: 3       # number of state variables  [h,u,v]
@@ -107,16 +119,22 @@ enkf-parameters:
 
   # nurged parameters
   # h_nurge_ic: 350         # nurged increment for initial thickness
-  h_nurge_ic: 350 
-  u_nurge_ic: 0         # nurged increment for initial velocity
-  nurged_entries_percentage: 0.25 #%     # percentage of nurged entries in the state vector
+  h_nurge_ic: 350
+  u_nurge_ic: 0         # nurged increment for initial velocity (also applied to v)
+  # nurged_entries_percentage: fraction of the PHYSICAL X-DOMAIN LENGTH
+  # (not a fraction of the flattened state-vector index range) that gets
+  # nudged: nodes with x <= nurged_entries_percentage * Lx are perturbed by
+  # a linear taper from -h_nurge_ic/-u_nurge_ic at x=0 to 0 at that
+  # threshold (see _physical_nudge_expr in _icepack_enkf.py). Coordinate-
+  # based and therefore identical for any ranks_per_model. Only h/u/v are
+  # affected; smb is never touched by this nudge.
+  nurged_entries_percentage: 0.25 #%
 
   # enkf model parameters
   model_name: "icepack"               # name of the model
   model_solver: "solver_weertman"     # name of the solver
   filter_type: "EnKF"               # name of the filter: EnKF, DEnKF, EnTKF, EnRSKF
   local_analysis: false           # local analysis flag: True, False, global analysis is default
-  parallel_flag: "MPI_model"             # parallel flag: Serial, MPI, MPI_model
   n_modeltasks: 1                     # number of model tasks (for MPI)
   commandlinerun: "True"              # command line run flag: True, False
   execution_flag: 0                  #`execution flag: 0 ->default, 1 -> sequntial, 2 -> even_distribution_of_problem size, 3 -> even_distribution_of_problem size with load balancing

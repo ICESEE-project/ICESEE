@@ -104,6 +104,16 @@ def generate_true_state(**icesee_kwargs):
             #     print(f"[Generate-True-State: read output file] Error reading the file: {e}")
                 # return None
 
+        # In full-parallel mode the caller supplies an HDF5 dataset so that
+        # the trajectory remains disk-backed.  The integration loop above has
+        # already populated that dataset in place; rebuilding a dictionary of
+        # NumPy slices here would materialize the complete trajectory and
+        # defeat the large-data execution path.
+        if isinstance(statevec_true, h5py.Dataset):
+            statevec_true.file.flush()
+            os.chdir(icesee_path)
+            return None
+
         updated_state = {}
         for key in vec_inputs:
             updated_state[key] = statevec_true[indx_map[key],:]
@@ -182,6 +192,13 @@ def generate_nurged_state(**icesee_kwargs):
             except Exception as e:
                 print(f"[DEBUG] Error reading the file: {e}")
                 # return None
+
+        # As for the true trajectory, keep execution-mode-2 output in the
+        # caller-owned HDF5 dataset and avoid an nd-by-nt NumPy allocation.
+        if isinstance(statevec_nurged, h5py.Dataset):
+            statevec_nurged.file.flush()
+            os.chdir(icesee_path)
+            return None
 
         updated_state = {'Vx': statevec_nurged[indx_map["Vx"],:],
                         'Vy': statevec_nurged[indx_map["Vy"],:],

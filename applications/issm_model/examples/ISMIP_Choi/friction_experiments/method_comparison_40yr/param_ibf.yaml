@@ -1,0 +1,13 @@
+# IBF: ISSM inversion updates basal friction after each annual analysis.
+#
+# The accepted inversion controls are unchanged; only the common comparison
+# duration, observation window, timestep, and spin-up differ from the
+# principal long-duration IBF experiment.
+extends: param.yaml
+
+enkf-parameters:
+  data_path: _modelrun_datasets_method_comparison_40yr_ibf
+  inversion_flag: 1
+  inversion_start_time: 2.0
+  frozen_analysis_vars: [coefficient]
+

@@ -9,6 +9,9 @@
 import gc
 import os
 import copy
+import tempfile
+import json
+from contextlib import contextmanager
 import h5py
 import numpy as np
 import bigmpi4py as BM
@@ -20,10 +23,301 @@ from ICESEE.src.utils.tools import icesee_get_index
 
 from ICESEE.src.run_model_da._error_generation import generate_enkf_field
 from ICESEE.src.utils.utils import UtilsFunctions
+from ICESEE.src.utils.random_streams import process_noise_seed as _process_noise_seed
 
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 # rank_seed, rng = ParallelManager().initialize_seed(MPI.COMM_WORLD)
 from ICESEE.src.parallelization._parallel_i_o import (write_ensemble_member_direct, write_ensemble_member_direct_h5, open_ensemble_file)
+
+
+def process_noise_is_due(icesee_kwargs, k=None):
+    """Return whether process noise is applied at this forecast step.
+
+    ``observations`` is the historical mode-1 contract for the normal
+    Nens >= MPI-size path.  Keeping the decision here prevents execution
+    mode and MPI layout from silently changing the stochastic model.
+    """
+    schedule = str(
+        icesee_kwargs.get("process_noise_schedule", "observations")
+    ).strip().lower()
+    if schedule in {"none", "off", "disabled"}:
+        return False
+    if schedule in {"every_step", "all", "forecast"}:
+        return True
+    if schedule not in {"observations", "observation", "analysis"}:
+        raise ValueError(
+            "process_noise_schedule must be 'observations', 'every_step', "
+            f"or 'none'; got {schedule!r}"
+        )
+
+    if k is None:
+        k = int(icesee_kwargs.get("k", 0))
+    obs_index = np.asarray(icesee_kwargs.get("obs_index", []), dtype=np.int64)
+    number_obs = int(
+        icesee_kwargs.get("number_obs_instants", obs_index.size)
+    )
+    return bool(np.any(obs_index[:number_obs] == int(k)))
+
+
+def _forecast_member_seed(base_seed, timestep, ens_id):
+    """Stable application-forecast seed independent of MPI scheduling."""
+    return int(
+        np.random.SeedSequence(
+            [
+                int(base_seed) & 0xFFFFFFFF,
+                int(timestep) & 0xFFFFFFFF,
+                int(ens_id) & 0xFFFFFFFF,
+                0xF04ECA57,
+            ]
+        ).generate_state(1, dtype=np.uint32)[0]
+    )
+
+
+@contextmanager
+def forecast_member_context(icesee_kwargs, ens_id):
+    """Expose one deterministic RNG stream to every model adapter.
+
+    Legacy adapters consume NumPy's global generator, while newer adapters
+    consume ``rng`` or ``rank_seed``.  A member/timestep keyed stream makes
+    these interfaces identical in execution modes 1 and 2 and invariant to
+    rank count, round ordering, and restart scheduling.
+    """
+    seed = _forecast_member_seed(
+        icesee_kwargs.get("base_seed", 42),
+        icesee_kwargs.get("k", 0),
+        ens_id,
+    )
+    old_state = np.random.get_state()
+    np.random.seed(seed)
+    local_kwargs = dict(icesee_kwargs)
+    local_kwargs.update(
+        {
+            "ens_id": int(ens_id),
+            "seed": seed,
+            "rank_seed": seed,
+            "rng": np.random.default_rng(seed),
+        }
+    )
+    try:
+        yield local_kwargs
+    finally:
+        np.random.set_state(old_state)
+
+
+def _process_noise_state_path(icesee_kwargs, ens_id):
+    base = icesee_kwargs.get("_modelrun_datasets") or icesee_kwargs.get(
+        "data_path", "_modelrun_datasets"
+    )
+    return os.path.join(
+        str(base), "_process_noise_state", f"member_{int(ens_id):06d}.h5"
+    )
+
+
+def _read_member_process_noise(icesee_kwargs, ens_id, size, timestep):
+    """Read the member's AR(1) state, resetting stale state on a fresh run."""
+    path = _process_noise_state_path(icesee_kwargs, ens_id)
+    if not os.path.exists(path):
+        return np.zeros(int(size), dtype=np.float64)
+    try:
+        with h5py.File(path, "r") as handle:
+            last_k = int(handle.attrs.get("last_timestep", -1))
+            stored_seed = int(handle.attrs.get("base_seed", -1))
+            values = np.asarray(handle["noise"], dtype=np.float64)
+        # A state from the same or a later cycle belongs to an older fresh run.
+        if (
+            last_k >= int(timestep)
+            or values.size != int(size)
+            or stored_seed != int(icesee_kwargs.get("base_seed", 42))
+        ):
+            return np.zeros(int(size), dtype=np.float64)
+        return values
+    except (OSError, KeyError, ValueError):
+        return np.zeros(int(size), dtype=np.float64)
+
+
+def _write_member_process_noise(icesee_kwargs, ens_id, values, timestep):
+    """Atomically checkpoint one member's AR(1) process-noise state."""
+    path = _process_noise_state_path(icesee_kwargs, ens_id)
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(
+        prefix=f".member_{int(ens_id):06d}_", suffix=".h5", dir=directory
+    )
+    os.close(fd)
+    try:
+        with h5py.File(temporary, "w") as handle:
+            handle.create_dataset("noise", data=np.asarray(values, dtype=np.float64))
+            handle.attrs["last_timestep"] = int(timestep)
+            handle.attrs["base_seed"] = int(icesee_kwargs.get("base_seed", 42))
+            handle.flush()
+        os.replace(temporary, path)
+    except Exception:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def add_member_process_noise(ensemble_vec, ens_id, icesee_kwargs):
+    """Apply restartable member-specific AR(1) noise to state variables.
+
+    Random fields are keyed by (base seed, timestep, ensemble member,
+    variable), so changing MPI rank counts, subcommunicator sizes, or member
+    scheduling cannot alter the realization.  The AR state is checkpointed per
+    member rather than shared by members in execution order.
+    """
+    k = int(icesee_kwargs.get("k", 0))
+    if not process_noise_is_due(icesee_kwargs, k):
+        return ensemble_vec
+
+    num_state_vars = int(icesee_kwargs["num_state_vars"])
+    total_vars = int(icesee_kwargs["total_state_param_vars"])
+    if icesee_kwargs["joint_estimation"] or icesee_kwargs["localization_flag"]:
+        hdim = ensemble_vec.shape[0] // total_vars
+    else:
+        hdim = ensemble_vec.shape[0] // num_state_vars
+    state_block_size = hdim * num_state_vars
+
+    previous = _read_member_process_noise(
+        icesee_kwargs, ens_id, state_block_size, k
+    )
+    alpha = float(icesee_kwargs.get("alpha", 0.0))
+    rho = float(icesee_kwargs.get("rho", 1.0))
+    dt = float(icesee_kwargs.get("dt", 1.0))
+    Lx = float(icesee_kwargs.get("Lx", 1.0))
+    Ly = float(icesee_kwargs.get("Ly", 1.0))
+    sig_q = list(icesee_kwargs.get("sig_Q", []))
+    base_seed = int(icesee_kwargs.get("base_seed", 42))
+
+    updated_noise = np.empty(state_block_size, dtype=np.float64)
+    noise_increment = np.empty(state_block_size, dtype=np.float64)
+    old_rng_state = np.random.get_state()
+    try:
+        for ii in range(num_state_vars):
+            start, stop = ii * hdim, (ii + 1) * hdim
+            seed = _process_noise_seed(base_seed, k, ens_id, ii)
+            np.random.seed(seed)
+            noise_kwargs = dict(icesee_kwargs)
+            noise_kwargs.update(
+                {
+                    "ens_id": int(ens_id),
+                    "ii_sig": ii,
+                    "seed": seed,
+                    # Pass "rng" explicitly (not just "seed"): generate_enkf_field's
+                    # own fallback prefers a "base_seed" entry in icesee_kwargs over
+                    # "seed" when both are present -- and config/_utility_imports.py
+                    # unconditionally sets icesee_kwargs["base_seed"] (default 42)
+                    # for every application, so this ambiguity was live for every
+                    # mode-2 run, not just configs with an explicit base_seed. An
+                    # explicit "rng" bypasses it entirely, matching the same fix
+                    # already applied to mode 0's forecast step (EnKF.py) and to
+                    # generate_initial_member_increment.
+                    "rng": np.random.default_rng(seed),
+                    "Lx_dim": np.sqrt(Lx * Ly),
+                    "noise_dim": hdim,
+                    "num_vars": total_vars,
+                }
+            )
+            white = np.asarray(generate_enkf_field(**noise_kwargs), dtype=np.float64)
+            white = white.reshape(-1)[:hdim]
+            current = (
+                alpha * previous[start:stop]
+                + np.sqrt(max(0.0, 1.0 - alpha**2)) * white
+            )
+            updated_noise[start:stop] = current
+            sigma = float(sig_q[ii]) if ii < len(sig_q) else 0.0
+            noise_increment[start:stop] = np.sqrt(dt) * sigma * rho * current
+    finally:
+        np.random.set_state(old_rng_state)
+
+    ensemble_vec[:state_block_size] += noise_increment
+    sub_rank = int(icesee_kwargs.get("sub_rank", 0))
+    if sub_rank == 0:
+        _write_member_process_noise(
+            icesee_kwargs, ens_id, updated_noise, k
+        )
+    return ensemble_vec
+
+
+def advance_ensemble_member(
+    ensemble_vec,
+    ens_id,
+    icesee_kwargs,
+    indx_map,
+    *,
+    sub_rank=0,
+):
+    """Advance one member using the execution-mode-independent kernel.
+
+    Execution modes 1 and 2 differ only in how member vectors are stored and
+    transported.  The model call, state-vector packing, deterministic random
+    stream, and process-noise update must remain identical.  Keeping those
+    operations in one function prevents the two drivers from gradually
+    developing different scientific results.
+    """
+    local_kwargs = dict(icesee_kwargs)
+    local_kwargs.update(
+        {
+            "ens_id": int(ens_id),
+            "sub_rank": int(sub_rank),
+        }
+    )
+    member = np.asarray(ensemble_vec, dtype=np.float64).copy()
+    member_before = member.copy() if local_kwargs.get("execution_parity_trace") else None
+
+    with forecast_member_context(local_kwargs, ens_id) as member_kwargs:
+        member_kwargs["sub_rank"] = int(sub_rank)
+        updated_state = icesee_kwargs["model_module"].forecast_step_single(
+            ensemble=member,
+            **member_kwargs,
+        )
+
+    for key, value in updated_state.items():
+        member[indx_map[key]] = value
+
+    member_after_model = (
+        member.copy() if local_kwargs.get("execution_parity_trace") else None
+    )
+
+    # ``add_member_process_noise`` owns the schedule decision.  Calling it
+    # unconditionally here keeps the two execution modes on exactly the same
+    # branch and avoids duplicated schedule logic in their I/O wrappers.
+    member = add_member_process_noise(member, ens_id, member_kwargs)
+    if local_kwargs.get("execution_parity_trace") and int(sub_rank) == 0:
+        trace_root = os.path.join(
+            str(
+                local_kwargs.get("_modelrun_datasets")
+                or local_kwargs.get("data_path", "_modelrun_datasets")
+            ),
+            "_execution_parity_trace",
+        )
+        os.makedirs(trace_root, exist_ok=True)
+        timestep = int(local_kwargs.get("k", 0))
+        trace_path = os.path.join(
+            trace_root,
+            f"member_{int(ens_id):06d}_step_{timestep:08d}.npz",
+        )
+        metadata = {
+            "execution_mode": int(local_kwargs.get("execution_mode", -1)),
+            "member": int(ens_id),
+            "timestep": timestep,
+            "dt": float(local_kwargs.get("dt", np.nan)),
+            "sigma_96": float(local_kwargs.get("sigma_96", np.nan)),
+            "beta_96": float(local_kwargs.get("beta_96", np.nan)),
+            "rho_96": float(local_kwargs.get("rho_96", np.nan)),
+            "process_noise_due": bool(
+                process_noise_is_due(local_kwargs, timestep)
+            ),
+        }
+        np.savez(
+            trace_path,
+            member_before=member_before,
+            member_after_model=member_after_model,
+            member_after_noise=member,
+            metadata=np.asarray(json.dumps(metadata)),
+        )
+    return member
 
 def parallel_forecast_step_default_run(**icesee_kwargs):
     import h5py
@@ -57,9 +351,10 @@ def parallel_forecast_step_default_run(**icesee_kwargs):
     Lx = icesee_kwargs.get("Lx", 1.0)
     Ly = icesee_kwargs.get("Ly", 1.0)
 
+    # Retained for backward-compatible return dictionaries only.  Process
+    # noise is member-keyed and restartable; it must never depend on one
+    # shared, rank-local ``noise`` array.
     noise = icesee_kwargs.get("noise", None)
-    if noise is None:
-        raise ValueError("icesee_kwargs must contain `noise`.")
 
     time_forecast_ensemble_generation = icesee_kwargs.get("time_forecast_ensemble_generation", 0.0)
     time_forecast_noise_generation = icesee_kwargs.get("time_forecast_noise_generation", 0.0)
@@ -77,34 +372,12 @@ def parallel_forecast_step_default_run(**icesee_kwargs):
     vecs, indx_map, dim_per_proc = icesee_get_index(**icesee_kwargs)
 
     def _add_process_noise(ensemble_vec, ens_id, local_kwargs):
-        nonlocal noise
         nonlocal time_forecast_noise_generation
-
-        if icesee_kwargs["joint_estimation"] or icesee_kwargs["localization_flag"]:
-            hdim = ensemble_vec.shape[0] // icesee_kwargs["total_state_param_vars"]
-        else:
-            hdim = ensemble_vec.shape[0] // icesee_kwargs["num_state_vars"]
-
-        state_block_size = hdim * icesee_kwargs["num_state_vars"]
         _t_noise = MPI.Wtime()
-
-        noise_all = []
-        q0 = []
-        for ii, sig in enumerate(icesee_kwargs["sig_Q"]):
-            if ii < icesee_kwargs["num_state_vars"]:
-                noise_kwargs = dict(local_kwargs)
-                noise_kwargs.update({"ii_sig": ii, "Lx_dim": np.sqrt(Lx * Ly), "noise_dim": hdim, "num_vars": icesee_kwargs["total_state_param_vars"]})
-                W = generate_enkf_field(**noise_kwargs)
-                prev_noise = noise[ii * hdim: (ii + 1) * hdim]
-                noise_i = alpha * prev_noise + np.sqrt(1.0 - alpha**2) * W
-                q0.append(noise_i)
-                noise_all.append(np.sqrt(dt) * sig * rho * noise_i)
-
-        if noise_all:
-            noise_update = np.concatenate(noise_all, axis=0)
-            ensemble_vec[:state_block_size] += noise_update[:state_block_size]
-            noise = np.concatenate(q0, axis=0)
-
+        local_kwargs.update({"sub_rank": sub_rank})
+        ensemble_vec = add_member_process_noise(
+            ensemble_vec, ens_id, local_kwargs
+        )
         time_forecast_noise_generation += MPI.Wtime() - _t_noise
         return ensemble_vec
 
@@ -153,14 +426,16 @@ def parallel_forecast_step_default_run(**icesee_kwargs):
                 with h5py.File(input_file, "r") as f:
                     ensemble_local = f["ensemble"][:, ens_id, k].astype(np.float64, copy=True)
 
-                updated_state = model_module.forecast_step_single(ensemble=ensemble_local, **local_kwargs)
-                for key, value in updated_state.items():
-                    ensemble_local[indx_map[key]] = value
-
-                obs_index = icesee_kwargs["obs_index"]
-                km = icesee_kwargs.get("km")
-                if (km < icesee_kwargs["number_obs_instants"]) and (k == obs_index[km]):
-                    ensemble_local = _add_process_noise(ensemble_local, ens_id, local_kwargs)
+                _t_noise = MPI.Wtime()
+                ensemble_local = advance_ensemble_member(
+                    ensemble_local,
+                    ens_id,
+                    local_kwargs,
+                    indx_map,
+                    sub_rank=sub_rank,
+                )
+                if process_noise_is_due(icesee_kwargs, k):
+                    time_forecast_noise_generation += MPI.Wtime() - _t_noise
 
                 if sub_rank == 0:
                     local_vec = ensemble_local
@@ -192,11 +467,16 @@ def parallel_forecast_step_default_run(**icesee_kwargs):
             with h5py.File(input_file, "r") as f:
                 ensemble_local = f["ensemble"][:, ens_id, k].astype(np.float64, copy=True)
 
-            updated_state = model_module.forecast_step_single(ensemble=ensemble_local, **local_kwargs)
-            for key, value in updated_state.items():
-                ensemble_local[indx_map[key]] = value
-
-            ensemble_local = _add_process_noise(ensemble_local, ens_id, local_kwargs)
+            _t_noise = MPI.Wtime()
+            ensemble_local = advance_ensemble_member(
+                ensemble_local,
+                ens_id,
+                local_kwargs,
+                indx_map,
+                sub_rank=sub_rank,
+            )
+            if process_noise_is_due(icesee_kwargs, k):
+                time_forecast_noise_generation += MPI.Wtime() - _t_noise
 
             if sub_rank == 0:
                 local_vec = ensemble_local
@@ -273,7 +553,16 @@ def parallel_forecast_step_default_full_parallel_run(**icesee_kwargs):
     size_world = comm_world.Get_size()
 
     subcomm = icesee_kwargs.get("subcomm", MPI.COMM_SELF)
-    sub_rank = subcomm.Get_rank()
+    # A spare rank under the hierarchical resource plan (resource_plan.py)
+    # is handed MPI.COMM_NULL for subcomm (Get_rank() raises MPI_ERR_COMM
+    # on it); icesee_kwargs["sub_rank"] was already safely computed as
+    # None for that case by icesee_mpi_ens_distribution.
+    if "sub_rank" in icesee_kwargs:
+        sub_rank = icesee_kwargs["sub_rank"]
+    elif subcomm is not None and subcomm != MPI.COMM_NULL:
+        sub_rank = subcomm.Get_rank()
+    else:
+        sub_rank = None
 
     color = icesee_kwargs.get("color", 0)
     rounds = icesee_kwargs.get("rounds", 1)
@@ -295,9 +584,9 @@ def parallel_forecast_step_default_full_parallel_run(**icesee_kwargs):
     Lx = icesee_kwargs.get("Lx", 1.0)
     Ly = icesee_kwargs.get("Ly", 1.0)
 
+    # Backward-compatible metadata only; stochastic state is maintained per
+    # member by ``add_member_process_noise``.
     noise = icesee_kwargs.get("noise", None)
-    if noise is None:
-        raise ValueError("icesee_kwargs must contain `noise`.")
 
     time_forecast_ensemble_generation = icesee_kwargs.get(
         "time_forecast_ensemble_generation", 0.0
@@ -312,57 +601,31 @@ def parallel_forecast_step_default_full_parallel_run(**icesee_kwargs):
         "time_forecast_file_writing", 0.0
     )
 
-    vecs, indx_map, dim_per_proc = icesee_get_index(**icesee_kwargs)
+    # A spare rank (color is None -- resource_plan.py) never calls
+    # _run_one_ensemble below (guarded by `if color is not None:`), the
+    # only place `indx_map` is used, so it never dereferences a None
+    # here -- but icesee_get_index itself touches `comm` (this rank's
+    # `subcomm`, which resource_plan.py hands a spare rank as
+    # MPI.COMM_NULL), so the call itself must be skipped for a spare
+    # rank rather than merely its result being unused.
+    if color is not None:
+        vecs, indx_map, dim_per_proc = icesee_get_index(**icesee_kwargs)
+    else:
+        vecs, indx_map, dim_per_proc = None, None, None
 
     def _add_process_noise(ensemble_vec, ens_id, local_kwargs):
-        nonlocal noise
         nonlocal time_forecast_noise_generation
-
-        if icesee_kwargs["joint_estimation"] or icesee_kwargs["localization_flag"]:
-            hdim = ensemble_vec.shape[0] // icesee_kwargs["total_state_param_vars"]
-        else:
-            hdim = ensemble_vec.shape[0] // icesee_kwargs["num_state_vars"]
-
-        state_block_size = hdim * icesee_kwargs["num_state_vars"]
-
         _t_noise = MPI.Wtime()
-
-        noise_all = []
-        q0 = []
-
-        for ii, sig in enumerate(icesee_kwargs["sig_Q"]):
-            # IMPORTANT: strict <, not <=
-            if ii < icesee_kwargs["num_state_vars"]:
-                noise_kwargs = dict(local_kwargs)
-                noise_kwargs.update(
-                    {
-                        "ens_id": ens_id,
-                        "ii_sig": ii,
-                        "Lx_dim": np.sqrt(Lx * Ly),
-                        "noise_dim": hdim,
-                        "num_vars": icesee_kwargs["total_state_param_vars"],
-                    }
-                )
-
-                W = generate_enkf_field(**noise_kwargs)
-
-                prev_noise = noise[ii * hdim : (ii + 1) * hdim]
-                noise_i = alpha * prev_noise + np.sqrt(1.0 - alpha**2) * W
-
-                q0.append(noise_i)
-                noise_all.append(np.sqrt(dt) * sig * rho * noise_i)
-
-        if noise_all:
-            noise_update = np.concatenate(noise_all, axis=0)
-            ensemble_vec[:state_block_size] += noise_update[:state_block_size]
-            noise = np.concatenate(q0, axis=0)
-
+        local_kwargs.update({"sub_rank": sub_rank})
+        ensemble_vec = add_member_process_noise(
+            ensemble_vec, ens_id, local_kwargs
+        )
         time_forecast_noise_generation += MPI.Wtime() - _t_noise
-
         return ensemble_vec
 
     def _run_one_ensemble(ens_id):
         nonlocal time_forecast_file_writing
+        nonlocal time_forecast_noise_generation
 
         if ens_id < 0 or ens_id >= Nens:
             return
@@ -384,25 +647,58 @@ def parallel_forecast_step_default_full_parallel_run(**icesee_kwargs):
         )
         time_read = MPI.Wtime() - _t_read
 
-        updated_state = model_module.forecast_step_single(
-            ensemble=ensemble_vec,
-            **local_kwargs,
-        )
-
-        for key, value in updated_state.items():
-            ensemble_vec[indx_map[key]] = value
-
-        ensemble_vec = _add_process_noise(
+        _t_noise = MPI.Wtime()
+        ensemble_vec = advance_ensemble_member(
             ensemble_vec,
             ens_id,
             local_kwargs,
+            indx_map,
+            sub_rank=sub_rank,
         )
+        if process_noise_is_due(icesee_kwargs, k):
+            time_forecast_noise_generation += MPI.Wtime() - _t_noise
+
+        # A genuinely spatially distributed model (e.g. Firedrake/Icepack
+        # with ranks_per_model > 1) has each rank in `subcomm` update only
+        # its own disjoint slice of `ensemble_vec` above (see `indx_map` /
+        # icesee_get_index) -- every other position is still whatever this
+        # rank read from the shared file at the top of this call. Only
+        # `sub_rank == 0` writes the file below, so without gathering every
+        # rank's own freshly updated slice onto it first, every other
+        # rank's update is silently discarded each timestep and that rank
+        # keeps re-solving from the same stale state forever (a real,
+        # reproduced bug found via Stage 4C's first real
+        # ranks_per_model=2 Icepack validation run -- previously invisible
+        # because every model registered so far is either single-rank-per-
+        # member or, for Lorenz-96's legacy multi-rank case, replicated,
+        # not distributed). Mirrors `combine_member_state`'s identical
+        # gather-then-root-only pattern already used for ensemble
+        # initialization (`_mpi_ensemble_intialization.py`); for a
+        # replicated model (`state_distribution == "replicated"`) this is
+        # unnecessary -- every rank's copy is already the complete,
+        # identical full vector -- so it is skipped there exactly as
+        # `combine_member_state` itself skips it.
+        _replicated = str(
+            local_kwargs.get("state_distribution", "distributed")
+        ).strip().lower() == "replicated"
+        if subcomm.Get_size() > 1 and not _replicated:
+            own_payload = {
+                key: (np.asarray(idx), ensemble_vec[idx])
+                for key, idx in indx_map.items()
+            }
+            gathered = subcomm.gather(own_payload, root=0)
+            if sub_rank == 0:
+                for payload in gathered:
+                    for key, (idx, vals) in payload.items():
+                        ensemble_vec[idx] = vals
 
         # To avoid duplicate writes, only the subcommunicator root writes
         # the completed ensemble member.
         if sub_rank == 0:
             _t_write = MPI.Wtime()
-            write_k = k + 1 if k < nt - 1 else k
+            # History contains the initial condition (0) plus one state for
+            # each of the ``nt`` model advances, exactly as in mode 1.
+            write_k = k + 1
             enkf_parallel_io.write_forecast(write_k, ensemble_vec, ens_id)
             time_forecast_file_writing += MPI.Wtime() - _t_write + time_read
 
@@ -410,22 +706,53 @@ def parallel_forecast_step_default_full_parallel_run(**icesee_kwargs):
 
     _t_forecast = MPI.Wtime()
 
+    # Stage 4B fix for the P>Nens/spare-rank HDF5 hang: read_forecast's own
+    # docstring states its invariant plainly -- "every rank in
+    # self.mpi_comm calls this once per timestep (it is not gated by
+    # sub_rank), which is what makes it safe ... to open/extend the shared
+    # HDF5 window." That invariant held when every rank always belonged to
+    # some model group; it silently broke once resource_plan.py introduced
+    # spare ranks (which never enter the `if color is not None:` loop
+    # below and so never called read_forecast at all) and partial rounds
+    # (`_run_one_ensemble` returns before read_forecast whenever
+    # `ens_id >= Nens` in the final round -- an *active* rank with no
+    # member this round). Both are exactly the mismatched-collective
+    # deadlock the P=10/Nens=4 case reproduced: active ranks blocked
+    # inside read_forecast's collective HDF5 open while spare/idle-this-
+    # round ranks had already moved on to a later comm_world.Barrier().
+    #
+    # Fixed the same way ensemble initialization's equivalent priming call
+    # already was (see enkf_parallel_io._ensure_batch(0) in
+    # _mpi_ensemble_intialization.py, kept unconditional/outside its own
+    # `if color is not None:` guard for the identical reason): every
+    # world rank -- spare or active, with or without a member this round
+    # -- joins this one priming collective, for the same (t_lo, t_hi)
+    # range read_forecast itself would ensure. This makes the *first*
+    # rank to reach the window for timestep k always be literally every
+    # rank in comm_world at once; every subsequent read_forecast call
+    # inside the round loop below (by ranks that do have a member this
+    # round) then finds the window already open and returns immediately
+    # (_ensure_batch_range is idempotent once the window already covers
+    # the requested range) -- a round loop does not change how many times
+    # the actual collective open happens, only how many members' data
+    # move through the window once it is open.
+    enkf_parallel_io._ensure_batch_range(k, min(k + 1, enkf_parallel_io.nt - 1))
+
     # ------------------------------------------------------------------
-    # Case 2: Nens >= size_world
-    # each subcomm processes multiple ensemble members over rounds.
+    # Unified round loop, driven by the centralized resource plan
+    # (resource_plan.py). `rounds` and `subcomm_size_min` (== the plan's
+    # num_model_groups) already correctly represent both the historical
+    # "few ranks, many members" and "many ranks, fewer members" regimes as
+    # special cases, plus any explicit ranks_per_model configuration that
+    # fits neither -- e.g. P=4,Nens=8,ranks_per_model=2 needs 4 rounds
+    # despite Nens >= size_world, which the old two-branch condition could
+    # not express. A spare rank (color is None, subcomm is MPI.COMM_NULL)
+    # belongs to no model group and must not enter any round.
     # ------------------------------------------------------------------
-    if Nens >= size_world:
+    if color is not None:
         for round_id in range(rounds):
             ens_id = color + round_id * subcomm_size_min
             _run_one_ensemble(ens_id)
-
-    # ------------------------------------------------------------------
-    # Case 3: Nens < size_world
-    # one subcommunicator per ensemble member.
-    # ------------------------------------------------------------------
-    else:
-        ens_id = color
-        _run_one_ensemble(ens_id)
 
     time_forecast_ensemble_generation += MPI.Wtime() - _t_forecast
 

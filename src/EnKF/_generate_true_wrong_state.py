@@ -12,10 +12,12 @@ import zarr
 import os
 import shutil
 import psutil
+import time
 def rss_gb():
     return psutil.Process(os.getpid()).memory_info().rss / 1e9
 
 from ICESEE.src.utils.tools import icesee_get_index
+from ICESEE.src.utils.performance import record_phase
 
 def generate_true_wrong_state(**icesee_kwargs):
     """"Generate true and nurged states for the ICESEE model.
@@ -86,6 +88,7 @@ def generate_true_wrong_state(**icesee_kwargs):
 
                 # ---------- TRUE STATE ----------
                 if gen_true:
+                    _t_phase = time.perf_counter()
                     print("[ICESEE] Generating true state ...")
                     d_true = require_dataset("true_state", shape=(nd, ntp1), dtype="f8", chunks=chunk_size)
                     icesee_kwargs["statevec_true"] = d_true  # write target
@@ -100,9 +103,11 @@ def generate_true_wrong_state(**icesee_kwargs):
                                 d_true[indx_map[key], :] = value
                         else:
                             d_true[:, :] = out_true
+                    record_phase("truth_generation", time.perf_counter() - _t_phase)
 
                 # ---------- NURGED STATE ----------
                 if gen_nurged:
+                    _t_phase = time.perf_counter()
                     print("[ICESEE] Generating nurged state ...")
                     d_nurged = require_dataset("nurged_state", shape=(nd, ntp1), dtype="f8", chunks=chunk_size)
                     icesee_kwargs["statevec_nurged"] = d_nurged  # write target
@@ -117,7 +122,13 @@ def generate_true_wrong_state(**icesee_kwargs):
                                 d_nurged[indx_map[key], :] = value
                         else:
                             d_nurged[:, :] = out_nurged
+                    record_phase("wrong_reference_generation", time.perf_counter() - _t_phase)
 
             icesee_kwargs.update({"dim_list": dim_list})
 
+    # Skipped phases are recorded with zero operations ("no events").
+    if not icesee_kwargs.get("generate_true_state", True):
+        record_phase("truth_generation", 0.0, operations=0)
+    if not icesee_kwargs.get("generate_nurged_state", True):
+        record_phase("wrong_reference_generation", 0.0, operations=0)
     return icesee_kwargs

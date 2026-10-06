@@ -107,6 +107,10 @@ def generate_true_state(**icesee_kwargs):
             #     if key in f:
             #         statevec_true[indx_map[key], k-1] = f[key][:].reshape(-1, order='F')[0]
 
+    if isinstance(statevec_true, h5py.Dataset):
+        statevec_true.flush()
+        return None
+
     updated_state = {}
     for key in vec_inputs:
         updated_state[key] = statevec_true[indx_map[key],:]
@@ -231,6 +235,10 @@ def generate_nurged_state(**icesee_kwargs):
             for key in icesee_kwargs.get('vec_inputs'):
                 key_name = f'{key}_{k}'
                 statevec_nurged[indx_map[key], k-1] = f[key_name][0]
+
+    if isinstance(statevec_nurged, h5py.Dataset):
+        statevec_nurged.flush()
+        return None
 
     updated_state = {}
     for key in vec_inputs:

@@ -12,6 +12,24 @@ from ICESEE.applications.icepack_model.examples.synthetic_ice_stream._icepack_mo
 from ICESEE.config._utility_imports import icesee_get_index
 
 
+def _physical_nudge_expr(x, Lx, amplitude, threshold_fraction):
+    """Physical-coordinate-based nudging taper (Stage 4C decomposition-
+    invariance fix, Option A). Kept identical to the copy in
+    applications/icepack_model/examples/synthetic_ice_stream/_icepack_enkf.py
+    (that file's own docstring has the full rationale); this is the
+    fallback module SupportedModels.call_model() uses for any icepack
+    example that does not provide its own local _icepack_enkf.py.
+    """
+    if amplitude == 0 or threshold_fraction <= 0:
+        return firedrake.Constant(0.0)
+    xi = x / Lx
+    return conditional(
+        xi <= threshold_fraction,
+        -amplitude * (1.0 - xi / threshold_fraction),
+        0.0,
+    )
+
+
 # --- Forecast step ---
 def forecast_step_single(ensemble=None, **icesee_kwargs):
     """ensemble: packs the state variables:h,u,v of a single ensemble member
@@ -145,35 +163,18 @@ def initialize_ensemble(ens, **icesee_kwargs):
 
 
     # initialize the ensemble members
-    # hdim = vecs['h'].shape[0]
-    hdim = h0.dat.data_ro.size
-    # h_indx = int(np.ceil(nurged_entries_percentage*hdim+1))
-
-    # # # create a bump -100 to 0
-    # h_bump = np.linspace(-h_nurge_ic,0,h_indx)
-    # h_with_bump = h_bump + h0.dat.data_ro[:h_indx]
-    # h_perturbed = np.concatenate((h_with_bump, h0.dat.data_ro[h_indx:]))
-    # statevec_ens[:hdim,ens] = h_perturbed
-    # h_perturbed = h0.dat.data_ro
-
     if u_nurge_ic != 0 or h_nurge_ic != 0:
-        h_indx = int(np.ceil(nurged_entries_percentage*hdim+1))
-
-        # u_indx = int(np.ceil(u_nurge_ic+1))
-        u_indx = 1
-        h_bump = np.linspace(-h_nurge_ic,0,h_indx)
-        u_bump = np.linspace(-u_nurge_ic,0,h_indx)
-        # h_bump = np.random.uniform(-h_nurge_ic,0,h_indx)
-        # u_bump = np.random.uniform(-u_nurge_ic,0,h_indx)
-        # print(f"hdim: {hdim}, h_indx: {h_indx}")
-        # print(f"[Debug]: h_bump shape: {h_bump.shape} h0_index: {h0.dat.data_ro[:h_indx].shape}")
-        h_with_bump = h_bump + h0.dat.data_ro[:h_indx]
-        u_with_bump = u_bump + u0.dat.data_ro[:h_indx,0]
-        v_with_bump = u_bump + u0.dat.data_ro[:h_indx,1]
-
-        h_perturbed = np.concatenate((h_with_bump, h0.dat.data_ro[h_indx:]))
-        u_perturbed = np.concatenate((u_with_bump, u0.dat.data_ro[h_indx:,0]))
-        v_perturbed = np.concatenate((v_with_bump, u0.dat.data_ro[h_indx:,1]))
+        # Physical-coordinate-based nudging (Stage 4C Option A) -- see
+        # _physical_nudge_expr's own docstring.
+        h_bump_fn = Function(Q).interpolate(
+            _physical_nudge_expr(x, Lx, h_nurge_ic, nurged_entries_percentage)
+        )
+        u_bump_fn = Function(Q).interpolate(
+            _physical_nudge_expr(x, Lx, u_nurge_ic, nurged_entries_percentage)
+        )
+        h_perturbed = h0.dat.data_ro + h_bump_fn.dat.data_ro
+        u_perturbed = u0.dat.data_ro[:, 0] + u_bump_fn.dat.data_ro
+        v_perturbed = u0.dat.data_ro[:, 1] + u_bump_fn.dat.data_ro
 
         h = Function(Q)
         u = Function(V)
@@ -258,23 +259,17 @@ def generate_nurged_state(**icesee_kwargs):
 
     # if velocity is nurged, then run to get a solution to be used as am initial guess for velocity.
     if u_nurge_ic != 0.0 or h_nurge_ic != 0.0:
-        h_indx = int(np.ceil(nurged_entries_percentage*hdim+1))
-
-        # u_indx = int(np.ceil(u_nurge_ic+1))
-        u_indx = 1
-        h_bump = np.linspace(-h_nurge_ic,0,h_indx)
-        u_bump = np.linspace(-u_nurge_ic,0,h_indx)
-        # h_bump = np.random.uniform(-h_nurge_ic,0,h_indx)
-        # u_bump = np.random.uniform(-u_nurge_ic,0,h_indx)
-        # print(f"hdim: {hdim}, h_indx: {h_indx}")
-        # print(f"[Debug]: h_bump shape: {h_bump.shape} h0_index: {h0.dat.data_ro[:h_indx].shape}")
-        h_with_bump = h_bump + h0.dat.data_ro[:h_indx]
-        u_with_bump = u_bump + u0.dat.data_ro[:h_indx,0]
-        v_with_bump = u_bump + u0.dat.data_ro[:h_indx,1]
-
-        h_perturbed = np.concatenate((h_with_bump, h0.dat.data_ro[h_indx:]))
-        u_perturbed = np.concatenate((u_with_bump, u0.dat.data_ro[h_indx:,0]))
-        v_perturbed = np.concatenate((v_with_bump, u0.dat.data_ro[h_indx:,1]))
+        # Physical-coordinate-based nudging (Stage 4C Option A) -- see
+        # _physical_nudge_expr's own docstring.
+        h_bump_fn = Function(Q).interpolate(
+            _physical_nudge_expr(x, Lx, h_nurge_ic, nurged_entries_percentage)
+        )
+        u_bump_fn = Function(Q).interpolate(
+            _physical_nudge_expr(x, Lx, u_nurge_ic, nurged_entries_percentage)
+        )
+        h_perturbed = h0.dat.data_ro + h_bump_fn.dat.data_ro
+        u_perturbed = u0.dat.data_ro[:, 0] + u_bump_fn.dat.data_ro
+        v_perturbed = u0.dat.data_ro[:, 1] + u_bump_fn.dat.data_ro
 
         h = Function(Q)
         u = Function(V)

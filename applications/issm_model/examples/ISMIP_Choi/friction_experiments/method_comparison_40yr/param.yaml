@@ -1,0 +1,35 @@
+# Matched 40-year WBF / EBF / IBF method-comparison experiment.
+#
+# This profile is deliberately separate from the principal long-duration IBF
+# experiment.  All three child profiles inherit the same truth, prior,
+# observations, forcing, timestep, and ensemble stabilization; only the basal
+# friction treatment differs.
+extends: ../param.yaml
+
+modeling-parameters:
+  num_years: 40
+  timesteps_per_year: 0.1
+
+enkf-parameters:
+  Nens: 40
+
+  # Annual surface and velocity observations from year 2 through year 24.
+  freq_obs: 1
+  obs_start_time: 2
+  obs_max_time: 24
+
+  # Four-year bed campaigns from year 2 through year 22, followed by a
+  # terminal year-24 survey that anchors the free-forecast initial condition.
+  bed_obs_snapshot: [2, 6, 10, 14, 18, 22, 24]
+
+  # The coupling preflight established that both initialization and forecast
+  # must retain dt=0.1 for EBF friction changes to affect the ISSM trajectory.
+  ensemble_spinup_years: 4.0
+  ensemble_spinup_dt: 0.1
+
+  # Retain the validated seaward-GL prior used by the coupling preflight.
+  initial_gl_seaward_thickness_m: 500.0
+  initial_gl_seaward_width_m: 40000.0
+
+  force_fresh_start: 1
+

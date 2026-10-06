@@ -12,6 +12,13 @@ import math
 import copy
 import gc
 
+from ICESEE.src.parallelization.parallel_mpi.resource_plan import plan_resources
+from ICESEE.src.utils.performance import register_run_metadata
+from ICESEE.src.parallelization.parallel_mpi.model_capabilities import (
+    validate_ranks_per_model_request,
+    validate_stochastic_method_for_decomposition,
+)
+
 class ParallelManager:
     """
     This class provides variables for MPI parallelization to be shared
@@ -195,9 +202,7 @@ class ParallelManager:
         # if self.model_nprocs is None: use model_nprocs = size_world or subcomm_size_min
         self.model_nprocs = icesee_kwargs.get("model_nprocs")
 
-        # remove data file
-        import re
-        if re.match(r"\AMPI_model\Z", icesee_kwargs.get('parallel_flag'), re.IGNORECASE):
+        if int(icesee_kwargs.get("execution_mode", 1)) in (1, 2):
             _modelrun_datasets = icesee_kwargs.get("data_path",None)
             if self.rank_world == 0 and not os.path.exists(_modelrun_datasets):
                  os.makedirs(_modelrun_datasets, exist_ok=True)
@@ -224,19 +229,74 @@ class ParallelManager:
 
         if icesee_kwargs.get("default_run", False):
             if self.rank_world == 0: print("[ICESEE] Running default parallel mode")
-            if Nens >= self.size_world:
-                # Divide ranks into `size` subcommunicators
-                subcomm_size_min = min(self.size_world, Nens)  # Use at most `Nens` groups
-                self.color = self.rank_world % subcomm_size_min  # Group ranks into `subcomm_size_min` subcommunicators
-                self.key = self.rank_world // subcomm_size_min  # Ordering within each subcommunicator
 
-                #  here ens_id = number
-                self.ens_id = self.color # only needed for initializations as we will only have color ranks available either way
-            else:
-                # More processes than ensembles, map processes to ensembles efficiently
-                self.color = self.rank_world % Nens
-                self.key = self.rank_world // Nens
-                self.ens_id = self.color
+            # Centralized resource plan -- see resource_plan.py. Must use
+            # the exact same (world_size, Nens, ranks_per_model) inputs as
+            # icesee_mpi_ens_distribution() below, so both agree on which
+            # world rank belongs to which model group (a rank must
+            # initialize the same member it later forecasts).
+            requested_rpm = icesee_kwargs.get("ranks_per_model", None)
+            validate_ranks_per_model_request(icesee_kwargs.get("model_name"), requested_rpm)
+            # Stage 4D.2: an optional, independent cap on concurrently
+            # active model groups (currently only meaningful for ISSM,
+            # where a group is a persistent, expensive MATLAB server).
+            # None (the default -- key absent for every other model's
+            # config) changes nothing; see plan_resources's own docstring.
+            max_model_groups = icesee_kwargs.get("issm_server_count")
+            plan = plan_resources(self.size_world, Nens, requested_rpm, max_model_groups)
+            if (
+                isinstance(requested_rpm, str)
+                and requested_rpm.strip().lower() == "auto"
+                and plan.ranks_per_model > 1
+            ):
+                # An explicit "auto" request (unlike an omitted/None
+                # ranks_per_model, which resolves via the *legacy* policy
+                # every currently shipped configuration already runs under
+                # and must stay unaffected -- see
+                # validate_ranks_per_model_request's own docstring) can
+                # resolve to more than one rank per model; re-check the
+                # *resolved* value against this model's registered
+                # capability in that case only.
+                validate_ranks_per_model_request(icesee_kwargs.get("model_name"), plan.ranks_per_model)
+            validate_stochastic_method_for_decomposition(
+                icesee_kwargs.get("model_name"), plan.ranks_per_model, icesee_kwargs
+            )
+            icesee_kwargs["resource_plan"] = plan
+            icesee_kwargs["ranks_per_model"] = plan.ranks_per_model
+            icesee_kwargs["num_model_groups"] = plan.num_model_groups
+            register_run_metadata(
+                ensemble_size=plan.nens,
+                active_ranks=plan.active_ranks,
+                spare_ranks=plan.spare_ranks,
+                model_groups=plan.num_model_groups,
+                ranks_per_model=plan.ranks_per_model,
+                rounds=plan.num_rounds,
+            )
+            if self.rank_world == 0:
+                print(f"[ICESEE] {plan.summary()}")
+                if icesee_kwargs.get("verbose"):
+                    print(plan.describe_all_ranks())
+
+            if plan.is_spare(self.rank_world):
+                # Never let a spare rank join any model-group
+                # subcommunicator's collectives. MPI.UNDEFINED is the
+                # standard way to be excluded from the result of a
+                # collective Split() call while still participating in
+                # the (also collective) call itself.
+                self.color = MPI.UNDEFINED
+                self.key = self.rank_world
+                self.comm_sub = self.COMM_WORLD.Split(self.color, self.key)
+                self.rank_sub = None
+                self.size_sub = 0
+                self.ens_id = None
+                return self.rank_sub, self.size_sub, self.comm_sub, self.ens_id
+
+            self.color = plan.group_id(self.rank_world)  # block-contiguous group id
+            self.key = self.rank_world  # preserves in-group world-rank order
+            # Round-0 member, for model initialization -- later rounds'
+            # member assignment is read from the resource plan directly by
+            # the DA driver, not from this one-time initialization value.
+            self.ens_id = plan.member_for(0, self.color)
 
             self.comm_sub = self.COMM_WORLD.Split(self.color, self.key)
             self.rank_sub = self.comm_sub.Get_rank()
@@ -290,22 +350,73 @@ class ParallelManager:
 
         if icesee_kwargs.get("default_run", False):
 
-            if Nens >= size_world:
-                # Divide ranks into `size` subcommunicators
-                subcomm_size_min = min(size_world, Nens)  # Use at most `Nens` groups
-                color = rank_world % subcomm_size_min  # Group ranks into `subcomm_size_min` subcommunicators
-                key = rank_world // subcomm_size_min  # Ordering within each subcommunicator
+            # Centralized resource plan -- must match icesee_mpi_init()'s
+            # plan exactly (same inputs), so this driver-time distribution
+            # agrees with whatever group each rank already initialized
+            # its model instance for.
+            requested_rpm = icesee_kwargs.get("ranks_per_model", None)
+            plan = icesee_kwargs.get("resource_plan")
+            if plan is None or plan.world_size != size_world or plan.nens != Nens:
+                validate_ranks_per_model_request(icesee_kwargs.get("model_name"), requested_rpm)
+                max_model_groups = icesee_kwargs.get("issm_server_count")
+                plan = plan_resources(size_world, Nens, requested_rpm, max_model_groups)
+                if (
+                    isinstance(requested_rpm, str)
+                    and requested_rpm.strip().lower() == "auto"
+                    and plan.ranks_per_model > 1
+                ):
+                    validate_ranks_per_model_request(icesee_kwargs.get("model_name"), plan.ranks_per_model)
+            validate_stochastic_method_for_decomposition(
+                icesee_kwargs.get("model_name"), plan.ranks_per_model, icesee_kwargs
+            )
+            icesee_kwargs["resource_plan"] = plan
+            icesee_kwargs["ranks_per_model"] = plan.ranks_per_model
+            icesee_kwargs["num_model_groups"] = plan.num_model_groups
+            rounds = plan.num_rounds
+            # subcomm_size_min historically meant "the divisor used to turn
+            # a (color, round) pair into a member id via color + round *
+            # subcomm_size_min" (see _mpi_forecast_functions.py) -- that is
+            # exactly num_model_groups under the new plan, in both the old
+            # "few ranks" and "many ranks" regimes it used to branch on
+            # separately.
+            subcomm_size_min = plan.num_model_groups
 
-                # Determine how many rounds of processing are needed
-                rounds = (Nens + subcomm_size_min - 1) // subcomm_size_min  # Ceiling division
+            # Stage 4B: an explicit, persistent I/O communicator containing
+            # exactly the active (non-spare) resource ranks -- the
+            # "active model-resource ranks only" participant set Stage 4B
+            # calls for -- built once here (a single Split, matching the
+            # model-group Split's own cost) and exposed via icesee_kwargs
+            # rather than inferred repeatedly from `color is not None`
+            # throughout the codebase. Not yet threaded into
+            # EnKF_fully_parallel_IO's own self.mpi_comm (that object's
+            # constructor and most of its methods are already correctly
+            # called by literally every comm_world rank, active or spare,
+            # uniformly -- see EnKF_parallel_io.py's own per-method
+            # comments); this is deliberately scoped as topology-layer
+            # infrastructure for diagnostics and future use, not a
+            # retroactive rewrite of that file's communicator plumbing.
+            is_io_rank = not plan.is_spare(rank_world)
+            io_comm = comm_world.Split(0 if is_io_rank else MPI.UNDEFINED, rank_world)
+            icesee_kwargs["io_comm"] = io_comm
+            icesee_kwargs["is_io_rank"] = is_io_rank
+            icesee_kwargs["io_rank"] = io_comm.Get_rank() if is_io_rank else None
+            icesee_kwargs["io_size"] = io_comm.Get_size() if is_io_rank else 0
+            if rank_world == 0 and icesee_kwargs.get("verbose"):
+                print(
+                    f"[ICESEE] I/O topology: world={size_world}, "
+                    f"io_ranks={plan.active_ranks}, spare_ranks={plan.spare_ranks}"
+                )
 
-            else:
-                # More processes than ensembles, map processes to ensembles efficiently
-                color = rank_world % Nens
-                key = rank_world // Nens
+            if plan.is_spare(rank_world):
+                color = None
+                key = rank_world
+                subcomm = comm_world.Split(MPI.UNDEFINED, key)
+                sub_rank = None
+                sub_size = 0
+                return rounds, color, sub_rank, sub_size, subcomm, subcomm_size_min, rank_world, size_world, comm_world, None, None
 
-                rounds = 1  # Only one round of processing needed
-                subcomm_size_min = None
+            color = plan.group_id(rank_world)
+            key = rank_world
 
             subcomm = comm_world.Split(color, key)
             # get rank and size for each subcommunicator

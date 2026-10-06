@@ -1,0 +1,6 @@
+# Matched 40-year WBF experiment using p=3 and q=0 in run_model.m.
+extends: ../method_comparison_40yr/param_wbf.yaml
+
+enkf-parameters:
+  data_path: _modelrun_datasets_p3q0_comparison_wbf_40yr
+  force_fresh_start: 1

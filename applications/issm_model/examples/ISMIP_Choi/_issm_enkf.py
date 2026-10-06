@@ -138,6 +138,14 @@ def generate_true_state(**icesee_kwargs):
             statevec_true[indx_map['bed'], k-1] = f[key_bed][0]
             statevec_true[indx_map['coefficient'], k-1] = f[key_coefficient][0]
 
+    # In fully-parallel mode ``statevec_true`` is the on-disk HDF5 target.
+    # Re-slicing every variable here would materialize the complete trajectory
+    # in memory after it has already been written successfully.
+    if isinstance(statevec_true, h5py.Dataset):
+        statevec_true.flush()
+        os.chdir(icesee_path)
+        return None
+
     updated_state = {}
     for key in vec_inputs:
         updated_state[key] = statevec_true[indx_map[key],:]
@@ -274,6 +282,13 @@ def generate_nurged_state(**icesee_kwargs):
             statevec_nurged[indx_map['coefficient'], k-1] = f[key_coefficient][0]
             # statevec_nurged[indx_map['bed'], k-1] = f['bed'][0]
             # statevec_nurged[indx_map['coefficient'], k-1] = f['coefficient'][0]
+
+    # See ``generate_true_state``: signal successful in-place completion
+    # without reconstructing a second copy of the full trajectory in RAM.
+    if isinstance(statevec_nurged, h5py.Dataset):
+        statevec_nurged.flush()
+        os.chdir(icesee_path)
+        return None
 
     updated_state = {}
     for key in vec_inputs:
@@ -419,4 +434,3 @@ def initialize_ensemble(ens, **icesee_kwargs):
     os.chdir(icesee_path)
 
     return updated_state
-

@@ -7,6 +7,7 @@
 # --- Imports ---
 import os
 import sys
+import shutil
 import h5py
 import numpy as np
 import warnings
@@ -30,6 +31,121 @@ def get_project_root():
         current_dir = os.path.dirname(current_dir)  # Move one level up
 
     return current_dir
+
+def _parse_generic_cli_overrides(extra_argv):
+    """Parse leftover CLI tokens (anything not claimed by the named
+    ``argparse`` arguments) into a ``{key: raw_string}`` dict.
+
+    Supports ``--key=value`` and ``--key value`` syntax. A bare ``--key``
+    with no following value (or immediately followed by another ``--``
+    token) is treated as the boolean flag ``"true"``. This is what lets
+    *any* YAML configuration key be overridden from the command line
+    (e.g. ``--sig_Q=[0.02,0.02,0.02]`` or ``--inflation_factor=1.5``)
+    without a hand-written ``parser.add_argument()`` call for every new
+    key introduced to ICESEE.
+    """
+    overrides = {}
+    i = 0
+    while i < len(extra_argv):
+        tok = extra_argv[i]
+        if not tok.startswith('--'):
+            i += 1
+            continue
+        body = tok[2:]
+        if '=' in body:
+            key, raw_value = body.split('=', 1)
+            overrides[key] = raw_value
+            i += 1
+        else:
+            key = body
+            if i + 1 < len(extra_argv) and not extra_argv[i + 1].startswith('--'):
+                overrides[key] = extra_argv[i + 1]
+                i += 2
+            else:
+                overrides[key] = 'true'
+                i += 1
+    return overrides
+
+
+def _coerce_cli_override(raw_value, current_value):
+    """Coerce a raw CLI override string to match the type of the
+    existing configuration value it is replacing.
+
+    Uses ``yaml.safe_load`` to reuse YAML's own int/float/bool/list/None
+    parsing rules on the CLI string, rather than requiring every
+    configuration key to hand-declare its own ``argparse`` type. If the
+    existing value is a numpy array, the parsed value is cast back into
+    an array of the same dtype so downstream numeric code keeps working
+    unchanged.
+    """
+    try:
+        parsed_value = yaml.safe_load(raw_value)
+    except yaml.YAMLError:
+        parsed_value = raw_value
+
+    if isinstance(current_value, np.ndarray):
+        return np.array(parsed_value, dtype=current_value.dtype)
+    if isinstance(current_value, bool):
+        return bool(parsed_value)
+    if isinstance(current_value, int) and not isinstance(parsed_value, bool):
+        # A YAML integer (e.g. obs_start_time: 10) must not truncate a
+        # fractional override such as 0.25 to 0.
+        if isinstance(parsed_value, float) and not parsed_value.is_integer():
+            return parsed_value
+        return int(parsed_value)
+    if isinstance(current_value, float):
+        return float(parsed_value)
+    return parsed_value
+
+
+def _unclaimed_argv(extra_argv):
+    """The leftover CLI tokens that are not ICESEE ``--key[=value]``
+    overrides (same token rules as ``_parse_generic_cli_overrides``), e.g.
+    a solver library's own options such as ``-ksp_type gmres``, in order."""
+    unclaimed = []
+    i = 0
+    while i < len(extra_argv):
+        tok = extra_argv[i]
+        if not tok.startswith('--'):
+            unclaimed.append(tok)
+            i += 1
+        elif '=' not in tok[2:] and i + 1 < len(extra_argv) and not extra_argv[i + 1].startswith('--'):
+            i += 2
+        else:
+            i += 1
+    return unclaimed
+
+
+def apply_generic_cli_overrides(icesee_kwargs, extra_argv):
+    """Apply arbitrary ``--key=value`` CLI overrides onto ``icesee_kwargs``.
+
+    Any configuration key that already exists in ``icesee_kwargs`` (i.e.
+    every key sourced from ``params.yaml``'s physical/modeling/enkf
+    sections, plus the derived keys computed in this loader) can be
+    overridden from the command line, automatically -- new configuration
+    keys never need a new ``parser.add_argument()`` call. An unrecognized
+    ``--key`` (not already present in ``icesee_kwargs``) raises a
+    ``ValueError`` to catch typos rather than silently creating a new,
+    unused key.
+    """
+    overrides = _parse_generic_cli_overrides(extra_argv)
+    applied = {}
+    for key, raw_value in overrides.items():
+        if key not in icesee_kwargs:
+            raise ValueError(
+                f"Unrecognized command-line override '--{key}'. It does not match "
+                "any existing ICESEE configuration key (check params.yaml section "
+                "names/keys for a typo)."
+            )
+        icesee_kwargs[key] = _coerce_cli_override(raw_value, icesee_kwargs[key])
+        applied[key] = icesee_kwargs[key]
+        print(f"[ICESEE] CLI override applied: {key} = {icesee_kwargs[key]!r}")
+    # The values the user explicitly requested, so later stages can honor
+    # them and verify that nothing silently replaced them
+    # (src/utils/run_schedule.py::verify_cli_overrides_respected).
+    icesee_kwargs["cli_overrides"] = applied
+    return icesee_kwargs
+
 
 # Get the root of the project
 project_root = get_project_root()
@@ -64,13 +180,14 @@ if 'ipykernel' in sys.modules:
 # =============================================================================
 # --- Command Line Arguments ---
 if not flag_jupyter:
-    # Mapping for execution mode
-    execution_modes_str = {
+    # Mapping for the intra-mode ensemble distribution strategy.  This is
+    # intentionally separate from ``execution_mode`` (0/1/2 in YAML).
+    distribution_modes_str = {
         'default_run': 0,
         'sequential_run': 1,
         'even_distribution': 2
     }
-    execution_modes_int = {v: k for k, v in execution_modes_str.items()}  # Reverse mapping
+    distribution_modes_int = {v: k for k, v in distribution_modes_str.items()}
 
     # CL args.
     parser = ArgumentParser(description='ICESEE: Ice Sheet Parameter and State Estimation model')
@@ -84,24 +201,33 @@ if not flag_jupyter:
     parser.add_argument('--sequential_run', action='store_true', help='sequential run')
     parser.add_argument('--even_distribution', action='store_true', help='even distribution')
     parser.add_argument('--data_path', type=str, required=False, default=None, help='folder to save data for single or multiple runs')
-    parser.add_argument('execution_mode', type=int, choices=[0, 1, 2], nargs='?', help='Execution mode: 0=default_run, 1=sequential_run, 2=even_distribution')
+    parser.add_argument('distribution_mode', type=int, choices=[0, 1, 2], nargs='?', help='Ensemble distribution: 0=default, 1=sequential, 2=even')
     parser.add_argument('--model_nprocs', type=int, required = False, default=None, help='number of processors for the coupled model')
     parser.add_argument('-F', '--force-params', type=str, required=False, default='params.yaml', help='Path to YAML parameter file (default: params.yaml)')
+    parser.add_argument('--execution_mode', type=int, required=False, default=None, choices=[0, 1, 2, 3],
+                         help='Execution mode: 0=serial, 1=partial parallel, 2=fully parallel, '
+                              '3=spatially distributed. Overrides enkf-parameters.execution_mode in the YAML file.')
 
-    args = parser.parse_args()
+    # ``parse_known_args`` (instead of ``parse_args``) lets the fixed set of
+    # named arguments above coexist with a generic catch-all: any leftover
+    # ``--key=value`` token that doesn't match one of them is treated as a
+    # generic override of a YAML configuration key (see
+    # ``apply_generic_cli_overrides`` below), applied once ``icesee_kwargs``
+    # is fully built.
+    args, _cli_extra_argv = parser.parse_known_args()
 
     # check if default run arugment is provided
     run_flag = False
     if (args.default_run or args.sequential_run or args.even_distribution):
         run_flag = True
 
-    # Determine execution mode
+    # Determine the distribution strategy within the selected execution mode.
     selected_mode = 'default_run'  # Default mode
 
-    if args.execution_mode is not None:
-        selected_mode = execution_modes_int[args.execution_mode]  # Convert int to string
+    if args.distribution_mode is not None:
+        selected_mode = distribution_modes_int[args.distribution_mode]
     else:
-        for mode in execution_modes_str.keys():
+        for mode in distribution_modes_str.keys():
             if getattr(args, mode):
                 selected_mode = mode
                 break
@@ -161,8 +287,39 @@ if not flag_jupyter:
     })
 
     # --- Ensemble Parameters ---
+    # nt (2026-09-28, second pass): different applications interpret
+    # `timesteps_per_year` differently -- Icepack/Lorenz96/ISSM's own
+    # run_da_*.py all self-derive nt=num_years/timesteps_per_year (dt in
+    # years), but this generic loader has no way to know that convention
+    # holds for every application (confirmed: it does not -- see
+    # docs/execution-mode-3-design.md's reconciliation notes). Generically
+    # assuming EITHER formula here was the actual bug, not just which
+    # formula was chosen: a one-time internal nt/t is built here (used
+    # only to feed the generic generate_observation_schedule() call below,
+    # BEFORE any application gets a chance to self-derive its own nt in
+    # its own run_da_*.py) and there is no application-agnostic way to
+    # compute it correctly for every application from num_years/
+    # timesteps_per_year alone.
+    #
+    # Fix: let the application's own YAML declare its already-resolved
+    # `nt` directly (`modeling-parameters.nt`) when the num_years*
+    # timesteps_per_year default below is not what that application's own
+    # nt actually is -- an explicit, application-owned value, not a
+    # generic reinterpretation of what `timesteps_per_year` means. Falls
+    # back to the ORIGINAL historical formula (num_years *
+    # timesteps_per_year) when `nt` is not given, so every existing
+    # configuration that does not opt in is completely unaffected -- this
+    # generic loader never assumes, derives, or special-cases any
+    # application's own time-discretization convention. See
+    # applications/icepack_model/examples/idealized_pig/params.yaml's own
+    # `nt: 1640` for the one application currently opting in, and
+    # test_observation_schedule_uses_correct_nt_convention.py.
     icesee_kwargs.update({
-        'nt': int(float(_modeling_section['num_years']) * float(_modeling_section['timesteps_per_year'])), # number of time steps
+        'nt': (
+            int(float(_modeling_section['nt']))
+            if 'nt' in _modeling_section
+            else int(float(_modeling_section['num_years']) * float(_modeling_section['timesteps_per_year']))
+        ),
         'dt': 1.0 / float(_modeling_section['timesteps_per_year']),
         'num_state_vars': int(float(_enkf_section.get('num_state_vars', 1))),
         'num_param_vars': int(float(_enkf_section.get('num_param_vars', 0))),
@@ -175,21 +332,36 @@ if not flag_jupyter:
         'obs_max_time': int(float(_enkf_section.get('obs_max_time', 1))),
         'obs_start_time': float(_enkf_section.get('obs_start_time', 1)),
         'localization_flag': bool(_enkf_section.get('localization_flag', False)),
-        'parallel_flag': _enkf_section.get('parallel_flag', 'serial'),
         'n_modeltasks': int(_enkf_section.get('n_modeltasks', 1)),
         'execution_flag': int(_enkf_section.get('execution_flag', 0)),
         'model_name': _enkf_section.get('model_name', 'model'),
         'use_random_fields': bool(_enkf_section.get('use_random_fields', False)),
-        'execution_mode'   : int(_enkf_section.get('execution_mode', 1)),  # 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run
+        'execution_mode'   : int(_enkf_section.get('execution_mode', 1)),  # 0 -> serial, 1 -> partial parallel_run, 2 -> fully parallel run, 3 -> spatially distributed (application-specific; see src/parallelization/distributed_mode3_registry.py). Re-applied below (CLI --execution_mode takes precedence over the YAML value).
         'serial_file_creation': bool(_enkf_section.get('serial_file_creation', True)),
         'chunk_size': int(_enkf_section.get('chunk_size', 5000)),
         'joint_estimated_params': _enkf_section.get('joint_estimated_params', []),
         'coupled_model_datasets_dir': _enkf_section.get('coupled_model_datasets', 'data'),
         'vec_inputs': _enkf_section['vec_inputs'],
         'collective_threshold': int(_enkf_section.get('collective_threshold', 16)), # threshold for switching to collective I/O
+        'ranks_per_model': _enkf_section.get('ranks_per_model', None),  # Stage 4A hierarchical topology: None -> legacy auto policy, int -> explicit, "auto" -> resource_plan's auto policy (see resource_plan.py / model_capabilities.py)
     })
 
-    icesee_kwargs.update({'batch_size': min(int(_enkf_section.get('batch_size', 50)), icesee_kwargs['nt'])})  # number of time steps to process in each batch
+    # Mode 2 uses a two-shard sliding window by default: the current and next
+    # ensemble states remain open without reserving the full run history.
+    # ``batch_size`` is consumed by execution mode 2.  The execution mode is
+    # commonly selected by the launcher rather than stored in the YAML, so it
+    # is not reliable to derive this default from ``_enkf_section`` here.
+    # Keep the file window small unless the user explicitly opts into a wider
+    # one; otherwise a mode-2 run can pre-create a large fraction of its full
+    # ensemble history before the first forecast is evaluated.
+    default_batch_size = 2
+    icesee_kwargs.update({'batch_size': min(int(_enkf_section.get('batch_size', default_batch_size)), icesee_kwargs['nt'])})
+    icesee_kwargs.update({
+        'synthetic_observation_storage': str(_enkf_section.get('synthetic_observation_storage', 'compact')),
+        'ensemble_storage_dtype': str(_enkf_section.get('ensemble_storage_dtype', 'float64')),
+        'storage_safety_factor': float(_enkf_section.get('storage_safety_factor', 1.10)),
+        'fail_on_insufficient_storage': bool(_enkf_section.get('fail_on_insufficient_storage', False)),
+    })
 
     # Spatial random-field backend.  Keep FFT as the backward-compatible
     # default; graph mode is selected explicitly and consumes the physical
@@ -224,18 +396,6 @@ if not flag_jupyter:
         icesee_kwargs['execution_flag'] = 2
     else:
         icesee_kwargs['execution_flag'] = 0
-
-    # set run modes
-    execution_mode = {
-        'serial': 1 if icesee_kwargs.get('execution_mode', 0) == 0  else 0,
-        'partial': 1 if icesee_kwargs.get('execution_mode', 0) == 1  else 0,
-        'full': 1 if icesee_kwargs.get('execution_mode', 0) == 2  else 0,
-    }
-    # if none of the above modes is set to True set partial to True
-    if not any(execution_mode.values()):
-        execution_mode['partial'] = True
-
-    icesee_kwargs.update({'mode': execution_mode})
 
     # update for time t
     icesee_kwargs['t'] = np.linspace(0, int(float(_modeling_section['num_years'])), icesee_kwargs['nt'] + 1)
@@ -279,10 +439,28 @@ if not flag_jupyter:
         'observations_available': _enkf_section.get('observations_available', False),
         'obs_data_path': _enkf_section.get('obs_data_path', icesee_kwargs.get('coupled_model_datasets_dir', 'data') + '/observations_data.h5'),
         'create_ensemble_dataset': _enkf_section.get('create_ensemble_dataset', True),
+        # Full-parallel large-data controls.  VDS exposes one logical 3-D
+        # ensemble without copying the timestep shards.
+        'ensemble_finalize_mode': str(_enkf_section.get('ensemble_finalize_mode', 'vds')),
+        # ``auto`` preserves full history when it fits and switches to a
+        # restartable rolling window when it does not.
+        'ensemble_history_mode': str(_enkf_section.get('ensemble_history_mode', 'auto')),
+        'analysis_memory_budget_mb': float(_enkf_section.get('analysis_memory_budget_mb', 256.0)),
+        'analysis_row_chunk_size': int(_enkf_section.get('analysis_row_chunk_size', 0)),
+        'observation_row_chunk_size': int(_enkf_section.get('observation_row_chunk_size', 0)),
+        'analysis_finalize_memory_budget_mb': float(_enkf_section.get('analysis_finalize_memory_budget_mb', 2048.0)),
+        'analysis_finalize_member_chunk_size': int(_enkf_section.get('analysis_finalize_member_chunk_size', 0)),
+        'local_analysis_memory_budget_mb': float(_enkf_section.get('local_analysis_memory_budget_mb', 2048.0)),
+        'observation_operator_storage': str(_enkf_section.get('observation_operator_storage', 'indices')),
+        'analysis_svd_energy': float(_enkf_section.get('analysis_svd_energy', 0.999)),
+        'finalize_row_chunk_size': int(_enkf_section.get('finalize_row_chunk_size', 16384)),
         'restart_enabled': _enkf_section.get('restart_enabled', True),
         'force_fresh_start': _enkf_section.get('force_fresh_start', False),
         'checkpoint_every': int(_enkf_section.get('checkpoint_every', 1)),
         'base_seed': int(_enkf_section.get('base_seed', 42)),
+        # Keep process-noise timing independent of execution mode.  The
+        # default matches the established mode-1 schedule.
+        'process_noise_schedule': str(_enkf_section.get('process_noise_schedule', 'observations')),
         'k_start_override': _enkf_section.get('k_start_override', None),
         'ICESEE_PERFORMANCE_TEST': bool(_enkf_section.get('ICESEE_PERFORMANCE_TEST', False)), # this is an environment variable
         'h5_file_compression': _enkf_section.get('h5_file_compression', None), # e.g., 'gzip' or 'lzf' or 'szip' or None
@@ -373,7 +551,49 @@ if not flag_jupyter:
         'data_path': data_path,
         'model_nprocs': model_nprocs,
         'random_field_method': random_field_method,
+        'execution_mode': int(args.execution_mode) if args.execution_mode is not None else int(_enkf_section.get('execution_mode', 1)),
     })
+
+    # Always start a run from a clean data_path: stale files left behind by
+    # a previous run (e.g. a different ensemble size, an old dense/compact
+    # observation layout) must never leak into a new one. ``rmtree(...,
+    # ignore_errors=True)`` is a risk-free no-op if the path doesn't exist
+    # yet; ``makedirs(..., exist_ok=True)`` then (re)creates it. Refuse to
+    # do this for paths that resolve to the current directory, the user's
+    # home directory, or the filesystem root, to guard against an
+    # accidental catastrophic delete from a misconfigured data_path.
+    _data_path_abs = os.path.abspath(data_path)
+    _unsafe_data_paths = {os.path.abspath(p) for p in (os.getcwd(), os.path.expanduser('~'), '/')}
+    if _data_path_abs in _unsafe_data_paths:
+        raise ValueError(
+            f"Refusing to auto-clean data_path='{data_path}' because it resolves to "
+            f"'{_data_path_abs}', which looks like the current directory, home "
+            "directory, or filesystem root. Point data_path at a dedicated "
+            "subdirectory instead."
+        )
+    # Only rank 0 (or a plain single-process launch) deletes; every rank
+    # then ensures the directory exists. This mirrors the rank-detection
+    # pattern used in run_models_da.py -- MPI isn't explicitly initialized
+    # yet at this point in the import chain, only environment-variable
+    # rank hints are available.
+    _rank_hint = int(
+        next(
+            (
+                os.environ[name]
+                for name in (
+                    "OMPI_COMM_WORLD_RANK",
+                    "PMIX_RANK",
+                    "PMI_RANK",
+                    "MV2_COMM_WORLD_RANK",
+                )
+                if name in os.environ
+            ),
+            "0",
+        )
+    )
+    if _rank_hint == 0:
+        shutil.rmtree(data_path, ignore_errors=True)
+    os.makedirs(data_path, exist_ok=True)
 
     joint_estimated_params = len(icesee_kwargs.get('joint_estimated_params', []))
     if icesee_kwargs['joint_estimation']:
@@ -412,7 +632,6 @@ if not flag_jupyter:
         icesee_kwargs['number_obs_instants'] = num_observations
         icesee_kwargs['m_obs'] = num_observations
 
-    icesee_kwargs['parallel_flag']       = _enkf_section.get('parallel_flag', 'serial')
     icesee_kwargs['commandlinerun']      = _enkf_section.get('commandlinerun', False)
 
     #  check available parameters in the obseve_params list that need to be observed
@@ -423,24 +642,7 @@ if not flag_jupyter:
 
     icesee_kwargs['params_vec'] = params_vec
 
-    import re
-
-    # if re.match(r'\AMPI_model\Z', icesee_kwargs.get('parallel_flag'), re.IGNORECASE):
-    #     # --- Initialize MPI ---
-    #     from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
-
-    #     icesee_rank, icesee_size, icesee_comm, ens_id = ParallelManager().icesee_mpi_init(icesee_kwargs)
-
-    #     # check if _modelrun_datasets exists in path if not create one
-    #     _modelrun_datasets = icesee_kwargs.get('data_path',None)
-    #     if icesee_rank == 0 and not os.path.exists(_modelrun_datasets):
-    #         os.makedirs(_modelrun_datasets, exist_ok=True)
-
-    #     #  synchronize the processes
-    #     icesee_comm.Barrier()
-
-    # else:
-    if not re.match(r'\AMPI_model\Z', icesee_kwargs.get('parallel_flag'), re.IGNORECASE):
+    if int(icesee_kwargs['execution_mode']) == 0:
         icesee_rank = 0
         icesee_size = 1
         icesee_comm = None
@@ -449,3 +651,14 @@ if not flag_jupyter:
         _modelrun_datasets = icesee_kwargs.get('data_path',None)
         if not os.path.exists(_modelrun_datasets):
             os.makedirs(_modelrun_datasets, exist_ok=True)
+
+    # Apply any generic ``--key=value`` CLI overrides last, after every
+    # YAML-sourced and derived key has been computed, so that a CLI
+    # override always wins and is never silently clobbered by a later
+    # default/derivation step in this loader.
+    icesee_kwargs = apply_generic_cli_overrides(icesee_kwargs, _cli_extra_argv)
+
+    # Leave only the arguments ICESEE did not consume in sys.argv, so a
+    # library that reads the command line after this point (e.g. PETSc when
+    # Firedrake is imported) sees its own options but not ICESEE's.
+    sys.argv[1:] = _unclaimed_argv(_cli_extra_argv)

@@ -1,0 +1,12 @@
+# Fast initial-condition preflight for the corrected p=3, q=0 principal run.
+# This produces only the true and no-assimilation initial states so the
+# seaward grounding-line displacement can be inspected before the long run.
+extends: param_principal_ibf_100yr.yaml
+
+enkf-parameters:
+  data_path: _modelrun_datasets_p3q0_principal_ibf_100yr_seaward_gl_ic_check
+  initial_state_only: true
+  generate_true_state: true
+  generate_nurged_state: true
+  generate_true_wrong_state_only: false
+  generate_synthetic_obs_only: false
