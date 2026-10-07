@@ -166,6 +166,7 @@ class StreamingNativeDistributedMemberPool:
         member_ids: tuple[int, ...],
         *,
         store: InactiveMemberStore | None = None,
+        member_factory: Any = None,
     ) -> None:
         reactivate = getattr(adapter, "reactivate_native_member", None)
         if not callable(reactivate):
@@ -189,9 +190,16 @@ class StreamingNativeDistributedMemberPool:
         # Build each member ONCE via the adapter's existing initial-state
         # constructor (unchanged contract), immediately pack + store, then
         # release it -- construction itself never holds more than one live
-        # native member at a time either.
+        # native member at a time either. A restart passes a
+        # ``member_factory`` that allocates members without initializing
+        # them; restore_owned then overwrites the stored state.
+        factory = (
+            member_factory
+            if member_factory is not None
+            else adapter.initialize_native_member
+        )
         for member_id in self._member_ids:
-            member = adapter.initialize_native_member(
+            member = factory(
                 member_id, topology=topology, icesee_kwargs=icesee_kwargs
             )
             if not isinstance(member.fields, DistributedFieldRegistry):

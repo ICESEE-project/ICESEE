@@ -32,6 +32,26 @@ initialize directly from it with
 
 ---
 
+## Execution mode 3: checkpoints and resuming
+
+Mode 3 writes restart checkpoints of the whole ensemble under
+`<data_path>/_mode3_state_history/`. By default only the newest two step
+checkpoints and the initial ensemble are kept, so disk use does not grow with
+the number of timesteps. These are restart state, not a results archive.
+
+- Keep every step's ensemble (old behaviour, ~`Nens` × state size per step):
+  `--checkpoint_keep_last=0`
+- Also keep every analysis step: `--checkpoint_keep_analysis=True`
+- Write a checkpoint only every N steps: `--checkpoint_every=N`
+
+To continue an interrupted run (crash, wall-time limit, full disk), repeat the
+**original command unchanged** and add `--resume_from_checkpoint=True`. The run
+continues after the newest valid checkpoint and keeps the original
+observations. Without that flag a run starts by deleting `data_path`. Details:
+`docs/execution-mode-3-design.md` ("Restart, retention, and crash consistency").
+
+---
+
 ## Running via `run_da_icepack.py`
 
 Follow these steps to execute the [run_da_icepack.py](./run_da_icepack.py) script. All parameters are managed in the [params.yaml](./params.yaml) file for easy configuration.

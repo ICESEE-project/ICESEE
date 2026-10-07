@@ -83,11 +83,18 @@ downstream plotting/post-processing built against that schema will not read
 mode-3 output directly. Directory layout under
 ``<data_path>/_mode3_state_history/``:
 
-- ``initial_condition/step_00000000/`` -- the native pool's initial
+- ``initial_condition/checkpoint_00000000/`` -- the native pool's initial
   (pre-forecast) ensemble, written once before the timestep loop.
-- ``steps/step_<k:08d>/`` for ``k`` in ``[0, nt)`` -- the analyzed (or, on
-  non-observed steps, forecast-only) ensemble *after* native cycle ``k``,
-  i.e. the mode-3 equivalent of modes 0-2's ensemble column ``k + 1``.
+- ``steps/checkpoint_<k:08d>/`` -- the analyzed (or, on non-observed steps,
+  forecast-only) ensemble *after* native cycle ``k``, i.e. the mode-3
+  equivalent of modes 0-2's ensemble column ``k + 1``.
+
+Which step checkpoints are written and retained, and how
+``--resume_from_checkpoint`` continues an interrupted run, is the generic
+policy of ``src/parallelization/mode3_checkpointing.py``
+(``checkpoint_every``, ``checkpoint_keep_last``,
+``checkpoint_keep_analysis``). By default only a rolling window of recent
+restart checkpoints is kept, not one checkpoint per timestep.
 
 Scope caveat: every rank still reads back the *full* ``hu_obs``/``R``
 synthetic-observation arrays in memory after the setup phase (matching
@@ -119,8 +126,11 @@ from ICESEE.src.EnKF._generate_synthetic_observations import (
     generate_synthetic_observations,
 )
 from ICESEE.src.EnKF._generate_true_wrong_state import generate_true_wrong_state
-from ICESEE.src.parallelization.distributed_checkpoint import (
-    save_distributed_checkpoint,
+from ICESEE.src.parallelization.mode3_checkpointing import (
+    HISTORY_DIRNAME,
+    CheckpointPolicy,
+    Mode3CheckpointManager,
+    fresh_start_plan,
 )
 from ICESEE.src.parallelization.distributed_mode3_registry import (
     register_execution_mode_3,
@@ -131,6 +141,8 @@ from ICESEE.src.parallelization.distributed_native_cycle import (
 )
 from ICESEE.src.parallelization.distributed_native_runtime import (
     initialize_native_member_pool,
+    native_layout_fingerprint,
+    restore_native_member_pool,
 )
 from ICESEE.src.parallelization.distributed_streaming_runtime import (
     run_native_store_streaming_analysis_cycle,
@@ -213,6 +225,30 @@ def _build_reference_setup_context(icesee_kwargs: dict) -> int:
     return nd
 
 
+def _setup_artifacts_reusable(icesee_kwargs: dict, nd: int) -> bool:
+    """Whether a resumed run can reuse the original truth/observation files.
+
+    Reusing them (instead of regenerating the full truth trajectory) keeps
+    a resume cheap and assimilates exactly the observations the
+    interrupted run used. Shapes must match this run's configuration.
+    """
+
+    try:
+        with h5py.File(icesee_kwargs["synthetic_obs_file"], "r") as f:
+            hu_obs = f["hu_obs"]
+            if "R" not in f or hu_obs.shape[0] != nd:
+                return False
+            if hu_obs.shape[1] != int(icesee_kwargs.get("number_obs_instants", hu_obs.shape[1])):
+                return False
+        if icesee_kwargs.get("generate_true_state", True):
+            with h5py.File(icesee_kwargs["true_nurged_file"], "r") as f:
+                if f["true_state"].shape != (nd, int(icesee_kwargs["nt"]) + 1):
+                    return False
+    except (OSError, KeyError):
+        return False
+    return True
+
+
 def run_icepack_execution_mode_3(**icesee_kwargs):
     """Drive idealized_pig's full mode-3 DA cycle. Registered under ``"icepack"``."""
 
@@ -288,6 +324,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     # manifest.json["source_topology"]["spatial_ranks"].
     _model_nprocs_before_true_wrong_state = icesee_kwargs.get("model_nprocs")
 
+    resume = bool(icesee_kwargs.get("resume_from_checkpoint", False))
     true_wrong_time = 0.0
     observation_time = 0.0
     nd = None
@@ -298,12 +335,21 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         _t = MPI.Wtime()
         nd = _build_reference_setup_context(icesee_kwargs)
         record_phase("truth_model_setup", MPI.Wtime() - _t)
-        _t = MPI.Wtime()
-        icesee_kwargs = generate_true_wrong_state(**icesee_kwargs)
-        true_wrong_time = MPI.Wtime() - _t
-        _t = MPI.Wtime()
-        icesee_kwargs = generate_synthetic_observations(**icesee_kwargs)
-        observation_time = MPI.Wtime() - _t
+        if resume and _setup_artifacts_reusable(icesee_kwargs, nd):
+            print(
+                "[ICESEE] resume: reusing existing "
+                f"{_true_nurged} and {_synthetic_obs}",
+                flush=True,
+            )
+            record_phase("truth_generation", 0.0, operations=0)
+            record_phase("wrong_reference_generation", 0.0, operations=0)
+        else:
+            _t = MPI.Wtime()
+            icesee_kwargs = generate_true_wrong_state(**icesee_kwargs)
+            true_wrong_time = MPI.Wtime() - _t
+            _t = MPI.Wtime()
+            icesee_kwargs = generate_synthetic_observations(**icesee_kwargs)
+            observation_time = MPI.Wtime() - _t
     world.Barrier()
 
     icesee_kwargs["model_nprocs"] = _model_nprocs_before_true_wrong_state
@@ -320,9 +366,42 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         world, spatial_ranks=int(icesee_kwargs["model_nprocs"])
     )
     adapter = IDEALIZED_PIG_NATIVE_ADAPTER
+
+    obs_t, ind_m, m_obs = UtilsFunctions(icesee_kwargs).generate_observation_schedule(
+        **icesee_kwargs
+    )
+    icesee_kwargs.update(
+        {"obs_t": obs_t, "obs_index": ind_m, "number_obs_instants": m_obs, "m_obs": m_obs}
+    )
+
+    run_id = str(icesee_kwargs.get("run_id", _DEFAULT_RUN_ID))
+    checkpoints = Mode3CheckpointManager(
+        os.path.join(_modelrun_datasets, HISTORY_DIRNAME),
+        run_id=run_id,
+        topology=topology,
+        number_of_members=Nens,
+        nt=nt,
+        analysis_steps=[int(step) for step in np.asarray(ind_m)[:m_obs]],
+        policy=CheckpointPolicy.from_kwargs(icesee_kwargs),
+        time_grid=icesee_kwargs.get("t"),
+        layout_fingerprint=native_layout_fingerprint(adapter, topology, icesee_kwargs),
+    )
+    plan = checkpoints.prepare_resume() if resume else fresh_start_plan()
+    checkpoints.report_plan(plan)
+
+    ensemble_init_time = 0.0
+    restart_restore_time = 0.0
     _t = MPI.Wtime()
-    pool = initialize_native_member_pool(adapter, topology, icesee_kwargs)
-    ensemble_init_time = MPI.Wtime() - _t
+    if plan.checkpoint_path is not None:
+        # Continue: allocate members and overwrite them from the committed
+        # checkpoint. The initial ensemble is never regenerated.
+        pool, _ = restore_native_member_pool(
+            adapter, topology, icesee_kwargs, plan.checkpoint_path, expected_run_id=run_id
+        )
+        restart_restore_time = MPI.Wtime() - _t
+    else:
+        pool = initialize_native_member_pool(adapter, topology, icesee_kwargs)
+        ensemble_init_time = MPI.Wtime() - _t
 
     obs_indices = np.asarray(
         UtilsFunctions(icesee_kwargs).JObs_indices(nd), dtype=np.int64
@@ -353,23 +432,14 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
             "'generated_R' is not (yet) supported here."
         )
     base_seed = int(icesee_kwargs.get("base_seed", 42))
-
-    obs_t, ind_m, m_obs = UtilsFunctions(icesee_kwargs).generate_observation_schedule(
-        **icesee_kwargs
-    )
-    icesee_kwargs.update(
-        {"obs_t": obs_t, "obs_index": ind_m, "number_obs_instants": m_obs, "m_obs": m_obs}
-    )
-    km = 0
-
-    run_id = str(icesee_kwargs.get("run_id", _DEFAULT_RUN_ID))
-    history_root = os.path.join(_modelrun_datasets, "_mode3_state_history")
-    initial_root = os.path.join(history_root, "initial_condition")
-    steps_root = os.path.join(history_root, "steps")
+    # Analyses already applied before the restored checkpoint (0 when
+    # starting fresh); the loop continues the same schedule from there.
+    km = plan.analyses_completed
 
     # --- initial (pre-forecast) native ensemble, written once before the
     # timestep loop -- the mode-3 equivalent of modes 0-2's ensemble column
-    # 0 (see module docstring for the checkpoint directory layout). ---
+    # 0 (see module docstring for the checkpoint directory layout). A
+    # resumed run keeps the one its original run wrote. ---
     # Checkpoint write counters for the performance summary; bytes are the
     # owned state arrays handed to the checkpoint writer.
     checkpoint_io = {"bytes_written": 0.0, "write_time_s": 0.0, "writes": 0}
@@ -384,23 +454,27 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         checkpoint_io["write_time_s"] += seconds
         checkpoint_io["writes"] += 1
 
-    init_file_time = 0.0
-    _initial_snapshot = pool.snapshot_owned()
-    _t = MPI.Wtime()
-    save_distributed_checkpoint(
-        initial_root,
-        0,
-        _initial_snapshot,
-        topology,
-        run_id=run_id,
-        metadata={"Nens": Nens, "description": "initial (pre-forecast) ensemble"},
+    checkpoints.storage_preflight(
+        start_step=plan.start_step,
+        bytes_per_checkpoint=int(pool.layout.global_size) * Nens * np.dtype(np.float64).itemsize,
+        files_per_checkpoint=int(world.Get_size()) + 1,
+        include_initial=True,
     )
-    init_file_time = MPI.Wtime() - _t
-    _record_checkpoint(_initial_snapshot, init_file_time)
-    del _initial_snapshot
-    time_analysis_cycle_steps = 0.0
 
-    for k in range(nt):
+    init_file_time = 0.0
+    if not plan.resumed:
+        _initial_snapshot = pool.snapshot_owned()
+        _t = MPI.Wtime()
+        checkpoints.write_initial(
+            _initial_snapshot, extra={"description": "initial (pre-forecast) ensemble"}
+        )
+        init_file_time = MPI.Wtime() - _t
+        _record_checkpoint(_initial_snapshot, init_file_time)
+        del _initial_snapshot
+    time_analysis_cycle_steps = 0.0
+    analyses_this_run = 0
+
+    for k in range(plan.start_step, nt):
         do_analysis = bool(km < m_obs and k == ind_m[km])
         batches = []
         if do_analysis:
@@ -477,24 +551,24 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
             print(f"[ICESEE] mode3 forecast step {k}: wall={_step_wall:.4f}s did_analysis={do_analysis}", flush=True)
         if do_analysis:
             km += 1
+            analyses_this_run += 1
 
+        # Restart checkpoint of the state after cycle k. idealized_pig has no
+        # state-modifying analysis finalizer, so result.local_analysis is
+        # exactly the pool's live state. Retention prunes older rolling
+        # checkpoints only after this one has committed.
         _t = MPI.Wtime()
-        save_distributed_checkpoint(
-            steps_root,
+        _written = checkpoints.commit_step(
             k,
             result.local_analysis,
-            topology,
-            run_id=run_id,
-            metadata={
-                "Nens": Nens,
-                "observation_rows": result.observation_rows,
-                "error_mode": error_mode,
-                "did_analysis": do_analysis,
-            },
+            did_analysis=do_analysis,
+            analyses_completed=km,
+            extra={"observation_rows": result.observation_rows, "error_mode": error_mode},
         )
-        _checkpoint_s = MPI.Wtime() - _t
-        time_forecast_file_writing += _checkpoint_s
-        _record_checkpoint(result.local_analysis, _checkpoint_s)
+        if _written is not None:
+            _checkpoint_s = MPI.Wtime() - _t
+            time_forecast_file_writing += _checkpoint_s
+            _record_checkpoint(result.local_analysis, _checkpoint_s)
 
     world.Barrier()
 
@@ -502,7 +576,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     # every rank owns and cleans up only its OWN store file -- no
     # additional cross-rank coordination needed beyond the barrier above,
     # since ownership never changes and no rank ever opens another rank's
-    # file. Durable checkpoints (steps_root/initial_root above) are a
+    # file. Durable checkpoints (the checkpoint manager's roots) are a
     # completely separate, untouched mechanism -- this only ever removes
     # the TEMPORARY working store, never a checkpoint.
     _store = getattr(pool, "_store", None)
@@ -563,12 +637,16 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     # ─────────────────────────────────────────────────────────────
     global_elapsed_time = MPI.Wtime() - global_start_time
 
+    steps_run = nt - plan.start_step
     register_run_metadata(
         execution_mode=icesee_kwargs.get("execution_mode"),
         model=icesee_kwargs.get("model_name"),
-        forecast_steps=nt,
-        analysis_events=km,
+        forecast_steps=steps_run,
+        analysis_events=analyses_this_run,
         checkpoints=checkpoint_io["writes"],
+        checkpoint_policy=checkpoints.policy.describe(),
+        checkpoints_pruned=len(checkpoints.pruned),
+        resumed_from_step=plan.completed_step if plan.resumed else None,
         member_store_backend=icesee_kwargs.get("member_store_backend", "memory"),
         store_streaming_analysis=bool(icesee_kwargs.get("use_store_streaming_analysis", False)),
     )
@@ -587,17 +665,21 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
             "true_wrong_state": true_wrong_time,
             "observation_generation": observation_time,
             "ensemble_init": ensemble_init_time,
+            "restart_restore": restart_restore_time,
             "forecast_step": time_forecast_step,
-            "analysis_step": None if km else 0.0,
+            "analysis_step": None if analyses_this_run else 0.0,
             "forecast_step/with_analysis": time_analysis_cycle_steps,
             "init_file_io": init_file_time,
             "forecast_file_io": time_forecast_file_writing,
             "analysis_file_io": analysis_file_time,
         },
         counts={
-            "forecast_step": nt,
-            "analysis_step": km,
-            "forecast_step/with_analysis": km,
+            "forecast_step": steps_run,
+            "analysis_step": analyses_this_run,
+            "forecast_step/with_analysis": analyses_this_run,
+            # A resumed run restores the ensemble instead of initializing it.
+            "ensemble_init": 0 if plan.resumed else 1,
+            "restart_restore": 1 if plan.resumed else 0,
         },
         output_dir=_modelrun_datasets,
     )
