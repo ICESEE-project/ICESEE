@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from typing import Any, Mapping
 
 import numpy as np
@@ -443,27 +444,55 @@ def reactivate_member(
     deactivate/reactivate round-trip tests.
     """
 
-    ctx = _shared_context(topology, icesee_kwargs)
-    thickness = Function(ctx.Q)
-    velocity = Function(ctx.V)
-    surface = Function(ctx.Q)
-    basal_melt = Function(ctx.Q) if _basal_melt_in_state(icesee_kwargs) else None
-
-    state = IcepackNativeState(
-        thickness=thickness,
-        velocity=velocity,
-        surface=surface,
-        basal_melt=basal_melt,
-        layout_id="icepack-idealized-pig-v1",
-    )
+    state = allocate_member(member_id, topology=topology, icesee_kwargs=icesee_kwargs)
     state.registry.unpack_owned(
         np.asarray(packed_state, dtype=np.float64), synchronize=False
     )
     return state
 
 
+def allocate_member(
+    member_id: int,
+    *,
+    topology: Any,
+    icesee_kwargs: Mapping[str, Any],
+) -> IcepackNativeState:
+    """Empty native storage for one member on the shared, cached context.
+
+    No perturbation and no Icepack solve: a restart allocates every member
+    this way and then overwrites all owned values from the checkpoint, so
+    resuming never regenerates the initial ensemble.
+    """
+
+    ctx = _shared_context(topology, icesee_kwargs)
+    return IcepackNativeState(
+        thickness=Function(ctx.Q),
+        velocity=Function(ctx.V),
+        surface=Function(ctx.Q),
+        basal_melt=Function(ctx.Q) if _basal_melt_in_state(icesee_kwargs) else None,
+        layout_id="icepack-idealized-pig-v1",
+    )
+
+
+def layout_fingerprint(*, topology: Any, icesee_kwargs: Mapping[str, Any]) -> str:
+    """Identity of this rank's owned mesh-node numbering.
+
+    A digest of the owned nodal coordinates in owned-DOF order (rounded to
+    1 mm), so a restart refuses checkpoint rows written under a different
+    mesh numbering instead of silently scattering them onto wrong nodes.
+    """
+
+    ctx = _shared_context(topology, icesee_kwargs)
+    coords = np.ascontiguousarray(np.round(ctx.coords, 3), dtype=np.float64)
+    digest = hashlib.sha256(coords.tobytes())
+    digest.update(str(coords.shape).encode())
+    return "coords-sha256:" + digest.hexdigest()[:32]
+
+
 IDEALIZED_PIG_NATIVE_ADAPTER = IcepackNativeAdapter(
     initialize_member=initialize_member,
     forecast_member=forecast_member,
     reactivate_member=reactivate_member,
+    allocate_member=allocate_member,
+    layout_fingerprint=layout_fingerprint,
 )

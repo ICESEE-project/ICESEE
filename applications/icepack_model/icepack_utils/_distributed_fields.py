@@ -294,6 +294,8 @@ class IcepackNativeAdapter:
         inverse_member: Callable[..., None] | None = None,
         restore_checkpoint: Callable[..., None] | None = None,
         reactivate_member: Callable[..., IcepackNativeState] | None = None,
+        allocate_member: Callable[..., IcepackNativeState] | None = None,
+        layout_fingerprint: Callable[..., str] | None = None,
     ) -> None:
         for name, callback in (
             ("initialize_member", initialize_member),
@@ -311,6 +313,10 @@ class IcepackNativeAdapter:
             raise TypeError("restore_checkpoint must be callable")
         if reactivate_member is not None and not callable(reactivate_member):
             raise TypeError("reactivate_member must be callable")
+        if allocate_member is not None and not callable(allocate_member):
+            raise TypeError("allocate_member must be callable")
+        if layout_fingerprint is not None and not callable(layout_fingerprint):
+            raise TypeError("layout_fingerprint must be callable")
         self._initialize_member = initialize_member
         self._forecast_member = forecast_member
         self._observe_member = observe_member
@@ -336,6 +342,16 @@ class IcepackNativeAdapter:
             self.reactivate_native_member = self._native_reactivate_callback(
                 reactivate_member
             )
+        # Restart (restore_native_member_pool) duck-types these two: an
+        # allocator builds a member's native storage without initializing
+        # it, and a fingerprint identifies the mesh numbering checkpoints
+        # were written under.
+        if allocate_member is not None:
+            self.allocate_native_member = self._native_allocate_callback(
+                allocate_member
+            )
+        if layout_fingerprint is not None:
+            self.native_layout_fingerprint = layout_fingerprint
 
     @staticmethod
     def _native_inversion_callback(callback: Callable[..., None]):
@@ -401,6 +417,23 @@ class IcepackNativeAdapter:
             return NativeDistributedMember(int(member_id), state.registry, state)
 
         return reactivate_native_member
+
+    @staticmethod
+    def _native_allocate_callback(callback: Callable[..., IcepackNativeState]):
+        def allocate_native_member(
+            member_id: int,
+            *,
+            topology: Any,
+            icesee_kwargs: Mapping[str, Any],
+        ) -> NativeDistributedMember:
+            state = callback(
+                int(member_id), topology=topology, icesee_kwargs=icesee_kwargs
+            )
+            if not isinstance(state, IcepackNativeState):
+                raise TypeError("Icepack allocator must return IcepackNativeState")
+            return NativeDistributedMember(int(member_id), state.registry, state)
+
+        return allocate_native_member
 
     @staticmethod
     def _state(member: NativeDistributedMember) -> IcepackNativeState:

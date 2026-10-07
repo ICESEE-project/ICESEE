@@ -143,6 +143,93 @@ random-stream keys, the completed cycle, observation metadata, inversion state,
 and other model-agnostic restart state. No backend may require a rank-0
 full-member gather.
 
+### Restart, retention, and crash consistency
+
+Implemented in `src/parallelization/distributed_checkpoint.py` (format,
+validation, discovery) and `src/parallelization/mode3_checkpointing.py`
+(policy, resume planning, retention). Neither knows a model's field names;
+the state is opaque packed blocks addressed by member ID and global rows.
+
+**Commit contract.** Every rank writes `.shard_<rank>.h5.tmp` inside
+`.checkpoint_<step>.<run_id>.staging/`, fsyncs it, and renames it to
+`shard_<rank>.h5`. World rank 0 verifies member/block coverage, writes
+`manifest.json` (`"complete": true`), and atomically renames the staging
+directory to `checkpoint_<step>`. Only a `checkpoint_<8 digits>` directory
+is committed; dot-prefixed staging directories and `.tmp` files never are.
+Newer manifests also record each shard's byte size and an optional
+model-supplied layout fingerprint; the format string is unchanged, so
+checkpoints from before these additions remain readable and new ones remain
+readable by older code.
+
+**Discovery.** `discover_latest_checkpoint` scans committed directories
+newest first and returns the first that passes
+`validate_distributed_checkpoint`: complete manifest, matching step, run
+and ensemble size, every member's blocks tiled exactly once by shard
+intervals, every shard present (never `.tmp`), of the recorded size where
+recorded, and readable with the expected HDF5 datasets. A damaged newest
+checkpoint therefore falls back to the previous one. Under MPI, rank 0
+scans and broadcasts so every rank restores the same checkpoint.
+
+**Resume semantics.** `steps/checkpoint_<k>` holds the ensemble after the
+complete cycle `k` (forecast plus, if scheduled, the analysis), i.e. the
+state at `t[k + 1]`. A resume restores it and continues with cycle
+`k + 1`; the number of completed analyses is the number of scheduled
+analysis steps `<= k`, so an analysis inside the checkpoint is never
+repeated, and a cycle interrupted before its checkpoint committed is
+recomputed in full. If no step checkpoint exists, the pre-forecast
+`initial_condition` ensemble is restored and the run continues at cycle 0.
+Members are rebuilt with the adapter's optional `allocate_native_member`
+(no perturbation, no model solve) and then overwritten from the checkpoint;
+the initial ensemble is never regenerated. `stochastic_R` observation
+errors are seeded by the analysis index, so they are reproduced exactly.
+Before continuing, the manifests already on disk are checked against the
+current configuration (ensemble size, step count, and each checkpoint's
+`did_analysis` against the analysis schedule); a resume command that would
+change the schedule is refused. If no valid checkpoint exists the run
+fails instead of silently starting over. Adapters whose DOF numbering may
+change between invocations can supply `native_layout_fingerprint`; a
+restart then refuses state written under a different numbering, and accepts
+a checkpoint that predates fingerprints only when neither the writing nor
+the resuming run decomposed the mesh (`model_nprocs` 1). Idealized PIG
+fingerprints its owned mesh-node coordinates.
+
+**Retention.** Checkpoints serve three purposes that are kept apart:
+the inactive-member store is temporary working storage (never a recovery
+artifact), step checkpoints are durable restart state, and full ensemble
+history is scientific output that is only kept when asked for. Policy keys
+(`enkf-parameters`, also accepted as `--key=value`):
+
+| key | default | meaning |
+| --- | --- | --- |
+| `checkpoint_every` | `1` | write a step checkpoint every N cycles (the final cycle is always written) |
+| `checkpoint_keep_last` | `2` | retain the newest N step checkpoints; `0` keeps every checkpoint written |
+| `checkpoint_keep_analysis` | `false` | also keep the checkpoint of every analysis step |
+| `resume_from_checkpoint` | `false` | continue from the newest valid checkpoint in `data_path` |
+
+New checkpoints record a `checkpoint_role` (`restart`, `analysis`,
+`history`, `initial`); only `restart` checkpoints are ever deleted, and
+checkpoints written before retention existed are never deleted
+automatically. Deletion happens on rank 0 only after the replacement
+checkpoint has committed on every rank, and a deleted checkpoint is first
+renamed to `.checkpoint_<step>.deleting`, so a crash mid-deletion cannot
+leave a partial directory that looks committed. Consequently ENOSPC or a
+crash while writing step `N` always leaves step `N - 1` recoverable. A
+resume removes abandoned `.staging`/`.deleting` directories and moves
+(never deletes) a damaged committed directory newer than the selected
+checkpoint aside as `.checkpoint_<step>.invalid`.
+
+At startup the runner prints the projected checkpoint footprint for the
+chosen policy and warns when it approaches or exceeds the free space on the
+target filesystem; the warning never stops a run. With the defaults the
+footprint is three checkpoints (the initial ensemble plus the newest two),
+independent of the number of timesteps.
+
+**Resuming.** Re-run the original command unchanged except for
+`--resume_from_checkpoint=True`. The config loader then keeps `data_path`
+instead of cleaning it, and a resumed run reuses the original
+`true_nurged_states.h5`/`synthetic_obs.h5` when their shapes match. A run
+without the flag still starts by deleting `data_path`.
+
 Hybrid MPI plus controlled threaded kernels or BLAS is permitted within each
 spatial rank. Thread counts must be explicit to prevent oversubscription. Dask
 may support preprocessing and workflow scheduling, but is not part of the MPI
