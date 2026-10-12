@@ -94,7 +94,9 @@ def generate_true_state(**icesee_kwargs):
     # data_path, matching mode3_runner.py's existing pattern.
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.makedirs(_modelrun_datasets, exist_ok=True)
-    hs_files = f"{_modelrun_datasets}/hs_profiles_true"
+    # Earlier runs wrote this file without the .h5 extension; readers fall
+    # back to that name (see read_results.ipynb).
+    hs_files = f"{_modelrun_datasets}/hs_profiles_true.h5"
 
     with h5py.File(hs_files, "w") as F:
         dataset_h = F.create_dataset("h_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8")
@@ -186,15 +188,15 @@ def generate_true_state(**icesee_kwargs):
             if (k == int(flowline_profile_steps[kk])):
 
                 h_profiles, s_profiles = flowline_profile(h, s, valid_points)
-                #### DEBUGGING
-                print(f"\n Time step {k}: h_profiles_mean = {np.mean(h_profiles)}, s_profiles_mean = {np.mean(s_profiles)} \n")
-                #############
-                
-                
+                print(s_profiles.shape,h_profiles.shape,"\n")
+
+
+                # Column 0 holds the initial profile; the kk-th requested
+                # save step goes to column kk + 1.
                 with h5py.File(hs_files, "a") as F:
                     F["h_profiles"][:,kk+1] = h_profiles
                     F["s_profiles"][:,kk+1] = s_profiles
-                
+
                 kk += 1
 
     # Fully parallel execution supplies an HDF5 dataset as the write target.
@@ -294,7 +296,7 @@ def initialize_ensemble(ens, **icesee_kwargs):
     # Path-isolation fix (2026-09-28): see generate_true_state's hs_files.
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.makedirs(_modelrun_datasets, exist_ok=True)
-    hs_ensemble_files = f"{_modelrun_datasets}/hs_ensemble_profiles{ens}"
+    hs_ensemble_files = f"{_modelrun_datasets}/hs_ensemble_profiles{ens}.h5"
 
     with h5py.File(hs_ensemble_files, "w") as F:
         dataset_h_ensemble = F.create_dataset("h_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8")
@@ -501,7 +503,7 @@ def generate_nurged_state(**icesee_kwargs):
     # Path-isolation fix (2026-09-28): see generate_true_state's hs_files.
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.makedirs(_modelrun_datasets, exist_ok=True)
-    hs_nudged_files = f"{_modelrun_datasets}/hs_profiles_wrong"
+    hs_nudged_files = f"{_modelrun_datasets}/hs_profiles_wrong.h5"
 
     with h5py.File(hs_nudged_files, "w") as F:
         dataset_h = F.create_dataset("h_nudged_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8")
@@ -613,13 +615,14 @@ def generate_nurged_state(**icesee_kwargs):
 
                 h_profiles, s_profiles = flowline_profile(h, s, valid_points)
                 print(s_profiles.shape,h_profiles.shape,"\n")
-                #print(f"n\ average thickness = {np.mean(h.dat.data_ro)} and average BMR = {np.mean(basal_melt_field.dat.data_ro)} \n")
-                
-                
+
+
+                # Column 0 holds the initial profile; the kk-th requested
+                # save step goes to column kk + 1.
                 with h5py.File(hs_nudged_files, "a") as F:
                     F["h_nudged_profiles"][:,kk+1] = h_profiles
                     F["s_nudged_profiles"][:,kk+1] = s_profiles
-                
+
                 kk += 1
 
     # See generate_true_state: mode 2 writes this trajectory in place.
