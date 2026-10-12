@@ -303,6 +303,17 @@ def BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', ex
 
 
 
+def profile_path(data_path, name):
+    """Path of the flowline-profile file ``<data_path>/<name>.h5``. Runs made
+    before the .h5 extension was added wrote ``<data_path>/<name>``; that
+    file is returned instead when it is the only one present."""
+    path = os.path.join(data_path, f"{name}.h5")
+    legacy = os.path.join(data_path, name)
+    if not os.path.exists(path) and os.path.exists(legacy):
+        return legacy
+    return path
+
+
 # --- Checking the ice thickness ---
 
 def checkThickness(icesee_kwargs):
@@ -656,7 +667,7 @@ def run_model(ensemble, **icesee_kwargs):
     # collide on the same file. Now scoped under this run's own
     # data_path, matching mode3_runner.py's existing pattern.
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
-    hs_ensemble_files = f"{_modelrun_datasets}/hs_ensemble_profiles{ens}"
+    hs_ensemble_files = profile_path(_modelrun_datasets, f"hs_ensemble_profiles{ens}")
 
     # Restored gating: this block previously ran unconditionally every
     # timestep for every ensemble member even though its output is only

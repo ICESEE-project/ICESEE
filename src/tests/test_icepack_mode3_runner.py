@@ -334,11 +334,22 @@ def test_resume_continues_from_latest_checkpoint_without_reinitializing(tmp_path
         f.create_dataset("R", data=np.eye(4))
     with h5py.File(tmp_path / "true_nurged_states.h5", "w") as f:
         f.create_dataset("true_state", data=np.zeros((4, 5)))
+    # Flowline profiles from the interrupted run, in the current (.h5) and
+    # the earlier extensionless file name, must survive the resume.
+    profile_files = [tmp_path / "hs_profiles_true.h5", tmp_path / "hs_profiles_true"]
+    for path in profile_files:
+        with h5py.File(path, "w") as f:
+            for name in ("h_profiles", "s_profiles"):
+                f.create_dataset(name, data=np.arange(12.0).reshape(4, 3))
+            f.create_dataset("bed_values", data=np.ones(4))
+            f.create_dataset("distances", data=np.arange(4.0))
+    profiles_before = [path.read_bytes() for path in profile_files]
 
     runner.run_icepack_execution_mode_3(
         **_runner_kwargs(tmp_path, nt=4, resume_from_checkpoint=True)
     )
 
+    assert [path.read_bytes() for path in profile_files] == profiles_before
     assert records.calls == {"true_wrong": 0, "synth_obs": 0, "init_pool": 0}
     assert records.restored == [(steps / "checkpoint_00000001", runner._DEFAULT_RUN_ID)]
     # Cycles 0-1 (and the analysis at 1) are not repeated; 3 is analyzed once.
