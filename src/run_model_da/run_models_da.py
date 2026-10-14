@@ -30,6 +30,7 @@ from ICESEE.src.utils.icesee_context import (
     normalize_icesee_kwargs,
 )
 from ICESEE.src.utils.run_schedule import verify_cli_overrides_respected
+from ICESEE.src.utils.init_trace import trace_init, traced_init
 
 _MODE_TO_TARGET = {
     "serial":      ("ICESEE.src.run_model_da.icesee_da_serial",
@@ -89,8 +90,10 @@ def icesee_model_data_assimilation(**icesee_kwargs):
     if rank_hint == 0:
         print(
             f"[ICESEE] Execution mode {mode_number}: "
-            f"{EXECUTION_MODE_NAMES[mode_number]}"
+            f"{EXECUTION_MODE_NAMES[mode_number]}",
+            flush=True,
         )
+    trace_init("dispatch selected", mode=mode, model=icesee_kwargs.get("model_name"))
 
     # ``batch_size`` is an I/O-window control, not an ensemble/time batching
     # heuristic.  In particular, mode 2 must honor a value of one or two;
@@ -114,7 +117,8 @@ def icesee_model_data_assimilation(**icesee_kwargs):
         # Lazy import only the selected runner
         mod = importlib.import_module(module_name)
         runner = getattr(mod, func_name)
-        return runner(**icesee_kwargs)
+        with traced_init(f"runner {func_name}"):
+            return runner(**icesee_kwargs)
     except Exception:
         print(f"[ICESEE] Error in {mode} run mode:")
         tb_str = "".join(traceback.format_exception(*sys.exc_info()))

@@ -99,8 +99,15 @@ def _build_shared_context(
     packed into a flat per-member state vector.
     """
 
+    from ICESEE.src.utils.init_trace import init_trace_enabled, trace_init
+
     mesh_kwargs = dict(icesee_kwargs)
     mesh_kwargs["comm"] = topology.spatial_comm
+    if init_trace_enabled():
+        trace_init("ENTER per-group model context",
+                   group=getattr(topology, "ensemble_slot", None),
+                   model_rank=getattr(topology, "spatial_rank", None),
+                   model_comm=topology.spatial_comm)
     mesh, _meshOpts, Q, V = initializeMesh(**mesh_kwargs)
 
     forward_model = icepack.models.IceStream(
@@ -131,6 +138,11 @@ def _build_shared_context(
         axis=1,
     )
 
+    if init_trace_enabled():
+        trace_init("EXIT  per-group model context",
+                   group=getattr(topology, "ensemble_slot", None),
+                   model_rank=getattr(topology, "spatial_rank", None),
+                   owned_nodes=coords.shape[0])
     return _SharedPigContext(
         Q=Q,
         V=V,

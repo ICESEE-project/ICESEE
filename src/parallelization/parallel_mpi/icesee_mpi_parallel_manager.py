@@ -14,7 +14,9 @@ import gc
 
 from ICESEE.src.parallelization.parallel_mpi.resource_plan import plan_resources
 from ICESEE.src.utils.performance import register_run_metadata
+from ICESEE.src.utils.init_trace import arm_hang_watchdog, trace_init
 from ICESEE.src.parallelization.parallel_mpi.model_capabilities import (
+    validate_node_local_model_groups,
     validate_ranks_per_model_request,
     validate_stochastic_method_for_decomposition,
 )
@@ -198,6 +200,10 @@ class ParallelManager:
         self.COMM_WORLD = MPI.COMM_WORLD
         self.size_world = self.COMM_WORLD.Get_size()
         self.rank_world = self.COMM_WORLD.Get_rank()
+        arm_hang_watchdog()
+        trace_init("MPI initialized", Nens=icesee_kwargs.get("Nens"),
+                   model_nprocs=icesee_kwargs.get("model_nprocs"),
+                   execution_mode=icesee_kwargs.get("execution_mode"))
 
         # if self.model_nprocs is None: use model_nprocs = size_world or subcomm_size_min
         self.model_nprocs = icesee_kwargs.get("model_nprocs")
@@ -276,6 +282,16 @@ class ParallelManager:
                 print(f"[ICESEE] {plan.summary()}")
                 if icesee_kwargs.get("verbose"):
                     print(plan.describe_all_ranks())
+
+            # Every world rank (spares included) takes part; the decision is
+            # identical on all ranks, so a refused layout exits cleanly here
+            # rather than deadlocking inside a model group's collective I/O.
+            validate_node_local_model_groups(
+                icesee_kwargs.get("model_name"),
+                self.COMM_WORLD,
+                plan.group_id,
+                plan.ranks_per_model,
+            )
 
             if plan.is_spare(self.rank_world):
                 # Never let a spare rank join any model-group
