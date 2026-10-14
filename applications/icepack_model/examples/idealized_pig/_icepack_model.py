@@ -11,6 +11,8 @@ import sys
 import os
 import h5py
 
+from ICESEE.src.utils.init_trace import traced_init
+
 os.environ["OMP_NUM_THREADS"] = "1"
 
 # --- import model functions ---
@@ -74,12 +76,15 @@ def initialState(h0, s0, u0, zb, grounded0, floating0, Q):
 def initializeMesh(**icesee_kwargs):
     initFile = icesee_kwargs["initFile"]
     meshFile = icesee_kwargs["meshFile"]
-    meshI = mf.getMeshFromCheckPoint(initFile,icesee_kwargs)
-    mesh, Q, V, meshOpts = \
-        mf.setupMesh(meshFile, degree=1,
-                     meshOversample=2,
-                     newMesh=meshI,
-                     comm=icesee_kwargs.get("comm"))
+    comm = icesee_kwargs.get("comm")
+    with traced_init("checkpoint mesh load", comm=comm):
+        meshI = mf.getMeshFromCheckPoint(initFile,icesee_kwargs)
+    with traced_init("mesh construction (argus + function spaces)", comm=comm):
+        mesh, Q, V, meshOpts = \
+            mf.setupMesh(meshFile, degree=1,
+                         meshOversample=2,
+                         newMesh=meshI,
+                         comm=comm)
 
     return mesh, meshOpts, Q, V
 
@@ -121,7 +126,8 @@ def initializeRun(icesee_kwargs, forward_solver, mesh, Q, V):
     # to how many indices are written, so preserving idx=20000 on write
     # produced a 34.67 GB file instead of a compact one).
     compact_initialization = bool(icesee_kwargs.get("compact_initialization", False))
-    with firedrake.CheckpointFile(icesee_kwargs["initFile"], 'r', comm=checkpoint_comm) as checkpoint:
+    with traced_init("checkpoint field load", comm=checkpoint_comm, compact=compact_initialization), \
+            firedrake.CheckpointFile(icesee_kwargs["initFile"], 'r', comm=checkpoint_comm) as checkpoint:
         if compact_initialization:
             velocity = checkpoint.load_function(mesh, "velocity")
             h0 = checkpoint.load_function(mesh, "thickness")
@@ -138,12 +144,13 @@ def initializeRun(icesee_kwargs, forward_solver, mesh, Q, V):
 
     """ find initial velocity """
     uThresh = firedrake.Constant(icesee_kwargs['uThresh'])
-    u0 = forward_solver.diagnostic_solve(velocity=velocity, thickness=h0,
-                                                surface=s0,
-                                                beta=beta0, fluidity=A0,
-                                                grounded=grounded0,
-                                                floating=floating0,
-                                                uThresh=uThresh)
+    with traced_init("initial diagnostic solve", comm=checkpoint_comm):
+        u0 = forward_solver.diagnostic_solve(velocity=velocity, thickness=h0,
+                                                    surface=s0,
+                                                    beta=beta0, fluidity=A0,
+                                                    grounded=grounded0,
+                                                    floating=floating0,
+                                                    uThresh=uThresh)
 
     """ define initial state """
     h, hLast, s, u, zF, grounded, floating = initialState(h0, s0, u0, bed, grounded0, floating0, Q)
@@ -371,7 +378,8 @@ def initialize_model(**icesee_kwargs):
     opts = {"dirichlet_ids": [1],"diagnostic_solver_parameters": {"max_iterations": 150, "tolerance": 1e-6},}
     # opts = {"dirichlet_ids": meshOpts["dirichlet_ids"],"diagnostic_solver_parameters": {"max_iterations": 150, "tolerance": 1e-6},}
 
-    forward_solver = icepack.solvers.FlowSolver(forward_model, **opts)
+    with traced_init("Icepack solver construction", comm=comm):
+        forward_solver = icepack.solvers.FlowSolver(forward_model, **opts)
 
 
 

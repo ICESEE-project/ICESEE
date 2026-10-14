@@ -147,6 +147,9 @@ from ICESEE.src.parallelization.distributed_native_runtime import (
 from ICESEE.src.parallelization.distributed_streaming_runtime import (
     run_native_store_streaming_analysis_cycle,
 )
+from ICESEE.src.parallelization.parallel_mpi.model_capabilities import (
+    validate_node_local_model_groups,
+)
 from ICESEE.src.parallelization.distributed_topology import (
     create_distributed_topology,
     register_topology_run_metadata,
@@ -155,6 +158,7 @@ from ICESEE.src.utils.icesee_context import (
     normalize_execution_mode,
     normalize_icesee_kwargs,
 )
+from ICESEE.src.utils.init_trace import init_trace_enabled, trace_init, traced_init
 from ICESEE.src.utils.localization import active_observation_std
 from ICESEE.src.utils.performance import (
     emit_performance_report,
@@ -285,7 +289,10 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
     if world_rank == 0 and not os.path.exists(_modelrun_datasets):
         os.makedirs(_modelrun_datasets, exist_ok=True)
-    world.Barrier()
+    trace_init("mode3 runner entered", Nens=Nens, nt=nt,
+               model_nprocs=icesee_kwargs.get("model_nprocs"))
+    with traced_init("mode3 barrier (data_path ready)"):
+        world.Barrier()
 
     _true_nurged = f"{_modelrun_datasets}/true_nurged_states.h5"
     _synthetic_obs = f"{_modelrun_datasets}/synthetic_obs.h5"
@@ -333,8 +340,10 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         # up here; it is reported as its own phase so that True/Wrong State
         # Time covers trajectory generation only, as in modes 0-2.
         _t = MPI.Wtime()
-        nd = _build_reference_setup_context(icesee_kwargs)
+        with traced_init("truth model setup (COMM_SELF reference)"):
+            nd = _build_reference_setup_context(icesee_kwargs)
         record_phase("truth_model_setup", MPI.Wtime() - _t)
+        
         if resume and _setup_artifacts_reusable(icesee_kwargs, nd):
             print(
                 "[ICESEE] resume: reusing existing "
@@ -345,12 +354,17 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
             record_phase("wrong_reference_generation", 0.0, operations=0)
         else:
             _t = MPI.Wtime()
-            icesee_kwargs = generate_true_wrong_state(**icesee_kwargs)
+            with traced_init("truth generation", nd=nd):
+                icesee_kwargs = generate_true_wrong_state(**icesee_kwargs)
             true_wrong_time = MPI.Wtime() - _t
+
             _t = MPI.Wtime()
-            icesee_kwargs = generate_synthetic_observations(**icesee_kwargs)
+            with traced_init("observation generation"):
+                icesee_kwargs = generate_synthetic_observations(**icesee_kwargs)
             observation_time = MPI.Wtime() - _t
-    world.Barrier()
+
+    with traced_init("mode3 barrier (truth/observations ready)"):
+        world.Barrier()
 
     icesee_kwargs["model_nprocs"] = _model_nprocs_before_true_wrong_state
 
@@ -362,9 +376,28 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         error_R = f["R"][:]
     icesee_kwargs["error_R"] = error_R
 
-    topology = create_distributed_topology(
-        world, spatial_ranks=int(icesee_kwargs["model_nprocs"])
+    with traced_init("topology communicator creation",
+                     model_nprocs=icesee_kwargs["model_nprocs"]):
+        topology = create_distributed_topology(
+            world, spatial_ranks=int(icesee_kwargs["model_nprocs"])
+        )
+    # The per-group model setup below opens the initialization checkpoint
+    # collectively on topology.spatial_comm; refuse node-spanning groups
+    # before reaching it (see model_capabilities.py).
+    _spatial_ranks = int(icesee_kwargs["model_nprocs"])
+    validate_node_local_model_groups(
+        model, world, lambda r: r // _spatial_ranks, _spatial_ranks
     )
+    _group = getattr(topology, "ensemble_slot", None)
+    if init_trace_enabled():
+        trace_init(
+            "topology",
+            group=_group,
+            groups=getattr(topology, "ensemble_groups", None),
+            model_rank=getattr(topology, "spatial_rank", None),
+            model_comm=getattr(topology, "spatial_comm", None),
+            ensemble_comm=getattr(topology, "ensemble_comm", None),
+        )
     adapter = IDEALIZED_PIG_NATIVE_ADAPTER
 
     obs_t, ind_m, m_obs = UtilsFunctions(icesee_kwargs).generate_observation_schedule(
@@ -392,15 +425,34 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     ensemble_init_time = 0.0
     restart_restore_time = 0.0
     _t = MPI.Wtime()
+
     if plan.checkpoint_path is not None:
-        # Continue: allocate members and overwrite them from the committed
-        # checkpoint. The initial ensemble is never regenerated.
-        pool, _ = restore_native_member_pool(
-            adapter, topology, icesee_kwargs, plan.checkpoint_path, expected_run_id=run_id
-        )
+        # Resume from the last valid committed checkpoint.
+        # Do not regenerate the initial ensemble.
+        with traced_init("ensemble restoration (native member pool)", group=_group):
+            pool, _ = restore_native_member_pool(
+                adapter,
+                topology,
+                icesee_kwargs,
+                plan.checkpoint_path,
+                expected_run_id=run_id,
+            )
+
         restart_restore_time = MPI.Wtime() - _t
+
     else:
-        pool = initialize_native_member_pool(adapter, topology, icesee_kwargs)
+        with traced_init("ensemble initialization (native member pool)", group=_group):
+            pool = initialize_native_member_pool(
+                adapter, topology, icesee_kwargs
+            )
+
+        if init_trace_enabled():
+            trace_init(
+                "members assigned",
+                group=_group,
+                members=list(getattr(pool, "member_ids", [])),
+            )
+
         ensemble_init_time = MPI.Wtime() - _t
 
     obs_indices = np.asarray(

@@ -68,6 +68,13 @@ class ModelCapabilities:
     state can be safely reused/reinitialized across scheduling rounds
     (mode 2's round loop already assumes this for every current
     application: ``ens_id = color + round_id * subcomm_size_min``).
+
+    ``requires_node_local_model_groups``: whether every rank of one model
+    group must be on the same compute node. Set by an application whose
+    multi-rank model setup performs collective parallel file I/O that has
+    been observed to deadlock when a model group's communicator spans
+    nodes. A launch that places one group across nodes is then refused at
+    startup (see ``validate_node_local_model_groups``) instead of hanging.
     """
 
     model_name: str
@@ -76,6 +83,7 @@ class ModelCapabilities:
     supports_distributed_state: bool = False
     default_ranks_per_model: Optional[int] = None
     supports_round_based_reuse: bool = True
+    requires_node_local_model_groups: bool = False
     notes: str = ""
 
 
@@ -90,6 +98,7 @@ def register_model_capabilities(
     supports_distributed_state: bool = False,
     default_ranks_per_model: Optional[int] = None,
     supports_round_based_reuse: bool = True,
+    requires_node_local_model_groups: bool = False,
     notes: str = "",
 ) -> None:
     """Register ``model_name``'s hierarchical-topology capabilities.
@@ -107,6 +116,7 @@ def register_model_capabilities(
         supports_distributed_state=bool(supports_distributed_state),
         default_ranks_per_model=default_ranks_per_model,
         supports_round_based_reuse=bool(supports_round_based_reuse),
+        requires_node_local_model_groups=bool(requires_node_local_model_groups),
         notes=notes,
     )
 
@@ -170,6 +180,66 @@ def validate_ranks_per_model_request(model_name: Optional[str], requested_ranks_
             "per ensemble member. Use ranks_per_model=1 (or omit it), or "
             "verify and register multi-rank support for this model first."
         )
+
+
+def node_spanning_model_groups(hosts, group_of_rank):
+    """Return ``{group: sorted hosts}`` for every model group whose ranks
+    sit on more than one host.
+
+    ``hosts[r]`` is world rank ``r``'s host name and ``group_of_rank(r)``
+    its model-group id (``None`` for a rank in no group, e.g. a spare).
+    Pure function: every rank evaluates it on the same allgathered input,
+    so every rank reaches the same decision.
+    """
+    group_hosts: dict = {}
+    for rank, host in enumerate(hosts):
+        group = group_of_rank(rank)
+        if group is None:
+            continue
+        group_hosts.setdefault(group, set()).add(host)
+    return {
+        group: sorted(names)
+        for group, names in sorted(group_hosts.items())
+        if len(names) > 1
+    }
+
+
+def validate_node_local_model_groups(model_name, world, group_of_rank, ranks_per_model):
+    """Refuse a launch whose model groups span compute nodes when
+    ``model_name`` requires node-local groups; otherwise warn on rank 0.
+
+    Collective over ``world`` (one ``allgather`` of host names); must be
+    called by every rank of ``world``. Raises the same error on every rank,
+    so the job exits cleanly instead of deadlocking later inside a model
+    group's collective I/O. Topology is never changed here.
+    """
+    import socket
+
+    if int(ranks_per_model or 1) <= 1:
+        return {}
+    hosts = world.allgather(socket.gethostname())
+    spanning = node_spanning_model_groups(hosts, group_of_rank)
+    if not spanning:
+        return spanning
+    shown = ", ".join(
+        f"group {group} on {'+'.join(names)}" for group, names in list(spanning.items())[:4]
+    )
+    if len(spanning) > 4:
+        shown += f", ... ({len(spanning)} groups in total)"
+    message = (
+        f"{len(spanning)} model group(s) of {ranks_per_model} ranks span more than "
+        f"one compute node ({shown}). Launch so that each node holds a whole "
+        f"number of model groups: e.g. srun -N <nodes> --ntasks-per-node=<a "
+        f"multiple of {ranks_per_model}> with -n equal to nodes x tasks-per-node."
+    )
+    if get_model_capabilities(model_name).requires_node_local_model_groups:
+        raise RuntimeError(
+            f"[ICESEE] model {model_name!r} requires node-local model groups "
+            "(its collective model-setup I/O can deadlock across nodes): " + message
+        )
+    if world.Get_rank() == 0:
+        print(f"[ICESEE] WARNING: {message}", flush=True)
+    return spanning
 
 
 def validate_stochastic_method_for_decomposition(
@@ -370,6 +440,18 @@ register_model_capabilities(
     "icepack",
     supports_multi_rank_per_model=True,
     supports_distributed_state=True,
+    # Firedrake's collective CheckpointFile open (parallel HDF5 -> Open
+    # MPI's OMPIO, initialization file on NFS) can deadlock inside
+    # MPI_File_open when the model group's communicator spans compute
+    # nodes: the shared-file-pointer component is selected inconsistently
+    # across the nodes, so one rank waits in a barrier inside
+    # mca_sharedfp_lockedfile_file_open while its partner has moved on to
+    # an allreduce in mca_common_ompio_set_view (PACE, Open MPI 5.0.9,
+    # 2026-10-03, gdb on a 38-rank Nens=19 model_nprocs=2 run; intermittent:
+    # isolated probes of the same open often succeed). The whole run then
+    # waits forever at the next world collective. Node-local groups never
+    # hung across all runs.
+    requires_node_local_model_groups=True,
     notes=(
         "Three Stage 4C continuations established: Firedrake's mesh "
         "partition is genuinely distributed (not replicated) across a "
