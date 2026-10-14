@@ -166,7 +166,6 @@ icesee_kwargs.update({"bmr_nudged": bmr_nudged})
 
 
 # --- Run Data Assimilation ---
-#icesee_kwargs.update({'params': params}) # update the kwargs with the parameters
 print(f"{icesee_kwargs["nd"]}, kwargs nd:{icesee_kwargs["nd"]}")
 PETSc.Sys.Print("Data assimilation with ICESEE ...")
 icesee_model_data_assimilation(**icesee_kwargs)

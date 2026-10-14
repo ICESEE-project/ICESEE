@@ -90,37 +90,25 @@ def initializeMesh(**icesee_kwargs):
 
 def initializeRun(icesee_kwargs, forward_solver, mesh, Q, V):
 
-    # Forward whatever communicator this call's mesh/model context already
-    # uses, rather than accepting CheckpointFile's own default (COMM_WORLD,
-    # baked into firedrake.checkpointing.CheckpointFile.__init__). That
-    # default is harmless for modes 0-2 (one Firedrake mesh partitioned
-    # across the whole run's model communicator, which IS COMM_WORLD in
-    # practice) but is a genuine correctness bug for mode 3's native
-    # adapter (_icepack_native.py), which builds one independent
-    # mesh/solver context per ensemble group on topology.spatial_comm and
-    # calls this function once per rank, group by group, not in lockstep
-    # across the whole world. A tiny 2-rank/2-independent-group probe
-    # confirmed this concretely: with no comm= (both ranks collectively
-    # opening CheckpointFile on COMM_WORLD despite each naming a different
-    # file), the read did not hang but returned silently WRONG values
-    # (cross-contaminated between the two groups' files) -- worse than a
-    # deadlock, since it fails without any visible error. Explicit
-    # comm=icesee_kwargs["comm"] (falling back to COMM_WORLD only if that
-    # key is absent, matching Firedrake's own `comm or COMM_WORLD`
-    # convention elsewhere in checkpointing.py) scopes the collective open
-    # to exactly the ranks that own this call's mesh, for every mode --
-    # not a mode-name conditional, just using the communicator the caller
-    # already established. See src/tests/test_icepack_checkpoint_communicator.py.
+    # Forward whatever communicator this call's mesh/model context already uses, rather than accepting CheckpointFile's own default (COMM_WORLD, baked into 
+    # # firedrake.checkpointing.CheckpointFile.__init__). That default is harmless for modes 0-2 (one Firedrake mesh partitioned across the whole run's model 
+    # communicator, which is COMM_WORLD in practice) but is a genuine correctness bug for mode 3's native adapter (_icepack_native.py), which builds one independent
+    # mesh/solver context per ensemble group on topology.spatial_comm and calls this function once per rank, group by group, not in lockstep across the whole world. 
+    # A tiny 2-rank/2-independent-group probe confirmed this concretely: with no comm= (both ranks collectively opening CheckpointFile on COMM_WORLD despite each naming a different
+    # file), the read did not hang but returned silently WRONG values (cross-contaminated between the two groups' files) -- worse than a deadlock, since it fails without 
+    # any visible error. Explicit comm=icesee_kwargs["comm"] (falling back to COMM_WORLD only if that key is absent, matching Firedrake's own `comm or COMM_WORLD` convention 
+    # elsewhere in checkpointing.py) scopes the collective open to exactly the ranks that own this call's mesh, for every mode -- not a mode-name conditional, just using 
+    # the communicator the caller already established. See src/tests/test_icepack_checkpoint_communicator.py.
     checkpoint_comm = icesee_kwargs.get("comm") or firedrake.COMM_WORLD
-    # Optional, explicitly opt-in (default False -- the full spin-up-
-    # history checkpoint's read path below is byte-for-byte unchanged):
-    # a "compact" initFile built by tools/build_compact_initialization.py
-    # stores velocity/thickness/surface in NORMAL (non-timestepping) mode,
-    # not at idx=20000 -- see that script's own docstring for why
-    # (measured: idx-mode storage is proportional to the index value, not
-    # to how many indices are written, so preserving idx=20000 on write
-    # produced a 34.67 GB file instead of a compact one).
+
+
+    # Optional, explicitly opt-in (default False -- the full spin-up- history checkpoint's read path below is byte-for-byte unchanged): a "compact" initFile built by 
+    # tools/build_compact_initialization.py stores velocity/thickness/surface in NORMAL (non-timestepping) mode, not at idx=20000 -- see that script's own docstring for why
+    # (measured: idx-mode storage is proportional to the index value, not to how many indices are written, so preserving idx=20000 on write produced a 34.67 GB file instead of 
+    # a compact one).
     compact_initialization = bool(icesee_kwargs.get("compact_initialization", False))
+
+
     with firedrake.CheckpointFile(icesee_kwargs["initFile"], 'r', comm=checkpoint_comm) as checkpoint:
         if compact_initialization:
             velocity = checkpoint.load_function(mesh, "velocity")
@@ -246,8 +234,8 @@ def BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', ex
     ####### TIMING OF LINEAR INCREASE IN BMR (true trajectory only) #######
     if experiment == EXPERIMENT_WRONG:
         melt_max = beginning_bmr
-    elif (step * icesee_kwargs['dt']) < icesee_kwargs["bmr_increase_time"]:
-        melt_max = beginning_bmr
+    #elif (step * icesee_kwargs['dt']) < icesee_kwargs["bmr_increase_time"]:
+        #melt_max = beginning_bmr
 
     if experiment == 'true':
         if (step * icesee_kwargs['dt']) < icesee_kwargs["bmr_increase_time"]:
@@ -256,11 +244,9 @@ def BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', ex
         # The period over which BMR increases shortens by 'x' years
         else:
             melt_max = ((final_bmr - beginning_bmr)/(icesee_kwargs["num_years"] - icesee_kwargs["bmr_increase_time"])) * ((step - (icesee_kwargs["bmr_increase_time"]/icesee_kwargs["dt"])) * icesee_kwargs["dt"]) + beginning_bmr
-    else:
-        melt_max = beginning_bmr
-    # "wrong" model where basal melt rate does not change over the entire simulation
-    #if experiment == 'false':
+    #else:
         #melt_max = beginning_bmr
+   
 
     ##########################################
 
@@ -574,10 +560,8 @@ def run_model(ensemble, **icesee_kwargs):
 
     #print(f"h_vec_mean={np.mean(h_vec)}, u_vec_mean = {np.mean(u_vec)}, v_vec_mean = {np.mean(v_vec)}\n")
 
-    # basal_melt_field is always part of the packed state vector regardless
-    # of the state/parameter bookkeeping split (see config/_utility_imports.py's
-    # vec_inputs/total_state_param_vars derivation and this file's 2026-09-28
-    # reconciliation note) -- read it unconditionally.
+    # basal_melt_field is always part of the packed state vector regardless of the state/parameter bookkeeping split (see config/_utility_imports.py's
+    # vec_inputs/total_state_param_vars derivation and this file's 2026-09-28 reconciliation note) -- read it unconditionally.
     basal_melt_vec = ensemble[indx_map["basal_melt_field"]]
 
     h = Function(Q)
@@ -656,8 +640,9 @@ def run_model(ensemble, **icesee_kwargs):
     #     if basal_melt is None:
     #         raise ValueError("basal_melt_field missing in icesee_kwargs when joint_estimation=False")
 
-    # return a list of the updated state variables. basal_melt_field is
-    # always part of the packed vector (see the unconditional read above).
+    
+    
+    # return a list of the updated state variables. basal_melt_field is always part of the packed vector (see the unconditional read above).
     updated_state = {'h': h.dat.data_ro,
                      'u': u.dat.data_ro[:,0],
                      'v': u.dat.data_ro[:,1],
@@ -665,23 +650,20 @@ def run_model(ensemble, **icesee_kwargs):
                      'basal_melt_field': basal_melt_field.dat.data_ro}
 
 
-    # -- extract the flowline profile at particular steps --
-    # Path-isolation fix (2026-09-28): was a hardcoded, non-run-specific
-    # relative path -- two jobs sharing this working directory would
-    # collide on the same file. Now scoped under this run's own
-    # data_path, matching mode3_runner.py's existing pattern.
+    # -- extract the flowline profile at particular steps -- Path-isolation fix (2026-09-28): was a hardcoded, non-run-specific relative path -- two jobs sharing this 
+    # working directory would collide on the same file. Now scoped under this run's own data_path, matching mode3_runner.py's existing pattern.
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     hs_ensemble_files = profile_path(_modelrun_datasets, f"hs_ensemble_profiles{ens}")
 
-    # Restored gating: this block previously ran unconditionally every
-    # timestep for every ensemble member even though its output is only
-    # ever consumed at the three save points below (t[k] in {5, 10, 20}).
-    if t[k] in (5, 10, 20):
-        with h5py.File(hs_ensemble_files, "r") as F:
-            valid_points = F["valid_points"][:]
+    
+    # Restored gating: this block previously ran unconditionally every timestep for every ensemble member even though its output is only ever consumed at the three 
+    # save points below (t[k] in {5, 10, 20}).
+    #if t[k] in (5, 10, 20):
+        #with h5py.File(hs_ensemble_files, "r") as F:
+            #valid_points = F["valid_points"][:]
 
-        h_profiles, s_profiles = flowline_profile(h, s, valid_points)
-        print(s_profiles.shape, h_profiles.shape,"\n")
+        #h_profiles, s_profiles = flowline_profile(h, s, valid_points)
+        #print(s_profiles.shape, h_profiles.shape,"\n")
 
     print(f"t[{k}] = {t[k]}")
 

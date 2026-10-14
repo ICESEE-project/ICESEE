@@ -35,8 +35,7 @@ perturbed thickness directly and deterministically via
 that the native adapter would consume.
 
 ``run_da_icepack.py``'s unconditional pre-dispatch call to
-``initialize_model(comm=MPI.COMM_WORLD)`` genuinely MPI-partitions the
-Firedrake mesh across the full world communicator -- correct for modes 0-2
+``initialize_model(comm=MPI.COMM_WORLD)`` -- correct for modes 0-2
 (which forecast on that same communicator) but wrong for mode 3 whenever
 ``world size > 1``: ``icesee_kwargs['nd']`` as computed there
 (``h0.dat.data.size * total_state_param_vars``) would be each rank's

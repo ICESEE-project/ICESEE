@@ -23,9 +23,9 @@ register_icepack_coordinate_provider()
 
 # --- Forecast step ---
 def forecast_step_single(ensemble=None, **icesee_kwargs):
-    """ensemble: packs the state variables:h,u,v of a single ensemble member
+    """ensemble: packs the state variables:h,u,v,s,basal_melt_rate of a single ensemble member
                  where h is thickness, u and v are the x and y components
-                 of the velocity field
+                 of the velocity field, s is ice elevation, basal_melt_rate is ice shelf basal melt
     Returns: ensemble: updated ensemble member
     """
     #  call the run_model fun to push the state forward in time
@@ -64,12 +64,7 @@ def generate_true_state(**icesee_kwargs):
     statevec_true[indx_map["u"],0] = u0.dat.data_ro[:,0]
     statevec_true[indx_map["v"],0] = u0.dat.data_ro[:,1]
     statevec_true[indx_map["s"],0] = s0.dat.data_ro
-    statevec_true[indx_map["basal_melt_field"],0] = basal_melt_field.dat.data_ro
-
-
-    # basal_melt_field is always part of the packed state vector regardless
-    # of the state/parameter bookkeeping split (see _icepack_model.py's
-    # 2026-09-28 reconciliation note).
+    # basal_melt_field is always part of the packed state vector regardless of the state/parameter bookkeeping split (see _icepack_model.py's 2026-09-28 reconciliation note).
     statevec_true[indx_map["basal_melt_field"],0] = basal_melt_field.dat.data_ro
 
     h = h0.copy(deepcopy=True)
@@ -81,17 +76,15 @@ def generate_true_state(**icesee_kwargs):
     h_profiles, s_profiles, valid_points, distances, bed_values = initial_flowline_profile(icesee_kwargs)
 
     #### DEBUGGING
-    print(f"\n INITIAL h_profiles_mean = {np.mean(h_profiles)}, s_profiles_mean = {np.mean(s_profiles)} \n")
+    #print(f"\n INITIAL h_profiles_mean = {np.mean(h_profiles)}, s_profiles_mean = {np.mean(s_profiles)} \n")
     #############
 
     # --- step numbers at which to extract flowline profiles during the simulation -- 
     flowline_profile_steps = [t/dt for t in icesee_kwargs["save_steps"]]
     print(f"\n steps where profiles are sampled = {flowline_profile_steps} \n")
 
-    # Path-isolation fix (2026-09-28): was a hardcoded, non-run-specific
-    # relative path -- two jobs sharing this working directory would
-    # collide on the same file. Now scoped under this run's own
-    # data_path, matching mode3_runner.py's existing pattern.
+    # Path-isolation fix (2026-09-28): was a hardcoded, non-run-specific relative path -- two jobs sharing this working directory would collide on the same file. 
+    # Now scoped under this run's own data_path, matching mode3_runner.py's existing pattern.
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.makedirs(_modelrun_datasets, exist_ok=True)
     # Earlier runs wrote this file without the .h5 extension; readers fall
@@ -220,21 +213,6 @@ def initialize_ensemble(ens, **icesee_kwargs):
 
     """initialize the ensemble members"""
 
-    ### unpack the **icesee_kwargs
-    # smb  = icesee_kwargs.get('smb', None)
-    # basal_melt_field = icesee_kwargs.get('basal_melt_field', None)
-    # wrong_basal_melt_field = icesee_kwargs.get('"wrong_basal_melt_field"', None)
-    # bed  = icesee_kwargs.get('bed', None)
-    # dt = icesee_kwargs.get('dt', None)
-    # nt = icesee_kwargs.get('nt', None)
-    # A0  = icesee_kwargs.get('A0', None)
-    # beta0  = icesee_kwargs.get('beta0', None)
-    Q  = icesee_kwargs.get('Q', None)
-    # V  = icesee_kwargs.get('V', None)
-    # h0 = icesee_kwargs.get('h0', None)
-    # u0 = icesee_kwargs.get('u', None)
-    # solver = icesee_kwargs.get('solver', None)
-
     ### UNPACK THE **icesee_kwargs DICTIONARY
     smb  = icesee_kwargs.get('smb', None)
     basal_melt_field = icesee_kwargs.get('basal_melt_field', None)
@@ -243,7 +221,7 @@ def initialize_ensemble(ens, **icesee_kwargs):
     #nt = icesee_kwargs.get('nt', None)
     #A0  = icesee_kwargs.get('A0', None)
     #beta0  = icesee_kwargs.get('beta0', None)
-    #Q  = icesee_kwargs.get('Q', None)
+    Q  = icesee_kwargs.get('Q', None)
     #V  = icesee_kwargs.get('V', None)
     h0 = icesee_kwargs.get('h0', None)
     u0 = icesee_kwargs.get('u', None)
@@ -257,33 +235,20 @@ def initialize_ensemble(ens, **icesee_kwargs):
     ### INITIALIZE THE ENSEMBLE MEMBERS
 
 
-    h_perturbed = h0.dat.data_ro + (15 * np.random.normal(0, 1, h0.dat.data_ro.size))
 
-    h_p = Function(Q)
-    h_p.dat.data[:] = h_perturbed
-
-
-    #s0 = icepack.compute_surface(thickness = h_p, bed = bed)
-
-
-    # CORRECTED (2026-09-28, second pass): joint_estimation means "are we
-    # performing joint state-parameter estimation," not "does
-    # basal_melt_field exist." This nudge initializes the ensemble's WRONG
-    # prior belief about a jointly-estimated parameter -- genuinely
-    # joint-estimation-algorithm-specific, so the gate is kept. Under the
-    # current config (joint_estimation=0; true-vs-wrong divergence instead
-    # comes from BasalMeltRate's EXPERIMENT_TRUE/EXPERIMENT_WRONG selector
-    # -- see _icepack_model.py), this gate is False and the nudge does not
-    # fire, so the two mechanisms never operate simultaneously in practice.
+    # CORRECTED (2026-09-28, second pass): joint_estimation means "are we performing joint state-parameter estimation," not "does basal_melt_field exist." 
+    # This nudge initializes the ensemble's WRONG prior belief about a jointly-estimated parameter -- genuinely joint-estimation-algorithm-specific, so the gate is kept. 
+    # Under the current config (joint_estimation=0; true-vs-wrong divergence instead comes from BasalMeltRate's EXPERIMENT_TRUE/EXPERIMENT_WRONG selector -- see _icepack_model.py), 
+    # this gate is False and the nudge does not fire, so the two mechanisms never operate simultaneously in practice.
     if icesee_kwargs["joint_estimation"]:
         basal_melt_field_nudged = basal_melt_field.dat.data_ro + icesee_kwargs["wrong_basal_melt_field"]
         basal_melt_field = Function(Q)
         basal_melt_field.dat.data[:] = basal_melt_field_nudged
 
-    h, u, s, floating, grounded = Icepack(solver, h_p, u0, smb, basal_melt_field, bed, dt, h0, icesee_kwargs)
 
-    # basal_melt_field is always part of the packed state (field existence
-    # is driven by the application's configured state definition, vec_inputs
+    h, u, s, floating, grounded = Icepack(solver, h0, u0, smb, basal_melt_field, bed, dt, h0, icesee_kwargs)
+
+    # basal_melt_field is always part of the packed state (field existence is driven by the application's configured state definition, vec_inputs
     # -- never by joint_estimation).
     initialized_state = {'h': h.dat.data_ro,
                          'u': u.dat.data_ro[:,0],
@@ -293,6 +258,7 @@ def initialize_ensemble(ens, **icesee_kwargs):
 
     # --- create file to save ensemble flowline profiles ---
     h_profiles, s_profiles, valid_points, distances, bed_values = initial_flowline_profile(icesee_kwargs)
+    
     # Path-isolation fix (2026-09-28): see generate_true_state's hs_files.
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.makedirs(_modelrun_datasets, exist_ok=True)
@@ -310,69 +276,6 @@ def initialize_ensemble(ens, **icesee_kwargs):
     #print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(initialized_state["h"])}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
 
     return initialized_state
-
-# --- generate the nurged state ---
-def generate_nurged_state(**icesee_kwargs):
-    """generate the nudged state of the model"""
-
-    #icesee_kwargs = icesee_kwargs["icesee_kwargs"]
-    #nt = icesee_kwargs["nt"] - 1
-
-    # unpack the **icesee_kwargs
-    smb  = icesee_kwargs.get('smb', None)
-    basal_melt_field = icesee_kwargs.get('basal_melt_field', None)
-    bed  = icesee_kwargs.get('bed', None)
-    dt = icesee_kwargs.get('dt', None)
-    nt = icesee_kwargs.get('nt', None)
-    A0  = icesee_kwargs.get('A0', None)
-    beta0  = icesee_kwargs.get('beta0', None)
-    Q  = icesee_kwargs.get('Q', None)
-    V  = icesee_kwargs.get('V', None)
-    h0 = icesee_kwargs.get('h0', None)
-    u0 = icesee_kwargs.get('u', None)
-    s0 = icesee_kwargs.get('s0', None)
-    floating = icesee_kwargs.get('floating', None)
-    grounded = icesee_kwargs.get('grounded', None)
-    solver = icesee_kwargs.get('solver', None)
-    save_steps = icesee_kwargs.get('save_steps', None)
-
-
-    # # -- update parameter if joint estimation is enabled
-    #if icesee_kwargs["joint_estimation"]:
-        #basal_melt_field_nudged = basal_melt_field.dat.data_ro + icesee_kwargs["wrong_basal_melt_field"]
-        #basal_melt_field_nudged = basal_melt_field.dat.data_ro
-        #basal_melt_field = Function(Q)
-        #basal_melt_field.dat.data[:] = basal_melt_field_nudged
-
-    #h, u, s, floating, grounded = Icepack(solver, h, u0, smb, basal_melt_field, bed, dt, h0, icesee_kwargs)
-
-    initialized_state = {'h': h0.dat.data_ro,
-                         'u': u0.dat.data_ro[:,0], 
-                         'v': u0.dat.data_ro[:,1],
-                         's': s0.dat.data_ro,
-                         'basal_melt_field': basal_melt_field.dat.data_ro}
-    
-
-    # --- create file to save ensemble flowline profiles ---
-    h_profiles, s_profiles, valid_points, distances, bed_values = initial_flowline_profile(icesee_kwargs)
-    hs_ensemble_files = f"_modelrun_datasets/hs_ensemble_profiles_ens{ens}_time0"
-
-
-    with h5py.File(hs_ensemble_files, "w") as F:
-    
-        dataset_h_ensemble = F.create_dataset("h_profiles", len(valid_points), dtype = "f8")
-        dataset_s_ensemble = F.create_dataset("s_profiles", len(valid_points), dtype = "f8")
-        dataset_s_ensemble[:] = s_profiles 
-        dataset_h_ensemble[:] = h_profiles 
-        dataset_bed_ensemble = F.create_dataset("bed_values", data = bed_values)
-        dataset_distances_ensemble = F.create_dataset("distances", data = distances)
-        dataset_valid_points_ensemble = F.create_dataset("valid_points", data = valid_points)
-
-    #print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(initialized_state["h"])}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
-
-    return initialized_state
-
-
 
 
 # --- generate the nurged state ---
@@ -406,87 +309,22 @@ def generate_nurged_state(**icesee_kwargs):
     # call the icesee_get_index function to get the indices of the state variables
     vecs, indx_map, dim_per_proc = icesee_get_index(**icesee_kwargs)
 
+    statevec_nurged[indx_map["h"],0]   = h0.dat.data_ro[:,0]
+    statevec_nurged[indx_map["u"],0]   = u0.dat.data_ro[:,0]
+    statevec_nurged[indx_map["v"],0]   = u0.dat.data_ro[:,1]
+    statevec_nurged[indx_map["s"],0]   = s0.dat.data_ro[:,0]
 
-    # if velocity is nurged, then run to get a solution to be used as am initial guess for velocity.
-    # if u_nurge_ic != 0.0 or h_nurge_ic != 0.0:
-    #     h_indx = int(np.ceil(nurged_entries_percentage*hdim+1))
-
-    #     # u_indx = int(np.ceil(u_nurge_ic+1))
-    #     u_indx = 1
-    #     h_bump = np.linspace(-h_nurge_ic,0,h_indx)
-    #     u_bump = np.linspace(-u_nurge_ic,0,h_indx)
-    #     # h_bump = np.random.uniform(-h_nurge_ic,0,h_indx)
-    #     # u_bump = np.random.uniform(-u_nurge_ic,0,h_indx)
-    #     # print(f"hdim: {hdim}, h_indx: {h_indx}")
-    #     # print(f"[Debug]: h_bump shape: {h_bump.shape} h0_index: {h0.dat.data_ro[:h_indx].shape}")
-    #     h_with_bump = h_bump + h0.dat.data_ro[:h_indx]
-    #     u_with_bump = u_bump + u0.dat.data_ro[:h_indx,0]
-    #     v_with_bump = u_bump + u0.dat.data_ro[:h_indx,1]
-
-    #     h_perturbed = np.concatenate((h_with_bump, h0.dat.data_ro[h_indx:]))
-    #     u_perturbed = np.concatenate((u_with_bump, u0.dat.data_ro[h_indx:,0]))
-    #     v_perturbed = np.concatenate((v_with_bump, u0.dat.data_ro[h_indx:,1]))
-
-    #     h = Function(Q)
-    #     u = Function(V)
-    #     h.dat.data[:]   = h_perturbed
-    #     u.dat.data[:,0] = u_perturbed
-    #     u.dat.data[:,1] = v_perturbed
-    #     h0 = h.copy(deepcopy=True)
-    #     # call the solver
-    #     h, u = Icepack(icesee_kwargs, solver, h, u, a, b, dt, h0)
-
-    #     # update the nurged state with the solution
-    #     h_perturbed = h.dat.data_ro
-    #     u_perturbed = u.dat.data_ro[:,0]
-    #     v_perturbed = u.dat.data_ro[:,1]
-    # else:
-    #     h_perturbed = h0.dat.data_ro + np.random.normal(0, 0.1, h0.dat.data_ro.size)
-    #     u_perturbed = u0.dat.data_ro[:,0]
-    #     v_perturbed = u0.dat.data_ro[:,1]
-
-    h_perturbed = h0.dat.data_ro + (15 * np.random.normal(0, 1, h0.dat.data_ro.size))
-
-    h_p = Function(Q)
-    h_p.dat.data[:] = h_perturbed
-
-
-    s0 = icepack.compute_surface(thickness = h_p, bed = bed)
-
-    s_perturbed = s0.dat.data_ro
-
-    u_perturbed = u0.dat.data_ro[:,0]
-    v_perturbed = u0.dat.data_ro[:,1]
-
-    statevec_nurged[indx_map["h"],0]   = h_perturbed
-    statevec_nurged[indx_map["u"],0]   = u_perturbed
-    statevec_nurged[indx_map["v"],0]   = v_perturbed
-    statevec_nurged[indx_map["s"],0]   = s_perturbed
-
-    # CORRECTED (2026-09-28, second pass): joint_estimation gates the
-    # joint-estimation-algorithm-specific nudge (initializing the
-    # ensemble's WRONG prior belief about a jointly-estimated parameter),
-    # not whether basal_melt_field exists in the packed state -- that is
-    # decided by the application's configured state definition (vec_inputs)
-    # and is therefore unconditional below. Under the current config
-    # (joint_estimation=0), this gate is False and the nudge does not
-    # fire; the true-vs-wrong divergence instead comes from the forecast
-    # loop's BasalMeltRate(..., experiment=EXPERIMENT_WRONG) calls, so the
-    # two mechanisms never operate simultaneously in practice.
+    # CORRECTED (2026-09-28, second pass): joint_estimation gates the joint-estimation-algorithm-specific nudge (initializing the ensemble's 
+    # WRONG prior belief about a jointly-estimated parameter), not whether basal_melt_field exists in the packed state -- that is decided by the 
+    # application's configured state definition (vec_inputs) and is therefore unconditional below. Under the current config (joint_estimation=0), 
+    # this gate is False and the nudge does not fire; the true-vs-wrong divergence instead comes from the forecast loop's BasalMeltRate(..., experiment=EXPERIMENT_WRONG) 
+    # calls, so the two mechanisms never operate simultaneously in practice.
     if icesee_kwargs["joint_estimation"]:
         basal_melt_field_nudged = basal_melt_field.dat.data_ro + icesee_kwargs["wrong_basal_melt_field"]
         basal_melt_field = Function(Q)
         basal_melt_field.dat.data[:] = basal_melt_field_nudged
 
     statevec_nurged[indx_map["basal_melt_field"],0] = basal_melt_field.dat.data_ro
-
-    h = Function(Q)
-    s = Function(Q)
-    u = Function(V)
-    h.dat.data[:] = h_perturbed
-    u.dat.data[:,0] = u_perturbed
-    u.dat.data[:,1] = v_perturbed
-    s.dat.data[:] = s_perturbed
 
     h = h0.copy(deepcopy=True)
     u = u0.copy(deepcopy=True)
@@ -570,17 +408,7 @@ def generate_nurged_state(**icesee_kwargs):
         elif (76/ dt) <= step:
             basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 2012 - 2017
 
-        # # -- DEBUGGING
-        #print(f"maximum_bmr=",{melt_max})
 
-
-
-
-        
-        # DEBUGGING
-        print(f" \n at time step {step} maximum basal melt is {melt_max} \n ")
-        
-    
         
         # call the ice stream model to update the state variables
         h, u, s, floating, grounded = Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, icesee_kwargs)
@@ -589,7 +417,6 @@ def generate_nurged_state(**icesee_kwargs):
         statevec_nurged[indx_map["u"],k+1] = u.dat.data_ro[:,0]
         statevec_nurged[indx_map["v"],k+1] = u.dat.data_ro[:,1]
         statevec_nurged[indx_map["s"],k+1] = s.dat.data_ro
-        statevec_nurged[indx_map["basal_melt_field"],k+1] = basal_melt_field.dat.data_ro
 
 
         # CORRECTED (2026-09-28, second pass): joint_estimation gates only
@@ -605,8 +432,6 @@ def generate_nurged_state(**icesee_kwargs):
             basal_melt_field.dat.data[:] = basal_melt_field_nudged
 
         statevec_nurged[indx_map["basal_melt_field"],k+1] = basal_melt_field.dat.data_ro
-
-            #statevec_nurged[indx_map["basal_melt_field"],k+1] = basal_melt_field_nudged
         
         
        # # -- saving flowline profile at certain steps
