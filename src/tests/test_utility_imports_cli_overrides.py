@@ -201,6 +201,32 @@ def test_data_path_stale_file_is_removed_and_directory_recreated():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+@pytest.mark.parametrize(
+    "resume_flag", [["--resume_from_checkpoint=True"], ["--resume_from_checkpoint"]]
+)
+def test_resume_from_checkpoint_keeps_existing_data_path(resume_flag):
+    tmp = tempfile.mkdtemp(prefix="icesee_utility_imports_test_")
+    checkpoint = os.path.join(tmp, "_mode3_state_history", "steps", "checkpoint_00000525")
+    os.makedirs(checkpoint)
+    with open(os.path.join(checkpoint, "manifest.json"), "w") as handle:
+        handle.write("{}")
+    try:
+        _reload_with_argv(["--data_path", tmp] + resume_flag)
+        assert os.path.isfile(os.path.join(checkpoint, "manifest.json"))
+        assert cli_module.icesee_kwargs["resume_from_checkpoint"] is True
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        _reload_with_argv(["--data_path", _fresh_tmp_data_path()])
+
+
+def test_checkpoint_retention_defaults_are_bounded():
+    kwargs = cli_module.icesee_kwargs
+    assert kwargs["resume_from_checkpoint"] is False
+    assert kwargs["checkpoint_every"] == 1
+    assert kwargs["checkpoint_keep_last"] == 2
+    assert kwargs["checkpoint_keep_analysis"] is False
+
+
 def test_data_path_missing_directory_is_created_without_error():
     tmp = _fresh_tmp_data_path()  # already removed by the helper
     assert not os.path.exists(tmp)

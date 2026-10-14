@@ -457,6 +457,11 @@ if not flag_jupyter:
         'restart_enabled': _enkf_section.get('restart_enabled', True),
         'force_fresh_start': _enkf_section.get('force_fresh_start', False),
         'checkpoint_every': int(_enkf_section.get('checkpoint_every', 1)),
+        # Execution-mode-3 restart/retention (src/parallelization/
+        # mode3_checkpointing.py). keep_last=0 keeps every checkpoint.
+        'checkpoint_keep_last': int(_enkf_section.get('checkpoint_keep_last', 2)),
+        'checkpoint_keep_analysis': bool(_enkf_section.get('checkpoint_keep_analysis', False)),
+        'resume_from_checkpoint': bool(_enkf_section.get('resume_from_checkpoint', False)),
         'base_seed': int(_enkf_section.get('base_seed', 42)),
         # Keep process-noise timing independent of execution mode.  The
         # default matches the established mode-1 schedule.
@@ -554,9 +559,10 @@ if not flag_jupyter:
         'execution_mode': int(args.execution_mode) if args.execution_mode is not None else int(_enkf_section.get('execution_mode', 1)),
     })
 
-    # Always start a run from a clean data_path: stale files left behind by
-    # a previous run (e.g. a different ensemble size, an old dense/compact
-    # observation layout) must never leak into a new one. ``rmtree(...,
+    # Start a new run from a clean data_path (a resume keeps it, below):
+    # stale files left behind by a previous run (e.g. a different ensemble
+    # size, an old dense/compact observation layout) must never leak into a
+    # new one. ``rmtree(...,
     # ignore_errors=True)`` is a risk-free no-op if the path doesn't exist
     # yet; ``makedirs(..., exist_ok=True)`` then (re)creates it. Refuse to
     # do this for paths that resolve to the current directory, the user's
@@ -591,7 +597,19 @@ if not flag_jupyter:
             "0",
         )
     )
-    if _rank_hint == 0:
+    # A resumed run continues from the checkpoints in data_path, so it must
+    # never be cleaned. The generic CLI overrides are applied only at the end
+    # of this loader, so --resume_from_checkpoint is read from argv here.
+    _resume_raw = _parse_generic_cli_overrides(_cli_extra_argv).get(
+        'resume_from_checkpoint', _enkf_section.get('resume_from_checkpoint', False)
+    )
+    _resume_requested = bool(
+        yaml.safe_load(_resume_raw) if isinstance(_resume_raw, str) else _resume_raw
+    )
+    if _resume_requested:
+        if _rank_hint == 0:
+            print(f"[ICESEE] resume_from_checkpoint: keeping existing data_path '{data_path}'")
+    elif _rank_hint == 0:
         shutil.rmtree(data_path, ignore_errors=True)
     os.makedirs(data_path, exist_ok=True)
 

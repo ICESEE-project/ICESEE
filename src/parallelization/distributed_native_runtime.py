@@ -499,6 +499,143 @@ class NativeDistributedMemberPool:
         return NativeObservationShard(positions, local_ids, values)
 
 
+def native_layout_fingerprint(
+    adapter: Any,
+    topology: Any,
+    icesee_kwargs: Mapping[str, Any],
+) -> str | None:
+    """Optional rank-local identity of the adapter's DOF numbering.
+
+    Adapters whose global state numbering can change between process
+    invocations (e.g. a mesh partitioned at runtime) may implement
+    ``native_layout_fingerprint(topology=..., icesee_kwargs=...)`` so that
+    checkpoints record it and a restart can refuse a mismatched numbering.
+    Returns ``None`` when the adapter does not provide one.
+    """
+
+    fingerprint = getattr(adapter, "native_layout_fingerprint", None)
+    if not callable(fingerprint):
+        return None
+    value = fingerprint(topology=topology, icesee_kwargs=icesee_kwargs)
+    return None if value is None else str(value)
+
+
+def _restart_member_factory(adapter: Any):
+    """Member constructor for a restart: allocate, never initialize.
+
+    ``allocate_native_member`` (optional adapter capability) creates a
+    member's native storage without perturbing or forecasting it.  Without
+    it the adapter's initializer is the only constructor available; its
+    state is then completely overwritten by the checkpoint, so the restart
+    is still exact, only slower.
+    """
+
+    allocate = getattr(adapter, "allocate_native_member", None)
+    if callable(allocate):
+        return allocate, True
+    return adapter.initialize_native_member, False
+
+
+def restore_native_member_pool(
+    adapter: NativeDistributedModelAdapter,
+    topology: Any,
+    icesee_kwargs: Mapping[str, Any],
+    checkpoint_path: Any,
+    *,
+    expected_run_id: str | None = None,
+):
+    """Rebuild this rank's member pool from a committed checkpoint.
+
+    Unlike :func:`initialize_native_member_pool` this never generates an
+    initial ensemble: members are allocated (see
+    ``_restart_member_factory``), then every owned state row is overwritten
+    with the checkpoint's values for the members scheduled on this ensemble
+    slot under the *current* topology.  Returns ``(pool, checkpoint)``.
+    """
+
+    from .distributed_checkpoint import load_distributed_checkpoint
+
+    validate_native_distributed_adapter(adapter)
+    number_of_members = int(icesee_kwargs.get("Nens", 1))
+    member_ids = members_for_ensemble_slot(
+        number_of_members,
+        int(topology.ensemble_groups),
+        int(topology.ensemble_slot),
+    )
+    if not member_ids:
+        raise ValueError(
+            "mode-3 process grid has an ensemble slot with no scheduled member"
+        )
+    factory, allocates = _restart_member_factory(adapter)
+    if not allocates and int(topology.world_rank) == 0:
+        print(
+            "[ICESEE] restart: adapter has no allocate_native_member; members are "
+            "constructed with the initializer and then overwritten from the "
+            "checkpoint",
+            flush=True,
+        )
+
+    if icesee_kwargs.get("use_member_streaming") and callable(
+        getattr(adapter, "reactivate_native_member", None)
+    ):
+        from .distributed_member_store import build_inactive_member_store
+        from .distributed_streaming_runtime import StreamingNativeDistributedMemberPool
+
+        store = build_inactive_member_store(
+            icesee_kwargs, world_rank=int(topology.world_rank)
+        )
+        pool = StreamingNativeDistributedMemberPool(
+            adapter,
+            topology,
+            icesee_kwargs,
+            member_ids,
+            store=store,
+            member_factory=factory,
+        )
+    else:
+        pool = NativeDistributedMemberPool(
+            {
+                member_id: factory(
+                    member_id, topology=topology, icesee_kwargs=icesee_kwargs
+                )
+                for member_id in member_ids
+            }
+        )
+    if isinstance(pool.layout, DistributedStateLayout):
+        validate_spatial_partition(pool.layout, topology.spatial_comm)
+    elif isinstance(pool.layout, DistributedBlockStateLayout):
+        validate_block_spatial_partition(pool.layout, topology.spatial_comm)
+    else:  # pragma: no cover - registry construction already guarantees this
+        raise TypeError("native member returned an unsupported distributed layout")
+
+    local_ensemble, checkpoint = load_distributed_checkpoint(
+        checkpoint_path,
+        pool.layout,
+        topology,
+        expected_run_id=expected_run_id,
+        number_of_members=number_of_members,
+        expected_layout_fingerprint=native_layout_fingerprint(
+            adapter, topology, icesee_kwargs
+        ),
+    )
+    pool.restore_owned(local_ensemble)
+    restore = getattr(adapter, "restore_native_checkpoint", None)
+    if callable(restore) and isinstance(pool, NativeDistributedMemberPool):
+        for member_id in pool.member_ids:
+            result = restore(
+                pool.member(member_id),
+                checkpoint,
+                topology=topology,
+                icesee_kwargs=icesee_kwargs,
+            )
+            if result is not None:
+                raise TypeError(
+                    "native checkpoint restore callbacks mutate model context "
+                    "and must return None"
+                )
+    return pool, checkpoint
+
+
 def initialize_native_member_pool(
     adapter: NativeDistributedModelAdapter,
     topology: Any,
