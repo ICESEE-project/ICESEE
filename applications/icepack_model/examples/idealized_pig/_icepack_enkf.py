@@ -262,7 +262,7 @@ def initialize_ensemble(ens, **icesee_kwargs):
     # Path-isolation fix (2026-09-28): see generate_true_state's hs_files.
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.makedirs(_modelrun_datasets, exist_ok=True)
-    hs_ensemble_files = f"{_modelrun_datasets}/hs_ensemble_profiles{ens}.h5"
+    hs_ensemble_files = f"{_modelrun_datasets}/hs_ensemble_profiles_{ens}.h5"
 
     with h5py.File(hs_ensemble_files, "w") as F:
         dataset_h_ensemble = F.create_dataset("h_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8")

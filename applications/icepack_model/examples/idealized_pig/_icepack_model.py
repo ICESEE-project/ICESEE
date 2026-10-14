@@ -659,7 +659,7 @@ def run_model(ensemble, **icesee_kwargs):
     # -- extract the flowline profile at particular steps -- Path-isolation fix (2026-09-28): was a hardcoded, non-run-specific relative path -- two jobs sharing this 
     # working directory would collide on the same file. Now scoped under this run's own data_path, matching mode3_runner.py's existing pattern.
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
-    hs_ensemble_files = profile_path(_modelrun_datasets, f"hs_ensemble_profiles{ens}")
+    hs_ensemble_files = profile_path(_modelrun_datasets, f"hs_ensemble_profiles_{ens}")
 
     
     # Restored gating: this block previously ran unconditionally every timestep for every ensemble member even though its output is only ever consumed at the three 
