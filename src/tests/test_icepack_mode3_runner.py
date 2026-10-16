@@ -105,7 +105,8 @@ def test_build_reference_setup_context_computes_global_nd_on_comm_self(monkeypat
     assert icesee_kwargs["nd"] == 12
     assert icesee_kwargs["h0"].dat.data.size == 4
     assert icesee_kwargs["solver"] == "solver"
-    assert captured_comm["comm"] is MPI.COMM_SELF
+    assert captured_comm["comm"] is runner._REFERENCE_COMM
+    assert captured_comm["comm"].Get_size() == 1
 
 
 class _SelfComm:
@@ -361,3 +362,30 @@ def test_resume_continues_from_latest_checkpoint_without_reinitializing(tmp_path
     counts = records.timing_calls[0]["counts"]
     assert counts["forecast_step"] == 2 and counts["analysis_step"] == 1
     assert counts["ensemble_init"] == 0 and counts["restart_restore"] == 1
+
+
+def test_release_model_topology_releases_context_before_owned_splits(monkeypatch):
+    events = []
+    class Comm:
+        def __init__(self, name):
+            self.name = name
+        def Free(self):
+            events.append(self.name)
+    world = Comm("world")
+    topology = types.SimpleNamespace(world=world, ensemble_comm=Comm("ensemble"), spatial_comm=Comm("spatial"))
+    monkeypatch.setattr(runner, "release_model_context", lambda topology: events.append("context"))
+    runner._release_model_topology(topology)
+    assert events == ["context", "ensemble", "spatial"]
+
+
+def test_release_model_topology_never_frees_world_or_alias_twice(monkeypatch):
+    freed = []
+    class Comm:
+        def Free(self):
+            freed.append(self)
+    world, owned = Comm(), Comm()
+    monkeypatch.setattr(runner, "release_model_context", lambda topology: None)
+    runner._release_model_topology(types.SimpleNamespace(world=world, ensemble_comm=owned, spatial_comm=owned))
+    assert freed == [owned]
+    runner._release_model_topology(types.SimpleNamespace(world=world, ensemble_comm=world, spatial_comm=world))
+    assert freed == [owned]

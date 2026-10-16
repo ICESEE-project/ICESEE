@@ -110,16 +110,19 @@ exercised for this application.
 from __future__ import annotations
 
 import os
+import gc
 
 import h5py
 import numpy as np
 from mpi4py import MPI
+from firedrake import COMM_SELF as _REFERENCE_COMM
 
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_model import (
     initialize_model,
 )
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_native import (
     IDEALIZED_PIG_NATIVE_ADAPTER,
+    release_model_context,
 )
 from ICESEE.applications.supported_models import SupportedModels
 from ICESEE.src.EnKF._generate_synthetic_observations import (
@@ -174,6 +177,24 @@ _SUPPORTED_ERROR_MODES = {"legacy_prior_anomalies", "stochastic_r"}
 _DEFAULT_RUN_ID = "icepack-idealized-pig-mode3"
 
 
+def _release_model_topology(topology):
+    """Collectively release owned splits before PyOP2's interpreter teardown.
+
+    PyOP2 attaches an inner communicator to the user spatial communicator.
+    Free the owning outer communicator while those attributes and inner
+    communicators are still valid; never free COMM_WORLD here.
+    """
+    release_model_context(topology)
+    gc.collect()
+    seen = set()
+    for name in ("ensemble_comm", "spatial_comm"):
+        comm = getattr(topology, name, None)
+        if comm is None or comm is getattr(topology, "world", None) or id(comm) in seen:
+            continue
+        seen.add(id(comm))
+        comm.Free()
+
+
 def _build_reference_setup_context(icesee_kwargs: dict) -> int:
     """Rebuild a correct, single-rank reference context and return ``nd``.
 
@@ -184,7 +205,7 @@ def _build_reference_setup_context(icesee_kwargs: dict) -> int:
     """
 
     ref_kwargs = dict(icesee_kwargs)
-    ref_kwargs["comm"] = MPI.COMM_SELF
+    ref_kwargs["comm"] = _REFERENCE_COMM
     (
         h,
         h0,
@@ -690,6 +711,8 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         output_dir=_modelrun_datasets,
     )
 
+    pool = None
+    _release_model_topology(topology)
     return icesee_kwargs
 
 

@@ -170,6 +170,11 @@ def _shared_context(
     return context
 
 
+def release_model_context(topology):
+    """Release the group's cached Firedrake objects before its MPI communicator."""
+    _SHARED_CONTEXT_CACHE.pop(id(topology), None)
+
+
 def _basal_melt_for_step(
     icesee_kwargs: Mapping[str, Any],
     step: int,
@@ -466,7 +471,36 @@ def layout_fingerprint(*, topology: Any, icesee_kwargs: Mapping[str, Any]) -> st
     return "coords-sha256:" + digest.hexdigest()[:32]
 
 
-IDEALIZED_PIG_NATIVE_ADAPTER = IcepackNativeAdapter(
+class _IdealizedPigAdapter(IcepackNativeAdapter):
+    """Keep application diagnostics outside the model-agnostic runtime."""
+
+    def initialize_native_member(self, member_id, *, topology, icesee_kwargs):
+        member = super().initialize_native_member(
+            member_id, topology=topology, icesee_kwargs=icesee_kwargs
+        )
+        from ._mode3_profiles import write_member_profile
+        ctx = _shared_context(topology, icesee_kwargs)
+        write_member_profile(
+            member_id, ctx.h0, ctx.s0, ctx.bed, step=0,
+            comm=topology.spatial_comm, icesee_kwargs=icesee_kwargs,
+        )
+        return member
+
+    def forecast_native_member(self, member, timestep, *, topology, icesee_kwargs):
+        super().forecast_native_member(
+            member, timestep, topology=topology, icesee_kwargs=icesee_kwargs
+        )
+        from ._mode3_profiles import write_member_profile
+        ctx = _shared_context(topology, icesee_kwargs)
+        state = self._state(member)
+        write_member_profile(
+            member.member_id, state.thickness, state.surface, ctx.bed,
+            step=int(timestep) + 1, comm=topology.spatial_comm,
+            icesee_kwargs=icesee_kwargs,
+        )
+
+
+IDEALIZED_PIG_NATIVE_ADAPTER = _IdealizedPigAdapter(
     initialize_member=initialize_member,
     forecast_member=forecast_member,
     reactivate_member=reactivate_member,
