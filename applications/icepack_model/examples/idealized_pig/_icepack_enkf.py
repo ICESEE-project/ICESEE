@@ -78,9 +78,6 @@ def generate_true_state(**icesee_kwargs):
     # --- extract a profile of the flowline at the initial state ---
     h_profiles, s_profiles, valid_points, distances, bed_values = initial_flowline_profile(icesee_kwargs)
 
-    # --- step numbers at which to extract flowline profiles during the simulation --
-    flowline_profile_steps = [t/dt for t in icesee_kwargs["save_steps"]]
-    print(flowline_profile_steps)
 
     # Store diagnostic files beneath the configured data_path.
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
@@ -246,23 +243,13 @@ def initialize_ensemble(ens, **icesee_kwargs):
     ### INITIALIZE THE ENSEMBLE MEMBERS
 
 
-    # Approved scientific update: no initial thickness perturbation.
-    h_perturbed = h0.dat.data_ro.copy()
-
-    h_p = Function(Q)
-    h_p.dat.data[:] = h_perturbed
-
-
-    #s0 = icepack.compute_surface(thickness = h_p, bed = bed)
-
-
     # Apply parameter nudging only when joint estimation is enabled.
     if icesee_kwargs["joint_estimation"]:
         basal_melt_field_nudged = basal_melt_field.dat.data_ro + icesee_kwargs["wrong_basal_melt_field"]
         basal_melt_field = Function(Q)
         basal_melt_field.dat.data[:] = basal_melt_field_nudged
 
-    h, u, s, floating, grounded = Icepack(solver, h_p, u0, smb, basal_melt_field, bed, dt, h0, icesee_kwargs)
+    h, u, s, floating, grounded = Icepack(solver, h0, u0, smb, basal_melt_field, bed, dt, h0, icesee_kwargs)
 
     # basal_melt_field is always part of the packed state (field existence
     # is driven by the application's configured state definition, vec_inputs
@@ -275,6 +262,7 @@ def initialize_ensemble(ens, **icesee_kwargs):
 
     # --- create file to save ensemble flowline profiles ---
     h_profiles, s_profiles, valid_points, distances, bed_values = initial_flowline_profile(icesee_kwargs)
+   
     # Store diagnostic files beneath the configured data_path.
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.makedirs(_modelrun_datasets, exist_ok=True)
@@ -289,8 +277,7 @@ def initialize_ensemble(ens, **icesee_kwargs):
         dataset_distances_ensemble = F.create_dataset("distances", data = distances)
         dataset_valid_points_ensemble = F.create_dataset("valid_points", data = valid_points)
 
-    #print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(initialized_state["h"])}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
-
+    
     return initialized_state
 
 # --- generate the nurged state ---
@@ -331,8 +318,6 @@ def generate_nurged_state(**icesee_kwargs):
     # --- extract a profile of the flowline at the initial state ---
     h_profiles, s_profiles, valid_points, distances, bed_values = initial_flowline_profile(icesee_kwargs)
 
-    # --- step numbers at which to extract flowline profiles during the simulation --
-    flowline_profile_steps = [t/dt for t in icesee_kwargs["save_steps"]]
 
     # Store diagnostic files beneath the configured data_path.
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
@@ -405,11 +390,6 @@ def generate_nurged_state(**icesee_kwargs):
 
         elif (76/ dt) <= step:
             basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 2012 - 2017
-
-        # # -- DEBUGGING
-        #print(f"maximum_bmr=",{melt_max})
-
-
 
 
         # call the ice stream model to update the state variables
