@@ -73,12 +73,7 @@ if "dt" in _cli and "timesteps_per_year" in _cli and float(_cli["dt"]) != float(
 dt = float(_cli["dt"]) if "dt" in _cli else float(icesee_kwargs["timesteps_per_year"])
 nt = int(round(num_years / dt))     # total number of time steps
 
-# Physical-year lookup array (icesee/features convention, 2026-09-28
-# reconciliation): t[k] gives the physical year of timestep k, used by
-# run_model/generate_true_state/generate_nurged_state to match
-# `save_steps` (given in physical years) to timestep indices when
-# dumping flowline profiles. Does not feed BasalMeltRate (which uses
-# `step`/`dt` directly) -- purely an I/O bookkeeping array.
+# Use physical model years to label diagnostic save points.
 t = np.linspace(0, int(num_years), nt + 1)
 
 icesee_kwargs.update({"nt": nt, "dt": dt, "timesteps_per_year": dt, "t": t})

@@ -15,10 +15,11 @@
 # icepack refuses model groups that span nodes.
 #
 # JIT caches (node-local, per job):
-#   PyOP2 .so + TSFC kernels : /tmp/icesee-<job>/{pyop2,tsfc}, shared by the
+#   PyOP2 .so + TSFC kernels : $TMPDIR/icesee-<job>/{pyop2,tsfc}, shared by the
 #                               ranks of one node (never NFS, never shared
 #                               across nodes or jobs)
-#   Loopy/pytools (sqlite)    : /tmp/icesee-<job>/xdg/rank<N>, per rank
+#   Loopy/pytools (sqlite)    : $TMPDIR/icesee-<job>/xdg/rank<N>, per rank
+# Shared TMPDIR falls back to /tmp. Caches survive for the job lifetime.
 # Model groups with more than one rank stay consistent through
 # ICESEE/src/utils/pyop2_compile_cache.py (installed by run_da_icepack.py).
 #
@@ -40,19 +41,17 @@
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=bkyanjo3@gatech.edu
 
-set -uo pipefail
+set -euo pipefail
 
-# --- Locations (independent of the submission directory) ---
-if [[ -n "${SLURM_SUBMIT_DIR:-}" && -f "${SLURM_SUBMIT_DIR}/run_da_icepack.py" ]]; then
-  PIG_DIR="$SLURM_SUBMIT_DIR"
-elif [[ -n "${SLURM_SUBMIT_DIR:-}" && -f "${SLURM_SUBMIT_DIR}/../run_da_icepack.py" ]]; then
-  PIG_DIR="$(cd "$SLURM_SUBMIT_DIR/.." && pwd)"
-else
-  PIG_DIR="$HOME/r-arobel3-0/ICESEE-Spack/ICESEE/applications/icepack_model/examples/idealized_pig"
-fi
-ICESEE_ROOT="$(cd "$PIG_DIR/../../../.." && pwd)"          # .../ICESEE
-SPACK_REPO="$(cd "$ICESEE_ROOT/.." && pwd)"                 # .../ICESEE-Spack
-cd "$PIG_DIR"
+# Slurm executes a spooled copy: resolve from submission directory or explicit root.
+ROOT_HINT="${ICESEE_SPACK_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
+while [[ "$ROOT_HINT" != / && ! -f "$ROOT_HINT/scripts/activate.sh" ]]; do ROOT_HINT="$(dirname "$ROOT_HINT")"; done
+HELPER="$ROOT_HINT/applications/icepack_model/examples/idealized_pig/pace/resolve_environment.sh"
+[[ -f "$HELPER" ]] || HELPER="$ROOT_HINT/ICESEE/applications/icepack_model/examples/idealized_pig/pace/resolve_environment.sh"
+[[ -f "$HELPER" ]] || { echo "Set ICESEE_SPACK_ROOT to the live Spack installation" >&2; exit 2; }
+module purge || true
+source "$HELPER"
+set -euo pipefail
 
 # --- Experiment (dt fixed at the production value) ---
 NENS="${NENS:-30}"
@@ -77,39 +76,29 @@ fi
 # --- Unique run directory ---
 RUN_ROOT="${RUN_ROOT:-$PIG_DIR/pace_runs}"
 RUN_DIR="$RUN_ROOT/pig_da_bench_Ne${NENS}_y${NUM_YEARS}_${SLURM_JOB_ID}"
-DATA_DIR="$RUN_DIR/icesee_data"   # ICESEE recreates data_path; keep logs outside it
 mkdir -p "$RUN_DIR"
 
-# --- Environment ---
-module purge >/dev/null 2>&1 || true
-# shellcheck disable=SC1091
-source "$SPACK_REPO/scripts/activate.sh"
-MPI_DIR="$(spack -e "$SPACK_REPO/.spack-env/icesee" location -i openmpi)"
-export PATH="$MPI_DIR/bin:$PATH"
-export LD_LIBRARY_PATH="$MPI_DIR/lib:${LD_LIBRARY_PATH:-}"
-export PYTHONPATH="$SPACK_REPO:$ICESEE_ROOT${PYTHONPATH:+:$PYTHONPATH}"
-export OMP_NUM_THREADS=1
-export ICESEE_PERFORMANCE_TEST=1
-export ICESEE_DEBUG_INIT="${ICESEE_DEBUG_INIT:-1}"        # rank-labelled init stage timings
-export ICESEE_HANG_DUMP_S="${ICESEE_HANG_DUMP_S:-0}"      # set >0 to dump stacks periodically
-hash -r
+# Preserve the user-facing dataset directory. Config import recreates data_path,
+# so refuse an existing target and serialize launchers outside that target.
+DATA_DIR="${ICESEE_DATA_PATH:-$PIG_DIR/_modelrun_datasets}"
+if [[ -e "$DATA_DIR" || -L "$DATA_DIR" ]]; then
+  echo "ERROR: $DATA_DIR already exists; preserve it before a fresh run, or set ICESEE_DATA_PATH." >&2
+  exit 2
+fi
+mkdir -p "$(dirname "$DATA_DIR")"
+DATA_LOCK="${DATA_DIR}.launch-lock"
+mkdir "$DATA_LOCK" || { echo "ERROR: output target is locked: $DATA_LOCK" >&2; exit 2; }
+trap 'rmdir "$DATA_LOCK" 2>/dev/null || true' EXIT
 
-# --- Per-rank launcher: node-local JIT caches and placement record ---
-JOB_CACHE="/tmp/icesee-${SLURM_JOB_ID}"
-cat > "$RUN_DIR/launch_rank.sh" <<EOF
-#!/bin/bash
-export PYOP2_CACHE_DIR="$JOB_CACHE/pyop2"
-export FIREDRAKE_TSFC_KERNEL_CACHE_DIR="$JOB_CACHE/tsfc"
-export XDG_CACHE_HOME="$JOB_CACHE/xdg/rank\${SLURM_PROCID}"
-mkdir -p "\$PYOP2_CACHE_DIR" "\$FIREDRAKE_TSFC_KERNEL_CACHE_DIR" "\$XDG_CACHE_HOME"
-echo "rank=\${SLURM_PROCID} node=\${SLURM_NODEID} local=\${SLURM_LOCALID} host=\$(hostname -s) cpus=\$(taskset -cp \$\$ 2>/dev/null | awk -F': ' '{print \$2}') group=\$((SLURM_PROCID / $MODEL_NPROCS))" >> "$RUN_DIR/placement.txt"
-exec python "\$@"
-EOF
-chmod +x "$RUN_DIR/launch_rank.sh"
-: > "$RUN_DIR/placement.txt"
+
+export ICESEE_PERFORMANCE_TEST=1
+export ICESEE_DEBUG_INIT="${ICESEE_DEBUG_INIT:-1}"
+export ICESEE_HANG_DUMP_S="${ICESEE_HANG_DUMP_S:-900}"
+# Rank placement and cache paths are recorded in stdout.log.
 
 # --- Run record ---
 {
+  echo "dataset_directory : $DATA_DIR"
   echo "job_id            : $SLURM_JOB_ID"
   echo "submitted_from    : ${SLURM_SUBMIT_DIR:-}"
   echo "nodes             : $SLURM_JOB_NODELIST ($NODES)"
@@ -130,8 +119,9 @@ python "$ICESEE_ROOT/scripts/benchmarks/pace_run_manifest.py" --out "$RUN_DIR/ma
 
 # --- Data assimilation ---
 START=$(date +%s)
-srun ${SRUN_EXTRA_ARGS:-} --mpi=pmix -N "$NODES" -n "$NP" --ntasks-per-node="$TPN" --distribution=block --cpu-bind=cores \
-  "$RUN_DIR/launch_rank.sh" run_da_icepack.py \
+set +e
+srun ${SRUN_EXTRA_ARGS:-} --mpi=pmix -N "$NODES" -n "$NP" --ntasks-per-node="$TPN" --distribution=block:block --cpu-bind=cores \
+  "$PIG_DIR/pace/launch_rank.sh" "$PIG_DIR/run_da_icepack.py" \
     --Nens="$NENS" \
     --execution_mode=3 \
     --model_nprocs="$MODEL_NPROCS" \
@@ -143,9 +133,10 @@ srun ${SRUN_EXTRA_ARGS:-} --mpi=pmix -N "$NODES" -n "$NP" --ntasks-per-node="$TP
     --data_path="$DATA_DIR" \
   > "$RUN_DIR/stdout.log" 2> "$RUN_DIR/stderr.log"
 STATUS=$?
+set -e
 ELAPSED=$(( $(date +%s) - START ))
 
-sort -t= -k2 -n "$RUN_DIR/placement.txt" -o "$RUN_DIR/placement.txt"
+
 [[ -f "$DATA_DIR/performance.json" ]] && cp "$DATA_DIR/performance.json" "$RUN_DIR/performance.json"
 {
   echo "end               : $(date -Is)"
@@ -154,8 +145,6 @@ sort -t= -k2 -n "$RUN_DIR/placement.txt" -o "$RUN_DIR/placement.txt"
 } | tee -a "$RUN_DIR/run_config.txt"
 [[ -f "$RUN_DIR/performance.json" ]] || echo "WARNING: performance.json was not produced"
 
-# Remove only this job's node-local JIT caches.
-srun ${SRUN_EXTRA_ARGS:-} --ntasks-per-node=1 -N "$NODES" -n "$NODES" rm -rf "$JOB_CACHE" >/dev/null 2>&1 || true
 sacct -j "$SLURM_JOB_ID" --format=JobID,Elapsed,TotalCPU,MaxRSS,NNodes,NTasks,State 2>/dev/null \
   > "$RUN_DIR/sacct.txt" || true
 exit "$STATUS"

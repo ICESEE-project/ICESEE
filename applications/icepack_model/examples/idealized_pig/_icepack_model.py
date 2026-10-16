@@ -575,10 +575,7 @@ def run_model(ensemble, **icesee_kwargs):
 
     #print(f"h_vec_mean={np.mean(h_vec)}, u_vec_mean = {np.mean(u_vec)}, v_vec_mean = {np.mean(v_vec)}\n")
 
-    # basal_melt_field is always part of the packed state vector regardless
-    # of the state/parameter bookkeeping split (see config/_utility_imports.py's
-    # vec_inputs/total_state_param_vars derivation and this file's 2026-09-28
-    # reconciliation note) -- read it unconditionally.
+    # The configured state vector includes basal_melt_field independently of joint estimation.
     basal_melt_vec = ensemble[indx_map["basal_melt_field"]]
 
     h = Function(Q)
@@ -669,46 +666,22 @@ def run_model(ensemble, **icesee_kwargs):
                      'basal_melt_field': basal_melt_field.dat.data_ro}
 
 
-    # -- extract the flowline profile at particular steps --
-    # Path-isolation fix (2026-09-28): was a hardcoded, non-run-specific
-    # relative path -- two jobs sharing this working directory would
-    # collide on the same file. Now scoped under this run's own
-    # data_path, matching mode3_runner.py's existing pattern.
-    _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
-    hs_ensemble_files = profile_path(_modelrun_datasets, f"hs_ensemble_profiles{ens}")
-
-    # Restored gating: this block previously ran unconditionally every
-    # timestep for every ensemble member even though its output is only
-    # ever consumed at the three save points below (t[k] in {5, 10, 20}).
-    if t[k] in (5, 10, 20):
+    # Sample only configured physical-year save points. Keep the established
+    # per-member .h5 schema and respect the run's data_path.
+    columns = [
+        index + 1 for index, year in enumerate(save_steps)
+        if np.isclose(float(step) * float(dt), float(year), rtol=0.0, atol=1e-9)
+    ]
+    if columns:
+        _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
+        hs_ensemble_files = profile_path(_modelrun_datasets, f"hs_ensemble_profiles{ens}")
         with h5py.File(hs_ensemble_files, "r") as F:
             valid_points = F["valid_points"][:]
-
         h_profiles, s_profiles = flowline_profile(h, s, valid_points)
-        print(s_profiles.shape, h_profiles.shape,"\n")
-
-    print(f"t[{k}] = {t[k]}")
-
-    # -- manually saving at the time steps but need to find an efficient way to determine this --
-    if t[k] == 5:
-        print(f"t[{k}] = {t[k]}")
         with h5py.File(hs_ensemble_files, "a") as F:
-            F["h_profiles"][:,1] = h_profiles
-            F["s_profiles"][:,1] = s_profiles
-
-    if t[k] == 10:
-        print(f"t[{k}] = {t[k]}")
-        with h5py.File(hs_ensemble_files, "a") as F:
-            F["h_profiles"][:,2] = h_profiles
-            F["s_profiles"][:,2] = s_profiles
-
-    if t[k] == 20:
-        print(f"t[{k}] = {t[k]}")
-        with h5py.File(hs_ensemble_files, "a") as F:
-            F["h_profiles"][:,3] = h_profiles
-            F["s_profiles"][:,3] = s_profiles
-
-
+            for column in columns:
+                F["h_profiles"][:, column] = h_profiles
+                F["s_profiles"][:, column] = s_profiles
 
     return updated_state
 
