@@ -170,6 +170,11 @@ def _shared_context(
     return context
 
 
+def release_model_context(topology):
+    """Release the group's cached Firedrake objects before its MPI communicator."""
+    _SHARED_CONTEXT_CACHE.pop(id(topology), None)
+
+
 def _basal_melt_for_step(
     icesee_kwargs: Mapping[str, Any],
     step: int,
@@ -276,21 +281,7 @@ def _icepack_run_kwargs(
     }
 
 
-# CORRECTED (2026-09-28, second pass): `joint_estimation` means "are we
-# performing joint state-parameter estimation" -- it is NOT a proxy for
-# "does basal_melt_field exist" (that question is answered by
-# `_basal_melt_in_state`/`vec_inputs`, below). This nudge is genuinely
-# joint-estimation-algorithm-specific -- it initializes the ensemble's
-# WRONG prior belief about a jointly-estimated parameter, mirroring
-# ``_icepack_enkf.initialize_ensemble`` in modes 0-2 -- so its
-# `joint_estimation` gate is semantically correct and is kept. Under the
-# current Idealized PIG config (joint_estimation=0, basal_melt_field is an
-# ordinary state variable, true-vs-wrong divergence comes from
-# BasalMeltRate's EXPERIMENT_TRUE/EXPERIMENT_WRONG selector instead), this
-# gate is simply False and the nudge does not fire -- so it never operates
-# simultaneously with the new experiment mechanism. If a future config
-# re-enables joint_estimation for some other jointly-estimated parameter,
-# this nudge correctly reactivates as part of that algorithm.
+# Apply parameter nudging only when joint estimation is enabled.
 def _nudge_basal_melt(basal_melt_field: Any, icesee_kwargs: Mapping[str, Any], Q: Any) -> Any:
     """Joint-estimation-specific nudge: initializes the ensemble's WRONG
     prior estimate of a jointly-estimated parameter. Same operation as
@@ -305,37 +296,16 @@ def _nudge_basal_melt(basal_melt_field: Any, icesee_kwargs: Mapping[str, Any], Q
 def initialize_member(
     member_id: int, *, topology: Any, icesee_kwargs: Mapping[str, Any]
 ) -> IcepackNativeState:
-    """Perturb thickness and take the initial Icepack step for one member.
+    """Take the initial model step from unperturbed, locally owned thickness.
 
-    Uses ``_member_initialization_context`` for the same member-keyed seed
-    derivation (``initialization_seed``) modes 1/2 use, but draws the
-    perturbation itself via ``coordinate_keyed_white_noise`` over this
-    rank's OWNED physical coordinates only (``ctx.coords``, O(Nx/P_model)
-    memory -- never the global mesh size). This makes the realization a
-    deterministic function of (base_seed, member_id, physical coordinate),
-    so the SAME mesh node gets the SAME N(0,1) draw regardless of which
-    rank owns it or how many spatial ranks the mesh is partitioned across
-    -- unlike a plain ``np.random.normal(0, 1, local_size)`` draw, whose
-    value at a given array position is only meaningful for one fixed
-    partition (confirmed: under real spatial decomposition, that draw
-    assigned uncorrelated noise to different physical nodes depending on
-    rank count, corrupting scientific R=1-vs-R>1 equivalence -- see
-    docs/execution-mode-3-design.md's fix history / this session's Gate-3
-    audit). NOT bit-identical to modes 1/2's own (still array-position-
-    keyed, and itself not yet fixed for spatial decomposition) draw for
-    the same member_id -- that old cross-mode parity was only ever
-    incidentally true at R=1 for both, and was never a decomposition-
-    invariant guarantee. The scientific formula (h0 + 15*N(0,1), one
-    independent standard-normal draw per physical mesh node) is
-    unchanged; only which physical node receives which realization is now
-    well-defined.
+    This matches the approved Idealized PIG scientific initialization update
+    in modes 0-2. Copy h0 so member initialization cannot mutate the shared
+    inflow/reference thickness. Forecast/process-noise streams are unchanged.
     """
 
     ctx = _shared_context(topology, icesee_kwargs)
 
-    with _member_initialization_context(icesee_kwargs, member_id) as _local_kwargs:
-        noise = coordinate_keyed_white_noise(ctx.coords, _local_kwargs["seed"])
-        h_perturbed = ctx.h0.dat.data_ro + 15 * noise
+    h_perturbed = ctx.h0.dat.data_ro.copy()
 
     h_p = Function(ctx.Q)
     h_p.dat.data[:] = h_perturbed
@@ -501,7 +471,36 @@ def layout_fingerprint(*, topology: Any, icesee_kwargs: Mapping[str, Any]) -> st
     return "coords-sha256:" + digest.hexdigest()[:32]
 
 
-IDEALIZED_PIG_NATIVE_ADAPTER = IcepackNativeAdapter(
+class _IdealizedPigAdapter(IcepackNativeAdapter):
+    """Keep application diagnostics outside the model-agnostic runtime."""
+
+    def initialize_native_member(self, member_id, *, topology, icesee_kwargs):
+        member = super().initialize_native_member(
+            member_id, topology=topology, icesee_kwargs=icesee_kwargs
+        )
+        from ._mode3_profiles import write_member_profile
+        ctx = _shared_context(topology, icesee_kwargs)
+        write_member_profile(
+            member_id, ctx.h0, ctx.s0, ctx.bed, step=0,
+            comm=topology.spatial_comm, icesee_kwargs=icesee_kwargs,
+        )
+        return member
+
+    def forecast_native_member(self, member, timestep, *, topology, icesee_kwargs):
+        super().forecast_native_member(
+            member, timestep, topology=topology, icesee_kwargs=icesee_kwargs
+        )
+        from ._mode3_profiles import write_member_profile
+        ctx = _shared_context(topology, icesee_kwargs)
+        state = self._state(member)
+        write_member_profile(
+            member.member_id, state.thickness, state.surface, ctx.bed,
+            step=int(timestep) + 1, comm=topology.spatial_comm,
+            icesee_kwargs=icesee_kwargs,
+        )
+
+
+IDEALIZED_PIG_NATIVE_ADAPTER = _IdealizedPigAdapter(
     initialize_member=initialize_member,
     forecast_member=forecast_member,
     reactivate_member=reactivate_member,

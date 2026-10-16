@@ -109,16 +109,19 @@ exercised for this application.
 from __future__ import annotations
 
 import os
+import gc
 
 import h5py
 import numpy as np
 from mpi4py import MPI
+from firedrake import COMM_SELF as _REFERENCE_COMM
 
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_model import (
     initialize_model,
 )
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_native import (
     IDEALIZED_PIG_NATIVE_ADAPTER,
+    release_model_context,
 )
 from ICESEE.applications.supported_models import SupportedModels
 from ICESEE.src.EnKF._generate_synthetic_observations import (
@@ -173,6 +176,24 @@ _SUPPORTED_ERROR_MODES = {"legacy_prior_anomalies", "stochastic_r"}
 _DEFAULT_RUN_ID = "icepack-idealized-pig-mode3"
 
 
+def _release_model_topology(topology):
+    """Collectively release owned splits before PyOP2's interpreter teardown.
+
+    PyOP2 attaches an inner communicator to the user spatial communicator.
+    Free the owning outer communicator while those attributes and inner
+    communicators are still valid; never free COMM_WORLD here.
+    """
+    release_model_context(topology)
+    gc.collect()
+    seen = set()
+    for name in ("ensemble_comm", "spatial_comm"):
+        comm = getattr(topology, name, None)
+        if comm is None or comm is getattr(topology, "world", None) or id(comm) in seen:
+            continue
+        seen.add(id(comm))
+        comm.Free()
+
+
 def _build_reference_setup_context(icesee_kwargs: dict) -> int:
     """Rebuild a correct, single-rank reference context and return ``nd``.
 
@@ -183,7 +204,7 @@ def _build_reference_setup_context(icesee_kwargs: dict) -> int:
     """
 
     ref_kwargs = dict(icesee_kwargs)
-    ref_kwargs["comm"] = MPI.COMM_SELF
+    ref_kwargs["comm"] = _REFERENCE_COMM
     (
         h,
         h0,
@@ -299,35 +320,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         {"true_nurged_file": _true_nurged, "synthetic_obs_file": _synthetic_obs}
     )
 
-    # --- setup phase: real world root only (see module docstring -- both
-    # the reference-context rebuild and the two file-writing generators
-    # hardcode/require a single-rank identity and would race or compute a
-    # wrong global nd if run from every rank). Non-root ranks keep these
-    # timings at 0.0; the MPI.MAX reduction below picks up root's real
-    # value, matching modes 0/1/2's timing-aggregation pattern. ---
-    # generate_true_wrong_state/generate_synthetic_observations are generic
-    # (modes-0-2-shared) functions that rebuild their returned kwargs dict
-    # and do not preserve every key they don't recognize -- confirmed
-    # directly (2026-09-28 PACE calibration debugging) that they silently
-    # drop `model_nprocs` on world_rank==0's own copy of icesee_kwargs
-    # only (every other rank's copy is untouched, since this block is
-    # rank-0-only). Left uncorrected, the topology built below from
-    # icesee_kwargs["model_nprocs"] would then be built from an
-    # inconsistent value on rank 0 vs every other rank. Rather than
-    # changing the shared generic function (out of scope -- it is used by
-    # modes 0-2 too, not Mode-3-specific), re-assert the pre-block value
-    # uniformly on every rank once the rank-0-only block has run.
-    #
-    # GOTCHA while verifying this fix: a console line "[ICESEE] ICESEE
-    # topology: world=..., ranks/model=..." appears early in every run's
-    # output and looks like it should reflect this -- it does NOT. That
-    # line is src/parallelization/parallel_mpi/resource_plan.py's own
-    # ResourcePlan display (generic modes-0-2 `ranks_per_model`), a
-    # completely decoupled concept from Mode-3's own `model_nprocs`/
-    # `topology.spatial_ranks` below (see this module's own docstring).
-    # The authoritative value for Mode-3 is `topology.spatial_ranks`
-    # itself, or equivalently a checkpoint's own
-    # manifest.json["source_topology"]["spatial_ranks"].
+    # Preserve model_nprocs across truth and observation setup.
     _model_nprocs_before_true_wrong_state = icesee_kwargs.get("model_nprocs")
 
     resume = bool(icesee_kwargs.get("resume_from_checkpoint", False))
@@ -342,7 +335,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         with traced_init("truth model setup (COMM_SELF reference)"):
             nd = _build_reference_setup_context(icesee_kwargs)
         record_phase("truth_model_setup", MPI.Wtime() - _t)
-        
+
         if resume and _setup_artifacts_reusable(icesee_kwargs, nd):
             print(
                 "[ICESEE] resume: reusing existing "
@@ -558,20 +551,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
                 )
             )
 
-        # run_native_global_analysis_cycle fuses the forecast and (when
-        # scheduled) analysis update into one call at this API boundary, so
-        # unlike modes 0-2 the two cannot be timed separately here; the
-        # combined per-step cost is reported as forecast_step_time.
-        #
-        # use_store_streaming_analysis (opt-in, requires use_member_streaming
-        # too): selects run_native_store_streaming_analysis_cycle, which
-        # pulls/pushes state-row blocks directly through the pool's
-        # InactiveMemberStore (transform_members_via_store) instead of
-        # requiring this rank's round-assigned members' full owned arrays
-        # simultaneously resident (transform_local_members). Verified
-        # bit-for-bit equivalent to the original path -- see
-        # test_distributed_streaming_runtime.py and this session's real-
-        # Icepack equivalence run.
+        # Report individual step wall times when verbose output is enabled.
         _t = MPI.Wtime()
         cycle_fn = (
             run_native_store_streaming_analysis_cycle
@@ -592,12 +572,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         time_forecast_step += _step_wall
         if do_analysis:
             time_analysis_cycle_steps += _step_wall
-        # PACE calibration instrumentation (2026-09-28, additive only --
-        # does not affect control flow or any existing metric). JIT/warm-up
-        # cost is concentrated in the first forecast step; printing each
-        # step's own wall time lets a post-run parser separate "first step"
-        # from "steady-state per-step" cost instead of only ever seeing the
-        # aggregated forecast_step_time average.
+        # Report individual step wall times when verbose output is enabled.
         if icesee_kwargs.get("verbose") and world_rank == 0:
             print(f"[ICESEE] mode3 forecast step {k}: wall={_step_wall:.4f}s did_analysis={do_analysis}", flush=True)
         if do_analysis:
@@ -735,6 +710,8 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         output_dir=_modelrun_datasets,
     )
 
+    pool = None
+    _release_model_topology(topology)
     return icesee_kwargs
 
 

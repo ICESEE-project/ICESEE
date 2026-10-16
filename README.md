@@ -8,14 +8,13 @@ ICESEE (ICE ShEet State and Parameter Estimator) is a data assimilation software
 
 ICESEE (ICE ShEet state and parameter Estimator) is a scalable ensemble-based data assimilation framework designed for coupling with ice-sheet, climate, and geophysical models such as ISSM, Icepack, and idealized systems like Lorenz-96.
 
-ICESEE provides a modular and extensible scientific computing infrastructure for ensemble forecasting, uncertainty quantification, parameter estimation, and hybrid physics–AI workflows in large-scale environmental modeling.
+ICESEE provides a modular and extensible scientific computing infrastructure for ensemble forecasting, uncertainty quantification, and parameter estimation workflows in large-scale environmental modeling.
 
 The framework supports:
 - Ensemble-based data assimilation methods
 - Distributed-memory HPC execution
 - Cloud-enabled scientific workflows
 - Cross-language model coupling
-- AI-enhanced scientific computing and machine learning integration
 
 ---
 
@@ -55,23 +54,6 @@ The figure shown below is generated directly from the automated test workflow of
 
 ---
 
-## AI/ML Integration
-
-ICESEE is being extended with scientific machine learning and AI-enhanced workflows to support next-generation hybrid physics–AI modeling and scalable intelligent simulation systems.
-
-Current and planned AI/ML capabilities include:
-
-- Machine learning–based parameter estimation
-- Neural-network observation operators
-- AI-enhanced ensemble initialization
-- Adaptive covariance and inflation tuning
-- Surrogate forward models for accelerated simulations
-- Intelligent workflow automation and HPC optimization
-- AI-assisted diagnostics and parameter tuning
-
-The AI/ML framework is designed to integrate seamlessly with existing ensemble-based data assimilation workflows while maintaining compatibility with distributed HPC environments and scientific modeling systems.
-
----
 
 ## Supported Models
 
@@ -124,7 +106,6 @@ boundary target is described in [`docs/model-adapter.md`](docs/model-adapter.md)
 
 - Integration of scientific machine learning workflows into data assimilation pipelines
 - Development of neural surrogate models for accelerated ice-sheet simulations
-- AI-enhanced parameter estimation and adaptive ensemble tuning
 - Expansion of cloud-native and remote execution through CryoStack
 - Expansion of distributed HPC workflows for large-scale ensemble forecasting
 - Continued integration of ICESEE workflows and supported models into CryoStack
@@ -132,11 +113,9 @@ boundary target is described in [`docs/model-adapter.md`](docs/model-adapter.md)
 
 - Machine learning–based parameter estimation
 - Neural-network observation operators
-- AI-enhanced ensemble initialization
 - Adaptive covariance and inflation tuning
 - Surrogate forward models for accelerated simulations
 - Intelligent workflow automation and HPC optimization
-- AI-assisted diagnostics and parameter tuning
 
 These capabilities are under active development and are not yet part of the stable ICESEE release.
 
