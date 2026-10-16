@@ -25,8 +25,15 @@ class Field:
         self.value = value
         self.calls = 0
 
-    def at(self, points, dont_raise=False):
+    def function_space(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(mesh=lambda: self)
+
+    tolerance = 0.5
+
+    def at(self, points, dont_raise=False, tolerance=None):
         assert dont_raise
+        assert tolerance == 1e-10
         self.calls += 1
         return [self.value if i % 2 == 0 else None for i in range(len(points))]
 

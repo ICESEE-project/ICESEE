@@ -401,60 +401,24 @@ def initialize_model(**icesee_kwargs):
 
 # --- Visualizing the model with a flowline profile DURING THE SIMULATION  ---
 def initial_flowline_profile(icesee_kwargs):
-
-    # -- arrays to save the ALL of the flowline profile outputs (including the initial state) throughout the simulation --
-    h_profiles=[]
-    s_profiles = []
-
-    """ define flowline in EPSG:3031 to track the profile of PIG across a seafloor ridge """
+    from ._mode3_profiles import sample_fields
     start = np.array([-1587750., -200000.])
     end = np.array([-1610250., -500000.])
-
-    num_points = 1000
-    t_values = np.linspace(0, 1, num_points)
-    profile_points = np.outer(1 - t_values, start) + np.outer(t_values, end)
-
-    """ try extracting values from the flowline and filter out points that fail """
-    valid_points = []
-    bed_values, surface_values, thickness_values = [], [], []
-
-    for p in profile_points:
-        try:
-            bed_values.append(icesee_kwargs["bed"].at(tuple(p)))
-            surface_values.append(icesee_kwargs["s"].at(tuple(p)))
-            thickness_values.append(icesee_kwargs["h"].at(tuple(p)))
-            valid_points.append(tuple(p))
-        except firedrake.PointNotInDomainError:
-            pass  # Ignore points that are outside the mesh
-
-    # Convert valid points back to NumPy array
-    valid_points = np.array(valid_points)
-    distances = np.linspace(0, np.linalg.norm(end - start), len(valid_points))
-
-    h_profiles.append(thickness_values)
-    s_profiles.append(surface_values)
-
-    return(h_profiles, s_profiles, valid_points, distances, bed_values)
+    points = start + np.linspace(0., 1., 1000)[:, None] * (end - start)
+    values = sample_fields((icesee_kwargs["h"], icesee_kwargs["s"], icesee_kwargs["bed"]), points)
+    valid = np.array([all(v[i] is not None for v in values) for i in range(len(points))])
+    valid_points = points[valid]
+    h, s, bed = [np.asarray([v[i] for i in np.flatnonzero(valid)], dtype=float).reshape(-1) for v in values]
+    distances = np.linalg.norm(valid_points - start, axis=1)
+    return [h], [s], valid_points, distances, bed
 
 
-
-
-# --- Visualizing the model with a flowline profile DURING THE SIMULATION  ---
 def flowline_profile(h, s, valid_points):
-
-    # -- arrays to save the flowline profile outputs at a particular time step --
-    surface_values, thickness_values = [], []
-
-    # -- sample values from the flowline points --
-    for p in valid_points:
-        try:
-            surface_values.append(s.at(tuple(p)))
-            thickness_values.append(h.at(tuple(p)))
-        except firedrake.PointNotInDomainError:
-            pass  # Ignore points that are outside the mesh
-
-
-    return np.array(thickness_values), np.array(surface_values)
+    from ._mode3_profiles import sample_fields
+    values = sample_fields((h, s), valid_points)
+    if any(value is None for field_values in values for value in field_values):
+        raise ValueError("A saved flowline point is outside the current model mesh")
+    return tuple(np.asarray(value, dtype=float).reshape(-1) for value in values)
 
 
 #########################################################################################

@@ -115,6 +115,7 @@ import gc
 import h5py
 import numpy as np
 from mpi4py import MPI
+from firedrake import COMM_SELF as _REFERENCE_COMM
 
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_model import (
     initialize_model,
@@ -204,7 +205,7 @@ def _build_reference_setup_context(icesee_kwargs: dict) -> int:
     """
 
     ref_kwargs = dict(icesee_kwargs)
-    ref_kwargs["comm"] = MPI.COMM_SELF
+    ref_kwargs["comm"] = _REFERENCE_COMM
     (
         h,
         h0,

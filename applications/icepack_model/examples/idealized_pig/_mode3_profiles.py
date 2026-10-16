@@ -13,6 +13,21 @@ def profile_columns(step, dt, save_steps):
             if np.isclose(step * dt, year, rtol=0.0, atol=1e-9)]
 
 
+def sample_fields(fields, points):
+    """Evaluate physical points without extrapolated overlap values."""
+    meshes = {}
+    for field in fields:
+        mesh = field.function_space().mesh()
+        meshes[id(mesh)] = (mesh, mesh.tolerance)
+    try:
+        values = [field.at(points, dont_raise=True, tolerance=1e-10)
+                  for field in fields]
+    finally:
+        for mesh, tolerance in meshes.values():
+            mesh.tolerance = tolerance
+    return values
+
+
 def write_member_profile(member_id, h, s, bed, *, step, comm, icesee_kwargs):
     """Sample collectively; only the spatial root opens the serial HDF5 file.
 
@@ -32,7 +47,7 @@ def write_member_profile(member_id, h, s, bed, *, step, comm, icesee_kwargs):
     points = start + fractions[:, None] * (end - start)
     # Firedrake's vector point evaluation is collective and returns None
     # for points outside the distributed mesh when dont_raise is enabled.
-    values = [field.at(points, dont_raise=True) for field in (h, s, bed)]
+    values = sample_fields((h, s, bed), points)
     valid = np.array([all(v[i] is not None for v in values) for i in range(len(points))])
     points = points[valid]
     arrays = [np.asarray([v[i] for i in np.flatnonzero(valid)], dtype=float).reshape(-1)

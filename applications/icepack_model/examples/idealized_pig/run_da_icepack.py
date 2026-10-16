@@ -39,7 +39,7 @@ from ICESEE.src.run_model_da.run_models_da import icesee_model_data_assimilation
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 from ICESEE.src.utils.performance import record_phase, register_package_versions
 from ICESEE.src.utils.run_schedule import resolve_run_schedule
-from ICESEE.src.utils.init_trace import traced_init
+from ICESEE.src.utils.init_trace import traced_init, arm_hang_watchdog
 from mpi4py import MPI
 
 # Record this application's model-stack versions in the end-of-run
@@ -52,7 +52,14 @@ from ICESEE.applications.icepack_model.examples.idealized_pig import mode3_runne
 
 # --- Initialize MPI ---
 
-rank, size, comm, _ = ParallelManager().icesee_mpi_init(icesee_kwargs)
+if int(icesee_kwargs.get("execution_mode", 1)) == 3:
+    # The native runner owns its topology and model contexts. Creating a
+    # legacy context here repeats checkpoint reads and diagnostic solves.
+    comm = MPI.COMM_WORLD
+    rank, size = comm.Get_rank(), comm.Get_size()
+    arm_hang_watchdog()
+else:
+    rank, size, comm, _ = ParallelManager().icesee_mpi_init(icesee_kwargs)
 
 PETSc.Sys.Print("Fetching the model parameters ...")
 
@@ -74,7 +81,7 @@ dt = float(_cli["dt"]) if "dt" in _cli else float(icesee_kwargs["timesteps_per_y
 nt = int(round(num_years / dt))     # total number of time steps
 
 # Use physical model years to label diagnostic save points.
-t = np.linspace(0, int(num_years), nt + 1)
+t = np.arange(nt + 1, dtype=float) * dt
 
 icesee_kwargs.update({"nt": nt, "dt": dt, "timesteps_per_year": dt, "t": t})
 
@@ -113,65 +120,68 @@ icesee_kwargs.update({
     #"hThresh": icesee_kwargs["hThresh"]
 })
 
-_t_init = time.perf_counter()
-with traced_init("model initialization (driver)", comm=comm):
-    h, h0, s, s0, u, bed, zF, grounded, floating, A0, beta0, smb, basal_melt_field, Q, V, forward_solver = initialize_model(**icesee_kwargs)
-record_phase("model_initialization", time.perf_counter() - _t_init)
+# Native Mode 3 initializes the reference on world root and each model
+# group once inside its runner. Modes 0-2 use the legacy driver context.
+if int(icesee_kwargs.get("execution_mode", 1)) != 3:
+    _t_init = time.perf_counter()
+    with traced_init("model initialization (driver)", comm=comm):
+        h, h0, s, s0, u, bed, zF, grounded, floating, A0, beta0, smb, basal_melt_field, Q, V, forward_solver = initialize_model(**icesee_kwargs)
+    record_phase("model_initialization", time.perf_counter() - _t_init)
 
 
 
-# ----- Update the parameters ----
+    # ----- Update the parameters ----
 
-icesee_kwargs["nd"] = h0.dat.data.size * icesee_kwargs["total_state_param_vars"] # get the size of the entire vector
-
-
-icesee_kwargs.update({
-
-    "smb": smb,
-    "h": h,
-    "h0": h0,
-    "s": s,
-    "s0": s0,
-    "u": u,
-    "basal_melt_field": basal_melt_field,
-    "A0": A0,
-    "beta0": beta0,
-    "Q":Q,
-    "V":V,
-    "bed": bed,
-    "seed":float(icesee_kwargs["seed"]),
-    "zF": zF,
-    "grounded": grounded,
-    "floating": floating,
-    "wrong_basal_melt_field": float(icesee_kwargs["wrong_basal_melt_field"]),
-    "solver": forward_solver,
-    "nd": icesee_kwargs["nd"],
-    #"Lx":float(icesee_kwargs["Lx"]),
-    #"Ly":float(icesee_kwargs["Ly"]),
-    #"nx":float(icesee_kwargs["nx"]),
-    #"ny":float(icesee_kwargs["ny"]),
-
-})
+    icesee_kwargs["nd"] = h0.dat.data.size * icesee_kwargs["total_state_param_vars"] # get the size of the entire vector
 
 
+    icesee_kwargs.update({
 
-# ----- Nudge the basal melt rate field -----
+        "smb": smb,
+        "h": h,
+        "h0": h0,
+        "s": s,
+        "s0": s0,
+        "u": u,
+        "basal_melt_field": basal_melt_field,
+        "A0": A0,
+        "beta0": beta0,
+        "Q":Q,
+        "V":V,
+        "bed": bed,
+        "seed":float(icesee_kwargs["seed"]),
+        "zF": zF,
+        "grounded": grounded,
+        "floating": floating,
+        "wrong_basal_melt_field": float(icesee_kwargs["wrong_basal_melt_field"]),
+        "solver": forward_solver,
+        "nd": icesee_kwargs["nd"],
+        #"Lx":float(icesee_kwargs["Lx"]),
+        #"Ly":float(icesee_kwargs["Ly"]),
+        #"nx":float(icesee_kwargs["nx"]),
+        #"ny":float(icesee_kwargs["ny"]),
 
-wrong_bmr = firedrake.Constant(icesee_kwargs["wrong_basal_melt_field"])
+    })
 
-# firedrake.interpolate(expr, Q) (the free-function form) now returns a
-# lazy symbolic Interpolate object in the installed Firedrake/UFL version,
-# not an evaluated Function -- Function(Q).interpolate(expr) is the
-# eager-evaluation equivalent (same math). Confirmed this matters here
-# specifically: icesee_kwargs["basal_melt_field"] is itself produced by
-# BasalMeltRate's own interpolate() call, so a lazy result fed into a
-# second interpolate() call is exactly the "Non-contiguous argument
-# numbers in interpolate" failure reproduced while diagnosing this.
-bmr_nudged = firedrake.Function(icesee_kwargs["Q"]).interpolate(
-    icesee_kwargs["basal_melt_field"] + wrong_bmr
-)
 
-icesee_kwargs.update({"bmr_nudged": bmr_nudged})
+
+    # ----- Nudge the basal melt rate field -----
+
+    wrong_bmr = firedrake.Constant(icesee_kwargs["wrong_basal_melt_field"])
+
+    # firedrake.interpolate(expr, Q) (the free-function form) now returns a
+    # lazy symbolic Interpolate object in the installed Firedrake/UFL version,
+    # not an evaluated Function -- Function(Q).interpolate(expr) is the
+    # eager-evaluation equivalent (same math). Confirmed this matters here
+    # specifically: icesee_kwargs["basal_melt_field"] is itself produced by
+    # BasalMeltRate's own interpolate() call, so a lazy result fed into a
+    # second interpolate() call is exactly the "Non-contiguous argument
+    # numbers in interpolate" failure reproduced while diagnosing this.
+    bmr_nudged = firedrake.Function(icesee_kwargs["Q"]).interpolate(
+        icesee_kwargs["basal_melt_field"] + wrong_bmr
+    )
+
+    icesee_kwargs.update({"bmr_nudged": bmr_nudged})
 
 
 

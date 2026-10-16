@@ -105,7 +105,8 @@ def test_build_reference_setup_context_computes_global_nd_on_comm_self(monkeypat
     assert icesee_kwargs["nd"] == 12
     assert icesee_kwargs["h0"].dat.data.size == 4
     assert icesee_kwargs["solver"] == "solver"
-    assert captured_comm["comm"] is MPI.COMM_SELF
+    assert captured_comm["comm"] is runner._REFERENCE_COMM
+    assert captured_comm["comm"].Get_size() == 1
 
 
 class _SelfComm:

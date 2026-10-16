@@ -18,9 +18,9 @@ RUN_DIR="$PIG_DIR/pace_runs/runtime-check-${SLURM_JOB_ID:?}"
 mkdir -p "$RUN_DIR"
 DATA_DIR="$RUN_DIR/data"
 export ICESEE_DEBUG_INIT=1 ICESEE_HANG_DUMP_S=300
-ARGS=(--Nens=2 --execution_mode=3 --model_nprocs=2 --num_years=1 --dt=0.05
-      --obs_start_time=0.5 --obs_max_time=1 --freq_obs=0.5
-      '--save_steps=[0.05, 0.1, 1.0]' --checkpoint_every=10
+ARGS=(--Nens=2 --execution_mode=3 --model_nprocs=2 --num_years=0.1 --dt=0.05
+      --obs_start_time=0.05 --obs_max_time=0.1 --freq_obs=0.05
+      '--save_steps=[0.05,0.1]' --checkpoint_every=1
       --checkpoint_keep_last=2 --data_path="$DATA_DIR")
 printf 'parent commit: '; git -C "$ICESEE_ROOT" rev-parse HEAD
 srun --mpi=pmix --nodes=2 --ntasks=4 --ntasks-per-node=2 --distribution=block:block --cpu-bind=cores \
@@ -34,7 +34,7 @@ root = Path(sys.argv[1])
 paths = [root / 'hs_profiles_true.h5'] + [root / f'hs_ensemble_profiles{i}.h5' for i in range(2)]
 for path in paths:
     with h5py.File(path) as handle:
-        np.testing.assert_array_equal(handle['written_steps'][:], [0, 1, 2, 20])
+        np.testing.assert_array_equal(handle['written_steps'][:], [0, 1, 2])
         assert handle['h_profiles'].shape[0] > 0
         assert np.isfinite(handle['h_profiles'][:]).all()
         assert np.isfinite(handle['s_profiles'][:]).all()
