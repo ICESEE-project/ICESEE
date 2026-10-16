@@ -293,11 +293,8 @@ def test_basal_melt_schedule_matches_reference_scenario_timeline(
     assert seen["experiment"] == native.EXPERIMENT_WRONG
 
 
-def test_initialize_member_uses_deterministic_coordinate_keyed_perturbation(monkeypatch):
-    """Same base seed + same logical member + same physical coordinate =>
-    same perturbation, independent of decomposition/ownership -- the
-    scientific invariant this fix establishes (replacing the old
-    array-position-keyed, decomposition-dependent draw)."""
+def test_initialize_member_preserves_initial_thickness_and_forcing(monkeypatch):
+    """Warmup receives the unperturbed initial thickness and configured forcing."""
     native._SHARED_CONTEXT_CACHE.clear()
     ctx_objs = _install_fake_mesh_pipeline(monkeypatch, build_calls=[])
 
@@ -322,21 +319,12 @@ def test_initialize_member_uses_deterministic_coordinate_keyed_perturbation(monk
     icesee_kwargs = _no_basal_melt_kwargs()
     topo = _topology()
 
-    # Reproduce the expected coordinate-keyed perturbation draw
-    # independently: (base_seed, member_id) -> seed (same derivation
-    # modes 1/2 use), then coordinate_keyed_white_noise over this rank's
-    # OWNED physical coordinates only -- NOT np.random.normal over local
-    # array size, which was the pre-fix (decomposition-dependent) draw.
-    seed = initialization_seed(icesee_kwargs["base_seed"], member_id=7, variable_index=0)
-    expected_noise = coordinate_keyed_white_noise(ctx_objs["coords"], seed)
-    expected_perturbation = 15 * expected_noise
-
     state = native.initialize_member(7, topology=topo, icesee_kwargs=icesee_kwargs)
 
     assert isinstance(state, IcepackNativeState)
     np.testing.assert_allclose(
         icepack_calls[0]["h"].dat.data_ro,
-        ctx_objs["h0"].dat.data_ro + expected_perturbation,
+        ctx_objs["h0"].dat.data_ro,
     )
     assert icepack_calls[0]["u"] is ctx_objs["u0"]
     assert icepack_calls[0]["smb"] is ctx_objs["smb"]
@@ -380,101 +368,35 @@ def _run_initialize_member(monkeypatch, member_id, *, icesee_kwargs=None):
     return ctx_objs, np.array(icepack_calls[0].dat.data_ro)
 
 
-def test_initialize_member_perturbation_uses_only_locally_owned_coordinates(monkeypatch):
-    """The coordinate array passed to coordinate_keyed_white_noise must be
-    exactly this rank's OWNED coordinates (same size as the local h0) --
-    never a larger/global-sized array -- confirming the fix generates only
-    locally owned values and never materializes a global Nx-sized
-    temporary."""
+def test_initialize_member_uses_unperturbed_owned_thickness(monkeypatch):
     native._SHARED_CONTEXT_CACHE.clear()
-    ctx_objs = _install_fake_mesh_pipeline(monkeypatch, build_calls=[])
-
-    captured = {}
-
-    def fake_coordinate_keyed_white_noise(coords, seed, coord_tolerance=1e-6):
-        captured["coords"] = np.asarray(coords)
-        captured["seed"] = seed
-        return np.zeros(np.asarray(coords).shape[0])
-
-    monkeypatch.setattr(native, "coordinate_keyed_white_noise", fake_coordinate_keyed_white_noise)
-    monkeypatch.setattr(
-        native, "Icepack",
-        lambda solver, h, u, smb, basal_melt_field, bed, dt, h0, run_kwargs: (
-            h, _vector_field(size=h.dat.data_ro.size), _scalar_field(size=h.dat.data_ro.size),
-            "floating-next", "grounded-next",
-        ),
-    )
-    monkeypatch.setattr(
-        native, "BasalMeltRate",
-        lambda icesee_kwargs, step, floating, Q, s, h, scenario, experiment=None: ("melt-field", 0.0),
-    )
-
-    icesee_kwargs = _no_basal_melt_kwargs()
-    topo = _topology()
-    native.initialize_member(7, topology=topo, icesee_kwargs=icesee_kwargs)
-
-    assert "coords" in captured
-    np.testing.assert_array_equal(captured["coords"], ctx_objs["coords"])
-    assert captured["coords"].shape[0] == ctx_objs["h0"].dat.data_ro.size
+    ctx, thickness = _run_initialize_member(monkeypatch, 7)
+    np.testing.assert_array_equal(thickness, ctx["h0"].dat.data_ro)
 
 
-def test_initialize_member_perturbation_reproducible_for_same_member(monkeypatch):
-    """Calling initialize_member twice for the SAME member_id (fresh
-    shared-context build each time) must produce the identical perturbed
-    thickness -- reproducibility of the member-keyed stream."""
+def test_initialize_member_is_reproducible_for_same_member(monkeypatch):
     native._SHARED_CONTEXT_CACHE.clear()
-    _ctx1, h_first = _run_initialize_member(monkeypatch, 7)
+    _ctx1, first = _run_initialize_member(monkeypatch, 7)
     native._SHARED_CONTEXT_CACHE.clear()
-    _ctx2, h_second = _run_initialize_member(monkeypatch, 7)
-    np.testing.assert_array_equal(h_first, h_second)
+    _ctx2, second = _run_initialize_member(monkeypatch, 7)
+    np.testing.assert_array_equal(first, second)
 
 
-def test_initialize_member_perturbation_differs_across_members(monkeypatch):
-    """Different member_ids must receive distinct perturbation
-    realizations at the same physical coordinates."""
+def test_initialize_member_starts_members_from_same_thickness(monkeypatch):
     native._SHARED_CONTEXT_CACHE.clear()
-    _ctx1, h_member7 = _run_initialize_member(monkeypatch, 7)
+    _ctx1, first = _run_initialize_member(monkeypatch, 7)
     native._SHARED_CONTEXT_CACHE.clear()
-    _ctx2, h_member8 = _run_initialize_member(monkeypatch, 8)
-    assert not np.allclose(h_member7, h_member8)
+    _ctx2, second = _run_initialize_member(monkeypatch, 8)
+    np.testing.assert_array_equal(first, second)
 
 
-def test_initialize_member_perturbation_amplitude_is_exactly_15(monkeypatch):
-    """h = h0 + 15 * N(0,1): the amplitude constant must still apply
-    exactly, unchanged by the coordinate-keying fix."""
+def test_initialize_member_does_not_draw_initialization_noise(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unperturbed initialization must not draw noise")
+    monkeypatch.setattr(native, "coordinate_keyed_white_noise", forbidden)
     native._SHARED_CONTEXT_CACHE.clear()
-    ctx_objs = _install_fake_mesh_pipeline(monkeypatch, build_calls=[])
-
-    known_noise = np.array([0.1, -0.2, 0.3, -0.4])
-
-    def fake_coordinate_keyed_white_noise(coords, seed, coord_tolerance=1e-6):
-        return known_noise
-
-    monkeypatch.setattr(native, "coordinate_keyed_white_noise", fake_coordinate_keyed_white_noise)
-
-    icepack_calls = []
-
-    def fake_icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, run_kwargs):
-        icepack_calls.append(h)
-        return (
-            h, _vector_field(size=h.dat.data_ro.size), _scalar_field(size=h.dat.data_ro.size),
-            "floating-next", "grounded-next",
-        )
-
-    monkeypatch.setattr(native, "Icepack", fake_icepack)
-    monkeypatch.setattr(
-        native, "BasalMeltRate",
-        lambda icesee_kwargs, step, floating, Q, s, h, scenario, experiment=None: ("melt-field", 0.0),
-    )
-
-    icesee_kwargs = _no_basal_melt_kwargs()
-    topo = _topology()
-    native.initialize_member(7, topology=topo, icesee_kwargs=icesee_kwargs)
-
-    np.testing.assert_array_equal(
-        icepack_calls[0].dat.data_ro,
-        ctx_objs["h0"].dat.data_ro + 15 * known_noise,
-    )
+    ctx, thickness = _run_initialize_member(monkeypatch, 7)
+    np.testing.assert_array_equal(thickness, ctx["h0"].dat.data_ro)
 
 
 def test_initialize_member_basal_melt_present_when_declared_in_state(monkeypatch):
