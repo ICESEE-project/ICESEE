@@ -10,6 +10,7 @@ import os
 import numpy as np
 import tqdm
 import h5py
+from ICESEE.applications.icepack_model.examples.idealized_pig._mode3_profiles import profile_columns
 
 # --- import run_simulation function from the available examples ---
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_model import *
@@ -89,12 +90,15 @@ def generate_true_state(**icesee_kwargs):
     hs_files = f"{_modelrun_datasets}/hs_profiles_true.h5"
 
     with h5py.File(hs_files, "w") as F:
-        dataset_h = F.create_dataset("h_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8")
-        dataset_s = F.create_dataset("s_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8")
+        dataset_h = F.create_dataset("h_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8", fillvalue=np.nan)
+        dataset_s = F.create_dataset("s_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8", fillvalue=np.nan)
         dataset_s[:,0] = s_profiles # save the initial surface elevation profile
         dataset_h[:,0] = h_profiles # save the initial thickness profile
         dataset_bed = F.create_dataset("bed_values", data = bed_values)
         dataset_distances = F.create_dataset("distances", data = distances)
+        F.create_dataset("profile_times", data=[0.0, *save_steps])
+        written = F.create_dataset("written_steps", data=np.full(len(save_steps) + 1, -1, dtype="i8"))
+        written[0] = 0
 
 
 
@@ -177,20 +181,14 @@ def generate_true_state(**icesee_kwargs):
 
 
 
-        if (kk <= len(flowline_profile_steps)-1):
-            if (k == int(flowline_profile_steps[kk])):
-
-                h_profiles, s_profiles = flowline_profile(h, s, valid_points)
-                print(s_profiles.shape,h_profiles.shape,"\n")
-
-
-                # Column 0 holds the initial profile; the kk-th requested
-                # save step goes to column kk + 1.
-                with h5py.File(hs_files, "a") as F:
-                    F["h_profiles"][:,kk+1] = h_profiles
-                    F["s_profiles"][:,kk+1] = s_profiles
-
-                kk += 1
+        columns = profile_columns(k + 1, float(dt), save_steps)
+        if columns:
+            h_profiles, s_profiles = flowline_profile(h, s, valid_points)
+            with h5py.File(hs_files, "a") as F:
+                for column in columns:
+                    F["h_profiles"][:, column] = h_profiles
+                    F["s_profiles"][:, column] = s_profiles
+                    F["written_steps"][column] = k + 1
 
     # Fully parallel execution supplies an HDF5 dataset as the write target.
     # The complete trajectory is already on disk; slicing every variable here
@@ -424,12 +422,15 @@ def generate_nurged_state(**icesee_kwargs):
     hs_nudged_files = f"{_modelrun_datasets}/hs_profiles_wrong.h5"
 
     with h5py.File(hs_nudged_files, "w") as F:
-        dataset_h = F.create_dataset("h_nudged_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8")
-        dataset_s = F.create_dataset("s_nudged_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8")
+        dataset_h = F.create_dataset("h_nudged_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8", fillvalue=np.nan)
+        dataset_s = F.create_dataset("s_nudged_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8", fillvalue=np.nan)
         dataset_s[:,0] = s_profiles # save the initial surface elevation profile
         dataset_h[:,0] = h_profiles # save the initial thickness profile
         dataset_bed = F.create_dataset("bed_values", data = bed_values)
         dataset_distances = F.create_dataset("distances", data = distances)
+        F.create_dataset("profile_times", data=[0.0, *save_steps])
+        written = F.create_dataset("written_steps", data=np.full(len(save_steps) + 1, -1, dtype="i8"))
+        written[0] = 0
 
     # # -- index for saving flowline profiles
     kk = 0
@@ -510,20 +511,14 @@ def generate_nurged_state(**icesee_kwargs):
         statevec_nurged[indx_map["basal_melt_field"],k+1] = basal_melt_field.dat.data_ro
 
        # # -- saving flowline profile at certain steps
-        if (kk <= len(flowline_profile_steps)-1):
-            if (k == int(flowline_profile_steps[kk])):
-
-                h_profiles, s_profiles = flowline_profile(h, s, valid_points)
-                print(s_profiles.shape,h_profiles.shape,"\n")
-
-
-                # Column 0 holds the initial profile; the kk-th requested
-                # save step goes to column kk + 1.
-                with h5py.File(hs_nudged_files, "a") as F:
-                    F["h_nudged_profiles"][:,kk+1] = h_profiles
-                    F["s_nudged_profiles"][:,kk+1] = s_profiles
-
-                kk += 1
+        columns = profile_columns(k + 1, float(dt), save_steps)
+        if columns:
+            h_profiles, s_profiles = flowline_profile(h, s, valid_points)
+            with h5py.File(hs_nudged_files, "a") as F:
+                for column in columns:
+                    F["h_nudged_profiles"][:, column] = h_profiles
+                    F["s_nudged_profiles"][:, column] = s_profiles
+                    F["written_steps"][column] = k + 1
 
     # See generate_true_state: mode 2 writes this trajectory in place.
     if isinstance(statevec_nurged, h5py.Dataset):
