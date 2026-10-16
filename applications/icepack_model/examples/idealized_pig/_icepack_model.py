@@ -95,22 +95,36 @@ def initializeMesh(**icesee_kwargs):
 
 def initializeRun(icesee_kwargs, forward_solver, mesh, Q, V):
 
-    # Forward whatever communicator this call's mesh/model context already uses, rather than accepting CheckpointFile's own default (COMM_WORLD, baked into 
-    # # firedrake.checkpointing.CheckpointFile.__init__). That default is harmless for modes 0-2 (one Firedrake mesh partitioned across the whole run's model 
-    # communicator, which is COMM_WORLD in practice) but is a genuine correctness bug for mode 3's native adapter (_icepack_native.py), which builds one independent
-    # mesh/solver context per ensemble group on topology.spatial_comm and calls this function once per rank, group by group, not in lockstep across the whole world. 
-    # A tiny 2-rank/2-independent-group probe confirmed this concretely: with no comm= (both ranks collectively opening CheckpointFile on COMM_WORLD despite each naming a different
-    # file), the read did not hang but returned silently WRONG values (cross-contaminated between the two groups' files) -- worse than a deadlock, since it fails without 
-    # any visible error. Explicit comm=icesee_kwargs["comm"] (falling back to COMM_WORLD only if that key is absent, matching Firedrake's own `comm or COMM_WORLD` convention 
-    # elsewhere in checkpointing.py) scopes the collective open to exactly the ranks that own this call's mesh, for every mode -- not a mode-name conditional, just using 
-    # the communicator the caller already established. See src/tests/test_icepack_checkpoint_communicator.py.
+    # Forward whatever communicator this call's mesh/model context already
+    # uses, rather than accepting CheckpointFile's own default (COMM_WORLD,
+    # baked into firedrake.checkpointing.CheckpointFile.__init__). That
+    # default is harmless for modes 0-2 (one Firedrake mesh partitioned
+    # across the whole run's model communicator, which IS COMM_WORLD in
+    # practice) but is a genuine correctness bug for mode 3's native
+    # adapter (_icepack_native.py), which builds one independent
+    # mesh/solver context per ensemble group on topology.spatial_comm and
+    # calls this function once per rank, group by group, not in lockstep
+    # across the whole world. A tiny 2-rank/2-independent-group probe
+    # confirmed this concretely: with no comm= (both ranks collectively
+    # opening CheckpointFile on COMM_WORLD despite each naming a different
+    # file), the read did not hang but returned silently WRONG values
+    # (cross-contaminated between the two groups' files) -- worse than a
+    # deadlock, since it fails without any visible error. Explicit
+    # comm=icesee_kwargs["comm"] (falling back to COMM_WORLD only if that
+    # key is absent, matching Firedrake's own `comm or COMM_WORLD`
+    # convention elsewhere in checkpointing.py) scopes the collective open
+    # to exactly the ranks that own this call's mesh, for every mode --
+    # not a mode-name conditional, just using the communicator the caller
+    # already established. See src/tests/test_icepack_checkpoint_communicator.py.
     checkpoint_comm = icesee_kwargs.get("comm") or firedrake.COMM_WORLD
-
-
-    # Optional, explicitly opt-in (default False -- the full spin-up- history checkpoint's read path below is byte-for-byte unchanged): a "compact" initFile built by 
-    # tools/build_compact_initialization.py stores velocity/thickness/surface in NORMAL (non-timestepping) mode, not at idx=20000 -- see that script's own docstring for why
-    # (measured: idx-mode storage is proportional to the index value, not to how many indices are written, so preserving idx=20000 on write produced a 34.67 GB file instead of 
-    # a compact one).
+    # Optional, explicitly opt-in (default False -- the full spin-up-
+    # history checkpoint's read path below is byte-for-byte unchanged):
+    # a "compact" initFile built by tools/build_compact_initialization.py
+    # stores velocity/thickness/surface in NORMAL (non-timestepping) mode,
+    # not at idx=20000 -- see that script's own docstring for why
+    # (measured: idx-mode storage is proportional to the index value, not
+    # to how many indices are written, so preserving idx=20000 on write
+    # produced a 34.67 GB file instead of a compact one).
     compact_initialization = bool(icesee_kwargs.get("compact_initialization", False))
     with traced_init("checkpoint field load", comm=checkpoint_comm, compact=compact_initialization), \
             firedrake.CheckpointFile(icesee_kwargs["initFile"], 'r', comm=checkpoint_comm) as checkpoint:
@@ -239,19 +253,14 @@ def BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', ex
     ####### TIMING OF LINEAR INCREASE IN BMR (true trajectory only) #######
     if experiment == EXPERIMENT_WRONG:
         melt_max = beginning_bmr
-    #elif (step * icesee_kwargs['dt']) < icesee_kwargs["bmr_increase_time"]:
-        #melt_max = beginning_bmr
+    elif (step * icesee_kwargs['dt']) < icesee_kwargs["bmr_increase_time"]:
+        melt_max = beginning_bmr
 
-    if experiment == 'true':
-        if (step * icesee_kwargs['dt']) < icesee_kwargs["bmr_increase_time"]:
-            melt_max = beginning_bmr
-    
-        # The period over which BMR increases shortens by 'x' years
-        else:
-            melt_max = ((final_bmr - beginning_bmr)/(icesee_kwargs["num_years"] - icesee_kwargs["bmr_increase_time"])) * ((step - (icesee_kwargs["bmr_increase_time"]/icesee_kwargs["dt"])) * icesee_kwargs["dt"]) + beginning_bmr
-    #else:
-        #melt_max = beginning_bmr
-   
+    # The period over which BMR increases shortens by 'x' years
+    else:
+        melt_max = ((final_bmr - beginning_bmr)/(icesee_kwargs["num_years"] - icesee_kwargs["bmr_increase_time"])) * ((step - (icesee_kwargs["bmr_increase_time"]/icesee_kwargs["dt"])) * icesee_kwargs["dt"]) + beginning_bmr
+
+
 
     ##########################################
 
@@ -392,60 +401,24 @@ def initialize_model(**icesee_kwargs):
 
 # --- Visualizing the model with a flowline profile DURING THE SIMULATION  ---
 def initial_flowline_profile(icesee_kwargs):
-
-    # -- arrays to save the ALL of the flowline profile outputs (including the initial state) throughout the simulation --
-    h_profiles=[]
-    s_profiles = []
-
-    """ define flowline in EPSG:3031 to track the profile of PIG across a seafloor ridge """
+    from ._mode3_profiles import sample_fields
     start = np.array([-1587750., -200000.])
     end = np.array([-1610250., -500000.])
-
-    num_points = 1000
-    t_values = np.linspace(0, 1, num_points)
-    profile_points = np.outer(1 - t_values, start) + np.outer(t_values, end)
-
-    """ try extracting values from the flowline and filter out points that fail """
-    valid_points = []
-    bed_values, surface_values, thickness_values = [], [], []
-
-    for p in profile_points:
-        try:
-            bed_values.append(icesee_kwargs["bed"].at(tuple(p)))
-            surface_values.append(icesee_kwargs["s"].at(tuple(p)))
-            thickness_values.append(icesee_kwargs["h"].at(tuple(p)))
-            valid_points.append(tuple(p))
-        except firedrake.PointNotInDomainError:
-            pass  # Ignore points that are outside the mesh
-
-    # Convert valid points back to NumPy array
-    valid_points = np.array(valid_points)
-    distances = np.linspace(0, np.linalg.norm(end - start), len(valid_points))
-
-    h_profiles.append(thickness_values)
-    s_profiles.append(surface_values)
-
-    return(h_profiles, s_profiles, valid_points, distances, bed_values)
+    points = start + np.linspace(0., 1., 1000)[:, None] * (end - start)
+    values = sample_fields((icesee_kwargs["h"], icesee_kwargs["s"], icesee_kwargs["bed"]), points)
+    valid = np.array([all(v[i] is not None for v in values) for i in range(len(points))])
+    valid_points = points[valid]
+    h, s, bed = [np.asarray([v[i] for i in np.flatnonzero(valid)], dtype=float).reshape(-1) for v in values]
+    distances = np.linalg.norm(valid_points - start, axis=1)
+    return [h], [s], valid_points, distances, bed
 
 
-
-
-# --- Visualizing the model with a flowline profile DURING THE SIMULATION  ---
 def flowline_profile(h, s, valid_points):
-
-    # -- arrays to save the flowline profile outputs at a particular time step --
-    surface_values, thickness_values = [], []
-
-    # -- sample values from the flowline points --
-    for p in valid_points:
-        try:
-            surface_values.append(s.at(tuple(p)))
-            thickness_values.append(h.at(tuple(p)))
-        except firedrake.PointNotInDomainError:
-            pass  # Ignore points that are outside the mesh
-
-
-    return np.array(thickness_values), np.array(surface_values)
+    from ._mode3_profiles import sample_fields
+    values = sample_fields((h, s), valid_points)
+    if any(value is None for field_values in values for value in field_values):
+        raise ValueError("A saved flowline point is outside the current model mesh")
+    return tuple(np.asarray(value, dtype=float).reshape(-1) for value in values)
 
 
 #########################################################################################
@@ -476,7 +449,6 @@ def Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, icesee_kwargs):
      # ---- net accumulation used by prognostic step ------
     a = icepack.interpolate((smb - basal_melt_field) * w2i, icesee_kwargs["Q"])
 
-    #print(f"\n Inside Icepack: mean BMR field = {np.mean(basal_melt_field.dat.data_ro)} \n")
 
     h = solver.prognostic_solve(
         dt = dt,
@@ -485,7 +457,9 @@ def Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, icesee_kwargs):
         accumulation = a,
         thickness_inflow = h0,
     )
-    
+
+    #print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}, Mean_net_accumlation_field:{np.mean(a.dat.data_ro)}\n")
+    #exit(1)
 
     icesee_kwargs["h"] = h
     h = checkThickness(icesee_kwargs)
@@ -562,12 +536,10 @@ def run_model(ensemble, **icesee_kwargs):
     u_vec = ensemble[indx_map["u"]]
     v_vec = ensemble[indx_map["v"]]
     s_vec = ensemble[indx_map["s"]]
-    basal_melt_vec = ensemble[indx_map["basal_melt_field"]]
 
     #print(f"h_vec_mean={np.mean(h_vec)}, u_vec_mean = {np.mean(u_vec)}, v_vec_mean = {np.mean(v_vec)}\n")
 
-    # basal_melt_field is always part of the packed state vector regardless of the state/parameter bookkeeping split (see config/_utility_imports.py's
-    # vec_inputs/total_state_param_vars derivation and this file's 2026-09-28 reconciliation note) -- read it unconditionally.
+    # The configured state vector includes basal_melt_field independently of joint estimation.
     basal_melt_vec = ensemble[indx_map["basal_melt_field"]]
 
     h = Function(Q)
@@ -637,18 +609,20 @@ def run_model(ensemble, **icesee_kwargs):
 
     # ----- joint estimation --------
 
-    # if kwargs["joint_estimation"]:
+    # if icesee_kwargs["joint_estimation"]:
+
     #     bmr_vec = ensemble[indx_map["basal_melt_field"]]
     #     basal_melt = Function(Q)
-    #     basal_melt.dat.data[:] = bmr_vec.copy() 
+    #     basal_melt.dat.data[:] = bmr_vec.copy()
+
     # else:
-    #     basal_melt = kwargs.get('basal_melt_field', None)       
+    #     basal_melt = icesee_kwargs.get('basal_melt_field', None)
+
     #     if basal_melt is None:
     #         raise ValueError("basal_melt_field missing in icesee_kwargs when joint_estimation=False")
 
-    
-    
-    # return a list of the updated state variables. basal_melt_field is always part of the packed vector (see the unconditional read above).
+    # return a list of the updated state variables. basal_melt_field is
+    # always part of the packed vector (see the unconditional read above).
     updated_state = {'h': h.dat.data_ro,
                      'u': u.dat.data_ro[:,0],
                      'v': u.dat.data_ro[:,1],
@@ -656,84 +630,24 @@ def run_model(ensemble, **icesee_kwargs):
                      'basal_melt_field': basal_melt_field.dat.data_ro}
 
 
-    # -- extract the flowline profile at particular steps -- Path-isolation fix (2026-09-28): was a hardcoded, non-run-specific relative path -- two jobs sharing this 
-    # working directory would collide on the same file. Now scoped under this run's own data_path, matching mode3_runner.py's existing pattern.
-    _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
-    hs_ensemble_files = profile_path(_modelrun_datasets, f"hs_ensemble_profiles_{ens}")
-
-    
-    # Restored gating: this block previously ran unconditionally every timestep for every ensemble member even though its output is only ever consumed at the three 
-    # save points below (t[k] in {5, 10, 20}).
-    #if t[k] in (5, 10, 20):
-        #with h5py.File(hs_ensemble_files, "r") as F:
-            #valid_points = F["valid_points"][:]
-
-        #h_profiles, s_profiles = flowline_profile(h, s, valid_points)
-        #print(s_profiles.shape, h_profiles.shape,"\n")
-
-    print(f"t[{k}] = {t[k]}")
-
-      
-    # if we're at a time step where we want to save a profile 
-    if step in flowline_profile_steps:
-
-        ##### DEBUGGING
-        print("inside a flowline profile step!")
-
-        # CREATE a file (per ensemble member) at the particular time step
-        hs_ensemble_files = f"_modelrun_datasets/hs_ensemble_profiles_ens{ens}_time{t[step]}"
-
-
-
-        # OPEN an older file where 'valid_points' is saved
-        ens_valid_points = f"_modelrun_datasets/hs_ensemble_profiles_ens0_time0"
-        # retrieve the saved 'valid_points' from which to sample profile points
-        with h5py.File(ens_valid_points, "r") as F:
+    # Sample only configured physical-year save points. Keep the established
+    # per-member .h5 schema and respect the run's data_path.
+    columns = [
+        index + 1 for index, year in enumerate(save_steps)
+        if np.isclose(float(step) * float(dt), float(year), rtol=0.0, atol=1e-9)
+    ]
+    if columns:
+        _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
+        hs_ensemble_files = profile_path(_modelrun_datasets, f"hs_ensemble_profiles{ens}")
+        with h5py.File(hs_ensemble_files, "r") as F:
             valid_points = F["valid_points"][:]
-        # now extract profiles of ice thickness and surface elevation
         h_profiles, s_profiles = flowline_profile(h, s, valid_points)
-        # sanity check
-        print(s_profiles.shape, h_profiles.shape,"\n")
-
-
-
-        # MANUALLY save profiles at years 1970, 2005, & 2017 (need more efficient way to do this)
-        if t[k] == 34:
-            with h5py.File(hs_ensemble_files, "w") as F:
-                    dataset_h_ensemble = F.create_dataset("h_profiles", len(valid_points), dtype = "f8")
-                    dataset_s_ensemble = F.create_dataset("s_profiles", len(valid_points), dtype = "f8")
-                    dataset_s_ensemble[:] = s_profiles 
-                    dataset_h_ensemble[:] = h_profiles 
-                    
-
-        if t[k] == 69:
-            with h5py.File(hs_ensemble_files, "w") as F:
-                dataset_h_ensemble = F.create_dataset("h_profiles", len(valid_points), dtype = "f8")
-                dataset_s_ensemble = F.create_dataset("s_profiles", len(valid_points), dtype = "f8")
-                dataset_s_ensemble[:] = s_profiles 
-                dataset_h_ensemble[:] = h_profiles 
-                
-
-        if t[k] == 81:
-            with h5py.File(hs_ensemble_files, "w") as F:
-                dataset_h_ensemble = F.create_dataset("h_profiles", len(valid_points), dtype = "f8")
-                dataset_s_ensemble = F.create_dataset("s_profiles", len(valid_points), dtype = "f8")
-                dataset_s_ensemble[:] = s_profiles 
-                dataset_h_ensemble[:] = h_profiles 
-               
-
-
+        with h5py.File(hs_ensemble_files, "a") as F:
+            for column in columns:
+                F["h_profiles"][:, column] = h_profiles
+                F["s_profiles"][:, column] = s_profiles
 
     return updated_state
-
-
-
-# Fetching mesh coordinates for perturbation generation
-from ICESEE.applications.icepack_model.icepack_utils._coordinates import (
-    register_icepack_coordinate_provider,
-)
-
-register_icepack_coordinate_provider()
 
 
 
