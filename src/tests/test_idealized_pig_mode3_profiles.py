@@ -84,14 +84,19 @@ def test_resume_changed_schedule_is_rejected(tmp_path):
         write(tmp_path, 3, save_steps=(0.3, 0.8))
 
 
-def test_true_profile_file_includes_final_step_and_marks_future_years(tmp_path):
+@pytest.mark.parametrize('function_name,state_key,filename,h_key', [
+    ('generate_true_state', 'statevec_true', 'hs_profiles_true.h5', 'h_profiles'),
+    ('generate_nurged_state', 'statevec_nurged', 'hs_profiles_wrong.h5', 'h_nudged_profiles'),
+])
+def test_reference_profiles_preserve_initial_state_and_include_final_step(
+        tmp_path, monkeypatch, function_name, state_key, filename, h_key):
     """Execute the actual truth-generator body with a tiny deterministic solver."""
     import ast
     import os
     from types import SimpleNamespace
     source = _path.with_name('_icepack_enkf.py').read_text()
     function = next(node for node in ast.parse(source).body
-                    if isinstance(node, ast.FunctionDef) and node.name == 'generate_true_state')
+                    if isinstance(node, ast.FunctionDef) and node.name == function_name)
     class FakeField:
         def __init__(self, data):
             self.dat = SimpleNamespace(data_ro=np.asarray(data))
@@ -107,13 +112,22 @@ def test_true_profile_file_includes_final_step_and_marks_future_years(tmp_path):
            'flowline_profile': lambda h, s, points: (h.dat.data_ro, s.dat.data_ro),
            'BasalMeltRate': lambda *args, **kw: (melt, 0.),
            'Icepack': lambda *args: (FakeField([12., 13.]), u, s, None, None),
-           'EXPERIMENT_TRUE': 'true'}
+           'EXPERIMENT_TRUE': 'true', 'EXPERIMENT_WRONG': 'wrong'}
     exec(compile(ast.Module(body=[function], type_ignores=[]), '<truth generator>', 'exec'), env)
     trajectory = np.zeros((10, 2))
-    env['generate_true_state'](dt=0.1, nt=1, h0=h, u=u, s0=s, basal_melt_field=melt,
-        statevec_true=trajectory, save_steps=[0.1, 34.], data_path=str(tmp_path), vec_inputs=list(mapping))
-    with h5py.File(tmp_path / 'hs_profiles_true.h5') as f:
-        np.testing.assert_allclose(f['h_profiles'][:, 1], [12., 13.])
-        assert np.isnan(f['h_profiles'][:, 2]).all()
+    def reject_noise(*args, **kwargs):
+        pytest.fail('Reference initialization must not draw thickness noise')
+    monkeypatch.setattr(np.random, 'normal', reject_noise)
+    kwargs = dict(dt=0.1, nt=1, h0=h, u=u, s0=s, basal_melt_field=melt,
+                  save_steps=[0.1, 34.], data_path=str(tmp_path),
+                  vec_inputs=list(mapping), joint_estimation=False)
+    kwargs[state_key] = trajectory
+    env[function_name](**kwargs)
+    np.testing.assert_allclose(trajectory[mapping['h'], 0], [10., 11.])
+    np.testing.assert_allclose(trajectory[mapping['s'], 0], [20., 21.])
+    np.testing.assert_allclose(h.dat.data_ro, [10., 11.])
+    with h5py.File(tmp_path / filename) as f:
+        np.testing.assert_allclose(f[h_key][:, 1], [12., 13.])
+        assert np.isnan(f[h_key][:, 2]).all()
         np.testing.assert_array_equal(f['written_steps'][:], [0, 1, -1])
     np.testing.assert_allclose(trajectory[mapping['h'], 1], [12., 13.])
