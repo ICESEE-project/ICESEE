@@ -262,7 +262,7 @@ def initialize_ensemble(ens, **icesee_kwargs):
 
     # --- create file to save ensemble flowline profiles ---
     h_profiles, s_profiles, valid_points, distances, bed_values = initial_flowline_profile(icesee_kwargs)
-   
+
     # Store diagnostic files beneath the configured data_path.
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.makedirs(_modelrun_datasets, exist_ok=True)
@@ -277,7 +277,7 @@ def initialize_ensemble(ens, **icesee_kwargs):
         dataset_distances_ensemble = F.create_dataset("distances", data = distances)
         dataset_valid_points_ensemble = F.create_dataset("valid_points", data = valid_points)
 
-    
+
     return initialized_state
 
 # --- generate the nurged state ---

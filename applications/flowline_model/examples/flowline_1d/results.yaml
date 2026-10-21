@@ -1,0 +1,20 @@
+# Results contract (ICESEE.src.postprocessing.contract).
+#
+# flowline.state_estimation (src/postprocessing/views/flowline.py) draws the
+# grounding-line / thickness / velocity figure read_results.ipynb cell 9
+# sets out to, from mode-3 checkpoints or an ensemble file. Switch this
+# contract to it once the example produces a usable run:
+#
+#   status: supported
+#   outputs: {data_dir: _modelrun_datasets, results_dir: _modelrun_datasets, ensemble: auto}
+#   views: [flowline.state_estimation, da.error_and_spread]
+schema: icesee-results/1
+model_name: flowline
+notebook: read_results.ipynb
+status: unsupported
+reason: >-
+  The example does not yet produce a usable run. In execution mode 3 (its
+  default) it completes, but the true state never changes over time and the
+  initial ensemble has no spread, so the first analysis diverges. In mode 2
+  synthetic-observation generation still fails with an IndexError (index 160
+  of a 151-step series).

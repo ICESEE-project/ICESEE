@@ -1,0 +1,29 @@
+# Results contract: where this example's outputs are and which result views
+# read them (ICESEE.src.postprocessing.contract). The views reproduce
+# read_results.ipynb. Maps need dof_coordinates.h5, written in the Icepack
+# environment by `python -m ICESEE.src.postprocessing.icepack_mesh`.
+schema: icesee-results/1
+model_name: icepack
+notebook: read_results.ipynb
+outputs:
+  data_dir: _modelrun_datasets
+  results_dir: _modelrun_datasets
+  ensemble: auto
+views:
+  - icepack.ensemble_profiles
+  - icepack.difference_maps
+  - icepack.snapshot_maps
+  - icepack.transects
+  - icepack.smb_along_x
+  - icepack.truth_vs_wrong
+  - icepack.error_tables
+  - da.error_and_spread
+not_reproduced:
+  - cell: 12
+    reason: >-
+      Superseded by cell 16 (same difference maps with SMB added); cell 12
+      labels time-step indices as years.
+  - cell: 18
+    reason: >-
+      Compares this run with a second, hybrid-inversion run
+      (_modelrun_datasets_ismb); a single run does not contain it.
