@@ -1,0 +1,21 @@
+# Results contract: where this example's outputs are and which result views
+# read them (ICESEE.src.postprocessing.contract). The views reproduce
+# read_results.ipynb.
+schema: icesee-results/1
+model_name: issm
+notebook: read_results.ipynb
+outputs:
+  data_dir: _modelrun_datasets
+  results_dir: _modelrun_datasets
+  # cell 10 of the notebook always reads icesee_ensemble_data.h5
+  ensemble: icesee_ensemble_data
+views:
+  - issm.profile_time_series
+  - da.error_and_spread
+not_reproduced:
+  - cell: 13
+    reason: Bed-observation scatter used while developing the example.
+  - cell: 30
+    reason: >-
+      Cells 27-43 build friction fields and kriged bed ensembles (inputs for
+      new experiments), not results of a run.

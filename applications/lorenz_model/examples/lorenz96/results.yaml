@@ -1,0 +1,19 @@
+# Results contract: where this example's outputs are and which result views
+# read them (ICESEE.src.postprocessing.contract). The views reproduce
+# read_results.ipynb.
+schema: icesee-results/1
+model_name: lorenz
+notebook: read_results.ipynb
+outputs:
+  data_dir: _modelrun_datasets
+  results_dir: _modelrun_datasets
+  ensemble: auto
+views:
+  - lorenz.state_estimation
+  - da.error_and_spread
+not_reproduced:
+  - cell: 9
+    reason: >-
+      All-filter comparison. Disabled in the notebook (all_flters = False) and
+      it reads datasets (statevec_true, statevec_ens_mean) that current ICESEE
+      runs no longer write; one run carries one filter.
