@@ -13,7 +13,7 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from src.parallelization.distributed_adapter import (
+from ICESEE.src.parallelization.distributed_adapter import (
     DistributedStateLayout,
     contiguous_state_layout,
 )

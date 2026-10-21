@@ -39,12 +39,12 @@ _CWD_BACKUP = os.getcwd()
 sys.argv = [sys.argv[0], "--data_path", tempfile.mkdtemp(prefix="icesee_test_data_path_")]
 os.chdir(_ISMIP_CHOI_DIR)
 try:
-    from applications.issm_model.examples.ISMIP_Choi import _issm_native as native
+    from ICESEE.applications.issm_model.examples.ISMIP_Choi import _issm_native as native
 finally:
     sys.argv = _ARGV_BACKUP
     os.chdir(_CWD_BACKUP)
 
-from src.parallelization.distributed_whole_member_adapter import WholeMemberState
+from ICESEE.src.parallelization.distributed_whole_member_adapter import WholeMemberState
 
 
 def _topology():

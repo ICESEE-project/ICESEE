@@ -56,15 +56,15 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from src.parallelization.distributed_whole_member_adapter import (
+from ICESEE.src.parallelization.distributed_whole_member_adapter import (
     WholeMemberNativeAdapter,
     WholeMemberState,
 )
-from applications.issm_model.examples.ISMIP_Choi._issm_enkf import (
+from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_enkf import (
     forecast_step_single,
     initialize_ensemble,
 )
-from applications.issm_model.examples.ISMIP_Choi._issm_model import run_model_inverse
+from ICESEE.applications.issm_model.examples.ISMIP_Choi._issm_model import run_model_inverse
 
 
 def _vec_inputs(icesee_kwargs: Mapping[str, Any]) -> list[str]:
