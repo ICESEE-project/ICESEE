@@ -101,8 +101,13 @@ class EnsembleKalmanFilter:
                 hdim = ensemble.shape[0] // icesee_kwargs["total_state_param_vars"]
             else:
                 hdim = ensemble.shape[0] // icesee_kwargs["num_state_vars"]
-            state_block_size = hdim * icesee_kwargs["num_state_vars"]
             vecs, indx_map, dim_per_proc = icesee_get_index(**icesee_kwargs)
+            # Sum the real block sizes: variables need not share hdim (e.g.
+            # flowline_1d's scalar grounding line next to two NX fields).
+            state_block_size = sum(
+                len(indx_map[key])
+                for key in list(icesee_kwargs["vec_inputs"])[: icesee_kwargs["num_state_vars"]]
+            )
 
             # Independent per-member AR(1) process-noise state. One column
             # per ensemble member -- updating member `ens` below only ever

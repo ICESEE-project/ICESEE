@@ -1,6 +1,6 @@
 physical-parameters:
-  # Lorenz96 Model parameters
-  A: 4e-12
+  # Flowline model parameters
+  A: 4e-26   # (Pa^-3 s^-1) Glen's flow-law rate factor
   n: 3       # Glen's flow law exponent
   C: 3e6
   rho_ice: 900.0  # (kg/m^3) Density of ice
@@ -21,7 +21,7 @@ physical-parameters:
 modeling-parameters:
   # Modeling parameters            
   num_years: 150        # number of years to run the model
-  timesteps_per_year: 2   # number of timesteps per year
+  timesteps_per_year: 1   # number of timesteps per year (one implicit step per year)
   year: 31536000        # number of seconds in a year
 
   example_name: "flowline_1d"  # example name
@@ -45,21 +45,21 @@ enkf-parameters:
   sig_Q: [0.01, 0.01, 0.01]          # process noise standard deviation
   length_scale: [2, 2, 2]   # length scale for the covariance matrix
 
-  generate_synthetic_obs: "True"  # Generate synthetic observations for testing
-  generate_true_state:    "True"   # Generate true state for synthetic observations
-  generate_nurged_state:  "True"   # Generate nudged state for synthetic observations
-  initialize_ensemble: "True"
-  sequential_ensemble_initialization: "False"
-  use_ensemble_pertubations: "True"
+  generate_synthetic_obs: True  # Generate synthetic observations for testing
+  generate_true_state:    True   # Generate true state for synthetic observations
+  generate_nurged_state:  True   # Generate nudged state for synthetic observations
+  initialize_ensemble: True
+  sequential_ensemble_initialization: False
+  use_ensemble_pertubations: True
 
   # estimation flags
-  joint_estimation: "False"  # joint estimation flag: True, False
-  state_estimation: "True"   # state estimation flag: True, False
-  parameter_estimation: "False" # parameter estimation flag: True, False
+  joint_estimation: False  # joint estimation flag: True, False
+  state_estimation: True   # state estimation flag: True, False
+  parameter_estimation: False # parameter estimation flag: True, False
 
   seed: 1                 # seed for random number generator
   inflation_factor: 1.0          # inflation factor
-  localization_flag: "False"      # localization flag: True, False
+  localization_flag: False      # localization flag: True, False
 
   # enkf model parameters
   model_name: "flowline"         # name of the model
