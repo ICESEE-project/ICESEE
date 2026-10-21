@@ -58,7 +58,7 @@ def flowline(varin, varin_old, **icesee_kwargs):
     hscale      = icesee_kwargs["hscale"]
     lambd       = icesee_kwargs["lambda"]
     m           = icesee_kwargs["m"]
-    n           = icesee_kwargs["n"]
+    n           = icesee_kwargs.get("glen_n", icesee_kwargs["n"])  # the DA loops reuse "n" for nt
     a           = icesee_kwargs["accum"] / icesee_kwargs["ascale"]
     eps         = icesee_kwargs["eps"]
     transient   = icesee_kwargs["transient"]
@@ -188,9 +188,6 @@ def run_model(ensemble, **icesee_kwargs):
     Run the implicit flowline model over nt time steps.
     """
 
-    varin = ensemble.copy()
-    last_entry = varin[-1]
-
     # Jacobian calculation
     Jf = Jac_calc(ensemble, **icesee_kwargs)
 
@@ -206,8 +203,6 @@ def run_model(ensemble, **icesee_kwargs):
     # Update the old solution
     ensemble = solve_result.x
     vecs, indx_map, dim_per_proc = icesee_get_index(**icesee_kwargs)
-    # update with last entry
-    ensemble[-1] = last_entry
     updated_state = {}
     for key in icesee_kwargs['vec_inputs']:
         updated_state[key] = ensemble[indx_map[key]]

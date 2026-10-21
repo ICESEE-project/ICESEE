@@ -21,10 +21,12 @@ simpler since there is no persistent external process to manage per member.
 
 Per the same project direction documented in ISSM's native adapter, this
 file does not modify ``_flowline_model.py``/``_flowline_enkf.py`` to invent
-finer-grained ownership that does not exist; it wires the existing,
-unmodified ``initialize_ensemble``/``forecast_step_single`` functions (used
-unchanged by modes 0-2) into ``WholeMemberNativeAdapter``
-(``src/parallelization/distributed_whole_member_adapter.py``).
+finer-grained ownership that does not exist; it wires the existing
+``initialize_ensemble``/``forecast_step_single`` functions (used by modes
+0-2) into ``WholeMemberNativeAdapter``
+(``src/parallelization/distributed_whole_member_adapter.py``). The mode-3
+cycle adds no ensemble perturbation itself, so this adapter applies the
+initial perturbation modes 0-2 use and per-step process noise.
 
 ## What this does and does not achieve
 
@@ -51,14 +53,15 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from src.parallelization.distributed_whole_member_adapter import (
+from ICESEE.src.parallelization.distributed_whole_member_adapter import (
     WholeMemberNativeAdapter,
     WholeMemberState,
 )
-from applications.flowline_model.examples.flowline_1d._flowline_enkf import (
+from ICESEE.applications.flowline_model.examples.flowline_1d._flowline_enkf import (
     forecast_step_single,
     initialize_ensemble,
 )
+from ICESEE.src.run_model_da._error_generation import generate_initial_member_increment
 
 
 def _vec_inputs(icesee_kwargs: Mapping[str, Any]) -> list[str]:
@@ -104,7 +107,17 @@ def initialize_member(
     call_kwargs = dict(icesee_kwargs)
     call_kwargs["statevec_ens"] = np.zeros((nd, 1))
     updated_state = initialize_ensemble(int(member_id), **call_kwargs)
-    variables = {name: np.asarray(updated_state[name]).ravel() for name in vec_inputs}
+    variables = {name: np.asarray(updated_state[name], dtype=float).ravel().copy() for name in vec_inputs}
+    # Same initial perturbation modes 0-2 add (src/EnKF/_ensemble_initialization.py);
+    # without it every member is identical and the first analysis divides by a
+    # zero ensemble covariance.
+    hdim = nd // int(icesee_kwargs["total_state_param_vars"])
+    increment, _ = generate_initial_member_increment(hdim, dict(icesee_kwargs), int(member_id), nd)
+    offset = 0
+    for name in vec_inputs:
+        size = variables[name].size
+        variables[name] += increment[offset:offset + size]
+        offset += size
     return WholeMemberState(
         variables=variables,
         vec_inputs=vec_inputs,
@@ -123,12 +136,22 @@ def forecast_member(
 
     vec_inputs = _vec_inputs(icesee_kwargs)
     ensemble = _pack_ensemble(state, vec_inputs)
-    updated_state = forecast_step_single(ensemble=ensemble, **dict(icesee_kwargs))
-    return {
-        name: np.asarray(updated_state[name]).ravel()
-        for name in vec_inputs
-        if name in updated_state
-    }
+    updated_state = forecast_step_single(ensemble=ensemble, **dict(icesee_kwargs, k=int(timestep)))
+    # Process noise: independent N(0, sig_Q^2) per variable entry each step
+    # (EnKF.ipynb's Q), keyed by (seed, member, step) so it does not depend
+    # on the rank layout.
+    member_id = int(state.model_context["member_id"])
+    rng = np.random.default_rng([int(icesee_kwargs.get("base_seed", 42)), member_id, int(timestep)])
+    sig_q = list(icesee_kwargs.get("sig_Q", []))
+    forecast = {}
+    for ii, name in enumerate(vec_inputs):
+        if name not in updated_state:
+            continue
+        value = np.asarray(updated_state[name], dtype=float).ravel().copy()
+        if ii < len(sig_q):
+            value += rng.normal(0.0, float(sig_q[ii]), size=value.size)
+        forecast[name] = value
+    return forecast
 
 
 FLOWLINE_NATIVE_ADAPTER = WholeMemberNativeAdapter(

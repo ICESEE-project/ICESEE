@@ -222,3 +222,58 @@ def test_run_flowline_execution_mode_3_orchestration(tmp_path, monkeypatch):
 
     assert len(save_all_data_calls) == 1
     assert len(timing_calls) == 1
+
+
+# --- flowline_1d physics wiring shared by every execution mode -------------
+from ICESEE.applications.flowline_model.examples.flowline_1d import _flowline_enkf as flowline_enkf
+from ICESEE.applications.flowline_model.examples.flowline_1d import _flowline_native as flowline_native
+from ICESEE.applications.flowline_model.examples.flowline_1d._flowline_model import run_model
+
+
+def test_static_config_time_grid_matches_the_loader_and_is_built_once(tmp_path):
+    kwargs = _base_kwargs(tmp_path, num_years=4.0, timesteps_per_year=1)
+    runner._build_static_config(kwargs)
+    # the observation schedule indexes ``t``; it must have one entry per state column
+    assert len(kwargs["t"]) == kwargs["nt"] + 1 == 5
+    assert kwargs["dt"] == pytest.approx(float(kwargs["year"]))
+    assert kwargs["glen_n"] == 3
+    accum = kwargs["accum"]
+    runner._build_static_config(kwargs)
+    assert kwargs["accum"] == accum  # a second build must not rescale by the year again
+
+
+def test_true_state_evolves_and_the_grounding_line_retreats(tmp_path):
+    kwargs = _base_kwargs(tmp_path, num_years=3.0)
+    runner._build_static_config(kwargs)
+    truth = np.zeros((kwargs["nd"], kwargs["nt"] + 1))
+    flowline_enkf.generate_true_state(**dict(kwargs, statevec_true=truth))
+    xg = truth[-1]
+    assert np.abs(np.diff(truth[: kwargs["NX"]], axis=1)).max() > 0
+    assert xg[-1] < xg[0]  # rising terminus melt pushes the grounding line back
+
+
+def test_forecast_reads_glens_exponent_not_the_step_count(tmp_path):
+    kwargs = _base_kwargs(tmp_path)
+    runner._build_static_config(kwargs)
+    truth = np.zeros((kwargs["nd"], kwargs["nt"] + 1))
+    flowline_enkf.generate_true_state(**dict(kwargs, statevec_true=truth))
+    state = truth[:, 0]
+    # the DA loops overwrite icesee_kwargs["n"] with nt every step
+    a = flowline_enkf.forecast_step_single(ensemble=state, **dict(kwargs, k=0))
+    b = flowline_enkf.forecast_step_single(ensemble=state, **dict(kwargs, k=0, n=kwargs["nt"]))
+    for key in kwargs["vec_inputs"]:
+        np.testing.assert_allclose(a[key], b[key])
+    assert np.ravel(a["xg"])[0] != state[-1]  # the grounding line is not frozen
+
+
+def test_mode3_members_start_apart_and_get_process_noise(tmp_path):
+    kwargs = _base_kwargs(tmp_path)
+    runner._build_static_config(kwargs)
+    members = [flowline_native.initialize_member(i, topology=None, icesee_kwargs=kwargs) for i in (0, 1)]
+    first = [np.concatenate([m.variables[k] for k in kwargs["vec_inputs"]]) for m in members]
+    assert not np.allclose(first[0], first[1])
+    noisy = flowline_native.forecast_member(members[0], 0, topology=None, icesee_kwargs=kwargs)
+    clean = run_model(first[0], **dict(kwargs, k=0, tcurrent=1, transient=1,
+                                      facemelt=flowline_enkf.facemelt_schedule(
+                                          flowline_enkf.FACEMELT_WRONG_END, **kwargs)))
+    assert not np.allclose(noisy["h"], clean["h"])
