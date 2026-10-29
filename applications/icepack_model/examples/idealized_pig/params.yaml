@@ -3,7 +3,8 @@ modeling-parameters:
   # Model parameters
 
   # number of years to run the model (icesee/features convention, 2026-09-28 reconciliation: 1935-2017 PIG basal-melt forcing timeline -- see BasalMeltRate's scenario schedule)
-  num_years: 82
+  #num_years: 82
+  num_years: 5
 
   # timesteps_per_year: in this example, the model step length in years (--dt on the command line sets the same step). Production uses 0.05.
   # Coarser steps are honored but numerically unsuitable here: at 0.5 the Icepack velocity solve fails to converge within the first 20 steps.
@@ -37,7 +38,8 @@ modeling-parameters:
   bmr_increase_time: 0
 
   # years (for a simulation of PIG between 1935 - 2017) at which to save the flowline profile (icesee/features convention; initial state is saved separately)
-  save_steps: [34, 69, 81]
+  #save_steps: [34, 69, 81]
+  save_steps: [2, 3, 4]
 
 enkf-parameters:
 
@@ -68,16 +70,16 @@ enkf-parameters:
   member_store_root: ""
 
 
-  Nens: 40                 # number of ensemble members (now set in the command line)
-  freq_obs: 1              # frequency of observations (per year?)
+  Nens: 10                 # number of ensemble members (now set in the command line)
+  freq_obs: 1              # frequency of observations (interval of time over which observations are generated)
 
 
   # obs_start_time/obs_max_time: icesee/features convention (2026-09-28 reconciliation, adopted after fixing the nt-formula bug in config/_utility_imports.py that
   # previously collapsed any window to a single degenerate observation regardless of these values -- see test_observation_schedule_uses_correct_nt_convention.py).
   # Produces observation years 10..40 (31 analysis events) at num_years=82, timesteps_per_year=0.05 (nt=1640) -- exact timestep indices are 200, 220, 240, ..., 800
   # (step = freq_obs/timesteps_per_year = 20).
-  obs_max_time: 40         # maximum time for observations
-  obs_start_time: 10        # start time for observations
+  obs_max_time: 4         # maximum time for observations
+  obs_start_time: 2        # start time for observations
 
 
   # num_state_vars/num_param_vars: icesee/features convention (2026-09-28 reconciliation) -- basal_melt_field is bookkept as an ordinary state variable (5+0), not a
@@ -102,7 +104,7 @@ enkf-parameters:
 
 
   # Statistical parameters (based on the number of state variables)
-  sig_model: [0.1,0.1,0.1,0.1,0.1] # model error standard deviation
+  #sig_model: [0.1,0.1,0.1,0.1,0.1] # model error standard deviation
   sig_obs: [5,0.5,0.1,0.1,0.1]   # observation error standard deviation
   sig_Q: [0.8,0.4,0.01,0.08,0.1]    # process noise standard deviation
   length_scale: [96,96,90,80,80]   # length scale for the covariance matrix, can be a list

@@ -529,6 +529,9 @@ def run_model(ensemble, **icesee_kwargs):
     # calculate the time step using ICESEE's time-stepping index (k) and the step size (dt)
     step = k
 
+    ### DEBUGGING ######
+    print(step)
+
     # -- steps at which to save profiles of the ensemble --
     flowline_profile_steps = [t/dt for t in icesee_kwargs["save_steps"]]
 
@@ -553,7 +556,7 @@ def run_model(ensemble, **icesee_kwargs):
     s.dat.data[:] = s_vec
     basal_melt_field.dat.data[:] = basal_melt_vec
 
-    print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
+    #print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
 
     ### Conditionals for depth-dependent basal melt rate function
     ### Select forcing scenario between 1935 - 2017
