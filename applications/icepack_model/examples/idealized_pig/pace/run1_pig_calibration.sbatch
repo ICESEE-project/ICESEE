@@ -141,7 +141,7 @@ srun --mpi=pmix -n "${SLURM_NTASKS}" python3 "$IDEALIZED_PIG_DIR/run_da_icepack.
   --force-params="$SCRIPT_DIR/params_calibration.yaml" \
   --Nens="$NENS" \
   --model_nprocs="$MODEL_NPROCS" \
-  --execution_mode=3 \
+  --execution_mode=3 --mode3_experimental=True \
   --compact_initialization=True \
   --initFile=data/extended_beta1000yrs_compact_idx20000.h5 \
   --random_field_method=graph \

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable
+import re
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,7 @@ class Mode3Registration:
     model_name: str
     runner: Callable[..., object]
     notes: str = ""
+    application: str | None = None
 
 
 _REGISTRY: dict[str, Mode3Registration] = {}
@@ -50,6 +52,7 @@ def register_execution_mode_3(
     runner: Callable[..., object],
     *,
     notes: str = "",
+    application: str | None = None,
 ) -> None:
     """Register ``model_name``'s production mode-3 runner.
 
@@ -65,20 +68,53 @@ def register_execution_mode_3(
         raise ValueError("model_name must be a non-empty string")
     if not callable(runner):
         raise TypeError("runner must be callable")
-    _REGISTRY[model_name] = Mode3Registration(
-        model_name=model_name, runner=runner, notes=notes
+    if application is None:
+        match = re.search(r"\.examples\.([A-Za-z_][A-Za-z0-9_]*)\.", getattr(runner, "__module__", ""))
+        application = match.group(1) if match else None
+    registration = Mode3Registration(
+        model_name=model_name, runner=runner, notes=notes, application=application
     )
+    _REGISTRY[model_name] = registration
+    if application:
+        _REGISTRY[f"{model_name}@{application}"] = registration
 
 
-def get_execution_mode_3(model_name: str | None) -> Mode3Registration | None:
+def get_execution_mode_3(model_name: str | None, *, application: str | None = None) -> Mode3Registration | None:
     """Return ``model_name``'s registration, or ``None`` if unsupported."""
 
     if not model_name:
         return None
-    return _REGISTRY.get(model_name)
+    if application:
+        scoped = _REGISTRY.get(f"{model_name}@{application}")
+        if scoped is not None:
+            return scoped
+    registration = _REGISTRY.get(model_name)
+    if application and registration and registration.application not in (None, application):
+        return None
+    return registration
 
 
 def registered_execution_mode_3_models() -> tuple[str, ...]:
     """Return the currently registered model names, sorted for display."""
 
-    return tuple(sorted(_REGISTRY))
+    return tuple(sorted({r.model_name for r in _REGISTRY.values()}))
+
+
+def register_native_application(model_name, *, application, adapter, setup,
+                                analysis_cycle=None, supported_features=()):
+    """Bind model operations to the shared runtime without a copied DA loop."""
+    if not application or not callable(setup):
+        raise ValueError("application and callable setup are required")
+    for operation in ("initialize_native_member", "forecast_native_member"):
+        if not callable(getattr(adapter, operation, None)):
+            raise TypeError(f"native adapter requires {operation}")
+    if analysis_cycle is not None and not callable(analysis_cycle):
+        raise TypeError("analysis_cycle must be callable")
+    def runner(**kwargs):
+        from ICESEE.src.parallelization.native_application import run_native_application
+        options = dict(adapter=adapter, setup=setup, supported_features=supported_features)
+        if analysis_cycle is not None:
+            options["analysis_cycle"] = analysis_cycle
+        return run_native_application(**options, **kwargs)
+    register_execution_mode_3(model_name, runner, application=application,
+                              notes="Shared native runtime with declared model capabilities")

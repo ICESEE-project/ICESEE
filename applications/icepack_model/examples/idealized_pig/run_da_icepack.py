@@ -8,11 +8,13 @@
 import sys
 import os
 import time
-import numpy as np
 
 # --- Configuration ---
+# Must precede the NumPy import: its BLAS reads the thread count when loaded.
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["PETSC_CONFIGURE_OPTIONS"] = "--download-mpich-device=ch3:sock"
+
+import numpy as np
 
 # --- ICESEE configuration, before Firedrake: it consumes ICESEE's own
 # command-line arguments, so PETSc (initialized by the Firedrake import)

@@ -70,6 +70,7 @@ from .distributed_analysis import (
     StochasticAnalysisProducts,
     assemble_selected_ensemble_rows,
     ensemble_transform_from_products,
+    collapsed_spread_message,
 )
 from .distributed_checkpoint import save_distributed_checkpoint
 from .distributed_fields import DistributedFieldRegistry
@@ -474,6 +475,7 @@ def transform_members_via_store(
     number_of_members: int,
     *,
     row_chunk_size: int,
+    row_transform=None,
 ) -> None:
     """Store-streaming counterpart of ``distributed_runtime.transform_local_members``.
 
@@ -550,6 +552,8 @@ def transform_members_via_store(
                 raise ValueError("gathered member chunk has an invalid shape")
             block[:, member_id] = values
         analysis_block = block @ transform
+        if row_transform is not None:
+            analysis_block = row_transform(row_slice, block, analysis_block)
         if use_bulk:
             local_analyzed = np.stack(
                 [analysis_block[:, int(member_id)] for member_id in member_ids], axis=1
@@ -575,6 +579,7 @@ def run_native_store_streaming_analysis_cycle(
     state_row_chunk_size: int = 4096,
     energy_fraction: float = 0.999,
     checkpoint_request: NativeCheckpointRequest | None = None,
+    analysis_row_controls=None,
 ) -> NativeCycleResult:
     """Store-streaming sibling of ``distributed_native_cycle.run_native_global_analysis_cycle``.
 
@@ -665,16 +670,23 @@ def run_native_store_streaming_analysis_cycle(
 
     if topology.is_ensemble_root:
         global_products = products.reduced(topology.spatial_comm)
-        transform = ensemble_transform_from_products(
+        refusal = collapsed_spread_message(
+            global_products,
+            relative_tolerance=icesee_kwargs.get("analysis_min_relative_spread", 1e-8),
+        )
+        transform = None if refusal else ensemble_transform_from_products(
             global_products, energy_fraction=energy_fraction
         )
         observation_rows = int(global_products.observation_rows)
     else:
+        refusal = None
         transform = None
         observation_rows = None
-    transform = np.asarray(
-        topology.ensemble_comm.bcast(transform, root=0), dtype=np.float64
-    )
+    # Every rank raises together; a root-only raise would strand the others.
+    transform, refusal = topology.ensemble_comm.bcast((transform, refusal), root=0)
+    if refusal:
+        raise RuntimeError(f"analysis at timestep {timestep} refused: {refusal}")
+    transform = np.asarray(transform, dtype=np.float64)
     observation_rows = int(topology.ensemble_comm.bcast(observation_rows, root=0))
 
     # Safe, provable optimization (this session's Phase-1 operation-count
@@ -698,6 +710,14 @@ def run_native_store_streaming_analysis_cycle(
     # operation-count derivation found: 25 timesteps x 67 row blocks =
     # 1675 bulk HDF5 operations measured for a run with only 2 real
     # analysis events -- 23 of those 25 passes were provably no-ops.
+    row_transform = None
+    if analysis_row_controls is not None:
+        def row_transform(rows, forecast_block, analysis_block):
+            global_rows = pool.layout.local_to_global_rows(
+                np.arange(rows.start, rows.stop, dtype=np.int64))
+            return analysis_row_controls(
+                analysis_vec=analysis_block, forecast_vec=forecast_block,
+                global_rows=global_rows, icesee_kwargs=icesee_kwargs)
     if number_of_batches > 0:
         transform_members_via_store(
             pool._store,
@@ -707,6 +727,7 @@ def run_native_store_streaming_analysis_cycle(
             topology.ensemble_comm,
             number_of_members,
             row_chunk_size=state_row_chunk_size,
+            row_transform=row_transform,
         )
     pool.finalize_all_from_store(
         adapter, timestep, topology=topology, icesee_kwargs=icesee_kwargs

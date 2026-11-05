@@ -206,13 +206,17 @@ def _temporarily_unregistered(model_name):
     """
     from ICESEE.src.parallelization import distributed_mode3_registry as module
 
-    previous = module._REGISTRY.pop(model_name, None)
+    previous = {key:value for key,value in module._REGISTRY.items()
+                if key == model_name or key.startswith(model_name+"@")}
+    for key in previous:
+        del module._REGISTRY[key]
     try:
         yield
     finally:
-        module._REGISTRY.pop(model_name, None)
-        if previous is not None:
-            module._REGISTRY[model_name] = previous
+        for key in list(module._REGISTRY):
+            if key == model_name or key.startswith(model_name+"@"):
+                del module._REGISTRY[key]
+        module._REGISTRY.update(previous)
 
 
 def test_icepack_real_bootstrap_self_heals_without_a_prior_mode3_runner_import():
@@ -270,17 +274,20 @@ def test_genuinely_unsupported_model_still_fails_clearly_via_real_bootstrap():
     assert isinstance(exc, NotImplementedError)
 
 
-def test_model_with_no_mode3_runner_in_this_example_dir_still_fails_clearly():
-    # A real, supported model (icepack) run from a real example directory
-    # that has no mode3_runner.py of its own (synthetic_ice_stream) must
-    # still raise NotImplementedError, not silently pick up a different
-    # example's registration or crash differently.
-    example_dir = os.path.join(
-        _REPO_ROOT, "applications", "icepack_model", "examples", "synthetic_ice_stream",
-    )
-    from ICESEE.src.parallelization.distributed_mode3_registry import get_execution_mode_3
-
+def test_model_with_no_mode3_runner_in_this_example_dir_still_fails_clearly(tmp_path):
+    example_dir=tmp_path/"unregistered_icepack_example"
+    example_dir.mkdir()
     with _temporarily_unregistered("icepack"):
-        assert get_execution_mode_3("icepack") is None
-        exc = _real_bootstrap_registers("icepack", example_dir)
-        assert isinstance(exc, NotImplementedError)
+        exc=_real_bootstrap_registers("icepack",str(example_dir))
+        assert isinstance(exc,NotImplementedError)
+
+
+def test_synthetic_example_bootstraps_its_own_native_runner():
+    example_dir=os.path.join(_REPO_ROOT,"applications","icepack_model","examples","synthetic_ice_stream")
+    from ICESEE.src.parallelization.distributed_mode3_registry import get_execution_mode_3
+    with _temporarily_unregistered("icepack"):
+        exc=_real_bootstrap_registers("icepack",example_dir)
+        assert not isinstance(exc,NotImplementedError)
+        registration=get_execution_mode_3("icepack",application="synthetic_ice_stream")
+        assert registration is not None
+        assert registration.application=="synthetic_ice_stream"

@@ -124,13 +124,13 @@ def icesee_model_data_assimilation_distributed(**icesee_kwargs):
     icesee_kwargs = normalize_icesee_kwargs(icesee_kwargs)
     normalize_execution_mode(icesee_kwargs, expected=3)
     model = icesee_kwargs.get("model_name")
-    registration = get_execution_mode_3(model)
+    registration = get_execution_mode_3(model, application=os.path.basename(os.getcwd()))
     if registration is None:
         # Self-heal before failing: see _jit_import_mode3_runner's own
         # docstring for why the registry can legitimately be empty here
         # even when a real adapter exists in the repository.
         _jit_import_mode3_runner(model)
-        registration = get_execution_mode_3(model)
+        registration = get_execution_mode_3(model, application=os.path.basename(os.getcwd()))
     if registration is None:
         supported = registered_execution_mode_3_models()
         raise NotImplementedError(

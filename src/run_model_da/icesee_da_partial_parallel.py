@@ -420,16 +420,12 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
 
     state_block_size = hdim * icesee_kwargs["num_state_vars"]
 
-    # --- compute the process noise covariance matrix ---
-    if isinstance(icesee_kwargs["sig_Q"], float):
-        nd = hdim*icesee_kwargs["total_state_param_vars"]
-        Q_err = np.eye(nd) * icesee_kwargs["sig_Q"] ** 2
-    else:
-        nd = hdim*icesee_kwargs["total_state_param_vars"]
-        Q_err = np.zeros((nd,nd))
+    # Preserve the global dimension after distributed ownership resolution.
+    nd = hdim * icesee_kwargs["total_state_param_vars"]
 
-    icesee_kwargs.update({"Q_err": Q_err})
-
+    # The forecast kernel draws configured fields directly. No dense process
+    # covariance is consumed here; constructing nd-by-nd was unused and made
+    # large native model states allocate hundreds of GiB.
     # --- Define filter flags
     EnKF_flag   = re.match(r"\AEnKF\Z", filter_type, re.IGNORECASE)
     DEnKF_flag  = re.match(r"\ADEnKF\Z", filter_type, re.IGNORECASE)
@@ -438,11 +434,11 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
 
     if rank_world == 0:
             nt = icesee_kwargs.get("nt", icesee_kwargs["nt"])
-            print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {size_world*(icesee_kwargs['model_nprocs']+1)} MPI ranks.")
+            print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {comm_world.Get_size()} MPI ranks.")
             pbar = tqdm(
                 total=nt,
                 initial=resume_timestep,
-                desc=f"[ICESEE] Assimilation progress ({size_world*(icesee_kwargs['model_nprocs']+1)} ranks)",
+                desc=f"[ICESEE] Assimilation progress ({comm_world.Get_size()} ranks)",
                 position=0,
                 leave=True,
                 dynamic_ncols=True

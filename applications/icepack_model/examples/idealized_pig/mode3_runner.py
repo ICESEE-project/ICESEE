@@ -29,9 +29,7 @@ Unlike Lorenz96, this runner does **not** call
 ``src/EnKF/_ensemble_initialization.py``: idealized_pig's native adapter
 (``_icepack_native.initialize_member``) does not depend on that generic
 setup-phase HDF5 artifact at all -- it reconstructs each member's initial
-perturbed thickness directly and deterministically via
-``_member_initialization_context`` (the same member-keyed RNG stream modes
-1/2 use), so there is nothing for ``ensemble_initialization`` to produce
+unperturbed thickness through the native model adapter, so there is nothing for ``ensemble_initialization`` to produce
 that the native adapter would consume.
 
 ``run_da_icepack.py``'s unconditional pre-dispatch call to
@@ -121,13 +119,24 @@ from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_model imp
 )
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_native import (
     IDEALIZED_PIG_NATIVE_ADAPTER,
+    node_coordinates,
+    owned_node_layout,
     release_model_context,
+)
+from ICESEE.applications.icepack_model.icepack_utils._reference_numbering import (
+    match_owned_nodes_to_reference,
+    reference_to_layout_permutation,
+    translate_observation_ids,
 )
 from ICESEE.applications.supported_models import SupportedModels
 from ICESEE.src.EnKF._generate_synthetic_observations import (
     generate_synthetic_observations,
 )
 from ICESEE.src.EnKF._generate_true_wrong_state import generate_true_wrong_state
+from ICESEE.src.parallelization._mpi_analysis_functions import apply_analysis_controls_local
+from ICESEE.src.parallelization.native_process_noise import (
+    NativeProcessNoiseAdapter, canonical_noise_identity,
+)
 from ICESEE.src.parallelization.mode3_checkpointing import (
     HISTORY_DIRNAME,
     CheckpointPolicy,
@@ -174,6 +183,22 @@ from ICESEE.src.utils.utils import UtilsFunctions
 
 _SUPPORTED_ERROR_MODES = {"legacy_prior_anomalies", "stochastic_r"}
 _DEFAULT_RUN_ID = "icepack-idealized-pig-mode3"
+
+
+def require_experimental_selection(icesee_kwargs):
+    """Refuse execution_mode 3 unless ``mode3_experimental`` is set.
+
+    Native Mode 3 for idealized_pig has not yet passed member-wise
+    comparison against the mode-2 baseline (forecast, analysis writeback
+    and restart). It is never selected implicitly and never falls back to
+    another mode.
+    """
+    if not bool(icesee_kwargs.get("mode3_experimental", False)):
+        raise RuntimeError(
+            "execution_mode=3 for idealized_pig is experimental and must be "
+            "selected explicitly with --mode3_experimental=True. Use "
+            "execution_mode=2 for production runs."
+        )
 
 
 def _release_model_topology(topology):
@@ -278,6 +303,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
 
     icesee_kwargs = normalize_icesee_kwargs(icesee_kwargs)
     normalize_execution_mode(icesee_kwargs, expected=3)
+    require_experimental_selection(icesee_kwargs)
 
     world = MPI.COMM_WORLD
     world_rank = int(world.Get_rank())
@@ -327,6 +353,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     true_wrong_time = 0.0
     observation_time = 0.0
     nd = None
+    reference_coords = None
     if world_rank == 0:
         # The single-rank reference model the truth is generated with is set
         # up here; it is reported as its own phase so that True/Wrong State
@@ -334,6 +361,8 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         _t = MPI.Wtime()
         with traced_init("truth model setup (COMM_SELF reference)"):
             nd = _build_reference_setup_context(icesee_kwargs)
+            # Truth and observation rows use this serial numbering.
+            reference_coords = node_coordinates(icesee_kwargs["Q"])
         record_phase("truth_model_setup", MPI.Wtime() - _t)
 
         if resume and _setup_artifacts_reusable(icesee_kwargs, nd):
@@ -362,6 +391,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
 
     nd = int(world.bcast(nd, root=0))
     icesee_kwargs["nd"] = nd
+    reference_coords = world.bcast(reference_coords, root=0)
 
     with h5py.File(_synthetic_obs, "r") as f:
         hu_obs = f["hu_obs"][:]
@@ -399,7 +429,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         {"obs_t": obs_t, "obs_index": ind_m, "number_obs_instants": m_obs, "m_obs": m_obs}
     )
 
-    run_id = str(icesee_kwargs.get("run_id", _DEFAULT_RUN_ID))
+    run_id = str(icesee_kwargs.get("run_id", _DEFAULT_RUN_ID)) + ":native-controls-v1:" + canonical_noise_identity(icesee_kwargs)
     checkpoints = Mode3CheckpointManager(
         os.path.join(_modelrun_datasets, HISTORY_DIRNAME),
         run_id=run_id,
@@ -462,8 +492,46 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     # This is the fix for the P>1 spatial-decomposition
     # "observation rows are not owned by this spatial rank" ValueError:
     # previously every rank was hand the full, unpartitioned `obs_indices`.
+    # Observation ids are rows of the serial reference numbering (truth and
+    # synthetic observations are generated on COMM_SELF). A model group with
+    # several spatial ranks renumbers the mesh, so translate each id to the
+    # distributed row of the same physical node before routing; order is
+    # kept, so `obs_positions` still index the canonical arrays.
+    owned_start, global_nodes, owned_coords = owned_node_layout(
+        topology=topology, icesee_kwargs=icesee_kwargs
+    )
+    if global_nodes * int(icesee_kwargs["total_state_param_vars"]) != nd:
+        raise RuntimeError(
+            f"distributed layout has {global_nodes} nodes per variable but the "
+            f"reference state has nd={nd}"
+        )
+    owned_reference_nodes = match_owned_nodes_to_reference(reference_coords, owned_coords)
+    reference_to_layout = reference_to_layout_permutation(
+        owned_start,
+        owned_reference_nodes,
+        topology.spatial_comm,
+        global_nodes,
+    )
+    # Apply the same configured forecast noise as modes 1/2, at the native
+    # model boundary. Initial thickness remains unperturbed. Noise is keyed
+    # in serial reference numbering, then scattered to physical owned rows.
+    canonical_rows = np.concatenate([
+        block.global_offset + owned_reference_nodes for block in pool.layout.blocks
+    ])
+    adapter = NativeProcessNoiseAdapter(
+        adapter, topology=topology, canonical_rows=canonical_rows,
+        reference_coords=reference_coords, icesee_kwargs=icesee_kwargs,
+        workspace_budget_mb=icesee_kwargs.get("native_noise_workspace_mb", 256),
+    )
+    if world_rank == 0:
+        print("[ICESEE] Native forecast noise: canonical configured schedule; "
+              "initial fields unchanged; bounded leader compatibility workspace",flush=True)
+    del reference_coords
     obs_positions, obs_local_indices = pool.route_observation_ids(
-        obs_indices, adapter, topology=topology, icesee_kwargs=icesee_kwargs
+        translate_observation_ids(obs_indices, reference_to_layout),
+        adapter,
+        topology=topology,
+        icesee_kwargs=icesee_kwargs,
     )
     error_mode = str(
         icesee_kwargs.get("enkf_observation_error_mode", "legacy_prior_anomalies")
@@ -567,6 +635,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
             topology=topology,
             icesee_kwargs=icesee_kwargs,
             error_mode=error_mode,
+            analysis_row_controls=apply_analysis_controls_local,
         )
         _step_wall = MPI.Wtime() - _t
         time_forecast_step += _step_wall
@@ -676,6 +745,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         member_store_backend=icesee_kwargs.get("member_store_backend", "memory"),
         store_streaming_analysis=bool(icesee_kwargs.get("use_store_streaming_analysis", False)),
     )
+    adapter.close()
     register_topology_run_metadata(topology, Nens)
     register_package_versions("petsc4py", "firedrake", "icepack")
     # The native cycle fuses each analysis into its forecast step, so there
@@ -683,7 +753,8 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     # analyses ran (and has no events when none did), and the steps that
     # carried an analysis are timed as "forecast_step/with_analysis", a
     # subset of "forecast_step". There
-    # is no ensemble-mean or forecast-noise phase in this runner.
+    # is no separate ensemble-mean phase. Forecast timing includes process
+    # noise and deterministic AR replay when restoring a checkpoint.
     emit_performance_report(
         world,
         elapsed_s=global_elapsed_time,

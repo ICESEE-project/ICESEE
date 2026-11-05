@@ -18,7 +18,7 @@ RUN_DIR="$PIG_DIR/pace_runs/runtime-check-${SLURM_JOB_ID:?}"
 mkdir -p "$RUN_DIR"
 DATA_DIR="$RUN_DIR/data"
 export ICESEE_DEBUG_INIT=1 ICESEE_HANG_DUMP_S=300
-ARGS=(--Nens=2 --execution_mode=3 --model_nprocs=2 --num_years=0.1 --dt=0.05
+ARGS=(--Nens=2 --execution_mode=3 --mode3_experimental=True --model_nprocs=2 --num_years=0.1 --dt=0.05
       --obs_start_time=0.05 --obs_max_time=0.1 --freq_obs=0.05
       '--save_steps=[0.05,0.1]' --checkpoint_every=1
       --checkpoint_keep_last=2 --data_path="$DATA_DIR")

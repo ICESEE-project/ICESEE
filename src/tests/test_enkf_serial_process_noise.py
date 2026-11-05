@@ -21,29 +21,7 @@ import tempfile
 import numpy as np
 import pytest
 
-# config/_utility_imports.py (imported transitively via EnKF.py) parses
-# sys.argv AND loads a params.yaml file at module import time -- and, since
-# the Pass-2 config-utility port, also deletes and recreates
-# icesee_kwargs['data_path'] as a side effect. No other test module imports
-# EnKF.py in-process (existing coverage only reaches it through
-# subprocess-launched driver scripts, which have their own clean argv and
-# cwd), so pytest's own CLI arguments -- and the lack of a params.yaml in
-# the pytest working directory -- would otherwise crash collection here.
-# Point -F at an existing, lightweight example config purely to satisfy
-# that import-time file read (nothing in these tests depends on its
-# contents), and --data_path at a disposable temp directory so the
-# auto-clean guard never touches the repository's own _modelrun_datasets.
-_lorenz96_params = os.path.join(
-    os.path.dirname(__file__),
-    "..", "..", "applications", "lorenz_model", "examples", "lorenz96", "params.yaml",
-)
-_safe_data_path = tempfile.mkdtemp(prefix="icesee_enkf_process_noise_test_")
-_saved_argv = sys.argv
-sys.argv = [sys.argv[0], "-F", _lorenz96_params, "--data_path", _safe_data_path]
-try:
-    from ICESEE.src.EnKF.python_enkf.EnKF import EnsembleKalmanFilter as EnKF
-finally:
-    sys.argv = _saved_argv
+from ICESEE.src.EnKF.python_enkf.EnKF import EnsembleKalmanFilter as EnKF
 
 
 def _no_op_forecast_step_single(ensemble=None, **icesee_kwargs):
@@ -211,3 +189,15 @@ def test_process_noise_state_persists_and_evolves_across_timesteps():
     # The AR(1) state must actually evolve (not stay pinned) across a real
     # timestep advance on the same instance.
     assert not np.allclose(state_after_k0, state_after_k1)
+
+
+def test_parameter_block_is_not_indexed_into_state_only_noise_history():
+    kwargs = _base_kwargs(nens=2, hdim=4, num_state_vars=3)
+    kwargs.update(joint_estimation=True, total_state_param_vars=4, nd=16,
+                  vec_inputs=["v0", "v1", "v2", "parameter"], sig_Q=[0.05]*4)
+    ensemble = np.zeros((16, 2))
+    ensemble[12:, :] = 7.0
+    enkf = EnKF(analysis_backend="serial")
+    result = enkf.forecast_step(ensemble, _no_op_forecast_step_single, **kwargs)
+    np.testing.assert_array_equal(result[12:, :], np.full((4, 2), 7.0))
+    assert enkf._process_noise_state.shape == (12, 2)

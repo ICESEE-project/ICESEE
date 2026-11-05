@@ -59,6 +59,7 @@ from ICESEE.applications.icepack_model.icepack_utils._distributed_fields import 
     IcepackForecastFields,
     IcepackNativeAdapter,
     IcepackNativeState,
+    scalar_ownership,
 )
 from ICESEE.src.parallelization._mpi_ensemble_intialization import (
     _member_initialization_context,
@@ -125,18 +126,9 @@ def _build_shared_context(
 
     # This rank's OWNED physical mesh-node coordinates only -- O(Nx/P_model)
     # memory, never a global-sized array. Computed once per ensemble group
-    # (cached alongside the rest of the shared context) and reused by every
-    # member's coordinate-keyed initial perturbation (see initialize_member),
-    # so a genuine per-DOF physical identity is available without
-    # regenerating or broadcasting coordinates per member.
-    x_expr, y_expr = SpatialCoordinate(mesh)
-    coords = np.stack(
-        (
-            np.asarray(Function(Q).interpolate(x_expr).dat.data_ro),
-            np.asarray(Function(Q).interpolate(y_expr).dat.data_ro),
-        ),
-        axis=1,
-    )
+    # (cached alongside the rest of the shared context) and used for the
+    # restart layout fingerprint and the reference-numbering map.
+    coords = node_coordinates(Q, mesh)
 
     if init_trace_enabled():
         trace_init("EXIT  per-group model context",
@@ -157,6 +149,28 @@ def _build_shared_context(
         smb=smb,
         coords=coords,
     )
+
+
+def node_coordinates(Q: Any, mesh: Any = None) -> np.ndarray:
+    """Owned nodal coordinates of scalar space ``Q``, in owned-row order."""
+
+    x_expr, y_expr = SpatialCoordinate(Q.mesh() if mesh is None else mesh)
+    return np.stack(
+        (
+            np.asarray(Function(Q).interpolate(x_expr).dat.data_ro),
+            np.asarray(Function(Q).interpolate(y_expr).dat.data_ro),
+        ),
+        axis=1,
+    )
+
+
+def owned_node_layout(*, topology: Any, icesee_kwargs: Mapping[str, Any]):
+    """``(owned_start, global_nodes, owned_coords)`` of this rank's scalar
+    rows in the distributed member layout (see build_icepack_field_registry)."""
+
+    ctx = _shared_context(topology, icesee_kwargs)
+    ownership = scalar_ownership(ctx.h0)
+    return ownership.owned_start, ownership.global_size, ctx.coords
 
 
 def _shared_context(

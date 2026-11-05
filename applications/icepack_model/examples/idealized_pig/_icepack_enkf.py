@@ -104,9 +104,10 @@ def generate_true_state(**icesee_kwargs):
     # loop through each step (k = 0 to k = 100)
     for k in range(nt):
 
-        #step = k * dt
+
         step = k
 
+        print(step)
 
         ### Conditionals for depth-dependent basal melt rate function
         ### Select forcing scenario between 1935 - 2017

@@ -140,6 +140,7 @@ def transform_local_members(
     icesee_kwargs: Mapping[str, Any],
     *,
     row_chunk_size: int,
+    row_transform=None,
 ) -> LocalMemberEnsemble:
     """Right-multiply locally owned member slabs by an ensemble transform.
 
@@ -168,6 +169,8 @@ def transform_local_members(
         row_chunk_size=row_chunk_size,
     ):
         analysis_block = forecast_block @ transform
+        if row_transform is not None:
+            analysis_block = row_transform(rows, forecast_block, analysis_block)
         for member_id in local_forecast.member_ids:
             output[member_id][rows] = analysis_block[:, member_id]
 

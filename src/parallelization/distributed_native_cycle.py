@@ -24,6 +24,7 @@ from .distributed_analysis import (
     StochasticAnalysisProducts,
     assemble_selected_ensemble_rows,
     ensemble_transform_from_products,
+    collapsed_spread_message,
 )
 from .distributed_checkpoint import (
     DistributedCheckpoint,
@@ -261,6 +262,7 @@ def run_native_global_analysis_cycle(
     energy_fraction: float = 0.999,
     checkpoint_request: NativeCheckpointRequest | None = None,
     apply_inversion: bool = False,
+    analysis_row_controls=None,
 ) -> NativeCycleResult:
     """Advance, analyze, finalize, and optionally checkpoint native members.
 
@@ -337,20 +339,36 @@ def run_native_global_analysis_cycle(
 
     if topology.is_ensemble_root:
         global_products = products.reduced(topology.spatial_comm)
-        transform = ensemble_transform_from_products(
+        refusal = collapsed_spread_message(
+            global_products,
+            relative_tolerance=icesee_kwargs.get("analysis_min_relative_spread", 1e-8),
+        )
+        transform = None if refusal else ensemble_transform_from_products(
             global_products,
             energy_fraction=energy_fraction,
         )
         observation_rows = int(global_products.observation_rows)
     else:
+        refusal = None
         transform = None
         observation_rows = None
-    transform = np.asarray(
-        topology.ensemble_comm.bcast(transform, root=0), dtype=np.float64
-    )
+    # Every rank raises together; a root-only raise would strand the others.
+    transform, refusal = topology.ensemble_comm.bcast((transform, refusal), root=0)
+    if refusal:
+        raise RuntimeError(f"analysis at timestep {timestep} refused: {refusal}")
+    transform = np.asarray(transform, dtype=np.float64)
     observation_rows = int(
         topology.ensemble_comm.bcast(observation_rows, root=0)
     )
+
+    row_transform = None
+    if number_of_batches and analysis_row_controls is not None:
+        def row_transform(rows, forecast_block, analysis_block):
+            global_rows = pool.layout.local_to_global_rows(
+                np.arange(rows.start, rows.stop, dtype=np.int64))
+            return analysis_row_controls(
+                analysis_vec=analysis_block, forecast_vec=forecast_block,
+                global_rows=global_rows, icesee_kwargs=icesee_kwargs)
 
     local_analysis = transform_local_members(
         local_forecast,
@@ -358,6 +376,7 @@ def run_native_global_analysis_cycle(
         topology,
         icesee_kwargs,
         row_chunk_size=state_row_chunk_size,
+        row_transform=row_transform,
     )
     pool.restore_and_finalize(
         local_analysis,

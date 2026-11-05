@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from mpi4py import MPI
 
 from ICESEE.src.utils.tools import icesee_get_index, env_flag
+from ICESEE.src.utils.init_trace import traced_init
 from ICESEE.src.utils.state_ownership import (
     resolve_state_ownership,
     combine_member_state,
@@ -620,7 +621,8 @@ def ensemble_initialization_full_parallel_run(**icesee_kwargs):
             # on a rank subset and must not be the one to open the shared
             # HDF5 batch window itself -- see
             # EnKF_fully_parallel_IO._require_batch.
-            enkf_parallel_io._ensure_batch(0)
+            with traced_init("mode2 open step-0 HDF5 window (collective)"):
+                enkf_parallel_io._ensure_batch(0)
 
             # A spare rank (color is None -- resource_plan.py) belongs to
             # no model group and must not enter this round loop, nor touch
@@ -659,9 +661,11 @@ def ensemble_initialization_full_parallel_run(**icesee_kwargs):
                         ens = ensemble_id
 
                         # Call the model to initialize the ensemble
-                        with _member_initialization_context(
-                            icesee_kwargs, ens
-                        ) as member_kwargs:
+                        with traced_init("mode2 member initialization",
+                                         member=ens, round=round_id), \
+                                _member_initialization_context(
+                                    icesee_kwargs, ens
+                                ) as member_kwargs:
                             data = model_module.initialize_ensemble(
                                 ens, **member_kwargs
                             )
@@ -678,7 +682,8 @@ def ensemble_initialization_full_parallel_run(**icesee_kwargs):
                         ensemble_vec += increment
 
                         _time_init_file_writing = MPI.Wtime()
-                        enkf_parallel_io.write_forecast(0, ensemble_vec, ensemble_id)
+                        with traced_init("mode2 member write", member=ensemble_id):
+                            enkf_parallel_io.write_forecast(0, ensemble_vec, ensemble_id)
                         # enkf_parallel_io.datasets[0][:, ens] = ensemble_vec
                         time_init_file_writing += MPI.Wtime() - _time_init_file_writing
 
@@ -751,11 +756,14 @@ def ensemble_initialization_full_parallel_run(**icesee_kwargs):
 
             shape_ens = comm_world.bcast(shape_ens, root=0)
 
-        comm_world.Barrier()
-        apply_initial_spread_filebacked(enkf_parallel_io, alpha)
+        with traced_init("mode2 barrier (all members initialized)"):
+            comm_world.Barrier()
+        with traced_init("mode2 initial spread (file-backed)"):
+            apply_initial_spread_filebacked(enkf_parallel_io, alpha)
         _time_init_ensemble_mean_computation = MPI.Wtime()
         # enkf_parallel_io.compute_forecast_mean_chunked(0)
-        enkf_parallel_io.compute_forecast_mean_chunked_v2(k=0,flag="initial")
+        with traced_init("mode2 initial ensemble mean"):
+            enkf_parallel_io.compute_forecast_mean_chunked_v2(k=0,flag="initial")
         # ens_mean = enkf_parallel_io.compute_forecast_mean(0)
         # ens_mean = .datasets[0][:, :].mean(axis=1)
         time_init_ensemble_mean_computation += MPI.Wtime() - _time_init_ensemble_mean_computation

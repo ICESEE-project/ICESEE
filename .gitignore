@@ -182,6 +182,7 @@ applications/icepack_model/examples/idealized_pig/data
 applications/issm_model/examples/ISMIP_Choi/spinup/data_new
 # Per-job PACE calibration/validation outputs
 **/pace_runs/
+**/validation_runs/
 **/results/
 **/icesee_perf_outputs/
 **/None/

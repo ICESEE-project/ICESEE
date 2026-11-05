@@ -59,6 +59,24 @@ from ICESEE.src.parallelization.EnKF_parallel_io import EnKF_fully_parallel_IO
 from ICESEE.src.utils.state_ownership import resolve_state_ownership
 
 # ======================== Run model with EnKF ========================
+def _initialization_reuse_decision(comm, *, run_already_complete,
+                                   reuse_allowed, state_file, nd, nens):
+    """Choose one startup branch before any rank can create its shards.
+
+    A rank-local existence/shape probe races against other ranks creating
+    the initial ensemble file. Some ranks can otherwise take the reuse
+    allgather while others enter initialization's HDF5 barriers.
+    """
+    decision = None
+    if comm.Get_rank() == 0:
+        decision = bool(run_already_complete or (
+            reuse_allowed and tools.h5_has_dataset_with_shape(
+                state_file, "states", (nd, nens)
+            )
+        ))
+    return bool(comm.bcast(decision, root=0))
+
+
 def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
     """ General function to run any kind of model with the Ensemble Kalman Filter """
 
@@ -514,13 +532,16 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
 
         restart_state_t = int(k_start) if k_start > 0 else 0
         run_already_complete = k_start >= nt
-        init_ok = run_already_complete or (reuse_allowed and tools.h5_has_dataset_with_shape(
-            os.path.join(
+        init_ok = _initialization_reuse_decision(
+            comm_world,
+            run_already_complete=run_already_complete,
+            reuse_allowed=reuse_allowed,
+            state_file=os.path.join(
                 _modelrun_datasets,
                 f"icesee_enkf_ens_{restart_state_t:04d}.h5",
             ),
-            "states", (nd, Nens)
-        ))
+            nd=nd, nens=Nens,
+        )
         if init_ok:
             if rank_world == 0:
                 if run_already_complete:
@@ -580,10 +601,10 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
         # Initialize progress bar on the root process
         if rank_world == 0:
             nt = icesee_kwargs.get("nt", icesee_kwargs["nt"])
-            print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {size_world*(icesee_kwargs['model_nprocs']+1)} MPI ranks.")
+            print(f"[ICESEE] Launching {model} with data assimilation using the {filter_type} filter across {comm_world.Get_size()} MPI ranks.")
             pbar = tqdm(
                 total=nt,
-                desc=f"[ICESEE] Assimilation progress ({size_world*(icesee_kwargs['model_nprocs']+1)} ranks)",
+                desc=f"[ICESEE] Assimilation progress ({comm_world.Get_size()} ranks)",
                 position=0,
                 leave=True,
                 dynamic_ncols=True,
