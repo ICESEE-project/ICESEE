@@ -32,7 +32,7 @@
 | `bed_enforce_below_surface` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `bed_graph_neighbors` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `bed_inference_start_time` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
-| `bed_inflation_factor` | Inflation factor for the bed block. | Unknown | Computed | No | None | Dictionary |
+| `bed_inflation_factor` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `bed_max_update_per_cycle` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `bed_min_surface_separation` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `bed_obs_indices` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
@@ -53,12 +53,12 @@
 | `checkpoint_every` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `checkpoint_keep_analysis` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `checkpoint_keep_last` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
-| `chunk_size` | State-row chunk size. | Unknown | Computed | No | None | Dictionary |
+| `chunk_size` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `cli_overrides` | The values the user explicitly requested, so later stages can honor them and verify that nothing silently replaced them (src/utils/run_schedule.py::verify_cli_overrides_respected). | Unknown | Computed(applied) | No | None | Dictionary |
-| `collective_threshold` | Threshold for selecting collective I/O. | Unknown | Computed | No | None | Dictionary |
+| `collective_threshold` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `commandlinerun` | Parameter for commandlinerun in dictionary | Unknown | Computed | No | None | Dictionary |
 | `coupled_model_datasets` | YAML configuration parameter for coupled model datasets | str | data | No | None | YAML |
-| `coupled_model_datasets_dir` | Directory for coupled-model datasets. | Unknown | Computed | No | None | Dictionary |
+| `coupled_model_datasets_dir` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `create_ensemble_dataset` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `data_path` | Re-apply normalized and command-line-resolved values after the raw YAML update.  Without this step, e.g. ``--Nens=40`` is silently replaced by the YAML value while constructing the canonical dictionary. | Unknown | Computed(data_path) | No | None | Dictionary |
 | `default_run` | Parameter for default run in dictionary | bool | True | No | None | Dictionary |
@@ -77,7 +77,7 @@
 | `finalize_row_chunk_size` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `flag_jupyter` | leave entire routine | bool | True | No | None | Internal |
 | `force_fresh_start` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
-| `freq_obs` | Observation interval in model time units. | Unknown | Computed | No | None | Dictionary |
+| `freq_obs` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `friction_idx` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `frozen_analysis_vars` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `generate_nurged_state` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
@@ -90,7 +90,7 @@
 | `h5_file_compression` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `h5_file_compression_level` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `inference_plugin_enabled` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
-| `inflation_factor` | Ensemble inflation factor. | Unknown | Computed | No | None | Dictionary |
+| `inflation_factor` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `initial_bed_bias` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `initial_spread_factor` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `initial_state_only` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
@@ -102,31 +102,31 @@
 | `length_scale` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `local_analysis` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `local_analysis_memory_budget_mb` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
-| `localization_flag` | Enable configured covariance localization. | Unknown | Computed | No | None | Dictionary |
+| `localization_flag` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `localization_radius` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `localized_vars` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `m_obs` | Parameter for m obs in dictionary | Unknown | Computed(num_observations) | No | None | Dictionary |
 | `mesh_coordinate_scale_to_m` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
-| `model_name` | Registered model name. | Unknown | Computed | No | None | Dictionary |
+| `model_name` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `model_nprocs` | Re-apply normalized and command-line-resolved values after the raw YAML update.  Without this step, e.g. ``--Nens=40`` is silently replaced by the YAML value while constructing the canonical dictionary. | Unknown | Computed(model_nprocs) | No | None | Dictionary |
-| `n_modeltasks` | Model task count. | Unknown | Computed | No | None | Dictionary |
+| `n_modeltasks` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `node_coords` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `nt` | Add model and analysis options to the canonical runtime context. | Unknown | Unknown | No | None | Dictionary |
-| `num_param_vars` | Number of packed parameter blocks. | Unknown | Computed | No | None | Dictionary |
-| `num_state_vars` | Number of packed state blocks. | Unknown | Computed | No | None | Dictionary |
+| `num_param_vars` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
+| `num_state_vars` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `number_obs_instants` | Parameter for number obs instants in dictionary | Unknown | Computed(num_observations) | No | None | Dictionary |
 | `obs_data_path` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `obs_index` | Parameter for obs index in dictionary | Unknown | Computed(obs_idx) | No | None | Dictionary |
-| `obs_max_time` | Application-configured runtime option. | Unknown | Computed | No | None | Dictionary |
+| `obs_max_time` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `obs_node_coords` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
-| `obs_start_time` | Application-configured runtime option. | Unknown | Computed | No | None | Dictionary |
+| `obs_start_time` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `observation_operator_storage` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `observation_row_chunk_size` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `observations_available` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `observed_params` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `observed_vars` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `param_ens_spread` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
-| `param_inflation_factor` | Application-configured runtime option. | Unknown | Computed | No | None | Dictionary |
+| `param_inflation_factor` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `parameter_estimation` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `params_vec` | check available parameters in the obseve_params list that need to be observed | list | [] | No | None | Variable |
 | `partitioned_io_flag` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
@@ -134,7 +134,7 @@
 | `physics_smb_inference` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `process_noise_schedule` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `random_field_method` | Re-apply normalized and command-line-resolved values after the raw YAML update.  Without this step, e.g. ``--Nens=40`` is silently replaced by the YAML value while constructing the canonical dictionary. | Unknown | Computed(random_field_method) | No | None | Dictionary |
-| `ranks_per_model` | Resource-plan ranks assigned to each model group. | Unknown | Computed | No | None | Dictionary |
+| `ranks_per_model` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `rel_vel_weight` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `restart_enabled` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `resume_from_checkpoint` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
@@ -142,7 +142,7 @@
 | `scalar_inputs` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `sequential_ensemble_initialization` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `sequential_run` | Parameter for sequential run in dictionary | bool | True | No | None | Dictionary |
-| `serial_file_creation` | Use serial file creation where configured. | Unknown | Computed | No | None | Dictionary |
+| `serial_file_creation` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `sig_Q` | Parameter for sig q in dictionary | Unknown | Computed | No | None | Dictionary |
 | `sig_model` | Parameter for sig model in dictionary | Unknown | Computed | No | None | Dictionary |
 | `sig_obs` | Parameter for sig obs in dictionary | Unknown | Computed | No | None | Dictionary |
@@ -158,7 +158,7 @@
 | `smb_spinup_hold_factor` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `smb_temporal_regularization` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `state_estimation` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
-| `state_inflation_factor` | Inflation factor for state blocks. | Unknown | Computed | No | None | Dictionary |
+| `state_inflation_factor` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `storage_safety_factor` | Parameter for storage safety factor in dictionary | Unknown | Computed | No | None | Dictionary |
 | `synthetic_observation_storage` | Parameter for synthetic observation storage in dictionary | Unknown | Computed | No | None | Dictionary |
 | `t` | Add model and analysis options to the canonical runtime context. | Unknown | Unknown | No | None | Dictionary |
@@ -166,7 +166,7 @@
 | `tikhonov_regularization_weight` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `total_state_param_vars` | Parameter for total state param vars in dictionary | Unknown | Unknown | No | None | Dictionary |
 | `use_ensemble_pertubations` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
-| `use_random_fields` | Enable configured spatial random fields. | Unknown | Computed | No | None | Dictionary |
+| `use_random_fields` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `var_nd` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `vec_inputs` | Parameter for vec inputs in dictionary | Unknown | Unknown | No | None | Dictionary |
 | `vel_idx` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
