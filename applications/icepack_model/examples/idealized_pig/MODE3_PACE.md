@@ -26,15 +26,19 @@ its pinned source automatically. Select the checkout explicitly below.
 
 ## Submit the validated configuration
 
-Run these commands from the updated ICESEE checkout containing `src/` and
-`applications/`. The dependency installation remains separate:
+Submit from the example directory in the updated scientific checkout. In the
+standard source-only layout, the launcher locates the source from the submission
+directory and reuses the sibling dependency installation:
 
 ```bash
-export ICESEE_SOURCE_ROOT="$(pwd -P)"
-export ICESEE_SPACK_ROOT="$HOME/r-arobel3-0/ICESEE-Spack"
-cd "$ICESEE_SOURCE_ROOT/applications/icepack_model/examples/idealized_pig"
+cd "$HOME/r-arobel3-0/ICESEE-Spack-source/ICESEE/applications/icepack_model/examples/idealized_pig"
 sbatch run_idealized_1.sbatch
 ```
+
+Explicit `ICESEE_SOURCE_ROOT` and `ICESEE_SPACK_ROOT` exports override discovery.
+The parameter file comes from `ICESEE_PARAMS_FILE` when set, otherwise the
+adjacent `ICESEE-run-configs/idealized_pig.yaml` when present, then the tracked
+`params.yaml`. The selected paths and a parameter copy are recorded with logs.
 
 The existing PIG mesh, parameter, SMB and compact spin-up input files must be
 available in this checkout's `data/`. They are not downloaded by the launcher.
@@ -43,15 +47,16 @@ spin-up history is a separate input choice. The submission uses your configured
 PACE account; override `--account` or `--partition` at submission if required by
 your allocation.
 
-Defaults are two nodes, eight MPI ranks per node, one CPU/thread per rank,
-96 GB per node and a two-hour limit. There are 16 MPI ranks total, two spatial
-ranks per model group, eight model groups, and 32 members in four rounds.
+Defaults are one node, eight MPI ranks, one CPU/thread per rank, 48 GB and a
+two-hour limit. Two spatial ranks per model group provide four model groups;
+24 members run in six rounds.
 For this native Icepack path the total is `model_groups * model_nprocs`;
 there is no additional coordinator rank per member. Nodes/ranks are resources,
 not the ensemble size. The script checks divisibility and uses block placement
 to keep each two-rank model group within a node.
 
-The scientific arguments match job 15125921.2: five years, `dt=0.05`, analyses
+The default allocation matches job 15369255. Both measured allocations use five
+years, `dt=0.05`, analyses
 at years 2, 3 and 4, and flowline profiles at years 0, 2, 3 and 4. No initial
 thickness perturbation, solver-cap increase or physical-parameter adjustment
 is introduced. Native process noise and the existing analysis controls are
@@ -83,7 +88,7 @@ The 24-member/eight-rank case completed on PACE in job 15369255 using only
 `--execution_mode=3`: one node, two spatial ranks per model, 100 forecast steps
 and three analyses. The job exited zero in 47:09. All eight final checkpoint
 shards and all 25 truth/member profile files were checked. Use
-`pace/validate_mode3_24.sbatch` to reproduce that allocation. This confirms
+`run_idealized_1.sbatch` or `pace/validate_mode3_24.sbatch` for that allocation. This confirms
 the PACE run; each laptop's installed Firedrake/MPI stack still needs its own
 compatibility check.
 

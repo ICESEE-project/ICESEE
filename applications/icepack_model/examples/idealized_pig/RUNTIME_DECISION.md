@@ -141,8 +141,9 @@ existing output targets and record source status.
 
 - `pace/test_modes_1_3.sbatch`: short concurrent diagnostics.
 - `pace/test_modes_1_3_year.sbatch`: one-year cases plus isolated mid-run restart.
-- `run_idealized_1.sbatch`: Mode-3 launcher using the validated science
-  and 16-rank topology, two nodes and a two-hour allocation.
+- `run_idealized_1.sbatch`: Mode-3 launcher submitted from the example directory;
+  defaults to 24 members, eight ranks on one node, 48 GB and two hours. It reuses
+  the retained dependency installation and saved external YAML when present.
 - `pace/validate_production_modes.sbatch`: concurrent 32-member, five-year
   confirmation; job 15125921 produced the mixed terminal results above.
 
