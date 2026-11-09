@@ -138,8 +138,12 @@ The initial reference mapping and all checkpoint shards remain available for
 restart; copying the aggregate alone is sufficient for its plotting datasets.
 
 For five years from time zero with `dt=0.05`, `checkpoint_00000099` is one final
-snapshot at year 5, not all timesteps. The aggregate has 101 columns: initial
-state plus 100 completed cycles numbered 0–99. At an analysis cycle its column
+snapshot at year 5, not all timesteps. That example's aggregate has 101 columns:
+initial state plus 100 completed cycles numbered 0–99. Column counts follow the
+chosen duration and `dt`: `K=int(round(T/dt))` cycles and `K+1` saved times. Use
+`ICESEE_DT=0.1 sbatch run_idealized_1.sbatch` for 51 columns over five years.
+Actual physical labels come from the run's model times, including when `T/dt`
+is not an integer. At an analysis cycle its column
 contains the updated ensemble. Flowline diagnostics remain separate and are
 not full analyzed-state history.
 

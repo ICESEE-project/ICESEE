@@ -43,7 +43,8 @@ def ensemble(column):
 manager.write_initial(ensemble(0))
 for step in range(2):
     manager.commit_step(step, ensemble(step + 1), did_analysis=(step == 1),
-                        analyses_completed=int(step == 1))
+                        analyses_completed=int(step == 1),
+                        extra={'error_mode': 'legacy_prior_anomalies'})
 world.Barrier()
 output = finalize_ensemble_history(world, data, row_chunk_size=2)
 error = None

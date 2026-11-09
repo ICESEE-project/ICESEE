@@ -145,3 +145,18 @@ def test_missing_explicit_parameters_fail_before_launch(tmp_path):
     })
     assert result.returncode == 2
     assert not capture.exists()
+
+
+@pytest.mark.parametrize('dt,columns', [('0.1', 51), ('0.025', 201)])
+def test_chosen_dt_reaches_driver_and_history_column_report(tmp_path, dt, columns):
+    result, _, capture = _run(tmp_path, counts={'ICESEE_DT': dt})
+    assert result.returncode == 0, result.stderr
+    assert '--dt=' + dt in json.loads(capture.read_text())
+    assert f'history_columns={columns}' in result.stdout
+
+
+@pytest.mark.parametrize('dt', ['0', '-0.1', 'nan', 'inf', 'invalid'])
+def test_invalid_dt_is_rejected_before_launch(tmp_path, dt):
+    result, _, capture = _run(tmp_path, counts={'ICESEE_DT': dt})
+    assert result.returncode == 2
+    assert not capture.exists()

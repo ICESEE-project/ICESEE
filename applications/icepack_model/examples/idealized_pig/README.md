@@ -294,8 +294,19 @@ sbatch run_idealized_1.sbatch
 
 The launcher passes that file through `--force-params`; editing the tracked
 script or copying it elsewhere is unnecessary. Arguments after the script name
-are not forwarded to Python. All launches retain five years, `dt=0.05`,
-observations at years 2/3/4 and requested profiles at years 0/2/3/4.
+are not forwarded to Python. Defaults are five years, `dt=0.05`, observations at
+years 2/3/4 and requested profiles at years 0/2/3/4. Select another timestep at
+submission with `ICESEE_DT`; `ICESEE_NUM_YEARS` selects duration. A changed duration
+still needs a valid observation window.
+
+```bash
+export ICESEE_DT=0.1
+export ICESEE_DATA_PATH="$PWD/_modelrun_datasets_dt01_trial01"
+sbatch run_idealized_1.sbatch
+```
+
+The launch record prints resolved forecast steps and history columns. Explicit
+launcher arguments override the YAML timestep/duration, so inspect `launch.txt`.
 
 For the two-node, 32-member allocation:
 
@@ -465,6 +476,26 @@ Older completed runs made with rolling retention may have only the initial
 checkpoint and the newest two steps, and no aggregate file. Changing readers
 cannot recreate their pruned snapshots. The full-history behavior applies to
 new runs made with the updated launcher/configuration.
+
+### Time columns follow the chosen timestep
+
+The exporter reads the resolved `nt` and physical `model_time` values from
+checkpoint manifests. It does not hard-code 100 cycles or 101 columns. For this
+PIG driver, requested duration `T` and user-selected `dt` resolve to
+`K = int(round(T / dt))` cycles, `K + 1` columns including the initial state,
+and `t[j] = j * dt`. Final checkpoint index is `K - 1`.
+
+| Five-year example | Forecast cycles | Time columns |
+|---|---|---|
+| `dt=0.1` | 50 | 51 |
+| `dt=0.05` | 100 | 101 |
+| `dt=0.025` | 200 | 201 |
+
+If `T / dt` is not an integer, the driver's rounded cycle count means the
+actual final time is `K * dt`. The file preserves that actual time grid; it does
+not stretch the labels to end at the requested duration. Check the launch
+schedule when choosing such values. `ICESEE_DT=0.1 sbatch run_idealized_1.sbatch`
+selects the first example without editing the script.
 
 ### Does `checkpoint_00000099` contain every timestep?
 

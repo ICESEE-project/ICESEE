@@ -56,6 +56,22 @@ printf 'Source: %s\nDependencies: %s\nParameters: %s\n' "$ICESEE_ROOT" "$SPACK_R
 # Five-year, 24-member reference allocation; scheduler options may be overridden.
 NENS="${ICESEE_NENS:-24}"
 MODEL_NPROCS="${ICESEE_MODEL_NPROCS:-2}"
+DT="${ICESEE_DT:-0.05}"
+NUM_YEARS="${ICESEE_NUM_YEARS:-5}"
+STEP_COUNT="$(python - "$NUM_YEARS" "$DT" <<'PYTHON'
+import math, sys
+try:
+    years, dt = map(float, sys.argv[1:])
+except ValueError:
+    raise SystemExit('ICESEE_NUM_YEARS and ICESEE_DT must be numbers')
+if not all(math.isfinite(v) and v > 0 for v in (years, dt)):
+    raise SystemExit('ICESEE_NUM_YEARS and ICESEE_DT must be finite and positive')
+ratio = years / dt
+if not math.isfinite(ratio) or round(ratio) < 1:
+    raise SystemExit('Duration and dt must produce at least one finite forecast step')
+print(int(round(ratio)))
+PYTHON
+)" || exit 2
 NODES="${SLURM_JOB_NUM_NODES:?Run this script with sbatch}"
 NP="${SLURM_NTASKS:?Missing Slurm task count}"
 TPN="${ICESEE_TASKS_PER_NODE:-${SLURM_NTASKS_PER_NODE:-8}}"
@@ -92,7 +108,7 @@ cp -- "$RUN_PARAMETERS" "$OUTDIR/params.yaml"
 export ICESEE_DEBUG_INIT="${ICESEE_DEBUG_INIT:-1}"
 export ICESEE_HANG_DUMP_S="${ICESEE_HANG_DUMP_S:-900}"
 ARGS=(--execution_mode=3 --force-params="$RUN_PARAMETERS" --Nens="$NENS"
-      --model_nprocs="$MODEL_NPROCS" --num_years=5 --dt=0.05
+      --model_nprocs="$MODEL_NPROCS" --num_years="$NUM_YEARS" --dt="$DT"
       --checkpoint_every=1 --checkpoint_keep_last=0
       --mode3_export_ensemble_history=True
       --obs_start_time=2 --obs_max_time=4 --freq_obs=1
@@ -104,6 +120,8 @@ CMD=(srun --mpi=pmix --exact --exclusive --nodes="$NODES" --ntasks="$NP"
 {
   printf 'Nodes=%s MPI_ranks=%s tasks_per_node=%s members=%s spatial_ranks=%s model_groups=%s\n' \
     "$NODES" "$NP" "$TPN" "$NENS" "$MODEL_NPROCS" "$GROUPS_COUNT"
+  printf 'Requested_years=%s dt=%s forecast_steps=%s history_columns=%s\n' \
+    "$NUM_YEARS" "$DT" "$STEP_COUNT" "$((STEP_COUNT + 1))"
   printf 'Parameters=%s\nDatasets=%s\nLogs=%s\nCommand:' "$RUN_PARAMETERS" "$DATA_DIR" "$OUTDIR"
   printf ' %q' "${CMD[@]}"
   printf '\n'

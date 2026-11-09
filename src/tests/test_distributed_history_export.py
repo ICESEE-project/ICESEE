@@ -13,14 +13,14 @@ from ICESEE.src.parallelization.distributed_history_export import (
 )
 
 
-@pytest.fixture
-def history(tmp_path):
+def _write_history(tmp_path, times=None):
+    times = np.arange(4) * 0.05 if times is None else np.asarray(times)
     root = tmp_path / '_mode3_state_history'
     blocks = [dict(name='h', global_offset=0, global_size=4),
               dict(name='forcing', global_offset=4, global_size=2)]
     maps = {'h': np.array([2, 0, 3, 1]), 'forcing': np.array([1, 0])}
-    reference = np.empty((6, 3, 4))
-    for column in range(4):
+    reference = np.empty((6, 3, len(times)))
+    for column in range(len(times)):
         checkpoint = (root / 'initial_condition/checkpoint_00000000' if column == 0 else
                       root / 'steps' / f'checkpoint_{column - 1:08d}')
         checkpoint.mkdir(parents=True)
@@ -46,11 +46,18 @@ def history(tmp_path):
         manifest = dict(complete=True, run_id='run-1', layout_id='mesh-1',
                         global_size=6, number_of_members=3, dtype='<f8', blocks=blocks,
                         timestep=max(column - 1, 0), shards=shards,
-                        metadata=dict(nt=3, next_step=column, completed_step=column - 1,
-                                      model_time=column * 0.05, did_analysis=(column == 2)))
+                        metadata=dict(nt=len(times) - 1, next_step=column, completed_step=column - 1,
+                                      model_time=float(times[column]), did_analysis=(column == 2)))
+        if column:
+            manifest['metadata']['error_mode'] = 'legacy_prior_anomalies'
         (checkpoint / 'manifest.json').write_text(json.dumps(manifest))
     save_reference_layout(root, run_id='run-1', layout_id='mesh-1', row_maps=maps)
     return tmp_path, reference, maps
+
+
+@pytest.fixture
+def history(tmp_path):
+    return _write_history(tmp_path)
 
 
 def test_materialized_history_is_reference_ordered_complete_and_standalone(history, monkeypatch):
@@ -227,3 +234,29 @@ def test_nonfinite_snapshot_is_not_published(history):
     with pytest.raises(ValueError, match='nonfinite state'):
         export_ensemble_history(data)
     assert not (data / 'icesee_ensemble_data.h5').exists()
+
+
+@pytest.mark.parametrize("dt", [0.1, 0.05, 0.025, 0.06])
+def test_history_columns_follow_resolved_dt_and_actual_model_times(tmp_path, dt):
+    years = 1.0
+    steps = int(round(years / dt))
+    times = np.arange(steps + 1) * dt
+    data, reference, _ = _write_history(tmp_path, times)
+    output = export_ensemble_history(data, row_chunk_size=2)
+    with h5py.File(output, 'r') as handle:
+        assert handle['ensemble'].shape == (6, 3, steps + 1)
+        assert handle['ensemble_mean'].shape == (6, steps + 1)
+        np.testing.assert_array_equal(handle['t'][:], times)
+        np.testing.assert_array_equal(handle['ensemble'][:], reference)
+        assert handle['checkpoint_steps'][-1] == steps - 1
+        assert handle['t'][-1] == steps * dt
+
+
+def test_changed_error_mode_between_forecast_steps_is_rejected(history):
+    data, _, _ = history
+    path = data / '_mode3_state_history/steps/checkpoint_00000000/manifest.json'
+    manifest = json.loads(path.read_text())
+    manifest['metadata']['error_mode'] = 'stochastic_R'
+    path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match='scientific schedule differs'):
+        export_ensemble_history(data)

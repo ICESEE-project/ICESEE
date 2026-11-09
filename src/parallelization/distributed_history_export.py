@@ -117,8 +117,8 @@ def _inventory(history_root):
         if not manifest.get('complete') or any(manifest.get(key) != value for key, value in signature.items()):
             raise ValueError(f'incomplete or incompatible checkpoint: {path.parent}')
         metadata = manifest['metadata']
-        if any(metadata.get(key) != final['metadata'].get(key)
-               for key in ('schedule_digest', 'error_mode')):
+        if (metadata.get('schedule_digest') != final['metadata'].get('schedule_digest')
+                or (column and metadata.get('error_mode') != final['metadata'].get('error_mode'))):
             raise ValueError(f'checkpoint scientific schedule differs: {path.parent}')
         if (int(metadata['nt']) != nt or int(metadata['next_step']) != column
                 or int(metadata['completed_step']) != column - 1
