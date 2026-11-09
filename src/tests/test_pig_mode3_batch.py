@@ -66,6 +66,8 @@ def test_validated_allocation_has_16_ranks_and_32_members(tmp_path):
     for expected in ("--nodes=2", "--ntasks=16", "--ntasks-per-node=8",
                      "--cpus-per-task=1", "--distribution=block:block",
                      "--execution_mode=3",
+                     "--checkpoint_every=1", "--checkpoint_keep_last=0",
+                     "--mode3_export_ensemble_history=True",
                      "--Nens=32", "--model_nprocs=2", "--save_steps=[2,3,4]",
                      "--data_path=" + str(pig / "_modelrun_datasets")):
         assert expected in args

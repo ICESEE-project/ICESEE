@@ -117,12 +117,37 @@ sacct -j JOBID --format=JobID,State,ExitCode,Elapsed
 ```
 
 The dataset directory contains `hs_profiles_true.h5` and
-`hs_ensemble_profiles0.h5` through `hs_ensemble_profiles31.h5`, plus native
-checkpoint shards/manifests. These are binary HDF5 files, not folders. Open
-with h5py or the result notebook after selecting this run's data directory.
+`hs_ensemble_profiles0.h5` through `hs_ensemble_profiles23.h5` for the default
+24-member run, plus native checkpoint shards/manifests. These are binary HDF5
+files, not folders. Read profiles with h5py. The updated notebook reads the
+standalone `icesee_ensemble_data.h5` published after full-history finalization;
+older rolling archives need a native checkpoint reader and still lack pruned times.
 Native profiles record `written_steps` and `profile_times`; unwritten columns
 must not be interpreted as physical zero values. Compilation caches are placed
 in node-local scratch, with rank-private XDG state, rather than shared storage.
+
+### Native snapshots and the combined plotting file
+
+The PIG launcher retains the initial ensemble and every completed cycle using
+`checkpoint_every=1`, `checkpoint_keep_last=0`. Each rank writes only its owned
+rows during the run. On completion, bounded finalization creates standalone
+`icesee_ensemble_data.h5` containing `ensemble` (state/member/time),
+`ensemble_mean` (state/time), physical `t`, and `analysis_applied`.
+Reference-row permutations align exported state with serial truth/observations.
+The initial reference mapping and all checkpoint shards remain available for
+restart; copying the aggregate alone is sufficient for its plotting datasets.
+
+For five years from time zero with `dt=0.05`, `checkpoint_00000099` is one final
+snapshot at year 5, not all timesteps. The aggregate has 101 columns: initial
+state plus 100 completed cycles numbered 0–99. At an analysis cycle its column
+contains the updated ensemble. Flowline diagnostics remain separate and are
+not full analyzed-state history.
+
+Earlier rolling-retention runs may retain only initial state and steps 98/99.
+Those missing times cannot be reconstructed or exported as complete history.
+The new exporter fails explicitly rather than filling the aggregate with zeros
+or silently dropping times. See the [README](README.md#8-locate-and-inspect-results)
+for manifest inspection, disk-size estimates and finalization recovery.
 
 ## Changing allocation for a benchmark
 

@@ -164,3 +164,15 @@ The synthetic example's shared whole-member native binding supports one
 spatial rank per model and rejects resume until it has a validated restart
 binding. That binding is not evidence of general spatial decomposition for
 every model.
+
+## Full ensemble history for plotting
+
+The current PIG launcher retains every native cycle and finalizes a standalone
+`icesee_ensemble_data.h5` after successful completion. Export reads bounded
+chunks from closed shards, aligns state rows to the serial truth/observation
+numbering and publishes the aggregate atomically. Checkpoints remain for restart.
+For five years with `dt=0.05`, checkpoint 99 is only the final snapshot; the
+aggregate has 101 time columns including the initial ensemble. Existing rolling
+archives cannot supply pruned intermediate snapshots. This storage change does
+not introduce a different filtering method or solver/physical configuration.
+See the README for the exact schema, retention requirements and validation scope.

@@ -384,7 +384,9 @@ DATA_DIR/
   synthetic_obs.h5
   true_nurged_states.h5
   performance.json
+  icesee_ensemble_data.h5       # published after successful full-history finalization
   _mode3_state_history/
+    reference_layout.h5        # serial-reference to native-row mapping
     initial_condition/checkpoint_00000000/
     steps/checkpoint_00000099/
       manifest.json
@@ -422,10 +424,117 @@ can still be physically unreasonable.
 
 Native member profiles are sampled after forecast advancement, before any analysis in that cycle. They are flowline forecast diagnostics, not a complete analyzed-state history. Use the committed checkpoint to inspect analyzed fields.
 
-Native Mode 3 writes rank-sharded checkpoints rather than requiring the generic
-aggregate ensemble-history file. A missing generic aggregate alone is not a
-native failure. Modes 1/2 have different output layouts; their result readers
-must match the corresponding history format.
+### Distributed checkpoints during the run, one plotting file at completion
+
+The PIG launcher and example YAML retain every native timestep. During the
+run, each rank writes its owned state rows to checkpoint shards. This avoids
+first gathering the entire ensemble onto one rank. Each committed manifest
+describes member/field ownership; keep it with all referenced shards for restart.
+
+After all cycles complete, the runner materializes **`icesee_ensemble_data.h5`**
+from those closed checkpoints. It reads bounded row chunks and one member at a
+time, computes the ensemble mean, and atomically publishes the finished file.
+A failed finalization preserves checkpoints and any previously published file;
+the run reports failure instead of publishing an incomplete aggregate. Its
+`analysis_file_io/ensemble_history_export` timer is a subset of total
+`analysis_file_io`, allowing benchmarks to separate finalization from forecasts.
+
+The combined file is standalone HDF5, with no external links to the shards:
+
+| Dataset | Shape | Content |
+|---|---|---|
+| `ensemble` | `(state, member, time)` | Initial ensemble and every completed cycle |
+| `ensemble_mean` | `(state, time)` | Member mean at each saved time |
+| `t` | `(time,)` | Physical model years |
+| `checkpoint_steps` | `(time,)` | `-1` for the initial state, then zero-based cycle indices |
+| `analysis_applied` | `(time,)` | Whether that cycle included an analysis update |
+
+Rows are reordered into the **serial reference numbering used by truth and
+observations**. Native MPI row numbers alone are not guaranteed to identify the
+same physical node. The coordinate-derived permutations are saved once in
+`_mode3_state_history/reference_layout.h5`; finalization refuses incompatible
+numbering, incomplete member/field ownership or missing snapshots. Initial
+thickness, forcing, random streams and filtering/solver settings are not altered
+by this storage path.
+
+The aggregate includes the updated ensemble on analysis cycles. It does not
+add a separately saved pre-analysis ensemble at the same time. Flowline files
+remain forecast diagnostics sampled at their requested years.
+
+Older completed runs made with rolling retention may have only the initial
+checkpoint and the newest two steps, and no aggregate file. Changing readers
+cannot recreate their pruned snapshots. The full-history behavior applies to
+new runs made with the updated launcher/configuration.
+
+### Does `checkpoint_00000099` contain every timestep?
+
+**No. Each checkpoint contains one ensemble snapshot.** Its shards partition
+that snapshot across ranks; they are not different times or necessarily one
+file per member. The final aggregate is what combines snapshots over time.
+
+For a run starting at year zero, five years with `dt=0.05` means 100 cycles:
+
+| Location under `_mode3_state_history/` | Snapshot time | Aggregate time column |
+|---|---|---|
+| `initial_condition/checkpoint_00000000/` | 0 years, before forecasting | 0 |
+| `steps/checkpoint_00000000/` | 0.05 years, after cycle 0 | 1 |
+| `steps/checkpoint_00000098/` | 4.95 years | 99 |
+| `steps/checkpoint_00000099/` | 5.0 years, final state | 100 |
+
+The initial and step checkpoint zero have different meanings and live in
+separate directories. With all cycles retained, the combined file has **101
+columns: the initial state plus 100 completed steps**. The final manifest has
+`timestep=99`, `metadata.next_step=100`, `metadata.nt=100` and
+`metadata.model_time=5.0`. `analysis_events_completed=3` is a cumulative count;
+it does not mean that three earlier states are inside checkpoint 99.
+
+Consult each manifest for other run lengths. To list retained snapshots without
+opening their state shards:
+
+```bash
+python - "$ICESEE_DATA_PATH" <<'PYTHON'
+from pathlib import Path
+import json, sys
+root = Path(sys.argv[1]) / '_mode3_state_history' / 'steps'
+for path in sorted(root.glob('checkpoint_*/manifest.json')):
+    manifest = json.loads(path.read_text())
+    metadata = manifest.get('metadata', {})
+    print(path.parent.name, 'complete=', manifest.get('complete'),
+          'time=', metadata.get('model_time'),
+          'next_step=', metadata.get('next_step'), 'nt=', metadata.get('nt'))
+PYTHON
+```
+
+### Full-history settings and recovery of finalization
+
+The PIG launcher passes `--checkpoint_every=1 --checkpoint_keep_last=0
+--mode3_export_ensemble_history=True`; the example YAML has the same defaults.
+No extra Mode-3 opt-in is needed. Other native applications keep their own
+checkpoint policies. Enabling this exporter requires both writing every cycle
+and keeping every checkpoint; incompatible retention is rejected before model
+setup. `mode3_export_row_chunk_size` bounds the number of reference rows in a
+finalization buffer (default 8192).
+
+Keep the checkpoint tree for restart. The standalone aggregate can be copied or
+downloaded by itself for plotting. Retaining both duplicates state payload on
+disk: for 270615 state rows, 24 members, float64 and 101 times, raw checkpoint
+state is about 5.25 GB, the aggregate ensemble about 5.25 GB and its mean about
+0.22 GB, before HDF5/metadata overhead. This is a size calculation, not measured
+throughput or a new scaling benchmark. The earlier measured PACE cases below
+predate full-history finalization; they do not establish its production-scale
+I/O time. Export tests cover reordered/split fields, complete time coverage,
+atomic failure, standalone reads and collective error handling.
+
+If all checkpoints and `reference_layout.h5` exist but finalization was
+interrupted, rerun only the export in an environment permitted for that I/O:
+
+```bash
+python -m ICESEE.src.parallelization.distributed_history_export   /absolute/path/to/completed-data --row-chunk-size=8192
+```
+
+This does not rerun the model or reconstruct pruned steps. It refuses incomplete
+history and preserves prior published output on failure. The common `sbatch`
+script does not forward arbitrary trailing Python flags.
 
 ## 9. Resume without destroying output
 
@@ -451,20 +560,48 @@ resource binding and provenance, with an existing-data check appropriate for
 resume. **Do not reuse the common fresh-run launcher unchanged:** it correctly
 refuses an existing data target. Do not remove its guards for routine fresh runs.
 
-Default native policy writes every step and retains the newest two step
-checkpoints plus the initial checkpoint. `checkpoint_keep_last=0` retains all;
-`checkpoint_keep_analysis` optionally retains analysis steps. These settings
-affect storage and restart availability. Do not delete old checkpoints until a
-new one has committed. Arbitrary mesh/topology migration is not established by
+The generic native policy can retain only the newest two step checkpoints;
+the PIG plotting workflow instead sets `checkpoint_every=1` and
+`checkpoint_keep_last=0` to retain the full history. Do not enable aggregate
+export for an older rolling archive with missing times. These settings affect
+storage and restart availability. Arbitrary mesh/topology migration is not established by
 the short same-topology restart test.
 
 ## 10. Plot and compare runs
 
-Use the `read_results.ipynb` data-path settings for the run you actually launched;
-check its expected history format before opening native results. For portable
+Use the data path for the run you actually launched. New native aggregate output
+has the familiar `ensemble`/`ensemble_mean` datasets. Load only the requested
+rows/times rather than copying the entire ensemble history into memory. For portable
 flowline plots, h5py/NumPy/Matplotlib can read `h_profiles`, `s_profiles`,
 `distances`, `bed_values`, `profile_times` and `written_steps` directly without
 loading Firedrake or a full spin-up history.
+
+For a complete ensemble time series at one serial-reference state row:
+
+```python
+from pathlib import Path
+import h5py
+import matplotlib.pyplot as plt
+
+data = Path("/absolute/path/to/completed-data")
+row = 0  # Choose the desired row within the documented state blocks.
+with h5py.File(data / "icesee_ensemble_data.h5", "r") as f:
+    if not f.attrs.get("complete", False):
+        raise ValueError("Ensemble history is not complete")
+    t = f["t"][:]
+    members = f["ensemble"][row, :, :].T
+    mean = f["ensemble_mean"][row, :]
+    analysis = f["analysis_applied"][:]
+plt.plot(t, members, color="gray", alpha=0.3)
+plt.plot(t, mean, color="blue", label="Ensemble mean")
+plt.scatter(t[analysis], mean[analysis], label="Analysis cycles")
+plt.xlabel("Time (years)")
+plt.legend()
+```
+
+The existing notebook's ensemble-loading cells can use those same dataset names.
+Mesh-map cells must use the actual PIG mesh and compatible row ordering; a
+rectangular template mesh is not evidence of a correct physical map.
 
 The standalone comparison utility needs NumPy, h5py and Matplotlib, not
 Firedrake. Run it on **completed** native outputs:

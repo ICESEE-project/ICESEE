@@ -93,6 +93,8 @@ export ICESEE_DEBUG_INIT="${ICESEE_DEBUG_INIT:-1}"
 export ICESEE_HANG_DUMP_S="${ICESEE_HANG_DUMP_S:-900}"
 ARGS=(--execution_mode=3 --force-params="$RUN_PARAMETERS" --Nens="$NENS"
       --model_nprocs="$MODEL_NPROCS" --num_years=5 --dt=0.05
+      --checkpoint_every=1 --checkpoint_keep_last=0
+      --mode3_export_ensemble_history=True
       --obs_start_time=2 --obs_max_time=4 --freq_obs=1
       '--save_steps=[2,3,4]' --data_path="$DATA_DIR")
 CMD=(srun --mpi=pmix --exact --exclusive --nodes="$NODES" --ntasks="$NP"

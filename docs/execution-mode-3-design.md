@@ -205,6 +205,18 @@ history is scientific output that is only kept when asked for. Policy keys
 | `checkpoint_keep_last` | `2` | retain the newest N step checkpoints; `0` keeps every checkpoint written |
 | `checkpoint_keep_analysis` | `false` | also keep the checkpoint of every analysis step |
 | `resume_from_checkpoint` | `false` | continue from the newest valid checkpoint in `data_path` |
+| `mode3_export_ensemble_history` | `false` | PIG runner: finalize a standalone reference-ordered `icesee_ensemble_data.h5`; requires every step retained |
+| `mode3_export_row_chunk_size` | `8192` | maximum reference rows per finalization buffer |
+
+The PIG example overrides the generic retention default: its YAML and common
+launcher use `checkpoint_every=1`, `checkpoint_keep_last=0` and enable history
+export. Each checkpoint contains one completed cycle; the final plotting file
+contains the initial state and all cycles, with `ensemble` (state/member/time),
+`ensemble_mean` (state/time) and physical time labels. Finalization reads closed
+HDF5 shards in bounded chunks and applies the stored reference/native row
+permutations. It publishes atomically, preserves restart shards and refuses
+missing timesteps rather than fabricating a full history from a rolling archive.
+Other model runners do not automatically enable this optional exporter.
 
 New checkpoints record a `checkpoint_role` (`restart`, `analysis`,
 `history`, `initial`); only `restart` checkpoints are ever deleted, and

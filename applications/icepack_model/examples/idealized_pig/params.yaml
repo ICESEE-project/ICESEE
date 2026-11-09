@@ -34,6 +34,12 @@ modeling-parameters:
 
 enkf-parameters:
 
+  # Retain each native timestep and publish the standalone plotting history.
+  checkpoint_every: 1
+  checkpoint_keep_last: 0
+  mode3_export_ensemble_history: true
+  mode3_export_row_chunk_size: 8192
+
   # Spatial ranks per native model group; zero selects the runner default of one.
   model_nprocs: 0
 

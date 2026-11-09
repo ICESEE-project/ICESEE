@@ -437,6 +437,8 @@ if not flag_jupyter:
         # mode3_checkpointing.py). keep_last=0 keeps every checkpoint.
         'checkpoint_keep_last': int(_enkf_section.get('checkpoint_keep_last', 2)),
         'checkpoint_keep_analysis': bool(_enkf_section.get('checkpoint_keep_analysis', False)),
+        'mode3_export_ensemble_history': bool(_enkf_section.get('mode3_export_ensemble_history', False)),
+        'mode3_export_row_chunk_size': int(_enkf_section.get('mode3_export_row_chunk_size', 8192)),
         'resume_from_checkpoint': bool(_enkf_section.get('resume_from_checkpoint', False)),
         'base_seed': int(_enkf_section.get('base_seed', 42)),
         # Keep process-noise timing independent of execution mode.  The
