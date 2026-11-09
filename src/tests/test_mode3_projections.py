@@ -1,10 +1,4 @@
-# ==============================================================================
-# @des: Tests for src/parallelization/mode3_projections.py -- validated
-# directly against the real, measured Icepack instrumentation numbers from
-# this session (P=1, Nens=2, 25 timesteps, 2 analysis events,
-# row_chunk_size=4096, owned_size_total=270615), not merely internally
-# self-consistent.
-# ==============================================================================
+# Check streamed analysis operation counts, memory budgets and storage projections.
 from __future__ import annotations
 
 from ICESEE.src.parallelization.mode3_projections import (
@@ -23,10 +17,8 @@ def test_blocks_per_cycle_matches_measured_icepack_value():
 
 
 def test_operation_count_projection_matches_measured_icepack_run_exactly():
-    """Ground truth: the REAL pre-optimization instrumentation measured
-    bulk_get_count=1675 for this exact configuration (see this session's
-    Gate-4 real-Icepack run). The post-optimization prediction (2 analysis
-    events, not 25 timesteps) must equal 134."""
+    """For 67 row blocks, compare 25 full passes (1675 reads) with two analysis
+    passes (134 reads)."""
 
     projection = project_operation_counts(
         ne=2, ensemble_groups=1, p_model=1, nx_global=54123, num_variable_blocks=5,
@@ -93,9 +85,6 @@ def test_memory_preflight_hdf5_backend_does_not_scale_inactive_ram_with_rounds()
 
 def test_recommend_row_chunk_size_respects_budget():
     b = recommend_row_chunk_size(ne=1000, memory_budget_bytes=1e9, safety_fraction=0.5)
-    # Verify the recommendation actually fits within the stated budget,
-    # using the SAME default workspace_constant the function itself uses
-    # (7.1 -- this session's real measured value, not an assumption; see
-    # mode3_projections.py's module docstring for the derivation).
+    # Verify the recommended chunk fits the budget with the default workspace factor.
     workspace = 7.1 * b * 1000 * 8
     assert workspace <= 0.5 * 1e9

@@ -1,35 +1,5 @@
 #!/bin/bash
-# ==============================================================================
-# Idealized PIG Mode-3 DA benchmark on PACE Phoenix.
-#
-# Production timestep (dt=0.05) and physics; one truth trajectory; compact
-# initialization (data/extended_beta1000yrs_compact_idx20000.h5); wrong/
-# reference trajectory disabled (params.yaml defaults). Only the run length,
-# observation window, ensemble size and rank layout are set here.
-#
-# Layout: NODES x TASKS_PER_NODE ranks, block-distributed, MODEL_NPROCS ranks
-# per ensemble member. TASKS_PER_NODE must be a multiple of MODEL_NPROCS so
-# no model group spans nodes. Measured on Phoenix (2026-10-03): one member per
-# rank (MODEL_NPROCS=1) gives ~1.65x the ensemble throughput per node of
-# MODEL_NPROCS=2 for this ~13.6k-node mesh. MODEL_NPROCS=2 is supported;
-# icepack refuses model groups that span nodes.
-#
-# JIT caches (node-local, per job):
-#   PyOP2 .so + TSFC kernels : $TMPDIR/icesee-<job>/{pyop2,tsfc}, shared by the
-#                               ranks of one node (never NFS, never shared
-#                               across nodes or jobs)
-#   Loopy/pytools (sqlite)    : $TMPDIR/icesee-<job>/xdg/rank<N>, per rank
-# Shared TMPDIR falls back to /tmp. Caches survive for the job lifetime.
-# Model groups with more than one rank stay consistent through
-# ICESEE/src/utils/pyop2_compile_cache.py (installed by run_da_icepack.py).
-#
-# Submit from anywhere:  sbatch pace/pig_da_benchmark.sbatch
-# Overrides (environment): NENS NUM_YEARS OBS_START OBS_MAX FREQ_OBS
-#                          MODEL_NPROCS RUN_ROOT TASKS_PER_NODE
-#                          SRUN_EXTRA_ARGS (e.g. --overlap when rehearsing
-#                          this script with bash inside an interactive
-#                          allocation)
-# ==============================================================================
+# Idealized PIG benchmark launcher.
 #SBATCH -J PIG-DA-bench
 #SBATCH -A gts-arobel3-atlas
 #SBATCH -p cpu-medium

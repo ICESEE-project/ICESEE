@@ -211,16 +211,9 @@ def readSMB(icesee_kwargs, Q):
 
 # --- Basal melt rate field ---
 
-# True-vs-wrong basal-melt forcing experiment (Idealized PIG only). This is
-# deliberately NOT a generic ICESEE concept -- it lives entirely in this
-# application file. Two explicit, canonical string values; BasalMeltRate
-# validates against them so a caller can never silently fall into the
-# wrong branch via a str/bool type mismatch (see docs/execution-mode-3-
-# design.md's 2026-09-28 reconciliation note for the history: an earlier
-# WIP used `experiment == 'true'` against callers that passed Python
-# bools, which happened to "fail safe" into the wrong-trajectory branch
-# for every ensemble member -- functionally the intended science, but
-# fragile and undocumented).
+# Canonical forcing selectors: truth ramps melt_max from 20 to 100;
+# ensemble forecasts retain 20. Validate string selectors to avoid ambiguous
+# boolean/string comparisons.
 EXPERIMENT_TRUE = "true"    # reference/true trajectory: melt_max ramps 20 -> 100 over the run
 EXPERIMENT_WRONG = "wrong"  # ensemble/forecast trajectory: melt_max held constant at 20
 

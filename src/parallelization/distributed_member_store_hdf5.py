@@ -1,53 +1,12 @@
-# ==============================================================================
-# @des: Prototype non-memory InactiveMemberStore backends (Option C,
-# Gates 3/4 of this session's store-backend investigation). Serial HDF5
-# only -- no MPI-HDF5 requirement, since each rank's store is entirely its
-# own file (never shared across ranks: ownership never changes, so there is
-# no reason for one rank to touch another rank's inactive-state file).
-# @date: 2026-09-26
-# ==============================================================================
-"""Two prototype file-backed ``InactiveMemberStore`` implementations.
+# Rank-local HDF5 inactive-member stores; serial files are private to each rank.
+"""Rank-local HDF5 backends for inactive member state.
 
-Both satisfy the exact same protocol as ``MemoryInactiveMemberStore``
-(``distributed_member_store.py``) -- the DA/runtime layer never sees HDF5 at
-all, per this session's Gate 2/8 requirement ("Do not expose HDF5/file
-semantics to the DA layer").
+HDF5MemberMajorStore uses one dataset per member. HDF5Chunked2DStore uses one
+chunked (owned_rows, members) dataset for bulk ensemble-row operations.
+Each rank owns one serial HDF5 file; no parallel h5py driver is required.
 
-File count is bounded to ONE FILE PER RANK regardless of Ne (Gate 9): each
-rank's own inactive-state file holds every member's data as either separate
-datasets (member-major) or columns of one 2D dataset (chunked-2D). This
-avoids the Ne x P_model x cycles file explosion the directive explicitly
-rejects, and avoids any rank-0 aggregation.
-
-``HDF5MemberMajorStore`` (Gate 3): one dataset per member, named
-``member_{id}``. Optimizes ``get``/``put`` (activate/deactivate a whole
-member) at the cost of ``get_ensemble_rows`` needing one HDF5 read per
-member (looped fallback).
-
-``HDF5Chunked2DStore`` (Gate 4): ONE 2D dataset per rank, shape
-``(owned_size, number_of_members)``, HDF5-chunked with independently
-configurable state-row and ensemble-member chunk widths. Optimizes
-``get_ensemble_rows``/``put_ensemble_rows`` (one native hyperslab read/write
-spanning many members) at the cost of ``get``/``put`` needing a column
-slice out of a 2D dataset instead of a dedicated 1D dataset.
-
-Neither backend is wired into any real application tonight -- both are
-prototypes for the benchmark harness (``scripts/benchmarks/
-mode3_large_state_benchmark.py``) to measure and compare, per this
-session's explicit "do not modify real Icepack yet" instruction.
-
-Known limitations (documented, not hidden):
-  - HDF5 does not reclaim file space when a dataset/column is "released"
-    without a full file repack (h5repack) -- ``release`` here only removes
-    the logical entry (drops the dataset for member-major; clears the
-    Python-side "known member" bookkeeping for chunked-2D), it does not
-    shrink the file on disk. Acceptable for a prototype; a production
-    backend would need a compaction/rotation policy.
-  - Serial HDF5 only (h5py without mpi4py-linked HDF5): each rank opens its
-    OWN file independently, so this works identically on macOS (no
-    parallel HDF5 build required) and on any MPI-HDF5-capable HPC system
-    without change -- there is no collective I/O here to require it.
-"""
+Releasing entries does not shrink the HDF5 file. Long-lived stores may need
+repacking or rotation. These temporary stores are not restart checkpoints."""
 
 from __future__ import annotations
 

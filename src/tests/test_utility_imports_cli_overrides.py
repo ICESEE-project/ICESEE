@@ -1,24 +1,5 @@
-# ==============================================================================
-# @des: Tests for the historical CLI-override and data_path auto-clean
-# functionality ported from test/ICESEE's config/_utility_imports.py into
-# main during Pass 2 reconciliation.
-#
-# config/_utility_imports.py executes its entire CLI-parsing/YAML-loading
-# pipeline at IMPORT TIME (it is module-level code, not a callable
-# function), and that pipeline now also deletes and recreates
-# icesee_kwargs['data_path'] as a side effect. To test it safely:
-#   - the module is imported exactly once at collection time, with argv
-#     pointed at Lorenz96's example params.yaml (a real, complete config)
-#     and --data_path redirected to a disposable temp directory, so the
-#     auto-clean guard never touches anything real;
-#   - the pure helper functions (_parse_generic_cli_overrides,
-#     _coerce_cli_override, apply_generic_cli_overrides) are then tested
-#     directly against synthetic dicts -- they have no side effects of
-#     their own;
-#   - the few tests that need the full module pipeline under different
-#     argv (execution_mode CLI precedence, the data_path guard itself) use
-#     importlib.reload with a fresh --data_path/--execution_mode each time.
-# ==============================================================================
+# Test CLI precedence and output-path handling with disposable configurations.
+# Importing the config module has filesystem effects; tests isolate its output.
 import importlib
 import os
 import shutil
@@ -182,7 +163,7 @@ def test_execution_mode_rejects_out_of_range_value():
         shutil.rmtree(tmp, ignore_errors=True)
         # argparse's choices rejection calls sys.exit before rebuilding
         # icesee_kwargs; reload the module back to a good state for any
-        # later test in this session.
+        # later test in the test suite.
         _reload_with_argv(["--data_path", _fresh_tmp_data_path()])
 
 
@@ -241,7 +222,7 @@ def test_data_path_missing_directory_is_created_without_error():
 def test_data_path_refuses_unsafe_paths(unsafe_path):
     with pytest.raises(ValueError):
         _reload_with_argv(["--data_path", unsafe_path])
-    # Restore a good state for any later test in this session.
+    # Restore a good state for any later test in the test suite.
     _reload_with_argv(["--data_path", _fresh_tmp_data_path()])
 
 

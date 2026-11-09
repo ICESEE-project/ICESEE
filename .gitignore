@@ -138,7 +138,7 @@ __pycache__/
 # Repository-wide local/generated artifacts
 # =============================================================================
 
-# OS, editors, notebooks, and AI workspaces
+# OS, editor, notebook and local workspace files
 .DS_Store
 **/.DS_Store
 .vscode/

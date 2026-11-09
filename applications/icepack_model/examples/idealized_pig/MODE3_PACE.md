@@ -1,6 +1,6 @@
-# Idealized PIG: student Mode-3 run on PACE
+# Idealized PIG: Mode-3 run on PACE
 
-The `features_debug` branch includes the student's scientific updates, upstream
+The `features_debug` branch includes the scientific updates, upstream
 `main`, and the runtime repairs used in the successful five-year Mode-3 check.
 Modes 1 and 2 also completed the five-year confirmation after the history and
 finalization repairs. See [RUNTIME_DECISION.md](RUNTIME_DECISION.md) for evidence
@@ -20,8 +20,7 @@ git merge --ff-only origin/features_debug
 
 Here `origin` must be `ICESEE-project/ICESEE`, not `ICESEE-Spack`. Keep your
 uncommitted work before updating; if Git refuses a fast-forward, inspect the
-local commits and merge them deliberately. Do not reset your work. The PACE
-integration worktree uses `icesee` for the scientific remote instead.
+local commits and merge them deliberately. Do not reset your work. A checkout may name its scientific remote `icesee`; verify the URL.
 Updating the scientific checkout does not update the parent installation or
 its pinned source automatically. Select the checkout explicitly below.
 
@@ -65,7 +64,7 @@ opt-in is required. The same topology, adapter, layout, checkpoint and
 observation-error validation still applies; invalid configurations fail rather
 than falling back to another mode.
 
-From the example directory, the student's 24-member/eight-rank configuration is:
+From the example directory, the 24-member/eight-rank configuration is:
 
 ```bash
 DATA_DIR="$PWD/_modelrun_datasets_mode3_$(date +%Y%m%d_%H%M%S)"
@@ -84,7 +83,7 @@ The 24-member/eight-rank case completed on PACE in job 15369255 using only
 `--execution_mode=3`: one node, two spatial ranks per model, 100 forecast steps
 and three analyses. The job exited zero in 47:09. All eight final checkpoint
 shards and all 25 truth/member profile files were checked. Use
-`pace/validate_student_mode3.sbatch` to reproduce that allocation. This confirms
+`pace/validate_mode3_24.sbatch` to reproduce that allocation. This confirms
 the PACE run; each laptop's installed Firedrake/MPI stack still needs its own
 compatibility check.
 

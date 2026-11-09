@@ -1,31 +1,5 @@
-# ==============================================================================
-# @des: Execution-mode-3 native adapter wiring for the idealized PIG example.
-#
-#       Bridges the existing whole-array idealized_pig physics in
-#       ``_icepack_model.py``/``_icepack_enkf.py`` (mesh setup, the
-#       prognostic/diagnostic Icepack step, and the basal-melt forcing
-#       schedule) to the mode-3 distributed runtime without ever
-#       materializing a full-mesh numpy vector for one ensemble member.
-#       Every persistent field stays a Firedrake ``Function`` whose owned
-#       degrees of freedom are read/written directly through
-#       ``IcepackNativeState``/``DistributedFieldRegistry`` -- see
-#       applications/icepack_model/icepack_utils/_distributed_fields.py.
-#
-#       Mesh, function spaces, the flow solver, and the forcing/boundary
-#       fields (bed, SMB, fluidity, friction, inflow thickness) are
-#       identical for every ensemble member of one run -- only the
-#       perturbed thickness/velocity/surface/basal-melt fields differ.
-#       They are therefore built once per process (a rank belongs to
-#       exactly one ensemble slot for its whole lifetime under the mode-3
-#       process grid) and shared by every member this rank forecasts,
-#       instead of being duplicated per member.  The mesh is partitioned
-#       across ``topology.spatial_comm`` (only the ranks inside this
-#       member's ensemble group), not the world communicator, so each
-#       ensemble group's per-rank memory is bounded by its own share of one
-#       member's mesh -- never by the full ensemble or the full world size.
-# @date: 2026-08-24
-# ==============================================================================
-
+# @author: Brian Kyanjo
+# Native Icepack adapter with persistent owned fields and spatial communicators.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -199,16 +173,10 @@ def _basal_melt_for_step(
     *,
     experiment: str = EXPERIMENT_WRONG,
 ) -> Any:
-    """Same depth-dependent control/warm forcing schedule used by
-    ``_icepack_model.run_model``/``_icepack_enkf.generate_true_state``
-    (1935-2017 PIG basal-melt scenario timeline).
+    """Evaluate the configured true/wrong basal-melt scenario at this step.
 
-    ``experiment`` defaults to ``EXPERIMENT_WRONG`` because every native
-    member this adapter forecasts is an ensemble/forecast trajectory
-    (mirroring ``_icepack_model.run_model``'s own default under the
-    2026-09-28 reconciliation) -- the true trajectory is generated once,
-    execution-mode-independently, by ``_icepack_enkf.generate_true_state``,
-    never by this Mode-3 adapter."""
+    Ensemble forecasts default to EXPERIMENT_WRONG. Truth generation uses the
+    single-rank reference generator with EXPERIMENT_TRUE."""
 
     dt = float(icesee_kwargs["dt"])
     if step < (6 / dt):
@@ -248,14 +216,8 @@ def _basal_melt_for_step(
 
 
 def _basal_melt_in_state(icesee_kwargs: Mapping[str, Any]) -> bool:
-    """Whether this run's declared state composition includes
-    ``basal_melt_field`` -- the generic, already-config-driven predicate
-    modes 0-2 use (``config/_utility_imports.py``'s ``vec_inputs``), not
-    the ``joint_estimation`` bookkeeping flag. ``vec_inputs`` reflects the
-    packed vector's actual composition regardless of whether the current
-    convention bookkeeps basal_melt_field as a state sub-block or a
-    jointly-estimated parameter sub-block (see docs/execution-mode-3-
-    design.md's 2026-09-28 reconciliation note)."""
+    """Return whether vec_inputs includes basal_melt_field, independent of
+    joint_estimation bookkeeping."""
 
     return "basal_melt_field" in icesee_kwargs.get("vec_inputs", ())
 
@@ -373,19 +335,11 @@ def forecast_member(
     topology: Any,
     icesee_kwargs: Mapping[str, Any],
 ) -> IcepackForecastFields:
-    """Advance one member's persistent Icepack state by one native step.
+    """Advance persistent native fields by one step.
 
-    Mirrors ``_icepack_model.run_model``: the inflow boundary thickness is
-    always the shared reference ``ctx.h0``, never the member's evolving
-    thickness. Unlike an earlier version of this adapter, the basal-melt
-    schedule's floating mask is now recomputed fresh from the member's
-    CURRENT surface each step (mirroring ``_icepack_model.Icepack``'s own
-    internal recomputation), not from a frozen initial ``ctx.floating0``
-    -- floating/grounded are pure diagnostics of (surface, bed), never
-    persistent DA state, so nothing needs to be packed, stored, or
-    checkpointed to keep this correct (see docs/execution-mode-3-
-    design.md's 2026-09-28 reconciliation note).
-    """
+    Use the shared reference thickness for inflow boundaries. Recompute the
+    floating mask from the member's current surface and bed each step; this
+    diagnostic mask is not independently checkpointed assimilation state."""
 
     ctx = _shared_context(topology, icesee_kwargs)
     step = int(timestep)

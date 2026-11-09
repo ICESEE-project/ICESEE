@@ -1,15 +1,4 @@
-# ==============================================================================
-# @des: Post-run instrumentation summary for PACE RUN 1 (Idealized PIG
-# Mode-3 calibration, 2026-09-28). Parses the run's own stdout log (which
-# already contains ICESEE's built-in timing table -- src/utils/tools.py's
-# display_timing_verbose -- plus the member-store stats line and the
-# per-step forecast timing this reconciliation added to mode3_runner.py)
-# and combines it with filesystem measurements (store file count/size,
-# checkpoint size) and, where available, peak RSS, into one JSON summary.
-#
-# Does not re-run or re-instrument anything -- purely a log/filesystem
-# parser, run once after RUN 1 finishes.
-# ==============================================================================
+# Summarize PIG timing logs and stored-file sizes without rerunning the model.
 from __future__ import annotations
 
 import argparse

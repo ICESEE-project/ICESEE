@@ -1,35 +1,5 @@
-# ==============================================================================
-# PACE RUN 1 calibration config (2026-09-28). A full, separate copy of
-# ../params.yaml with ONLY num_years/obs_start_time/obs_max_time changed
-# (production dt/timesteps_per_year=0.05 is kept -- deliberately NOT
-# changed, per the numerical-safety finding: Icepack's nonlinear solver
-# diverges at a coarser dt=1.0yr).
-#
-# This is a SEPARATE file, not a --key=value CLI override, because
-# config/_utility_imports.py computes its own internal nt/t/obs_index
-# ONCE from this file's modeling-parameters/enkf-parameters sections
-# before any generic CLI override is applied -- overriding num_years/
-# timesteps_per_year/obs_start_time/obs_max_time/freq_obs via CLI does
-# NOT recompute them (confirmed directly). Using a whole separate
-# --force_params=pace/params_calibration.yaml file makes the schedule
-# self-consistent for this shortened run.
-#
-# Ne/model_nprocs/execution_mode/use_member_streaming/member_store_backend
-# etc. remain ordinary CLI overrides in run1_pig_calibration.sbatch (those
-# ARE applied correctly, since they aren't schedule inputs) -- not
-# duplicated here.
-#
-# num_years/obs_start_time/obs_max_time changed relative to ../params.yaml:
-#   num_years: 82 -> 2        (real nt = 2/0.05 = 40, within the ~20-50
-#                               forecast-step calibration target)
-#   obs_start_time: 10 -> 1   (a single, genuine, mid-run analysis event
-#   obs_max_time: 40 -> 1      at year 1 = timestep 20 of 40 -- NOT the
-#                              t=0 degenerate-schedule workaround used in
-#                              this reconciliation's first calibration
-#                              attempt, now that the nt-formula bug is
-#                              fixed)
-# Everything else below is identical to ../params.yaml.
-# ==============================================================================
+# Two-year calibration configuration with dt=0.05 and an observation at year 1.
+# Select with --force-params; all values below define this separate experiment.
 modeling-parameters:
   num_years: 2
   timesteps_per_year: 0.05

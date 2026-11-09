@@ -1,4 +1,4 @@
-"""Exercise the student batch entry point without starting MPI or Slurm."""
+"""Exercise the PIG batch entry point without starting MPI or Slurm."""
 import json
 import os
 from pathlib import Path
@@ -60,7 +60,7 @@ def test_validated_allocation_has_16_ranks_and_32_members(tmp_path):
     assert not (pig / "_modelrun_datasets.launch-lock").exists()
 
 
-def test_student_24_member_eight_rank_allocation_uses_mode_selector_only(tmp_path):
+def test_reference_24_member_eight_rank_allocation_uses_mode_selector_only(tmp_path):
     result, _, capture = _run(tmp_path, counts={
         "SLURM_JOB_NUM_NODES": "1", "SLURM_NTASKS": "8",
         "SLURM_NTASKS_PER_NODE": "8", "ICESEE_NENS": "24",

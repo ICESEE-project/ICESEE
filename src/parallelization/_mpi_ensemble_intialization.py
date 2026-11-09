@@ -125,16 +125,8 @@ def _member_initialization_context(icesee_kwargs, ensemble_id, stream=0):
         np.random.set_state(old_state)
 
 
-# generate_initial_member_increment now lives in
-# ICESEE.src.run_model_da._error_generation (imported above) instead of
-# being defined here. It used to be mode-2-only, which is why modes 0/1
-# (src/EnKF/_ensemble_initialization.py) could not use it and instead kept
-# an older, separately-broken inline initial-noise implementation
-# (unreseeded shared RNG across members, no sig_Q scaling). Relocating it
-# to a model-agnostic, MPI-free module lets every execution mode share one
-# correctly seeded/scaled implementation -- see _error_generation.py's
-# docstring on the function itself, and CHANGELOG.md for the historical
-# reconciliation this addressed.
+# All execution modes share the member-keyed initial increment generator
+# from _error_generation; keep its seed and sig_Q semantics consistent.
 
 
 def apply_initial_spread_filebacked(enkf_parallel_io, alpha):

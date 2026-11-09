@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=PIG-student-check
+#SBATCH --job-name=PIG-mode2-check
 #SBATCH --account=gts-arobel3-atlas
 #SBATCH --partition=cpu-small
 #SBATCH --nodes=1
@@ -9,7 +9,7 @@
 #SBATCH --hint=nomultithread
 #SBATCH --mem=48G
 #SBATCH --time=00:10:00
-#SBATCH --output=student-mode2-%j.out
+#SBATCH --output=mode2-check-%j.out
 # Default: small real-MPI I/O lifecycle test. STAGE=pig requires a longer
 # explicit time allocation and reproduces 32 members / 5 years / observations 2,3,4.
 set -euo pipefail
@@ -22,7 +22,7 @@ unset SLURM_OVERCOMMIT SLURM_OVERLAP
 source "$ICESEE_SOURCE_ROOT/applications/icepack_model/examples/idealized_pig/pace/resolve_environment.sh"
 set -euo pipefail
 [[ "$SLURM_NTASKS" == 8 ]] || { echo 'Validation requires exactly eight ranks' >&2; exit 2; }
-RUN="$PIG_DIR/pace_runs/student-${STAGE:-io}-${SLURM_JOB_ID:?}"
+RUN="$PIG_DIR/pace_runs/validation-${STAGE:-io}-${SLURM_JOB_ID:?}"
 [[ ! -e "$RUN" ]] || { echo "Existing output: $RUN" >&2; exit 2; }
 mkdir -p "$RUN/io"
 { git -C "$ICESEE_ROOT" rev-parse HEAD; git -C "$ICESEE_ROOT" status --short; git -C "$ICESEE_ROOT" diff HEAD --stat; } > "$RUN/source.txt"

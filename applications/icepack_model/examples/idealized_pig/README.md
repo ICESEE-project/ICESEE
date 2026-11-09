@@ -1,107 +1,542 @@
-# Synthetic Ice Stream Example
+# Idealized Pine Island Glacier: installation, runs and results
 
-This example showcases synthetic ice stream modeling with various ensemble Kalman filters (EnKF, DEnKF, EnTKF, EnRSKF). You can run the example using one of two methods:
+This example couples Icepack/Firedrake forecasts to ICESEE ensemble data
+assimilation. It includes truth generation, synthetic observations, an optional
+unassimilated reference trajectory, ensemble forecasts, assimilation, flowline
+diagnostics and restart checkpoints.
 
-1. **Interactive Notebook**: Use the [synthetic_ice_stream_da.ipynb](./synthetic_ice_stream_da.ipynb) notebook for an exploratory, hands-on experience.
-2. **Terminal Execution** (Recommended for HPC): Use the [run_da_icepack.py](./run_da_icepack.py) script for optimized, high-performance runs.
+The runtime fixes described here are on `features_debug`, verified at
+`6e54239b9c551f82c8d15defaa050cf0bbf3219d` on 9 November 2026. Do not assume
+an older `main`, installation directory or notebook uses that code. Select and
+record the scientific checkout explicitly. This guide concerns this example;
+other model adapters have their own mode and dependency requirements.
 
----
+## 1. Choose the source and retain your working environment
 
-## Initialization data
+You need a working Icepack, Firedrake, PETSc, MPI and HDF5 environment, the ICESEE
+source and the PIG inputs. Updating Python source does not require rebuilding
+Spack or reinstalling Firedrake. Use the existing environment when it passes the
+checks below. For a new environment, follow the current [Firedrake installation
+guide](https://www.firedrakeproject.org/install.html) and
+[Icepack installation guide](https://icepack.github.io/install/).
 
-Data assimilation starts from the final state (history index 20000) of the
-1000-year spin-up stored in `data/extended_beta1000yrs.h5` (~39.5 GB). By
-default (`compact_initialization: true` in `params.yaml`) the model reads that
-state from a compact checkpoint, `data/extended_beta1000yrs_compact_idx20000.h5`
-(~29 MB): the mesh, `velocity`/`thickness`/`surface` at index 20000, and
-`bed`, `grounded`, `floating`, `fluidity`, `extended_beta`, copied unchanged.
+### Existing standalone scientific repository
 
-Build the compact checkpoint once from the spin-up history, from this
-directory:
+Run inside the ICESEE repository, where `src/` and `applications/` exist:
 
 ```bash
-python tools/build_compact_initialization.py \
-    --source data/extended_beta1000yrs.h5 \
-    --dest data/extended_beta1000yrs_compact_idx20000.h5 \
-    --idx 20000
+git status --short
+git remote -v
+git fetch origin features_debug
+git switch features_debug
+git merge --ff-only origin/features_debug
+git rev-parse HEAD
 ```
 
-The full spin-up history is needed only to build the compact checkpoint, or to
-initialize directly from it with
-`--compact_initialization=False --initFile=data/extended_beta1000yrs.h5`.
+Here `origin` must point to `ICESEE-project/ICESEE`. If it points to
+`ICESEE-Spack`, you are operating in the parent repository. Stop and locate the
+scientific repository before fetching or publishing scientific code. If there
+are local edits or a fast-forward fails, preserve and review them. Do not use a
+hard reset to make an update succeed.
 
----
+### ICESEE-Spack with a real submodule
 
-## Execution mode 3: checkpoints and resuming
+The parent and its ICESEE child are separate Git repositories:
 
-Mode 3 writes restart checkpoints of the whole ensemble under
-`<data_path>/_mode3_state_history/`. By default only the newest two step
-checkpoints and the initial ensemble are kept, so disk use does not grow with
-the number of timesteps. These are restart state, not a results archive.
+```bash
+cd /path/to/ICESEE-Spack
+git ls-tree HEAD ICESEE
+git submodule status ICESEE
+git -C ICESEE status --short
+git -C ICESEE remote -v
+```
 
-- Keep every step's ensemble (old behaviour, ~`Nens` × state size per step):
-  `--checkpoint_keep_last=0`
-- Also keep every analysis step: `--checkpoint_keep_analysis=True`
-- Write a checkpoint only every N steps: `--checkpoint_every=N`
+`160000 commit` identifies a submodule; `040000 tree` identifies an ordinary
+tracked directory, including historical subtree installations. A `.gitmodules`
+file alone does not prove that ICESEE is a submodule.
 
-To continue an interrupted run (crash, wall-time limit, full disk), repeat the
-**original command unchanged** and add `--resume_from_checkpoint=True`. The run
-continues after the newest valid checkpoint and keeps the original
-observations. Without that flag a run starts by deleting `data_path`. Details:
-`docs/execution-mode-3-design.md` ("Restart, retention, and crash consistency").
+For a clean, current submodule installation, initialize the pinned child:
 
----
+```bash
+git submodule update --init ICESEE
+```
 
-## Running via `run_da_icepack.py`
+To deliberately use the development updates described here, inspect the child
+and then select its branch:
 
-Follow these steps to execute the [run_da_icepack.py](./run_da_icepack.py) script. All parameters are managed in the [params.yaml](./params.yaml) file for easy configuration.
+```bash
+git -C ICESEE fetch origin features_debug
+git -C ICESEE switch features_debug
+git -C ICESEE merge --ff-only origin/features_debug
+```
 
-### Steps
+The child may now differ from the parent pin. This is expected until a reviewed
+parent commit records the new child revision. Running `git submodule update`
+again can return it to the older pin. See the wiki's
+[Source updates and submodules](https://github.com/ICESEE-project/ICESEE/wiki/9.-Source-updates-and-submodules).
 
-1. **Set Up Parameters**:
-   - Modify the [params.yaml](./params.yaml) file to specify your desired inputs and parameters.
-   - The script retrieves these parameters using helper functions from the [config/_utility_imports](https://github.com/KYANJO/ICESEE/blob/main/config/_utility_imports.py) module.
+### Keep an older subtree installation intact
 
-2. **Run the Script**:
-   - **Serial Execution**:
-     ```bash
-     python run_da_icepack.py
-     ```
-   - **Parallel Execution**:
-     ```bash
-     mpiexec -n 8 python run_da_icepack.py
-     ```
+Do not run a subtree pull into a new submodule or convert a dirty installation
+in place. A source-only checkout can reuse the original dependencies:
 
-3. **Select a Filter**:
-   - **Note**: Filter selection is only available in serial mode. Parallel mode currently supports only `EnKF`.
-   - Update the `filter_type` parameter in [params.yaml](./params.yaml) to choose a filter:
-     - `EnKF`: Ensemble Kalman Filter
-     - `DEnKF`: Deterministic Ensemble Kalman Filter
-     - `EnTKF`: Ensemble Transform Kalman Filter
-     - `EnRSKF`: Ensemble Square Root Kalman Filter
+```bash
+cd /path/with/space
+git clone --no-recurse-submodules https://github.com/ICESEE-project/ICESEE-Spack.git ICESEE-Spack-source
+cd ICESEE-Spack-source
+git submodule update --init ICESEE
+git -C ICESEE switch features_debug
+git -C ICESEE pull --ff-only origin features_debug
+```
 
-4. **View Outputs**:
-   - Results are stored as `.h5` files in the `results` and `_modelrun_datasets` directories, named as:
-     ```
-     filter_type-model.h5
-     ```
+Inspect remotes and clean status first. Initialize only the ICESEE child when
+reusing installed dependencies; there is no reason to download and build a
+second Spack stack for a source update. Keep the original installation and
+inputs until the new run is verified.
 
-5. **Analyze Results**:
-   - Use the [read_results.ipynb](./read_results.ipynb) notebook to load and visualize the results.
+## 2. Activate dependencies and verify imports
 
----
+On PACE, set both roots. The source root contains this example; the dependency
+root contains `scripts/activate.sh` and `.spack-env/icesee`:
 
-## Running with Containers
+```bash
+export ICESEE_SOURCE_ROOT=/absolute/path/to/ICESEE-Spack-source/ICESEE
+export ICESEE_SPACK_ROOT=/absolute/path/to/existing/ICESEE-Spack
+source "$ICESEE_SOURCE_ROOT/applications/icepack_model/examples/idealized_pig/pace/resolve_environment.sh"
+```
 
-For containerized environments (e.g., HPC clusters), use Apptainer/Singularity to run the script.
+The helper changes to the PIG example directory. Verify the active interpreter,
+package location and parallel HDF5 support before a scheduler submission:
 
-### Steps
+```bash
+python - <<'PYTHON'
+import sys, ICESEE, firedrake, icepack, h5py
+from mpi4py import MPI
+print("Python:", sys.executable)
+print("ICESEE paths:", list(ICESEE.__path__))
+print("Icepack:", icepack.__file__)
+print("Firedrake:", firedrake.__file__)
+print("Parallel h5py:", h5py.get_config().mpi)
+print("MPI:", MPI.Get_library_version())
+PYTHON
+git -C "$ICESEE_SOURCE_ROOT" rev-parse HEAD
+git -C "$ICESEE_SOURCE_ROOT" status --short
+```
 
-1. **Build the Container**:
-   - Follow the instructions in the [/src/container/apptainer/](https://github.com/KYANJO/ICESEE/tree/main/src/container/apptainer) directory to build the `icepack.sif` container image.
+Import checks do not validate a multi-rank run. Keep the launcher, mpi4py,
+PETSc and h5py in the same MPI environment; do not mix a system `mpirun` with
+Python packages linked to another MPI library. Avoid stacking unrelated Conda,
+virtualenv and Spack environments.
 
-2. **Execute the Script**:
-   - Run the script within the container:
-     ```bash
-     apptainer exec icepack.sif python run_da_icepack.py
-     ```
+For a laptop, activate its working Firedrake/Icepack environment and make the
+ICESEE checkout importable using that environment's installation procedure.
+The PACE resolver is specific to ICESEE-Spack; it is not a laptop activation
+script. PACE validation does not certify a different laptop software stack.
+
+## 3. Provide and identify inputs
+
+Use the lab's existing approved PIG inputs from the retained ICESEE-Spack
+installation. The new scientific checkout can link to those files while using
+the same installed dependencies. Users joining the project need access to that
+lab input directory before launching this example. The current configuration uses:
+
+| Input | Purpose |
+|---|---|
+| `data/extended_beta1000yrs_compact_idx20000.h5` | Compact final spin-up checkpoint, approximately 29 MB |
+| `data/PigFull2017GeomFull.exp` | Argus geometry used by mesh setup |
+| `data/OLS_Trend_plus_Resid_9b9.tif` | Surface mass-balance raster |
+| `data/PigFull2017GeomFull.yaml`, if present | Optional mesh settings read beside the `.exp` file |
+
+The historical `extended_beta1000yrs.h5` is about 39.5 GB and contains the full
+spin-up history. The compact checkpoint avoids reading that history for each
+initialization. `tools/build_compact_initialization.py` extracts the required
+state. Use its `--help` and verify the extracted fields against the source;
+a different compact file is not automatically the same initial condition.
+The legacy `paramsFile` YAML key is not consumed by the active PIG initialization
+path at this revision. Do not create an empty input file to silence a path error.
+
+When the approved inputs already exist in another installation, links avoid a
+second copy. From this example directory, for example:
+
+```bash
+PIG_INPUTS="$ICESEE_SPACK_ROOT/ICESEE/applications/icepack_model/examples/idealized_pig/data"
+if [[ ! -d "$PIG_INPUTS" ]]; then
+  PIG_INPUTS="$ICESEE_SPACK_ROOT/applications/icepack_model/examples/idealized_pig/data"
+fi
+printf 'Existing lab input directory: %s\n' "$PIG_INPUTS"
+mkdir -p data
+for name in extended_beta1000yrs_compact_idx20000.h5 PigFull2017GeomFull.exp OLS_Trend_plus_Resid_9b9.tif; do
+  if [[ ! -f "$PIG_INPUTS/$name" ]]; then
+    echo "Missing approved input: $PIG_INPUTS/$name" >&2
+  elif [[ -e "data/$name" || -L "data/$name" ]]; then
+    echo "Keep and inspect existing input: data/$name"
+  else
+    ln -s "$PIG_INPUTS/$name" "data/$name"
+  fi
+done
+```
+
+The two path forms support a nested ICESEE installation and the historical
+standalone layout. If your lab stores inputs elsewhere, set `PIG_INPUTS` to that
+approved directory. Inspect any reported missing files or existing targets before
+launching; the commands preserve existing destinations. If the original mesh
+has an optional adjacent `.yaml`, preserve that input too. For an intentionally
+different approved dataset, use a separate directory/configuration and record
+its identity.
+
+Inputs can remain in their original storage location. Use explicit configuration
+paths or links to approved existing inputs instead of duplicating the full
+history. Record hashes of files actually used. On Linux:
+
+```bash
+sha256sum data/extended_beta1000yrs_compact_idx20000.h5 \
+  data/PigFull2017GeomFull.exp data/OLS_Trend_plus_Resid_9b9.tif
+```
+
+Keep input filenames, hashes, source revision and environment information with
+run results. Identical names do not establish identical contents. Different HDF5 file hashes can also reflect container metadata rather than changed numerical fields; inspect dataset contents and writer metadata before concluding that the physical initial state differs.
+
+## 4. Keep personal scientific settings outside tracked source
+
+Copy the reviewed YAML once, then edit your own copy:
+
+```bash
+mkdir -p "$HOME/ICESEE-run-configs"
+cp params.yaml "$HOME/ICESEE-run-configs/idealized_pig.yaml"
+```
+
+Use `-F` or `--force-params` to select it. Relative input paths are resolved from
+the example's working directory; absolute input paths avoid ambiguity across
+checkouts. Explicit command-line overrides select the run's member count,
+mode, duration, timestep and output directory. Keep those arguments in the
+recorded command as well as retaining the YAML.
+
+Important experiment settings include:
+
+- `generate_true_state` and `generate_synthetic_obs` generate the reference and observations.
+- `generate_nurged_state=1` also creates the full wrong/no-assimilation trajectory. It is optional and adds work; the validated reference run used `0`.
+- `initialize_ensemble` controls fresh ensemble initialization. Resume restores saved members instead.
+- `save_steps` specifies requested profile years; the initial profile is saved separately.
+- `seed`, `sig_Q`, `sig_obs`, inflation and localization are scientific choices.
+- Initial native PIG thickness is unperturbed. Basal-melt forcing is the intended experiment discrepancy. Do not add thickness noise as a performance fix.
+
+Do not change solver caps, timesteps, forcing, initial uncertainty or analysis
+options to make a scaling comparison complete. Such changes define a different
+scientific experiment and require separate validation.
+
+## 5. Select an execution mode and resource layout
+
+| Mode | PIG execution | Important distinction |
+|---|---|---|
+| 0 | Serial runner | Useful as a small reference where supported |
+| 1 | Partially parallel forecast/analysis workflow | Generic state/history path |
+| 2 | Parallel forecast with distributed I/O/analysis workflow | Generic state/history path |
+| 3 | Native distributed Icepack state and ensemble-by-space execution | Requires the registered native adapter and valid ownership/topology |
+
+Select the runner with **`--execution_mode=3`** (or 1/2). There is no additional
+Mode-3 opt-in flag. Invalid native layouts or unsupported options fail explicitly;
+the code does not silently fall back to Mode 2. The legacy positional scheduling
+argument is a separate setting; omit it in the commands below.
+
+For native Mode 3:
+
+```text
+MPI ranks = concurrent model groups × spatial ranks per model group
+model groups = MPI ranks / model_nprocs
+```
+
+Ensemble members are scheduled over those groups. Eight ranks with
+`model_nprocs=2` provide four groups; 24 members require six rounds. There is
+no additional MPI coordinator rank per member in this native Icepack path.
+External MATLAB/ISSM processes have separate resource requirements.
+
+On multiple nodes, choose uniform ranks per node divisible by `model_nprocs`
+and use block placement so a model group stays within a node. The launcher
+checks allocation sizes, and rank logs record host placement for inspection. `Nens`
+can exceed the number of groups; it is not a request for the same number of MPI
+ranks. Strong scaling holds `Nens`, mesh and scientific settings fixed.
+
+## 6. Submit a fresh PACE run
+
+Run from this example directory with the roots exported as in section 2.
+A fresh output target must not exist, including as a symlink.
+
+The common launcher defaults to 32 members, two nodes, eight ranks per node,
+two spatial ranks per group, 96 GB per node and a two-hour cap:
+
+```bash
+export ICESEE_DATA_PATH="$PWD/_modelrun_datasets_trial01"
+sbatch run_idealized_1.sbatch
+```
+
+The 24-member, eight-rank reference allocation is:
+
+```bash
+export ICESEE_DATA_PATH="$PWD/_modelrun_datasets_24members_trial01"
+sbatch pace/validate_mode3_24.sbatch
+```
+
+Both run five years with `dt=0.05`, observations at years 2/3/4 and requested
+profiles at years 0/2/3/4. Check account/partition access and override scheduler
+options for your allocation. Do not copy another user's email directives.
+
+For a personal `-F` configuration, copy the launcher outside the repository,
+then add `--force-params=/absolute/path/to/idealized_pig.yaml` to its `ARGS`
+array. Preserve its allocation checks, output guards, exact launch arguments
+and exit reporting. The common launcher does not forward arbitrary positional
+arguments; appending `-F` after `sbatch run_idealized_1.sbatch` is insufficient.
+
+For a standalone MPI run on resources where you are allowed to run it:
+
+```bash
+DATA_DIR="$PWD/_modelrun_datasets_local_trial01"
+if [[ -e "$DATA_DIR" || -L "$DATA_DIR" ]]; then
+  echo "Choose a fresh output directory: $DATA_DIR" >&2
+else
+  mpirun -np 8 python run_da_icepack.py \
+    -F "$HOME/ICESEE-run-configs/idealized_pig.yaml" \
+    --execution_mode=3 --Nens=24 --model_nprocs=2 \
+    --num_years=5 --dt=0.05 \
+    --obs_start_time=2 --obs_max_time=4 --freq_obs=1 \
+    '--save_steps=[2,3,4]' --data_path="$DATA_DIR"
+fi
+```
+
+Use Slurm for computational runs on PACE; do not execute this MPI workload on
+a login node. A direct fresh CLI run can recreate the configured output path;
+keep the guard above and never point it at previous results.
+
+For Mode 1 or 2, select that mode explicitly and use its supported rank layout.
+`pace/validate_modes_1_2.sbatch` is a two-mode confirmation script, not a
+controlled scaling benchmark. The generic and native initialization paths
+differ; changing the mode does not by itself establish member-wise equivalence.
+
+## 7. Cache placement and monitoring
+
+`pace/launch_rank.sh` uses node-local `$TMPDIR`, falling back to `/tmp` for
+recognized shared filesystems. It assigns job/step-local PyOP2 and TSFC cache
+paths and rank-private `XDG_CACHE_HOME` for SQLite state. The launch log records
+host/cache paths. A larger shared project directory can hold inputs, results
+and checkpoints, but available storage alone does not make it suitable for
+concurrent JIT/SQLite cache traffic. Keep thread counts at one per MPI rank
+unless a separately validated hybrid layout is intended.
+
+```bash
+squeue -u "$USER"
+sacct -j JOBID --format=JobID,State,ExitCode,Elapsed
+cat pace_runs/mode3-JOBID/launch.txt
+cat pace_runs/mode3-JOBID/source.txt
+tail -n 40 pace_runs/mode3-JOBID/stdout.log
+tail -n 40 pace_runs/mode3-JOBID/stderr.log
+```
+
+Truth and optional wrong-state generation currently run on world rank zero;
+other ranks wait during that phase. Idle peers then do not prove Mode 3 was
+ignored. Watchdog timeout stack dumps are diagnostics, not automatically a
+failed solve. Check changing stacks, CPU/I/O progress and checkpoint commits
+before declaring a hang. Preserve failed logs and data.
+
+A nonlinear convergence error is different from an MPI or storage deadlock.
+Record the failing truth/member/step, pre/post-analysis fields and solver
+residuals. Do not silently increase the solver iteration cap or disable MPI
+file locking. The history fixes retain normal write safety.
+
+## 8. Locate and inspect results
+
+The end-of-run `performance.json` records phase timings and available numerical-package versions. Retain it with the scheduler accounting and input provenance. Phase timers can overlap: `forecast_step/with_analysis` is a subset of forecast-cycle time, not an isolated additive analysis timer. Rank-summed time is not wall time, and logical checkpoint throughput is not a raw filesystem benchmark.
+
+The common launcher writes logs, source state, exact arguments and
+`exit-status` to `pace_runs/mode3-JOBID/`. Data go to `ICESEE_DATA_PATH`, or
+`_modelrun_datasets/` by default. Custom launchers can choose another log root;
+read their `launch.txt` rather than assuming a path.
+
+Typical native output includes:
+
+```text
+DATA_DIR/
+  hs_profiles_true.h5
+  hs_ensemble_profiles0.h5
+  ...
+  hs_ensemble_profiles23.h5       # for a 24-member run
+  synthetic_obs.h5
+  true_nurged_states.h5
+  performance.json
+  _mode3_state_history/
+    initial_condition/checkpoint_00000000/
+    steps/checkpoint_00000099/
+      manifest.json
+      shard_00000000.h5
+      ...
+```
+
+`hs_profiles_true.h5` is a binary HDF5 file, **not a folder** or a text document.
+The member filenames are `hs_ensemble_profiles{member}.h5`, not
+`hs_profiles_true{member}.h5`. Older files may lack an extension. Inspect the
+selected data directory and the code revision before concluding generation
+failed. A text editor's binary-file warning is expected.
+
+```bash
+python - "$ICESEE_DATA_PATH" <<'PYTHON'
+from pathlib import Path
+import sys, h5py, numpy as np
+root=Path(sys.argv[1])
+for path in sorted(root.glob('hs*.h5')):
+    with h5py.File(path, 'r') as f:
+        print(path.name)
+        for key in ('h_profiles', 's_profiles'):
+            a=f[key][:]
+            print(key, a.shape, 'finite=', np.isfinite(a).all())
+        for key in ('written_steps', 'profile_times'):
+            print(key, f[key][:] if key in f else f.attrs.get(key))
+PYTHON
+```
+
+Check all members, requested/written columns, finite values and physical ranges.
+An unwritten profile column is not evidence of physically zero thickness; use
+metadata and the simulated interval. Older generic output can contain zero
+placeholders. Native output records written columns explicitly. A finite array
+can still be physically unreasonable.
+
+Native member profiles are sampled after forecast advancement, before any analysis in that cycle. They are flowline forecast diagnostics, not a complete analyzed-state history. Use the committed checkpoint to inspect analyzed fields.
+
+Native Mode 3 writes rank-sharded checkpoints rather than requiring the generic
+aggregate ensemble-history file. A missing generic aggregate alone is not a
+native failure. Modes 1/2 have different output layouts; their result readers
+must match the corresponding history format.
+
+## 9. Resume without destroying output
+
+Use the same scientific YAML, ensemble identities, inputs and supported topology.
+A restart must restore native state and RNG progression instead of regenerating
+the ensemble. Only a committed checkpoint with its manifest and all referenced
+shards is a restart candidate. Keep the original truth/observations/profiles.
+
+From an allocated compute environment, the direct native interface is:
+
+```bash
+mpirun -np 8 python run_da_icepack.py \
+  -F /absolute/path/to/the-original-run.yaml \
+  --execution_mode=3 --Nens=24 --model_nprocs=2 \
+  --num_years=5 --dt=0.05 \
+  --obs_start_time=2 --obs_max_time=4 --freq_obs=1 \
+  '--save_steps=[2,3,4]' --data_path=/absolute/path/to/existing-data \
+  --resume_from_checkpoint=True
+```
+
+For Slurm, create a dedicated resume launcher retaining the same environment,
+resource binding and provenance, with an existing-data check appropriate for
+resume. **Do not reuse the common fresh-run launcher unchanged:** it correctly
+refuses an existing data target. Do not remove its guards for routine fresh runs.
+
+Default native policy writes every step and retains the newest two step
+checkpoints plus the initial checkpoint. `checkpoint_keep_last=0` retains all;
+`checkpoint_keep_analysis` optionally retains analysis steps. These settings
+affect storage and restart availability. Do not delete old checkpoints until a
+new one has committed. Arbitrary mesh/topology migration is not established by
+the short same-topology restart test.
+
+## 10. Plot and compare runs
+
+Use the `read_results.ipynb` data-path settings for the run you actually launched;
+check its expected history format before opening native results. For portable
+flowline plots, h5py/NumPy/Matplotlib can read `h_profiles`, `s_profiles`,
+`distances`, `bed_values`, `profile_times` and `written_steps` directly without
+loading Firedrake or a full spin-up history.
+
+The standalone comparison utility needs NumPy, h5py and Matplotlib, not
+Firedrake. Run it on **completed** native outputs:
+
+```bash
+python tools/compare_mode3_runs.py \
+  /absolute/path/to/reference-data /absolute/path/to/candidate-data \
+  --output /absolute/path/to/comparison-figures
+```
+
+It reads bounded final-field slabs, checks ownership fingerprints and matching
+member/time metadata, and writes `comparison.json`, `field_metrics.csv`,
+`h_profiles_comparison.png` and `s_profiles_comparison.png`. Profile figures show
+truth, ensemble mean ± one ensemble standard deviation, and difference panels.
+A numbering or coordinate mismatch stops comparison rather than subtracting
+unrelated rows. Passing the same data directory twice is a reader/plot smoke
+check only; it is not an independent validation run.
+
+For a comparison, first match source revision, YAML/CLI science, seed, inputs
+by content, member IDs, MPI topology and profile coordinates/times. Compare
+complete final members in bounded field slabs; report maximum absolute error,
+RMSE and relative L2 per field. Compare physical flowline profiles and plot
+ensemble means with ensemble spread and truth. Confirm ownership/coordinate
+fingerprints before subtracting raw checkpoint rows from different environments.
+If numbering differs, resolve the physical mapping; equal vector lengths are
+not sufficient. Set acceptance tolerances for the scientific quantities under
+review rather than declaring success from a similar-looking mean curve.
+
+## 11. Scaling and validation limits
+
+Strong scaling fixes mesh, members, duration, timestep, observations, filtering,
+noise and storage policy while increasing allocated resources. Weak scaling
+must state what grows; increasing members changes sampling and the scientific
+experiment. Report cold/warm cache conditions, repeated timings, all-rank memory,
+phase timings, logical I/O and failures. A laptop/cluster wall-time comparison
+is not controlled scaling when inputs, CPU, environment or settings differ.
+
+Proposed native allocation commands, to submit only within your approved
+allocation and project budget:
+
+```bash
+# Strong scaling: retain 32 members and the common launcher's scientific settings.
+export ICESEE_NENS=32 ICESEE_MODEL_NPROCS=2 ICESEE_TASKS_PER_NODE=8
+export ICESEE_DATA_PATH="$PWD/_modelrun_datasets_strong_N4_trial01"
+sbatch --nodes=4 --ntasks=32 --ntasks-per-node=8 run_idealized_1.sbatch
+
+# Weak scaling: four members per group, increasing to 64 members on four nodes.
+export ICESEE_NENS=64
+export ICESEE_DATA_PATH="$PWD/_modelrun_datasets_weak_N4_trial01"
+sbatch --nodes=4 --ntasks=32 --ntasks-per-node=8 run_idealized_1.sbatch
+```
+
+These are unmeasured benchmark proposals. Keep output targets distinct and record
+resource/settings changes between trials. The weak case changes ensemble size;
+it is not a member-wise equivalence test against 32 members.
+
+Verified PACE cases at the published baseline:
+
+| Case | Result | Scope |
+|---|---|---|
+| Mode 3, 32 members, 16 ranks, 5 years | Job 15125921.2, exit 0, 34:24 | All final fields and 33 profiles inspected |
+| Mode 3, 24 members, 8 ranks, 5 years | Job 15369255, exit 0, 47:09 parent / 46:48 MPI step | All eight final shards and 25 profiles inspected |
+| Mode 3, second PACE installation, 24 members, 8 ranks, 5 years | Job 15371824, exit 0, 46:14 parent / 45:54 MPI step | All eight final shards and 25 profiles inspected |
+| Mode 1, 32 members, 8 ranks, 5 years | Job 15142488.1, exit 0, 42:01 | Final members, means and profiles inspected |
+| Mode 2, 32 members, 8 ranks, 5 years | Job 15142488.0, exit 0, 1:43:05 | Final members, means and profiles inspected |
+
+The second-installation 24-member case used identical runtime/configuration
+content, input datasets, generated observations and observation-error arrays.
+Truth profiles matched exactly. All final member fields and 25 profiles were
+finite with expected metadata; final thickness ranged from 30 to 4181.58 m.
+Across all final thickness members/rows, maximum absolute difference was
+0.211592 m, RMSE 0.0151454 m and relative L2 `8.57429e-6`; maximum member
+flowline thickness difference was 0.0135394 m. Thus these runs are close but
+not bitwise equivalent. Profiles before the first analysis differed by at most
+`1.59e-12` m; larger differences appeared afterward. Python patch versions and
+Open MPI versions differed (3.11.14/3.11.15 and 5.0.9/5.0.10 respectively),
+but those differences have not been isolated as the cause. No scientific
+acceptance threshold is implied. Version strings alone do not identify every
+compiler, BLAS or numerical build option.
+
+Mode 1/2 final per-field member relative L2 differences were at most `1.54e-12`.
+That is a measured comparison, not a universal acceptance threshold. Modes 1/2
+and native Mode 3 use different initial perturbation paths; these checks do not
+establish three-mode member-wise scientific equivalence. Native observation
+setup still contains replicated reads, and native noise retains a capped
+leader-local global-state workspace. Alternative filters and optional member
+streaming need their own correctness and performance validation; do not switch
+filters to hide an I/O bottleneck. See [RUNTIME_DECISION.md](RUNTIME_DECISION.md)
+and [MODE3_PACE.md](MODE3_PACE.md).
+
+## 12. Report a reproducible problem
+
+Include source hash/dirty status, import paths and package versions, exact
+command and selected YAML, input sizes/hashes, allocation/rank placement,
+cache locations, scheduler and process exits, last committed checkpoint,
+relevant log/traceback, profile metadata and field extrema. Remove credentials
+and private input contents. Preserve the failing run; do not clear HDF5
+consistency flags or overwrite outputs to make a reader proceed.

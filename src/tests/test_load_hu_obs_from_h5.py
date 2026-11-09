@@ -1,16 +1,4 @@
-# ==============================================================================
-# @des: Tests for load_hu_obs_from_h5 (src/utils/tools.py), ported from
-# test/ICESEE during Pass 2 reconciliation. It transparently reconstructs
-# the dense (state_dim x m_obs) synthetic-observation matrix from either
-# storage layout ICESEE writes to synthetic_obs.h5:
-#   - dense: a full "hu_obs" dataset (modes 0/1 always; mode 2 when
-#     synthetic_observation_storage is 'dense' or 'both').
-#   - compact: "hu_obs_compact" (nobs, m_obs) + "obs_indices" (nobs,) sparse
-#     rows + a "state_dimension" attr, scattered into a zero-filled dense
-#     array (mode 2's default, for bounded per-rank memory).
-# Small in-memory HDF5 fixtures (h5py.File(..., driver="core", backing_store
-# =False)) stand in for real scientific datasets.
-# ==============================================================================
+# Test reconstruction of dense observations from dense and compact HDF5 layouts.
 import h5py
 import numpy as np
 import pytest

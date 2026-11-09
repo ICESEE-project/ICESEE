@@ -5,37 +5,13 @@
 # state rather than live native model objects).
 # @date: 2026-09-26
 # ==============================================================================
-"""Inactive-member state storage, decoupled from the runtime layer that uses it.
+"""Inactive-member storage for native ensemble scheduling.
 
-The scientific/runtime layer (see ``distributed_streaming_runtime.py``) never
-needs to know HOW an inactive member's packed owned-state array is kept
-around between rounds -- only that it can ``put``, ``get``, and ``release``
-it by member ID. This keeps "state ownership" (the runtime's job) separate
-from "inactive-state backing" (this module's job), which is itself separate
-from "durable checkpointing" (``distributed_checkpoint.py``, unrelated and
-untouched by this module).
-
-Only a memory-resident backend is implemented here (Option B, the first
-authorized implementation). A future file/checkpoint-backed backend
-(Option C) or an HPC-specific backend can implement the same
-``InactiveMemberStore`` protocol without any runtime-layer change -- that is
-the entire point of this abstraction existing as its own module.
-
-Scale note (Ne up to ~1000, 37 GB/member): whole-array ``get``/``put`` is
-sufficient for Option B (bounding NATIVE/PETSc overhead to one live member)
-but does NOT by itself bound how much PACKED state must be addressable at
-once -- a caller that calls ``get`` for every one of 1000 members before
-using any of them would still need ~37 TB addressable. The optional
-``get_rows``/``put_rows`` methods below exist so a future backend (and a
-future streaming analysis primitive) can pull/push only a bounded
-state-row slice for one member without ever materializing that member's
-complete array -- the array-level ``get``/``put`` remain the only
-REQUIRED methods; ``get_rows``/``put_rows`` are duck-typed optional
-extensions (checked via ``getattr(store, "get_rows", None)``, exactly like
-this codebase's existing optional-adapter-method convention), so a simple
-backend (like ``MemoryInactiveMemberStore``) can still satisfy the full
-protocol by implementing them trivially in terms of the whole array.
-"""
+The runtime stores packed owned rows by member ID through put/get/release.
+Optional row and ensemble-row operations permit bounded analysis reads and
+writes. Backends can implement these operations in memory or on disk without
+exposing storage details to model adapters. This working store is separate
+from committed restart checkpoints."""
 
 from __future__ import annotations
 
@@ -76,20 +52,10 @@ class InactiveMemberStore(Protocol):
     def get_ensemble_rows(
         self, member_ids: tuple[int, ...], row_slice: slice
     ) -> np.ndarray:
-        """Optional bulk primitive: return ``row_slice`` for ALL of
-        ``member_ids`` in one call, shape ``(rows, len(member_ids))``.
+        """Return an owned-row block for member_ids, shape (rows, len(member_ids)).
 
-        Exists so a backend that can serve this natively (e.g. a chunked
-        2D state-row x ensemble-member layout) does not pay Ne separate
-        physical I/O operations for what is logically one request -- see
-        this session's Gate 7 finding: a filesystem backend doing 1000
-        independent small reads per row block scales terribly even though
-        an in-memory backend doing the same loop is cheap. Callers should
-        prefer this over looping ``get_rows`` when available; a backend
-        that cannot serve it natively may simply loop internally (see
-        ``MemoryInactiveMemberStore`` below) -- the DA layer never needs to
-        know which case applies.
-        """
+        Bulk access avoids one physical file read per member. Backends may implement
+        this directly or fall back to per-member row reads."""
 
     def put_ensemble_rows(
         self, member_ids: tuple[int, ...], row_slice: slice, block: np.ndarray

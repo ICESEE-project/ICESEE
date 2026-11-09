@@ -17,5 +17,5 @@ set -euo pipefail
   echo "This confirmation requires one node and eight MPI ranks" >&2; exit 2;
 }
 export ICESEE_NENS=24 ICESEE_MODEL_NPROCS=2 ICESEE_TASKS_PER_NODE=8
-export ICESEE_DATA_PATH="$ICESEE_SOURCE_ROOT/applications/icepack_model/examples/idealized_pig/pace_runs/student-mode3-${SLURM_JOB_ID:?}/data"
+export ICESEE_DATA_PATH="$ICESEE_SOURCE_ROOT/applications/icepack_model/examples/idealized_pig/pace_runs/mode3-24-${SLURM_JOB_ID:?}/data"
 exec bash "$ICESEE_SOURCE_ROOT/applications/icepack_model/examples/idealized_pig/run_idealized_1.sbatch"

@@ -1,11 +1,4 @@
-# ==============================================================================
-# @des: Level-1 unit tests for generate_initial_member_increment
-# (src/run_model_da/_error_generation.py), the shared initial-ensemble
-# perturbation generator used by every execution mode (0/1/2). Covers the
-# exact properties the modes-0/1 reconciliation fix was required to
-# establish: reproducibility, per-member distinctness, nonzero ensemble
-# spread, and correct sig_Q scaling response.
-# ==============================================================================
+# Test seeded, member-specific initial increments, ensemble spread and sig_Q scaling.
 import numpy as np
 import pytest
 

@@ -5,7 +5,7 @@
 Native Mode 3 completed the 32-member, five-year PACE validation in job
 15125921.2: 100 forecast steps, three analyses, exit zero in 34 minutes 24
 seconds. Final checkpoint fields and all 33 truth/member profile files were
-checked. The student launcher is `run_idealized_1.sbatch`; see
+checked. The batch launcher is `run_idealized_1.sbatch`; see
 [MODE3_PACE.md](MODE3_PACE.md) for fetching, submitting and reading results.
 
 Modes 1 and 2 subsequently completed the same 32-member, five-year case in
@@ -27,7 +27,7 @@ The production check is not a controlled strong/weak scaling result.
 
 ## Direct Mode 3 selection validation
 
-Job 15369255 completed the student's 24-member/eight-rank, five-year PIG
+Job 15369255 completed the 24-member/eight-rank, five-year PIG
 configuration on one PACE node using `--execution_mode=3` alone. Slurm reported
 exit zero in 47:09 (MPI step 46:48). The final checkpoint records completed step
 99, next step 100, model time 5.0 and three completed analyses. All eight shards
@@ -39,6 +39,20 @@ approximately -3867..974 in model units, surface 3.13..2632.13 m and basal melt
 while removing the additional selection gate. This validates completion and
 inspected output integrity for this PACE case, not a controlled scaling result
 or independent scientific accuracy.
+
+## Cross-installation comparison
+
+Job 15371824 repeated the 24-member/eight-rank case in a second PACE installation.
+It completed all 100 steps and three analyses with exit zero in 46:14 (MPI45:54).
+All eight final shards, five fields for every member, and all 25 profiles passed
+output checks. Runtime/configuration content, input dataset values, generated
+observations and error arrays matched the reference; truth profiles were exact.
+
+The runs are not bitwise equivalent. Maximum final thickness difference was
+0.211592 m (RMSE0.0151454 m, relative L2 8.57429e-6); maximum member profile
+difference was0.0135394 m. Larger differences appeared after assimilation.
+Python/Open MPI versions differed; the cause was not isolated. These measurements
+do not define a scientific acceptance tolerance.
 
 ## Runtime repairs
 
@@ -80,7 +94,7 @@ project filesystem is not required for these validations.
 
 ## Scientific settings and solver behavior
 
-Student `features_debug` changes are retained. The runtime repair does not
+Scientific `features_debug` changes are retained. The runtime repair does not
 raise the PETSc iteration cap or change physical parameters, uncertainty
 amplitudes, observation-error method or configured inflation values.
 The legacy Icepack options `max_iterations` and `tolerance` are not translated
@@ -127,9 +141,9 @@ existing output targets and record source status.
 
 - `pace/test_modes_1_3.sbatch`: short concurrent diagnostics.
 - `pace/test_modes_1_3_year.sbatch`: one-year cases plus isolated mid-run restart.
-- `run_idealized_1.sbatch`: student Mode-3 launcher using the validated science
+- `run_idealized_1.sbatch`: Mode-3 launcher using the validated science
   and 16-rank topology, two nodes and a two-hour allocation.
-- `pace/validate_student_production.sbatch`: concurrent 32-member, five-year
+- `pace/validate_production_modes.sbatch`: concurrent 32-member, five-year
   confirmation; job 15125921 produced the mixed terminal results above.
 
 Verify the intended remote with `git remote -v`; inherited worktrees can have

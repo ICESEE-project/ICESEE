@@ -1,21 +1,6 @@
-# ==============================================================================
-# @des: Reproducibility manifest for a PACE Mode-3 Idealized PIG run
-# (2026-09-28, PACE calibration prep). Writes one JSON file capturing the
-# environment/config context needed to interpret a run's timing/output,
-# without dumping the full environment (no secrets, no raw env dump).
-#
-# Because the original ICESEE repo's .git object store is corrupted (see
-# this session's git-corruption note) and this run's working tree carries
-# uncommitted reconciliation work on top of a clean clone, "git revision"
-# alone is not sufficient provenance. This script therefore also records:
-#   - the clean clone's own git revision/branch (informational only -- it
-#     predates the reconciliation and will not match the working tree);
-#   - an explicit "working tree modified" flag plus a content-hash digest
-#     of every tracked-relevant + untracked Idealized PIG/Mode-3 file, so
-#     two runs can be compared for "same code" without needing a commit.
-#
-# Usage: python pace_run_manifest.py --out <path/manifest.json> [--icesee-kwargs-json <path>]
-# ==============================================================================
+# Record source digests, selected configuration and numerical environment.
+# Git revision alone does not identify uncommitted working files. Include
+# per-file content hashes without dumping environment variables or secrets.
 from __future__ import annotations
 
 import argparse
@@ -31,10 +16,7 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# The specific files this reconciliation touched or that materially affect
-# a Mode-3 Idealized PIG run's behavior -- hashed individually (not the
-# whole repo, which is large and includes unrelated applications) so two
-# manifests can be diffed to see exactly which of these changed.
+# Hash files that affect native PIG runs so source differences are inspectable.
 _TRACKED_RELEVANT_FILES = [
     "applications/icepack_model/examples/idealized_pig/_icepack_model.py",
     "applications/icepack_model/examples/idealized_pig/_icepack_enkf.py",
@@ -73,9 +55,8 @@ def _git_provenance() -> dict:
         "branch": branch,
         "revision": revision,
         "revision_note": (
-            "clean-clone HEAD only -- predates this session's uncommitted "
-            "reconciliation work; use working_tree_digest below to identify "
-            "the actual code that ran"
+            "HEAD identifies committed source; working_tree_digest identifies "
+            "the selected files actually present during the run"
         ),
         "working_tree_modified": bool(status),
         "modified_file_count": len(status.splitlines()) if status else 0,
