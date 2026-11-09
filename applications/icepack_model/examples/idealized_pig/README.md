@@ -258,33 +258,56 @@ ranks. Strong scaling holds `Nens`, mesh and scientific settings fixed.
 
 ## 6. Submit a fresh PACE run
 
-Run from this example directory with the roots exported as in section 2.
-A fresh output target must not exist, including as a symlink.
+Submit directly from `applications/icepack_model/examples/idealized_pig` in the
+checkout you want to execute. The launcher discovers that checkout from
+`SLURM_SUBMIT_DIR`. In the source-only layout it reuses the sibling
+`ICESEE-Spack` installation; explicit `ICESEE_SOURCE_ROOT` and
+`ICESEE_SPACK_ROOT` exports take precedence.
 
-The common launcher defaults to 32 members, two nodes, eight ranks per node,
-two spatial ranks per group, 96 GB per node and a two-hour cap:
+The default allocation is 24 members, one node, eight MPI ranks, two spatial
+ranks per group, 48 GB and a two-hour cap:
 
 ```bash
-export ICESEE_DATA_PATH="$PWD/_modelrun_datasets_trial01"
+cd "$HOME/r-arobel3-0/ICESEE-Spack-source/ICESEE/applications/icepack_model/examples/idealized_pig"
 sbatch run_idealized_1.sbatch
 ```
 
-The 24-member, eight-rank reference allocation is:
+The default result directory is this example's `_modelrun_datasets`. It must
+not already exist, including as a symlink. Keep completed results and select a
+new path for each additional run:
 
 ```bash
-export ICESEE_DATA_PATH="$PWD/_modelrun_datasets_24members_trial01"
-sbatch pace/validate_mode3_24.sbatch
+export ICESEE_DATA_PATH="$PWD/_modelrun_datasets_trial02"
+sbatch run_idealized_1.sbatch
 ```
 
-Both run five years with `dt=0.05`, observations at years 2/3/4 and requested
-profiles at years 0/2/3/4. Check account/partition access and override scheduler
-options for your allocation. Do not copy another user's email directives.
+The parameter file is selected in this order: explicit `ICESEE_PARAMS_FILE`,
+`$HOME/r-arobel3-0/ICESEE-run-configs/idealized_pig.yaml` in the standard lab
+layout (beside the two installation directories), then this example's tracked
+`params.yaml`. The launcher prints the selected paths and saves a copy of the
+parameters in `pace_runs/mode3-JOBID/params.yaml`. To select another configuration:
 
-For a personal `-F` configuration, copy the launcher outside the repository,
-then add `--force-params=/absolute/path/to/idealized_pig.yaml` to its `ARGS`
-array. Preserve its allocation checks, output guards, exact launch arguments
-and exit reporting. The common launcher does not forward arbitrary positional
-arguments; appending `-F` after `sbatch run_idealized_1.sbatch` is insufficient.
+```bash
+export ICESEE_PARAMS_FILE="$HOME/r-arobel3-0/ICESEE-run-configs/idealized_pig.yaml"
+sbatch run_idealized_1.sbatch
+```
+
+The launcher passes that file through `--force-params`; editing the tracked
+script or copying it elsewhere is unnecessary. Arguments after the script name
+are not forwarded to Python. All launches retain five years, `dt=0.05`,
+observations at years 2/3/4 and requested profiles at years 0/2/3/4.
+
+For the two-node, 32-member allocation:
+
+```bash
+export ICESEE_NENS=32
+export ICESEE_DATA_PATH="$PWD/_modelrun_datasets_32members_trial01"
+sbatch --nodes=2 --ntasks=16 --ntasks-per-node=8 --mem=96G run_idealized_1.sbatch
+```
+
+Check account/partition access before submitting. Email notifications can be
+requested with `sbatch --mail-user=you@gatech.edu --mail-type=BEGIN,END,FAIL
+run_idealized_1.sbatch`; keep personal addresses outside tracked scripts.
 
 For a standalone MPI run on resources where you are allowed to run it:
 
