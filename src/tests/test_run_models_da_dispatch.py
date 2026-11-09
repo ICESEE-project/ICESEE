@@ -257,11 +257,13 @@ def test_model_with_no_mode3_runner_in_this_example_dir_still_fails_clearly(tmp_
 
 
 def test_synthetic_example_bootstraps_its_own_native_runner():
+    pytest.importorskip("firedrake", reason="Native Icepack bootstrap requires Firedrake")
+    pytest.importorskip("icepack", reason="Native Icepack bootstrap requires Icepack")
     example_dir=os.path.join(_REPO_ROOT,"applications","icepack_model","examples","synthetic_ice_stream")
     from ICESEE.src.parallelization.distributed_mode3_registry import get_execution_mode_3
     with _temporarily_unregistered("icepack"):
         exc=_real_bootstrap_registers("icepack",example_dir)
         assert not isinstance(exc,NotImplementedError)
         registration=get_execution_mode_3("icepack",application="synthetic_ice_stream")
-        assert registration is not None
+        assert registration is not None, f"Native runner import failed: {exc!r}"
         assert registration.application=="synthetic_ice_stream"
