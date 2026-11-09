@@ -67,9 +67,9 @@ def test_materialized_history_is_reference_ordered_complete_and_standalone(histo
 
     def bounded_read(dataset, selection):
         if Path(dataset.file.filename).name.startswith('shard_'):
-            assert isinstance(selection, np.ndarray)
-            assert len(selection) <= 2
-            reads.append(len(selection))
+            assert isinstance(selection, slice)
+            assert selection.stop - selection.start <= 2
+            reads.append(selection.stop - selection.start)
         return original(dataset, selection)
 
     with monkeypatch.context() as patch:
@@ -195,7 +195,6 @@ def test_mapping_disagreement_fails_before_writing(tmp_path):
 
 def test_pig_notebook_loads_selected_full_history_without_configuration_import(history):
     import os
-    from ICESEE.src.utils.tools import extract_datasets_from_h5
 
     data, reference, _ = history
     export_ensemble_history(data, row_chunk_size=2)
@@ -208,8 +207,7 @@ def test_pig_notebook_loads_selected_full_history_without_configuration_import(h
                 'applications/icepack_model/examples/idealized_pig/read_results.ipynb')
     cells = json.loads(notebook.read_text())['cells']
     assert '_utility_imports' not in ''.join(cells[1]['source'])
-    namespace = dict(os=os, h5py=h5py, np=np, results_dir=str(data),
-                     extract_datasets_from_h5=extract_datasets_from_h5)
+    namespace = dict(os=os, h5py=h5py, np=np, results_dir=str(data))
     try:
         exec(compile(''.join(cells[3]['source']), str(notebook), 'exec'), namespace)
         assert namespace['results_dir'] == str(data)
@@ -260,3 +258,117 @@ def test_changed_error_mode_between_forecast_steps_is_rejected(history):
     path.write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match='scientific schedule differs'):
         export_ensemble_history(data)
+
+
+@pytest.mark.parametrize('cycles', [0, 1, 2])
+def test_partial_export_keeps_only_committed_prefix_with_actual_times(history, cycles):
+    data, expected, _ = history
+    steps = data / '_mode3_state_history/steps'
+    for path in steps.glob('checkpoint_*'):
+        if int(path.name.split('_')[-1]) >= cycles:
+            shutil.rmtree(path)
+    tail = steps / f'checkpoint_{cycles:08d}'
+    tail.mkdir()
+    (tail / 'manifest.json').write_text('{"complete": false}')
+    path = export_ensemble_history(data, allow_partial=True, simulation_exit_code=17, row_chunk_size=3)
+    with h5py.File(path, 'r') as handle:
+        assert handle.attrs['export_complete']
+        assert not handle.attrs['complete']
+        assert handle.attrs['history_status'] == 'partial'
+        assert handle.attrs['simulation_exit_code'] == 17
+        assert handle.attrs['requested_steps'] == 3
+        assert handle.attrs['completed_steps'] == cycles
+        assert handle.attrs['last_completed_step'] == cycles - 1
+        np.testing.assert_array_equal(handle['ensemble'][:], expected[:, :, :cycles + 1])
+        np.testing.assert_array_equal(handle['t'][:], np.arange(cycles + 1) * .05)
+
+
+def test_partial_recovery_refuses_internal_gap_and_preserves_published_output(history):
+    data, _, _ = history
+    output = export_ensemble_history(data)
+    before = output.read_bytes()
+    shutil.rmtree(data / '_mode3_state_history/steps/checkpoint_00000001')
+    with pytest.raises(ValueError, match='missing history snapshot'):
+        export_ensemble_history(data, allow_partial=True)
+    assert output.read_bytes() == before
+
+
+def test_partial_recovery_cannot_replace_complete_history_but_can_use_another_path(history):
+    data, expected, _ = history
+    output = export_ensemble_history(data)
+    before = output.read_bytes()
+    shutil.rmtree(data / '_mode3_state_history/steps/checkpoint_00000002')
+    with pytest.raises(FileExistsError, match='cannot replace'):
+        export_ensemble_history(data, allow_partial=True)
+    assert output.read_bytes() == before
+    alternate = data / 'recovered.h5'
+    export_ensemble_history(data, allow_partial=True, output_path=alternate)
+    with h5py.File(alternate, 'r') as handle:
+        np.testing.assert_array_equal(handle['ensemble'][:], expected[:, :, :3])
+
+
+def test_partial_reader_and_notebook_work_without_end_of_run_summary(history):
+    import os
+    from ICESEE.src.postprocessing.outputs import load_da_outputs, native_history_metadata
+
+    data, expected, _ = history
+    initial = data / '_mode3_state_history/initial_condition/checkpoint_00000000/manifest.json'
+    manifest = json.loads(initial.read_text())
+    manifest['metadata'].update(observation_columns=[1, 3], observation_max_time=.15, execution_flag=0)
+    initial.write_text(json.dumps(manifest))
+    shutil.rmtree(data / '_mode3_state_history/steps/checkpoint_00000002')
+    path = export_ensemble_history(data, allow_partial=True, simulation_exit_code=17)
+    with h5py.File(data / 'true_nurged_states.h5', 'w') as handle:
+        handle['true_state'] = expected.mean(axis=1)
+    with h5py.File(data / 'synthetic_obs.h5', 'w') as handle:
+        handle['hu_obs'] = expected.mean(axis=1)[:, [1, 3]]
+    meta = native_history_metadata(path)
+    np.testing.assert_array_equal(meta['obs_index'], [1])
+    np.testing.assert_array_equal(meta['obs_column_indices'], [0])
+    assert meta['warnings'] and not meta['complete']
+    result = load_da_outputs(data, model_name='icepack')
+    assert result.metadata['history_complete'] is False
+    assert result.metadata['simulation_exit_code'] == 17
+    assert result.true_state.shape == (6, 3)
+    assert result.nurged_state.shape == (6, 3)
+    assert np.isnan(result.nurged_state).all()
+    np.testing.assert_array_equal(result.observations, expected.mean(axis=1)[:, [1]])
+    np.testing.assert_array_equal(result.ensemble_members(0), expected[0, :, :3].T)
+    notebook = (Path(__file__).resolve().parents[2] /
+                'applications/icepack_model/examples/idealized_pig/read_results.ipynb')
+    cell = json.loads(notebook.read_text())['cells'][3]['source']
+    namespace = dict(os=os, np=np, h5py=h5py, results_dir=str(data))
+    try:
+        exec(compile(''.join(cell), str(notebook), 'exec'), namespace)
+        np.testing.assert_array_equal(namespace['t'], [0, .05, .1])
+        np.testing.assert_array_equal(namespace['ensemble_vec_full'][:], expected[:, :, :3])
+    finally:
+        if '_ensemble_file' in namespace:
+            namespace['_ensemble_file'].close()
+
+
+def test_alternate_output_cannot_overwrite_restart_metadata(history):
+    data, _, _ = history
+    path = data / '_mode3_state_history/reference_layout.h5'
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match='must not replace checkpoint'):
+        export_ensemble_history(data, output_path=path)
+    assert path.read_bytes() == before
+
+
+def test_legacy_initial_metadata_reports_missing_observation_plan(history):
+    from ICESEE.src.postprocessing.outputs import native_history_metadata
+
+    data, _, _ = history
+    path = export_ensemble_history(data)
+    metadata = native_history_metadata(path)
+    assert 'Observation schedule metadata is unavailable' in metadata['warnings']
+
+
+def test_corrupt_aggregate_is_reported_as_a_results_error(tmp_path):
+    from ICESEE.src.postprocessing.outputs import load_da_outputs, ResultsError
+
+    (tmp_path / 'icesee_ensemble_data.h5').write_bytes(b'not an HDF5 file')
+    with pytest.raises(ResultsError) as error:
+        load_da_outputs(tmp_path, model_name='icepack')
+    assert error.value.kind == 'corrupt'

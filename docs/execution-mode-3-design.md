@@ -218,6 +218,18 @@ permutations. It publishes atomically, preserves restart shards and refuses
 missing timesteps rather than fabricating a full history from a rolling archive.
 Other model runners do not automatically enable this optional exporter.
 
+Standalone finalization also accepts `--allow-partial` after failed processes
+have stopped. It materializes the consecutive committed prefix, including the
+initial state, and marks requested versus available steps. `export_complete`
+means that file assembly finished; `complete` means that all requested history
+columns are present. Neither substitutes for the process exit status. A partial
+export cannot overwrite a complete or longer history, and missing middle
+snapshots remain errors. The PIG batch launcher attempts this serial recovery
+after a failed MPI step and preserves its original exit code. Hard allocation
+or node termination can prevent automatic recovery, so the same operation is
+available as a standalone NumPy/h5py command. No recovery path changes shard
+contents, checkpoint commits, model fields, RNG streams or analysis scheduling.
+
 New checkpoints record a `checkpoint_role` (`restart`, `analysis`,
 `history`, `initial`); only `restart` checkpoints are ever deleted, and
 checkpoints written before retention existed are never deleted

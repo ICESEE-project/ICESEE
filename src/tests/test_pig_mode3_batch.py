@@ -10,7 +10,7 @@ SCRIPT = (Path(__file__).resolve().parents[2] /
           "applications/icepack_model/examples/idealized_pig/run_idealized_1.sbatch")
 
 
-def _run(tmp_path, *, counts=None, existing=False, step_exit=0, discover=False, local_params=False):
+def _run(tmp_path, *, counts=None, existing=False, step_exit=0, finalizer_exit=0, discover=False, local_params=False):
     lab = tmp_path / "lab space"
     source = lab / "ICESEE-Spack-source" / "ICESEE"
     pig = source / "applications/icepack_model/examples/idealized_pig"
@@ -20,6 +20,12 @@ def _run(tmp_path, *, counts=None, existing=False, step_exit=0, discover=False, 
         'SPACK_REPO="$ICESEE_SPACK_ROOT"\n'
         'PIG_DIR="$ICESEE_ROOT/applications/icepack_model/examples/idealized_pig"\n'
         'cd "$PIG_DIR"\n')
+    exporter = source / "src/parallelization/distributed_history_export.py"
+    exporter.parent.mkdir(parents=True)
+    exporter.write_text(
+        'import json, os, sys\n'
+        'with open(os.environ["FINALIZER_CAPTURE"], "w") as f: json.dump(sys.argv[1:], f)\n'
+        'sys.exit(int(os.environ["FINALIZER_EXIT"]))\n')
     (pig / "params.yaml").write_text("science: tracked\n")
     deps = lab / "ICESEE-Spack"
     (deps / "scripts").mkdir(parents=True)
@@ -48,7 +54,9 @@ def _run(tmp_path, *, counts=None, existing=False, step_exit=0, discover=False, 
                SLURM_JOB_NUM_NODES="2", SLURM_NTASKS="16", SLURM_NTASKS_PER_NODE="8",
                SLURM_CPUS_PER_TASK="1", SLURM_JOB_ID="12345",
                PATH=str(bin_dir) + os.pathsep + env["PATH"],
-               CAPTURE=str(tmp_path / "argv.json"), STEP_EXIT=str(step_exit))
+               CAPTURE=str(tmp_path / "argv.json"), STEP_EXIT=str(step_exit),
+               FINALIZER_EXIT=str(finalizer_exit),
+               FINALIZER_CAPTURE=str(tmp_path / "finalizer-argv.json"))
     if discover:
         env.pop("ICESEE_SOURCE_ROOT")
         env.pop("ICESEE_SPACK_ROOT")
@@ -160,3 +168,22 @@ def test_invalid_dt_is_rejected_before_launch(tmp_path, dt):
     result, _, capture = _run(tmp_path, counts={'ICESEE_DT': dt})
     assert result.returncode == 2
     assert not capture.exists()
+
+
+@pytest.mark.parametrize("finalizer_exit", [0, 4])
+def test_failed_step_recovers_history_without_hiding_simulation_failure(tmp_path, finalizer_exit):
+    result, pig, _ = _run(tmp_path, step_exit=17, finalizer_exit=finalizer_exit)
+    assert result.returncode == 17
+    log = pig / "pace_runs/mode3-12345"
+    assert (log / "exit-status").read_text().strip() == "17"
+    assert (log / "finalizer-exit-status").read_text().strip() == str(finalizer_exit)
+    args = json.loads((tmp_path / "finalizer-argv.json").read_text())
+    assert args == [str(pig / "_modelrun_datasets"), "--allow-partial", "--simulation-exit-code", "17"]
+    assert (log / "finalizer.log").is_file()
+
+
+def test_successful_step_does_not_run_failure_recovery(tmp_path):
+    result, pig, _ = _run(tmp_path)
+    assert result.returncode == 0
+    assert not (tmp_path / "finalizer-argv.json").exists()
+    assert not (pig / "pace_runs/mode3-12345/finalizer-exit-status").exists()

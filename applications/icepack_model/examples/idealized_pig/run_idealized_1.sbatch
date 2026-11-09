@@ -132,5 +132,16 @@ set +e
 RESULT=$?
 set -e
 printf '%s\n' "$RESULT" > "$OUTDIR/exit-status"
+if (( RESULT != 0 )); then
+  # MPI has stopped: recover only snapshots with committed manifests.
+  set +e
+  python "$ICESEE_ROOT/src/parallelization/distributed_history_export.py" \
+    "$DATA_DIR" --allow-partial --simulation-exit-code "$RESULT" \
+    > "$OUTDIR/finalizer.log" 2>&1
+  FINALIZER_RESULT=$?
+  set -e
+  printf '%s\n' "$FINALIZER_RESULT" > "$OUTDIR/finalizer-exit-status"
+  printf 'History recovery exit=%s; log: %s/finalizer.log\n' "$FINALIZER_RESULT" "$OUTDIR"
+fi
 printf 'Mode 3 exit=%s; results: %s; logs: %s\n' "$RESULT" "$DATA_DIR" "$OUTDIR"
 exit "$RESULT"

@@ -77,22 +77,34 @@ def save_reference_layout(history_root, *, run_id, layout_id, row_maps):
     return path
 
 
-def _inventory(history_root):
+def _inventory(history_root, *, allow_partial=False):
     final_paths = sorted((history_root / 'steps').glob('checkpoint_*/manifest.json'))
     complete = []
     for path in final_paths:
-        manifest = json.loads(path.read_text())
+        try:
+            manifest = json.loads(path.read_text())
+        except (OSError, ValueError):
+            if allow_partial:
+                continue
+            raise
         if manifest.get('complete'):
             complete.append((int(manifest['timestep']), path, manifest))
-    if not complete:
+    initial_path = history_root / 'initial_condition/checkpoint_00000000/manifest.json'
+    if not complete and not (allow_partial and initial_path.is_file()):
         raise ValueError('no committed step checkpoints to export')
-    _, _, final = max(complete, key=lambda item: item[0])
+    if complete:
+        last_step, _, final = max(complete, key=lambda item: item[0])
+    else:
+        final = json.loads(initial_path.read_text())
+        last_step = -1
     nt = int(final['metadata']['nt'])
-    if final['timestep'] != nt - 1 or final['metadata']['next_step'] != nt:
+    if not -1 <= last_step < nt:
+        raise ValueError('checkpoint lies outside the requested run length')
+    if not allow_partial and (last_step != nt - 1 or final['metadata']['next_step'] != nt):
         raise ValueError('run is not complete; aggregate history was not published')
-    paths = [history_root / 'initial_condition/checkpoint_00000000/manifest.json']
+    paths = [initial_path]
     paths += [history_root / 'steps' / f'checkpoint_{step:08d}/manifest.json'
-              for step in range(nt)]
+              for step in range(last_step + 1)]
     snapshots = []
     signature = {key: final[key] for key in
                  ('run_id', 'layout_id', 'global_size', 'number_of_members', 'dtype', 'blocks')}
@@ -152,7 +164,7 @@ def _inventory(history_root):
         snapshots.append((manifest, sources))
     if not np.isfinite(times).all() or np.any(np.diff(times) <= 0):
         raise ValueError('checkpoint model times must be finite and increasing')
-    return signature, snapshots, np.asarray(times)
+    return signature, snapshots, np.asarray(times), nt
 
 
 def prepare_reference_layout(world, history_root, *, run_id, layout_id, row_maps):
@@ -176,8 +188,25 @@ def prepare_reference_layout(world, history_root, *, run_id, layout_id, row_maps
         raise RuntimeError(f'cannot save reference row mapping: {error}')
 
 
-def export_ensemble_history(data_path, *, row_chunk_size=8192):
-    """Atomically create ``icesee_ensemble_data.h5`` from a complete native run.
+def _bounded_values(dataset, indices, row_chunk_size):
+    """Gather from contiguous bounded reads, avoiding long HDF5 point lists."""
+    indices = np.asarray(indices, dtype=np.int64)
+    values = np.empty(indices.shape, dtype=dataset.dtype)
+    if indices.size and (indices.min() < 0 or indices.max() >= dataset.shape[0]):
+        raise ValueError('source selection lies outside the owned field')
+    bins = indices // row_chunk_size
+    for number in np.unique(bins):
+        positions = np.flatnonzero(bins == number)
+        start = int(number) * row_chunk_size
+        stop = min(start + row_chunk_size, dataset.shape[0])
+        block = dataset[start:stop]
+        values[positions] = block[indices[positions] - start]
+    return values
+
+
+def export_ensemble_history(data_path, *, row_chunk_size=8192, allow_partial=False,
+                            simulation_exit_code=None, output_path=None):
+    """Atomically create a full history or explicitly requested committed prefix.
 
     ``ensemble`` has (reference state, member, time) shape; ``ensemble_mean``
     has (reference state, time) shape. Column zero is the initial ensemble.
@@ -189,7 +218,8 @@ def export_ensemble_history(data_path, *, row_chunk_size=8192):
     row_chunk_size = int(row_chunk_size)
     if row_chunk_size < 1:
         raise ValueError('row_chunk_size must be positive')
-    signature, snapshots, times = _inventory(history_root)
+    signature, snapshots, times, requested_steps = _inventory(history_root, allow_partial=allow_partial)
+    history_complete = len(times) == requested_steps + 1
     blocks = signature['blocks']
     maps = {}
     with h5py.File(history_root / 'reference_layout.h5', 'r') as handle:
@@ -208,7 +238,15 @@ def export_ensemble_history(data_path, *, row_chunk_size=8192):
     dtype = np.dtype(signature['dtype'])
     if dtype.kind != 'f':
         raise ValueError('plotting history requires floating point state')
-    target = data_path / 'icesee_ensemble_data.h5'
+    target = data_path / 'icesee_ensemble_data.h5' if output_path is None else Path(output_path)
+    if target.resolve().is_relative_to(history_root.resolve()):
+        raise ValueError('output must not replace checkpoint files or their reference layout')
+    if not history_complete and target.exists():
+        with h5py.File(target, 'r') as previous:
+            if (previous.attrs.get('complete', False)
+                    or previous.attrs.get('run_id') != signature['run_id']
+                    or previous['ensemble'].shape[2] > len(times)):
+                raise FileExistsError('partial recovery cannot replace a complete, unrelated or longer history; choose --output')
     temporary = _temporary(target)
     try:
         with h5py.File(temporary, 'w') as output:
@@ -217,6 +255,21 @@ def export_ensemble_history(data_path, *, row_chunk_size=8192):
                                 layout_id=signature['layout_id'], complete=False,
                                 history_stage='post_cycle_analysis_when_scheduled',
                                 blocks=json.dumps(blocks))
+            output.attrs.update(export_complete=False, history_status='complete' if history_complete else 'partial',
+                                requested_steps=requested_steps, completed_steps=len(times) - 1,
+                                last_completed_step=len(times) - 2, last_model_time=float(times[-1]))
+            if simulation_exit_code is not None:
+                output.attrs['simulation_exit_code'] = int(simulation_exit_code)
+            initial_metadata = snapshots[0][0]['metadata']
+            output.attrs['observation_schedule_available'] = 'observation_columns' in initial_metadata
+            planned_observations = np.asarray(initial_metadata.get('observation_columns', []), dtype=np.int64)
+            available_observations = (planned_observations >= 0) & (planned_observations < len(times))
+            output.create_dataset('planned_obs_index', data=planned_observations)
+            output.create_dataset('obs_index', data=planned_observations[available_observations])
+            output.create_dataset('obs_column_indices', data=np.flatnonzero(available_observations))
+            for source, destination in [('observation_max_time', 'obs_max_time'), ('execution_flag', 'run_mode')]:
+                if source in initial_metadata:
+                    output.attrs[destination] = initial_metadata[source]
             ensemble = output.create_dataset('ensemble', (nd, nens, len(times)), dtype=dtype,
                                              chunks=(min(row_chunk_size, nd), 1, 1))
             mean = output.create_dataset('ensemble_mean', (nd, len(times)), dtype=dtype,
@@ -248,22 +301,24 @@ def export_ensemble_history(data_path, *, row_chunk_size=8192):
                                         if not positions.size:
                                             continue
                                         local = native_rows[positions] - first
-                                        order = np.argsort(local)
                                         dataset = handle[f'member_{member}/{name}']
                                         if dataset.shape != (last - first,) or dataset.dtype != dtype:
                                             raise ValueError('shard dataset shape/dtype disagrees with manifest')
-                                        values[positions[order]] = dataset[local[order]]
+                                        values[positions] = _bounded_values(dataset, local, row_chunk_size)
                                 if not np.isfinite(values).all():
                                     raise ValueError('checkpoint contains nonfinite state')
                                 ensemble[offset + start:offset + stop, member, column] = values
                                 total += values
                             mean[offset + start:offset + stop, column] = total / nens
                 print(f'[ICESEE] ensemble history: {column + 1}/{len(times)} snapshots', flush=True)
-            output.attrs['complete'] = True
+            output.attrs['complete'] = history_complete
+            output.attrs['export_complete'] = True
             output.flush()
         _publish(temporary, target)
     finally:
         temporary.unlink(missing_ok=True)
+    print(f'[ICESEE] published {"complete" if history_complete else "partial"} history: '
+          f'{len(times)-1}/{requested_steps} cycles; last model time {times[-1]:g}', flush=True)
     return target
 
 
@@ -285,5 +340,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('data_path', type=Path)
     parser.add_argument('--row-chunk-size', type=int, default=8192)
+    parser.add_argument('--allow-partial', action='store_true',
+                        help='export a contiguous committed prefix from an unfinished run')
+    parser.add_argument('--simulation-exit-code', type=int)
+    parser.add_argument('--output', type=Path)
     args = parser.parse_args()
-    print(export_ensemble_history(args.data_path, row_chunk_size=args.row_chunk_size))
+    print(export_ensemble_history(args.data_path, row_chunk_size=args.row_chunk_size,
+                                 allow_partial=args.allow_partial,
+                                 simulation_exit_code=args.simulation_exit_code,
+                                 output_path=args.output))

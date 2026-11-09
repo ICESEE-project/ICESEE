@@ -176,3 +176,46 @@ aggregate has 101 time columns including the initial ensemble. Existing rolling
 archives cannot supply pruned intermediate snapshots. This storage change does
 not introduce a different filtering method or solver/physical configuration.
 See the README for the exact schema, retention requirements and validation scope.
+
+
+## Exporting a failed run's available history
+
+The common batch launcher attempts serial finalization after a failed MPI step,
+using only consecutive committed checkpoints. Its `exit-status` remains the
+simulation's original failure code; `finalizer-exit-status` and `finalizer.log`
+report recovery separately. For a manually launched or forcibly interrupted run,
+stop all its processes and run the standalone exporter with `--allow-partial`.
+The README gives the exact command and the partial-file schema.
+
+A partial file has `export_complete=True`, `complete=False`, explicit
+requested/completed counts and a `t` axis ending at the last committed time.
+Initial-only recovery is supported. Missing middle snapshots, missing shards,
+invalid numbering and nonfinite values are errors. A complete published file
+is protected from partial replacement; `--output` can select another target.
+The notebook and generic output reader can use the partial file without the
+end-of-run summary. Hard node/allocation termination may prevent automatic
+recovery, so manual finalization remains necessary in that case.
+
+The output validation also exposed an existing one-cycle observation-time
+offset: with `dt=.05`, observations at years 2/3/4 were applied to native states
+saved at 2.05/3.05/4.05. Export retains those actual timestamps. A scheduling
+correction and new scientific validation remain separate work; complete file
+coverage does not establish correct observation timing.
+
+
+The initializer also takes one model step before saving its ensemble at metadata
+time zero. In job 15384953 its initial thickness matched truth at `dt=.05`
+within `1.14e-12` m, while differing from truth at zero by up to `40.123212` m.
+This existing generic/native initialization behavior is distinct from thickness
+perturbations; initial member thickness was identical. Neither timing behavior
+is changed or relabelled by the exporter.
+
+Job 15384953 (`da6f9dde`, 24 members/eight ranks) completed the full five-year
+history path in 1:29:27 with every step exiting zero. The aggregate contains
+270615 state rows, 24 members and 101 time columns. Independent reconstruction
+compared every one of its 655,970,760 values and every mean exactly with the
+checkpoint shards; all 25 profiles passed shape, written-time and finite-value
+checks. Export took 2485.64 seconds in that baseline. The revised contiguous
+reader/recovery implementation is verified separately on the closed archive;
+a new PACE performance result is not implied. See the README for the measured
+scope and outstanding scientific timing work.

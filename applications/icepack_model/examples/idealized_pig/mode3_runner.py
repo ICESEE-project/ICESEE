@@ -497,7 +497,12 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         _initial_snapshot = pool.snapshot_owned()
         _t = MPI.Wtime()
         checkpoints.write_initial(
-            _initial_snapshot, extra={"description": "initial (pre-forecast) ensemble"}
+            _initial_snapshot, extra={
+                "description": "initial (pre-forecast) ensemble",
+                "observation_columns": np.asarray(ind_m, dtype=int).tolist(),
+                "observation_max_time": float(icesee_kwargs["obs_max_time"]),
+                "execution_flag": int(icesee_kwargs["execution_flag"]),
+            }
         )
         init_file_time = MPI.Wtime() - _t
         _record_checkpoint(_initial_snapshot, init_file_time)
