@@ -80,12 +80,13 @@ jobs:
       - name: Run fast deterministic tests
         timeout-minutes: 15
         run: |
-          timeout --kill-after=30s 12m python -m pytest -q src/tests \
+          timeout --kill-after=30s 12m python -m pytest -vv --capture=tee-sys src/tests \
             --ignore=src/tests/parallel_mpi \
             --ignore=src/tests/test_resource_plan_mpi_topology.py \
             --ignore=src/tests/test_mpi_failure_handling.py \
             --ignore=src/tests/test_lorenz96_mode2_p_nens_matrix.py \
             --ignore=src/tests/test_enkf_parallel_io_topology.py \
+            --ignore=src/tests/test_enkf_readonly_analysis.py \
             --ignore=src/tests/test_lorenz_mode3_runner.py \
             --ignore=src/tests/test_mode3_large_state_benchmark.py \
             --ignore=src/tests/test_func.py \
@@ -133,8 +134,9 @@ jobs:
         timeout-minutes: 15
         run: |
           H5PY_VERSION="$(python -c 'import h5py; print(h5py.__version__)')"
-          CC=mpicc HDF5_MPI=ON HDF5_PKGCONFIG_NAME=hdf5-openmpi \
-            python -m pip install --no-binary=h5py --no-cache-dir --force-reinstall --no-deps \
+          python -m pip install pkgconfig
+          CC=mpicc HDF5_MPI=ON HDF5_PKGCONFIG_NAME=hdf5-openmpi H5PY_SETUP_REQUIRES=0 \
+            python -m pip install --no-binary=h5py --no-cache-dir --force-reinstall --no-deps --no-build-isolation \
             "h5py==${H5PY_VERSION}"
           python -c "import h5py; assert h5py.get_config().mpi, 'h5py was built without MPI'; print('h5py', h5py.__version__, 'mpi:', h5py.get_config().mpi)"
 
@@ -170,6 +172,7 @@ jobs:
             src/tests/test_mpi_failure_handling.py \
             src/tests/test_lorenz96_mode2_p_nens_matrix.py \
             src/tests/test_enkf_parallel_io_topology.py \
+            src/tests/test_enkf_readonly_analysis.py \
             src/tests/test_lorenz_mode3_runner.py \
             src/tests/test_mode3_large_state_benchmark.py
 
