@@ -185,22 +185,6 @@ _SUPPORTED_ERROR_MODES = {"legacy_prior_anomalies", "stochastic_r"}
 _DEFAULT_RUN_ID = "icepack-idealized-pig-mode3"
 
 
-def require_experimental_selection(icesee_kwargs):
-    """Refuse execution_mode 3 unless ``mode3_experimental`` is set.
-
-    Native Mode 3 for idealized_pig has not yet passed member-wise
-    comparison against the mode-2 baseline (forecast, analysis writeback
-    and restart). It is never selected implicitly and never falls back to
-    another mode.
-    """
-    if not bool(icesee_kwargs.get("mode3_experimental", False)):
-        raise RuntimeError(
-            "execution_mode=3 for idealized_pig is experimental and must be "
-            "selected explicitly with --mode3_experimental=True. Use "
-            "execution_mode=2 for production runs."
-        )
-
-
 def _release_model_topology(topology):
     """Collectively release owned splits before PyOP2's interpreter teardown.
 
@@ -303,7 +287,6 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
 
     icesee_kwargs = normalize_icesee_kwargs(icesee_kwargs)
     normalize_execution_mode(icesee_kwargs, expected=3)
-    require_experimental_selection(icesee_kwargs)
 
     world = MPI.COMM_WORLD
     world_rank = int(world.Get_rank())

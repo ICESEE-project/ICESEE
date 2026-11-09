@@ -50,13 +50,27 @@ def test_validated_allocation_has_16_ranks_and_32_members(tmp_path):
     args = json.loads(capture.read_text())
     for expected in ("--nodes=2", "--ntasks=16", "--ntasks-per-node=8",
                      "--cpus-per-task=1", "--distribution=block:block",
-                     "--execution_mode=3", "--mode3_experimental=True",
+                     "--execution_mode=3",
                      "--Nens=32", "--model_nprocs=2", "--save_steps=[2,3,4]",
                      "--data_path=" + str(pig / "_modelrun_datasets")):
         assert expected in args
+    assert not any("mode3_experimental" in arg for arg in args)
     assert not any("overlap" in arg or "overcommit" in arg for arg in args)
     assert (pig / "pace_runs/mode3-12345/exit-status").read_text().strip() == "0"
     assert not (pig / "_modelrun_datasets.launch-lock").exists()
+
+
+def test_student_24_member_eight_rank_allocation_uses_mode_selector_only(tmp_path):
+    result, _, capture = _run(tmp_path, counts={
+        "SLURM_JOB_NUM_NODES": "1", "SLURM_NTASKS": "8",
+        "SLURM_NTASKS_PER_NODE": "8", "ICESEE_NENS": "24",
+    })
+    assert result.returncode == 0, result.stderr
+    args = json.loads(capture.read_text())
+    for expected in ("--nodes=1", "--ntasks=8", "--Nens=24",
+                     "--model_nprocs=2", "--execution_mode=3"):
+        assert expected in args
+    assert not any("mode3_experimental" in arg for arg in args)
 
 
 @pytest.mark.parametrize("counts", [

@@ -29,7 +29,7 @@ for mode in 1 2 3; do
  args=(--execution_mode="$mode" --Nens=2 --num_years=0.2 --dt=0.05 --obs_start_time=0.05 --obs_max_time=0.15 --freq_obs=0.05 '--save_steps=[0.05,0.1,0.15]' --data_path="$RUN/mode$mode/data")
  placement=(-N1 -n2 --ntasks-per-node=2)
  if [[ "$mode" == 3 ]]; then
-  args+=(--model_nprocs=2 --mode3_experimental=True)
+  args+=(--model_nprocs=2)
   placement=(-N2 -n4 --ntasks-per-node=2)
  else
   args+=(--model_nprocs=1)

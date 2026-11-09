@@ -51,7 +51,7 @@ case "$STAGE" in
     export ICESEE_DEBUG_INIT=1 ICESEE_HANG_DUMP_S=300
     set +e
     "${SRUN[@]}" -N 2 -n 4 --ntasks-per-node=2 "$PIG_DIR/pace/launch_rank.sh" \
-      "$PIG_DIR/run_da_icepack.py" --Nens=2 --execution_mode=3 --mode3_experimental=True \
+      "$PIG_DIR/run_da_icepack.py" --Nens=2 --execution_mode=3 \
       --model_nprocs=2 --num_years=1 --dt=0.05 --obs_start_time=0.5 --obs_max_time=1 \
       --freq_obs=0.5 '--save_steps=[0.05,0.1,1.0]' --checkpoint_every=1 \
       --checkpoint_keep_last=2 --data_path="$RUN_DIR/data" \

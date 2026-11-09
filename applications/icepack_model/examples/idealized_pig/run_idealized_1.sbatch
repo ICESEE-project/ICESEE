@@ -58,7 +58,7 @@ mkdir -p "$OUTDIR"
 
 export ICESEE_DEBUG_INIT="${ICESEE_DEBUG_INIT:-1}"
 export ICESEE_HANG_DUMP_S="${ICESEE_HANG_DUMP_S:-900}"
-ARGS=(--execution_mode=3 --mode3_experimental=True --Nens="$NENS"
+ARGS=(--execution_mode=3 --Nens="$NENS"
       --model_nprocs="$MODEL_NPROCS" --num_years=5 --dt=0.05
       --obs_start_time=2 --obs_max_time=4 --freq_obs=1
       '--save_steps=[2,3,4]' --data_path="$DATA_DIR")

@@ -270,7 +270,6 @@ def _runner_kwargs(tmp_path, *, nt, **extra):
         execution_flag=0,
         t=np.linspace(0, 1, nt + 1),
         verbose=False,
-        mode3_experimental=True,
         **extra,
     )
 
@@ -424,12 +423,16 @@ def test_release_model_topology_never_frees_world_or_alias_twice(monkeypatch):
     assert freed == [owned]
 
 
-def test_mode3_requires_explicit_experimental_selection(tmp_path, monkeypatch):
-    _install_runner_fakes(monkeypatch, observation_steps=[0])
+@pytest.mark.parametrize("legacy_value", [None, False])
+def test_mode3_runs_without_an_experimental_opt_in(tmp_path, monkeypatch, legacy_value):
+    records = _install_runner_fakes(monkeypatch, observation_steps=[0])
     kwargs = _runner_kwargs(tmp_path, nt=1)
-    kwargs["mode3_experimental"] = False
-    with pytest.raises(RuntimeError, match="mode3_experimental"):
-        runner.run_icepack_execution_mode_3(**kwargs)
+    assert "mode3_experimental" not in kwargs
+    if legacy_value is not None:
+        kwargs["mode3_experimental"] = legacy_value
+    runner.run_icepack_execution_mode_3(**kwargs)
+    assert records.calls["init_pool"] == 1
+    assert records.cycle_calls == [(0, 1)]
 
 
 def test_observations_are_routed_in_distributed_numbering(tmp_path, monkeypatch):

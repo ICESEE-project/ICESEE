@@ -1,4 +1,4 @@
-# Idealized PIG runtime validation — 5 November 2026
+# Idealized PIG runtime validation — 9 November 2026
 
 ## Current status
 
@@ -8,20 +8,37 @@ seconds. Final checkpoint fields and all 33 truth/member profile files were
 checked. The student launcher is `run_idealized_1.sbatch`; see
 [MODE3_PACE.md](MODE3_PACE.md) for fetching, submitting and reading results.
 
-Modes 1 and 2 still have production I/O limits. Under the same two-hour parent
-allocation, Mode 1 reached 44/100 cycles with heavy history reads. Mode 2
-completed all 100 forecasts and three analyses, then timed out constructing
-its final ensemble output. Its raw final snapshot is readable and finite;
-the interrupted aggregate file retains an HDF5 open-for-write flag. Failed
-outputs are preserved. Neither mode has passed this production acceptance gate.
+Modes 1 and 2 subsequently completed the same 32-member, five-year case in
+job 15142488 after the history-layout and finalization repairs. Mode 1 exited
+zero in 42:01 and Mode 2 in 1:43:05. Both final fields/means and all 66 profile
+files were checked. Per-variable final member relative L2 differences were at
+most 1.54e-12; no new acceptance tolerance was inferred from this measurement.
+Mode 2 still spends substantial time writing forecasts, so completion does not
+establish efficient scaling. The earlier failed outputs remain preserved.
 
 All three modes passed earlier concurrent one-year, two-member diagnostics.
 Native Mode 3 also resumed from checkpoint 14, crossed analysis event 15 and
-reproduced uninterrupted final fields. It remains explicitly selected with
-`--execution_mode=3 --mode3_experimental=True`; it never falls back to Mode 2.
+reproduced uninterrupted final fields. Native PIG execution is selected with
+`--execution_mode=3`; no separate opt-in is required and it never falls back to
+Mode 2.
 Initial generic perturbations in Modes 1/2 and unperturbed native initialization
 differ, so PIG member-wise equivalence across all three modes is not claimed.
 The production check is not a controlled strong/weak scaling result.
+
+## Direct Mode 3 selection validation
+
+Job 15369255 completed the student's 24-member/eight-rank, five-year PIG
+configuration on one PACE node using `--execution_mode=3` alone. Slurm reported
+exit zero in 47:09 (MPI step 46:48). The final checkpoint records completed step
+99, next step 100, model time 5.0 and three completed analyses. All eight shards
+cover every owned field of all 24 members without gaps or duplicate ownership.
+All final values are finite: thickness 30..4181.62 m, velocity components within
+approximately -3867..974 in model units, surface 3.13..2632.13 m and basal melt
+0..20. All 25 profile files have 415 points and four written columns at years
+0, 2, 3 and 4. Solver settings and scientific configuration were not changed
+while removing the additional selection gate. This validates completion and
+inspected output integrity for this PACE case, not a controlled scaling result
+or independent scientific accuracy.
 
 ## Runtime repairs
 
@@ -122,8 +139,8 @@ checkout to migrate this candidate.
 
 ## Outstanding acceptance checks
 
-Repair and validate Mode-1 history I/O and Mode-2 output finalization. Test
-additional spatial topologies, compare native scientific configurations with
+Measure remaining Mode-2 forecast I/O, validate additional spatial topologies,
+compare native scientific configurations with
 matched initial ensembles, and perform controlled repeated strong/weak scaling.
 The validated native case used eight model groups, four members per group and
 two spatial ranks per group. Final thickness was 30..4181.29 m; all five fields

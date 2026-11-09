@@ -123,7 +123,7 @@ set +e
 srun ${SRUN_EXTRA_ARGS:-} --mpi=pmix -N "$NODES" -n "$NP" --ntasks-per-node="$TPN" --distribution=block:block --cpu-bind=cores \
   "$PIG_DIR/pace/launch_rank.sh" "$PIG_DIR/run_da_icepack.py" \
     --Nens="$NENS" \
-    --execution_mode=3 --mode3_experimental=True \
+    --execution_mode=3 \
     --model_nprocs="$MODEL_NPROCS" \
     --num_years="$NUM_YEARS" \
     --dt="$DT" \

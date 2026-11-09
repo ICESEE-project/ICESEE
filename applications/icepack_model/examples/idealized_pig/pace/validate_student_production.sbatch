@@ -30,7 +30,7 @@ for mode in 1 2 3; do
  args=(--execution_mode="$mode" --Nens=32 --num_years=5 --dt=0.05 --obs_start_time=2 --obs_max_time=4 --freq_obs=1 '--save_steps=[2,3,4]' --data_path="$RUN/mode$mode/data")
  if [[ "$mode" == 3 ]]; then
   placement=(-N2 -n16 --ntasks-per-node=8)
-  args+=(--model_nprocs=2 --mode3_experimental=True)
+  args+=(--model_nprocs=2)
  else
   placement=(-N1 -n8 --ntasks-per-node=8 --nodelist="${HOSTS[$((mode-1))]}")
   args+=(--model_nprocs=1)

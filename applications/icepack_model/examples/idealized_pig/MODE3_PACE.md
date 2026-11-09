@@ -2,8 +2,9 @@
 
 The `features_debug` branch includes the student's scientific updates, upstream
 `main`, and the runtime repairs used in the successful five-year Mode-3 check.
-Modes 1 and 2 retain unresolved production I/O issues described in
-[RUNTIME_DECISION.md](RUNTIME_DECISION.md). Use Mode 3 for this handoff.
+Modes 1 and 2 also completed the five-year confirmation after the history and
+finalization repairs. See [RUNTIME_DECISION.md](RUNTIME_DECISION.md) for evidence
+and remaining scaling limits.
 
 ## Update your scientific checkout
 
@@ -55,7 +56,37 @@ The scientific arguments match job 15125921.2: five years, `dt=0.05`, analyses
 at years 2, 3 and 4, and flowline profiles at years 0, 2, 3 and 4. No initial
 thickness perturbation, solver-cap increase or physical-parameter adjustment
 is introduced. Native process noise and the existing analysis controls are
-applied. The experimental flag selects native Mode 3 explicitly.
+applied. `--execution_mode=3` selects native Mode 3 directly.
+
+## Mode selection when launching directly
+
+`--execution_mode=3` selects the native PIG runner directly. No additional
+opt-in is required. The same topology, adapter, layout, checkpoint and
+observation-error validation still applies; invalid configurations fail rather
+than falling back to another mode.
+
+From the example directory, the student's 24-member/eight-rank configuration is:
+
+```bash
+DATA_DIR="$PWD/_modelrun_datasets_mode3_$(date +%Y%m%d_%H%M%S)"
+if [[ -e "$DATA_DIR" ]]; then
+  echo "Preserve existing output or choose another data directory: $DATA_DIR" >&2
+else
+  mpirun -np 8 python run_da_icepack.py \
+    --Nens=24 --execution_mode=3 --model_nprocs=2 \
+    --num_years=5 --dt=0.05 \
+    --obs_start_time=2 --obs_max_time=4 --freq_obs=1 \
+    --data_path="$DATA_DIR"
+fi
+```
+
+The 24-member/eight-rank case completed on PACE in job 15369255 using only
+`--execution_mode=3`: one node, two spatial ranks per model, 100 forecast steps
+and three analyses. The job exited zero in 47:09. All eight final checkpoint
+shards and all 25 truth/member profile files were checked. Use
+`pace/validate_student_mode3.sbatch` to reproduce that allocation. This confirms
+the PACE run; each laptop's installed Firedrake/MPI stack still needs its own
+compatibility check.
 
 ## Outputs and repeat runs
 

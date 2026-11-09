@@ -1211,12 +1211,18 @@ def parallel_write_full_ensemble_from_root(timestep, ensemble_mean, icesee_kwarg
         if timestep == 0:
             with h5py.File(output_file, 'w') as f:
                 # Create dataset with total dimensions
-                dset = f.create_dataset('ensemble', (nd, Nens, icesee_kwargs.get('nt', icesee_kwargs['nt']) + 1), dtype=dtype)
+                dset = f.create_dataset(
+                    'ensemble', (nd, Nens, icesee_kwargs['nt'] + 1),
+                    dtype=dtype, chunks=(min(nd, 16384), 1, 1),
+                )
                 # Write full ensemble
                 dset[:, :, 0] = full_ensemble[:,:Nens]
 
                 # Create and write ensemble mean
-                ens_mean = f.create_dataset('ensemble_mean', (nd, icesee_kwargs.get('nt', icesee_kwargs['nt']) + 1), dtype=dtype)
+                ens_mean = f.create_dataset(
+                    'ensemble_mean', (nd, icesee_kwargs['nt'] + 1),
+                    dtype=dtype, chunks=(min(nd, 16384), 1),
+                )
                 ens_mean[:, 0] = ensemble_mean
                 # ens_mean[:, 0] = full_ensemble[:, 0]
 

@@ -56,11 +56,6 @@ enkf-parameters:
   use_member_streaming: False
 
 
-  # mode3_experimental: execution_mode 3 for this application is experimental (not yet validated member-wise
-  # against mode 2) and runs only when this is True (--mode3_experimental=True). It never falls back to another mode.
-  mode3_experimental: False
-
-
   # use_store_streaming_analysis: opt-in, requires use_member_streaming=True too. Selects run_native_store_streaming_analysis_cycle (state-row-block streaming through the
   # InactiveMemberStore) instead of the original transform_local_members path. Default False preserves existing behavior.
   use_store_streaming_analysis: False
