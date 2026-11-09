@@ -70,7 +70,7 @@ def test_benchmark_single_rank_owned_bytes_match_prediction(tmp_path):
     """P=1 (no spatial decomposition): owned bytes must equal the full Nx
     exactly (this rank owns everything) -- the trivial baseline case."""
     _skip_if_unavailable()
-    result = _run(1, ["--nx", "10000", "--ne", "1", "--p-model", "1",
+    result = _run(1, ["--nx", "10000", "--ne", "2", "--p-model", "1",
                       "--row-chunk-size", "512", "--nobs", "20", "--n-cycles", "1"], tmp_path)
     assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-2000:]
     summary = json.loads(result.stdout)

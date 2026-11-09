@@ -77,3 +77,16 @@ def find_compatible_mpi_launcher():
         if _launcher_actually_works(candidate):
             return candidate
     return None
+
+
+def mpi_test_command(launcher, nprocs):
+    """Build a small MPI test launch, allowing Open MPI to exceed CI slots.
+
+    Use mpi4py's vendor identity rather than launcher banner wording.
+    Production resource requests do not use this helper.
+    """
+    from mpi4py import MPI
+    command = [launcher]
+    if MPI.get_vendor()[0] == "Open MPI":
+        command.append("--oversubscribe")
+    return command + ["-n", str(nprocs)]

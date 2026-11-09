@@ -24,7 +24,7 @@ import numpy as np
 import pytest
 import yaml
 
-from ICESEE.src.tests._mpi_launcher import find_compatible_mpi_launcher
+from ICESEE.src.tests._mpi_launcher import find_compatible_mpi_launcher, mpi_test_command
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LORENZ_DIR = REPO_ROOT / "applications" / "lorenz_model" / "examples" / "lorenz96"
@@ -70,14 +70,8 @@ def _make_config(nens, data_path, tmp_path):
 def _run_case(p, nens, tmp_path, timeout=120):
     data_path = tmp_path / f"data_p{p}_nens{nens}"
     config = _make_config(nens, data_path, tmp_path)
-    # --oversubscribe is an Open MPI-ism; only pass it when supported, so
-    # this test does not assume a specific MPI implementation beyond what
-    # find_compatible_mpi_launcher already verified works.
-    cmd = [_LAUNCHER]
-    if _supports_oversubscribe():
-        cmd.append("--oversubscribe")
-    cmd += [
-        "-n", str(p), sys.executable, "-m",
+    cmd = mpi_test_command(_LAUNCHER, p) + [
+        sys.executable, "-m",
         "ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96",
         "-F", str(config),
     ]
@@ -85,18 +79,6 @@ def _run_case(p, nens, tmp_path, timeout=120):
         cmd, cwd=LORENZ_DIR, capture_output=True, text=True, timeout=timeout,
     )
     return result, data_path
-
-
-def _launcher_flavor():
-    try:
-        out = subprocess.run([_LAUNCHER, "--version"], capture_output=True, text=True, timeout=10)
-        return out.stdout
-    except Exception:
-        return ""
-
-
-def _supports_oversubscribe():
-    return "Open MPI" in _launcher_flavor() or "open-mpi" in _launcher_flavor().lower()
 
 
 @pytest.mark.parametrize("p,nens,label", MATRIX, ids=[m[2] for m in MATRIX])
@@ -191,11 +173,8 @@ def test_explicit_ranks_per_model_1_with_spare_ranks_completes(tmp_path):
     with config_path.open("w") as f:
         yaml.safe_dump(config, f, sort_keys=False)
 
-    cmd = [_LAUNCHER]
-    if _supports_oversubscribe():
-        cmd.append("--oversubscribe")
-    cmd += [
-        "-n", "6", sys.executable, "-m",
+    cmd = mpi_test_command(_LAUNCHER, 6) + [
+        sys.executable, "-m",
         "ICESEE.applications.lorenz_model.examples.lorenz96.run_da_lorenz96",
         "-F", str(config_path),
     ]
