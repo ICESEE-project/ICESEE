@@ -1,22 +1,4 @@
-# ==============================================================================
-# @des: Focused regression test for the true-vs-wrong basal-melt forcing
-# experiment (Idealized PIG, 2026-09-28 reconciliation with icesee/features).
-#
-# Verifies, through the ACTUAL BasalMeltRate() code path (never a duplicated
-# formula in this test):
-#   - true trajectory (experiment=EXPERIMENT_TRUE): melt_max ramps from 20
-#     at the start of the run to ~100 by the end (linear ramp over
-#     num_years, per _icepack_model.BasalMeltRate).
-#   - wrong/ensemble trajectory (experiment=EXPERIMENT_WRONG): melt_max
-#     stays constant at 20 for the entire run.
-#   - BasalMeltRate rejects any experiment value other than the two
-#     canonical strings (no silent str/bool fallback).
-#
-# Runs the real computation in a subprocess under `mpirun -n 1` (this
-# suite's established convention for anything that touches real Firedrake
-# objects -- see src/tests/parallel_mpi/_basal_melt_experiment_worker.py),
-# not via direct in-process Firedrake import.
-# ==============================================================================
+# Test the Idealized PIG true/wrong basal-melt forcing selectors.
 from __future__ import annotations
 
 import json
@@ -100,7 +82,7 @@ def test_true_and_wrong_trajectories_diverge_by_the_end():
 
 
 def test_basal_melt_rate_rejects_unrecognized_experiment_value():
-    """Guards against the exact fragility this reconciliation removed: a
+    """Guards against the exact fragility typed forcing selectors prevent: a
     caller passing a Python bool (or any value other than the two
     canonical strings) must fail loudly, never silently fall into the
     wrong-trajectory branch via a str/bool type mismatch. Exercised inside

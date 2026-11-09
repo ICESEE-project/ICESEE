@@ -1,14 +1,5 @@
 #!/bin/bash
-# ==============================================================================
-# PACE RUN 0 -- environment/MPI/Firedrake smoke check (Idealized PIG Mode-3).
-# Cheap, fast (~minutes). NOT the scalability result -- see run1_pig_calibration.
-#
-# Environment/SLURM pattern reused from the repo's own known-working
-# idealized_pig launcher (../run_icesee_spack.sh / ../run_icesee_spack.sbatch),
-# not invented here: module purge, source ICESEE-Spack's scripts/activate.sh,
-# resolve the Spack-installed Open MPI explicitly onto PATH, srun --mpi=pmix.
-#
-# ==== STUDENT-EDITABLE (only these) ====
+# Environment and MPI smoke check for Idealized PIG.
 #SBATCH -J icesee-run0-smoke
 #SBATCH -A gts-arobel3-atlas          # ACCOUNT
 #SBATCH -p inferno                    # PARTITION/QOS
@@ -21,13 +12,10 @@
 #SBATCH -o run0-smoke-%j.out
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=CHANGE_ME@gatech.edu
-# ==== END STUDENT-EDITABLE ====
 
 set -euo pipefail
 
-# Anchor every path off THIS SCRIPT's own location, never off
-# $SLURM_SUBMIT_DIR (which depends on where the student happened to run
-# `sbatch` from and should not matter).
+# Resolve the example directory from this script path.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IDEALIZED_PIG_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$IDEALIZED_PIG_DIR"
@@ -40,7 +28,7 @@ echo "SLURM_JOB_ID: ${SLURM_JOB_ID:-unset}"
 echo "working directory: $IDEALIZED_PIG_DIR"
 echo "git branch: $(git -C "$IDEALIZED_PIG_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
 echo "git revision: $(git -C "$IDEALIZED_PIG_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
-echo "git status (should be reviewed -- uncommitted reconciliation work is expected): $(git -C "$IDEALIZED_PIG_DIR" status --porcelain 2>/dev/null | wc -l) modified/untracked files"
+echo "modified/untracked file count: $(git -C "$IDEALIZED_PIG_DIR" status --porcelain 2>/dev/null | wc -l) modified/untracked files"
 
 # --- Environment: reuse the repo's own known-working Spack activation ---
 # (../run_icesee_spack.sh's exact pattern -- not a new strategy)

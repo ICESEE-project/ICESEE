@@ -141,11 +141,7 @@ def _base_icesee_kwargs(**overrides):
         hThresh=30,
         water_to_ice=1.087241003,
         wrong_basal_melt_field=2.0,
-        # basal_melt_field's participation in the packed/registered state
-        # is driven by vec_inputs (2026-09-28 reconciliation -- see
-        # _icepack_native._basal_melt_in_state), not a joint_estimation
-        # flag. Default here matches the current icesee/features
-        # convention (5 state vars, basal_melt_field included).
+        # Register basal_melt_field according to vec_inputs, independently of joint_estimation.
         vec_inputs=["h", "u", "v", "s", "basal_melt_field"],
         base_seed=42,
     )
@@ -400,7 +396,7 @@ def test_initialize_member_does_not_draw_initialization_noise(monkeypatch):
 
 
 def test_initialize_member_basal_melt_present_when_declared_in_state(monkeypatch):
-    """2026-09-28 reconciliation (second pass): basal_melt_field's presence
+    """basal_melt_field's presence
     in the packed state is driven by vec_inputs, not joint_estimation.
     With joint_estimation left unset/False (the current Idealized PIG
     config), the joint-estimation-specific `+ wrong_basal_melt_field`
@@ -443,7 +439,7 @@ def test_initialize_member_basal_melt_present_when_declared_in_state(monkeypatch
 
 
 def test_initialize_member_nudges_basal_melt_when_joint_estimation(monkeypatch):
-    """2026-09-28 reconciliation (second pass): joint_estimation means "are
+    """joint_estimation means "are
     we performing joint state-parameter estimation," not "does
     basal_melt_field exist." The `+ wrong_basal_melt_field` nudge is
     genuinely joint-estimation-algorithm-specific (it initializes the
@@ -485,7 +481,7 @@ def test_forecast_member_advances_persistent_state_without_ensemble_vector(monke
         icepack_calls.append(dict(h=h, u=u, h0=h0, basal_melt_field=basal_melt_field))
         return ("h-next", "u-next", "s-next", "floating-next", "grounded-next")
 
-    # 2026-09-28 reconciliation: forecast_member recomputes floating fresh
+    # forecast_member recomputes floating fresh
     # from the member's CURRENT surface each step (mf.flotationHeight/
     # mf.flotationMask), never the frozen ctx.floating0 an earlier version
     # of this adapter incorrectly kept reusing.

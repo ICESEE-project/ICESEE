@@ -74,7 +74,7 @@ def test_initialize_run_forwards_icesee_kwargs_comm_to_checkpoint_file(monkeypat
     diagnostic_solve/readSMB calls -- so this test never touches real
     physics or an SMB file."""
 
-    sentinel_comm = object()
+    sentinel_comm = type('SpatialComm', (), {'Get_size': lambda self: 2})()
 
     class _FakeCheckpointFile:
         def __init__(self, filename, mode, comm=None):
@@ -107,7 +107,19 @@ def test_initialize_run_falls_back_to_comm_world_when_comm_key_absent(monkeypatc
     with pytest.raises(_CommCaptured) as excinfo:
         model.initializeRun(icesee_kwargs, forward_solver=None, mesh=None, Q=None, V=None)
 
-    assert excinfo.value.comm is firedrake.COMM_WORLD
+    expected = firedrake.COMM_SELF if firedrake.COMM_WORLD.Get_size() == 1 else firedrake.COMM_WORLD
+    assert excinfo.value.comm is expected
+
+
+def test_single_rank_context_uses_managed_firedrake_comm_self(monkeypatch):
+    class FakeCheckpointFile:
+        def __init__(self,filename,mode,comm=None):
+            raise _CommCaptured(comm)
+    single=type("SingleRankComm",(),{"Get_size":lambda self:1})()
+    monkeypatch.setattr(model.firedrake,"CheckpointFile",FakeCheckpointFile)
+    with pytest.raises(_CommCaptured) as captured:
+        model.initializeRun({"initFile":"unused.h5","comm":single},None,None,None,None)
+    assert captured.value.comm is firedrake.COMM_SELF
 
 
 @pytest.mark.parametrize("scoped", [True, False])

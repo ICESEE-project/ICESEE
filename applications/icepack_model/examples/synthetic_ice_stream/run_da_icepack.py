@@ -7,6 +7,7 @@
 # --- Imports ---
 import sys
 import os
+os.environ["OMP_NUM_THREADS"] = "1"
 import numpy as np
 from pathlib import Path
 
@@ -36,7 +37,13 @@ from ICESEE.src.utils.performance import register_package_versions
 register_package_versions("petsc4py", "firedrake", "icepack")
 
 # --- Initialize MPI ---
-rank, size, comm, _ = ParallelManager().icesee_mpi_init(icesee_kwargs)
+if int(icesee_kwargs.get("execution_mode", 1)) == 3:
+    from mpi4py import MPI
+    comm = firedrake.COMM_SELF
+    rank, size = 0, 1
+    from ICESEE.applications.icepack_model.examples.synthetic_ice_stream import mode3_runner
+else:
+    rank, size, comm, _ = ParallelManager().icesee_mpi_init(icesee_kwargs)
 
 PETSc.Sys.Print("Fetching the model parameters ...")
 

@@ -66,43 +66,55 @@ def build_vds(input_dir: str,
     if out_file is None:
         out_file = os.path.join(input_dir, "icesee_ensemble_data.h5")
 
-    # Probe meta
     with h5py.File(files[0], "r") as f0:
         nd, nens = f0[dset_name].shape
         dtype = f0[dset_name].dtype
-
     nt = len(files)
+    rows_per_chunk = max(1, int(row_chunk_size))
 
-    # Build VDS layout
     layout = h5py.VirtualLayout(shape=(nd, nens, nt), dtype=dtype)
-    for t, f in enumerate(files):
-        # Absolute source names keep the VDS valid when opened elsewhere.
-        vsrc = h5py.VirtualSource(os.path.abspath(f), dset_name, shape=(nd, nens))
+    for t, fpath in enumerate(files):
+        vsrc = h5py.VirtualSource(os.path.abspath(fpath), dset_name, shape=(nd, nens))
         layout[:, :, t] = vsrc
 
-    os.makedirs(os.path.dirname(out_file) or ".", exist_ok=True)
-    with h5py.File(out_file, "w", libver="latest") as fout:
-        # dset_name='ensemble'
-        states = fout.create_virtual_dataset(dset_name, layout, fillvalue=fillvalue)
-        if dset_name != "ensemble":
-            fout["ensemble"] = states
-        fout.attrs.update({
-            "nd": nd, "nens": nens, "nt": nt,
-            "stack_type": "VDS",
-            "source_dir": os.path.abspath(input_dir),
-            "dataset_name": dset_name
-        })
-        # Compute ensemble mean (iterate time slices lazily)
-        mean_dset = fout.create_dataset(
-            "ensemble_mean", shape=(nd, nt), dtype=np.float64,
-            chunks=(min(nd, max(1, int(row_chunk_size))), 1), fillvalue=np.nan
-        )
-        for t in range(nt):
-            for row0 in range(0, nd, max(1, int(row_chunk_size))):
-                row1 = min(nd, row0 + max(1, int(row_chunk_size)))
-                arr = fout[dset_name][row0:row1, :, t]
-                mean_dset[row0:row1, t] = np.nanmean(arr, axis=1)
-
+    output_dir = os.path.dirname(os.path.abspath(out_file))
+    os.makedirs(output_dir, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(
+        prefix="." + os.path.basename(out_file) + ".", suffix=".tmp", dir=output_dir
+    )
+    os.close(fd)
+    try:
+        with h5py.File(temporary, "w", libver="latest") as fout:
+            states = fout.create_virtual_dataset(dset_name, layout, fillvalue=fillvalue)
+            if dset_name != "ensemble":
+                fout["ensemble"] = states
+            fout.attrs.update({
+                "nd": nd, "nens": nens, "nt": nt,
+                "stack_type": "VDS",
+                "source_dir": os.path.abspath(input_dir),
+                "dataset_name": dset_name,
+            })
+            mean_dset = fout.create_dataset(
+                "ensemble_mean", shape=(nd, nt), dtype=np.float64,
+                chunks=(min(nd, rows_per_chunk), 1), fillvalue=np.nan,
+            )
+            # Read immutable snapshots directly, avoiding repeated VDS source resolution.
+            for t, fpath in enumerate(files):
+                with h5py.File(fpath, "r") as fi:
+                    source = fi[dset_name]
+                    if source.shape != (nd, nens) or source.dtype != dtype:
+                        raise ValueError(
+                            f"Incompatible snapshot {fpath}: "
+                            f"{source.shape}/{source.dtype} != {(nd, nens)}/{dtype}"
+                        )
+                    for row0 in range(0, nd, rows_per_chunk):
+                        row1 = min(nd, row0 + rows_per_chunk)
+                        arr = source[row0:row1, :]
+                        mean_dset[row0:row1, t] = np.nanmean(arr, axis=1)
+        os.replace(temporary, out_file)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
     return out_file
 
 # ---------- Option B: materialized 3-D HDF5 ----------

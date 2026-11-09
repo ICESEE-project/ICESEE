@@ -35,6 +35,11 @@ def initialize_model(**icesee_kwargs):
     """des: initialize the icepack model"""
     # --- get the communicator from icesee_kwargs
     comm = icesee_kwargs.get('comm')
+    # Use PyOP2/PETSc's managed singleton rather than attaching its lifetime
+    # callbacks to ICESEE-owned split communicators that die at shutdown.
+    if comm.Get_size() == 1:
+        comm = firedrake.COMM_SELF
+        icesee_kwargs['comm'] = comm
 
     # get size and rank of the communicator
     size = comm.Get_size()

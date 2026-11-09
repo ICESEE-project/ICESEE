@@ -70,6 +70,7 @@ from .distributed_analysis import (
     StochasticAnalysisProducts,
     assemble_selected_ensemble_rows,
     ensemble_transform_from_products,
+    collapsed_spread_message,
 )
 from .distributed_checkpoint import save_distributed_checkpoint
 from .distributed_fields import DistributedFieldRegistry
@@ -474,30 +475,13 @@ def transform_members_via_store(
     number_of_members: int,
     *,
     row_chunk_size: int,
+    row_transform=None,
 ) -> None:
-    """Store-streaming counterpart of ``distributed_runtime.transform_local_members``.
+    """Apply X_I @ transform to bounded state-row blocks from the member store.
 
-    Mathematically identical: for each state-row block ``I``, this computes
-    ``X_I^a = X_I @ transform`` (a pure per-block right-multiplication, no
-    dependence on rows outside ``I`` -- see this session's derivation of
-    ``iter_local_ensemble_row_blocks``, which established the SAME equation
-    and confirmed row-block separability holds for the existing ensemble
-    transform). The only difference is where each block's data comes from
-    (``store.get_rows`` instead of a pre-resident ``{member_id: full_array}``
-    dict) and where the analyzed block goes (``store.put_rows`` instead of
-    an in-memory output dict) -- so this never requires this rank's
-    round-assigned members' full owned arrays to be simultaneously resident.
-
-    The cross-rank ``ensemble_comm.allgather`` below exists for the SAME
-    reason as in ``iter_local_ensemble_row_blocks``: different ensemble
-    GROUPS (not different spatial ranks -- ``ensemble_comm`` connects ranks
-    at the SAME spatial coordinate across ensemble groups) hold different
-    members' data, so building one ``block_rows x Ne`` block requires
-    combining contributions from every ensemble group at this spatial
-    coordinate. This is classification (A) from the derivation: gathering
-    different ensemble MEMBERS for the SAME owned state rows -- never a
-    spatial gather, never a global-state reconstruction.
-    """
+    Each block is independent of other state rows. Use bulk ensemble-row methods
+    when available, with per-member row access as a fallback. Full owned arrays
+    for every scheduled member need not be resident simultaneously."""
 
     owned_size = int(owned_size)
     row_chunk_size = int(row_chunk_size)
@@ -550,6 +534,8 @@ def transform_members_via_store(
                 raise ValueError("gathered member chunk has an invalid shape")
             block[:, member_id] = values
         analysis_block = block @ transform
+        if row_transform is not None:
+            analysis_block = row_transform(row_slice, block, analysis_block)
         if use_bulk:
             local_analyzed = np.stack(
                 [analysis_block[:, int(member_id)] for member_id in member_ids], axis=1
@@ -575,33 +561,16 @@ def run_native_store_streaming_analysis_cycle(
     state_row_chunk_size: int = 4096,
     energy_fraction: float = 0.999,
     checkpoint_request: NativeCheckpointRequest | None = None,
+    analysis_row_controls=None,
 ) -> NativeCycleResult:
-    """Store-streaming sibling of ``distributed_native_cycle.run_native_global_analysis_cycle``.
+    """Advance and analyze a streaming native member pool.
 
-    Kept as a SEPARATE function, not a modification of the original --
-    per this session's directive, the original persistent/Option-B analysis
-    path (``transform_local_members``) is preserved unmodified as a
-    correctness reference. This function requires a
-    ``StreamingNativeDistributedMemberPool`` specifically (it uses
-    ``pool.forecast_streaming``/``pool.finalize_all_from_store``, and reaches
-    into ``pool._store`` for the streaming transform) -- it is not meant to
-    be a generic drop-in for the persistent pool.
+    Observation extraction uses the pool's stored owned rows. The analysis applies
+    bounded row transforms, then finalizes each member through the adapter.
+    Persistent pools use run_native_global_analysis_cycle instead.
 
-    Observation handling is IDENTICAL to the original (byte-for-byte the
-    same code): ``pool.observe_with_adapter`` already reads directly from
-    the store for a streaming pool (see ``StreamingNativeDistributedMemberPool.
-    observe_with_adapter``/``extract_rows_from_packed``), so no change was
-    needed there. Only the state-row transform step is replaced with
-    ``transform_members_via_store``, and only the forecast/finalize calls
-    use the streaming (non-dict-accumulating) pool methods.
-
-    KNOWN REMAINING COST (documented, not hidden): ``pool.snapshot_owned()``
-    for the return value and for ``checkpoint_request`` still assembles one
-    ``{member_id: full_owned_array}`` dict for this rank's round-assigned
-    members, same as the original path -- checkpoint writing itself is not
-    yet made to stream row-blocks directly from the store. This is a
-    separate, Option-C-adjacent piece of work, not attempted here.
-    """
+    The returned snapshot and optional checkpoint still materialize owned arrays
+    for this rank's scheduled members; checkpoint assembly is not row-streamed."""
 
     timestep = int(timestep)
     if timestep < 0:
@@ -665,39 +634,36 @@ def run_native_store_streaming_analysis_cycle(
 
     if topology.is_ensemble_root:
         global_products = products.reduced(topology.spatial_comm)
-        transform = ensemble_transform_from_products(
+        refusal = collapsed_spread_message(
+            global_products,
+            relative_tolerance=icesee_kwargs.get("analysis_min_relative_spread", 1e-8),
+        )
+        transform = None if refusal else ensemble_transform_from_products(
             global_products, energy_fraction=energy_fraction
         )
         observation_rows = int(global_products.observation_rows)
     else:
+        refusal = None
         transform = None
         observation_rows = None
-    transform = np.asarray(
-        topology.ensemble_comm.bcast(transform, root=0), dtype=np.float64
-    )
+    # Every rank raises together; a root-only raise would strand the others.
+    transform, refusal = topology.ensemble_comm.bcast((transform, refusal), root=0)
+    if refusal:
+        raise RuntimeError(f"analysis at timestep {timestep} refused: {refusal}")
+    transform = np.asarray(transform, dtype=np.float64)
     observation_rows = int(topology.ensemble_comm.bcast(observation_rows, root=0))
 
-    # Safe, provable optimization (this session's Phase-1 operation-count
-    # derivation, validated against a real Icepack run): when
-    # number_of_batches == 0, no chunk ever reaches products.add_chunk, so
-    # cross/gram/rhs stay exactly zero and ensemble_transform_from_products
-    # returns exactly np.eye(Ne) (verified bit-for-bit, not assumed) --
-    # X_I @ eye(Ne) == X_I for every row block, so the full store-streaming
-    # read/transform/write pass is a mathematically exact no-op on every
-    # non-analysis timestep. Skipping it here leaves the store holding
-    # exactly the forecast state transform_members_via_store would have
-    # written back unchanged, so finalize_all_from_store below still runs
-    # unconditionally (preserving every adapter's own finalize/ghost-sync
-    # semantics exactly, including for a future model whose finalizer is
-    # NOT a no-op) -- only the row-block MATH pass is skipped, never the
-    # per-model finalize. `number_of_batches` is already validated
-    # identical across every rank in `topology.ensemble_comm` above, and is
-    # computed identically on every world rank by every caller (never
-    # rank-dependent), so this branch is collective-safe with no new
-    # communication. This is exactly the wasted-I/O pattern this session's
-    # operation-count derivation found: 25 timesteps x 67 row blocks =
-    # 1675 bulk HDF5 operations measured for a run with only 2 real
-    # analysis events -- 23 of those 25 passes were provably no-ops.
+    # With no observation batches the transform is identity, so skip the
+    # store read/transform/write pass. Model finalization still runs to preserve
+    # adapter updates and halo synchronization. Batch counts are collective.
+    row_transform = None
+    if analysis_row_controls is not None:
+        def row_transform(rows, forecast_block, analysis_block):
+            global_rows = pool.layout.local_to_global_rows(
+                np.arange(rows.start, rows.stop, dtype=np.int64))
+            return analysis_row_controls(
+                analysis_vec=analysis_block, forecast_vec=forecast_block,
+                global_rows=global_rows, icesee_kwargs=icesee_kwargs)
     if number_of_batches > 0:
         transform_members_via_store(
             pool._store,
@@ -707,6 +673,7 @@ def run_native_store_streaming_analysis_cycle(
             topology.ensemble_comm,
             number_of_members,
             row_chunk_size=state_row_chunk_size,
+            row_transform=row_transform,
         )
     pool.finalize_all_from_store(
         adapter, timestep, topology=topology, icesee_kwargs=icesee_kwargs

@@ -77,6 +77,9 @@ def initializeMesh(**icesee_kwargs):
     initFile = icesee_kwargs["initFile"]
     meshFile = icesee_kwargs["meshFile"]
     comm = icesee_kwargs.get("comm")
+    if comm.Get_size() == 1:
+        comm = firedrake.COMM_SELF
+        icesee_kwargs["comm"] = comm
     with traced_init("checkpoint mesh load", comm=comm):
         meshI = mf.getMeshFromCheckPoint(initFile,icesee_kwargs)
     with traced_init("mesh construction (argus + function spaces)", comm=comm):
@@ -117,6 +120,8 @@ def initializeRun(icesee_kwargs, forward_solver, mesh, Q, V):
     # not a mode-name conditional, just using the communicator the caller
     # already established. See src/tests/test_icepack_checkpoint_communicator.py.
     checkpoint_comm = icesee_kwargs.get("comm") or firedrake.COMM_WORLD
+    if checkpoint_comm.Get_size() == 1:
+        checkpoint_comm = firedrake.COMM_SELF
     # Optional, explicitly opt-in (default False -- the full spin-up-
     # history checkpoint's read path below is byte-for-byte unchanged):
     # a "compact" initFile built by tools/build_compact_initialization.py
@@ -206,16 +211,9 @@ def readSMB(icesee_kwargs, Q):
 
 # --- Basal melt rate field ---
 
-# True-vs-wrong basal-melt forcing experiment (Idealized PIG only). This is
-# deliberately NOT a generic ICESEE concept -- it lives entirely in this
-# application file. Two explicit, canonical string values; BasalMeltRate
-# validates against them so a caller can never silently fall into the
-# wrong branch via a str/bool type mismatch (see docs/execution-mode-3-
-# design.md's 2026-09-28 reconciliation note for the history: an earlier
-# WIP used `experiment == 'true'` against callers that passed Python
-# bools, which happened to "fail safe" into the wrong-trajectory branch
-# for every ensemble member -- functionally the intended science, but
-# fragile and undocumented).
+# Canonical forcing selectors: truth ramps melt_max from 20 to 100;
+# ensemble forecasts retain 20. Validate string selectors to avoid ambiguous
+# boolean/string comparisons.
 EXPERIMENT_TRUE = "true"    # reference/true trajectory: melt_max ramps 20 -> 100 over the run
 EXPERIMENT_WRONG = "wrong"  # ensemble/forecast trajectory: melt_max held constant at 20
 
@@ -364,6 +362,9 @@ def findGroundedArea(bed,surface,Q):
 def initialize_model(**icesee_kwargs):
 
     comm = icesee_kwargs.get('comm')
+    if comm.Get_size() == 1:
+        comm = firedrake.COMM_SELF
+        icesee_kwargs["comm"] = comm
 
 
     # ---- Mesh, spaces ----
@@ -458,7 +459,6 @@ def Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, icesee_kwargs):
         thickness_inflow = h0,
     )
 
-    #print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}, Mean_net_accumlation_field:{np.mean(a.dat.data_ro)}\n")
     #exit(1)
 
     icesee_kwargs["h"] = h
@@ -529,6 +529,8 @@ def run_model(ensemble, **icesee_kwargs):
     # calculate the time step using ICESEE's time-stepping index (k) and the step size (dt)
     step = k
 
+    print(step)
+
     # -- steps at which to save profiles of the ensemble --
     flowline_profile_steps = [t/dt for t in icesee_kwargs["save_steps"]]
 
@@ -537,7 +539,6 @@ def run_model(ensemble, **icesee_kwargs):
     v_vec = ensemble[indx_map["v"]]
     s_vec = ensemble[indx_map["s"]]
 
-    #print(f"h_vec_mean={np.mean(h_vec)}, u_vec_mean = {np.mean(u_vec)}, v_vec_mean = {np.mean(v_vec)}\n")
 
     # The configured state vector includes basal_melt_field independently of joint estimation.
     basal_melt_vec = ensemble[indx_map["basal_melt_field"]]
@@ -553,7 +554,6 @@ def run_model(ensemble, **icesee_kwargs):
     s.dat.data[:] = s_vec
     basal_melt_field.dat.data[:] = basal_melt_vec
 
-    print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
 
     ### Conditionals for depth-dependent basal melt rate function
     ### Select forcing scenario between 1935 - 2017
@@ -603,7 +603,6 @@ def run_model(ensemble, **icesee_kwargs):
         basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 2012 - 2017
 
 
-    #print(f"\ndt = {dt}, h0_mean = {np.mean(h0.dat.data_ro)}, h_mean = {np.mean(h.dat.data_ro)}, u_mean = {np.mean(u.dat.data_ro[:,0])}, v_mean = {np.mean(u.dat.data_ro[:,1])}\n")
 
     h, u, s, floating, grounded = Icepack(solver, h, u, smb, basal_melt_field, bed, dt, h0, icesee_kwargs)
 

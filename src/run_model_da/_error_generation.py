@@ -14,9 +14,42 @@ import warnings
 from scipy.optimize import brentq
 import scipy.sparse as sp
 import functools
+import hashlib
+from collections import OrderedDict
 
 from ICESEE.src.utils.random_streams import initialization_seed
 
+
+
+_GRAPH_TRANSITION_CACHE = OrderedDict()
+_GRAPH_TRANSITION_CACHE_BYTES = 0
+_GRAPH_TRANSITION_CACHE_LIMIT = 64 * 1024**2
+
+
+def _cached_graph_transition(coords, neighbors, tolerance, builder):
+    """Reuse deterministic graph geometry; never cache a random field."""
+    global _GRAPH_TRANSITION_CACHE_BYTES
+    points = np.ascontiguousarray(coords, dtype=float)
+    digest = hashlib.blake2b(points.view(np.uint8), digest_size=16).digest()
+    key = (points.shape, int(neighbors), float(tolerance), digest)
+    cached = _GRAPH_TRANSITION_CACHE.pop(key, None)
+    if cached is not None:
+        _GRAPH_TRANSITION_CACHE[key] = cached
+        return cached
+    weights = builder(points, neighbors, coord_tolerance=tolerance)
+    degree = np.asarray(weights.sum(axis=1)).ravel()
+    safe = np.where(degree > 0, degree, 1.0)
+    transition = (sp.diags(1.0/safe) @ weights).tocsr()
+    size = sum(a.nbytes for a in (transition.data,transition.indices,transition.indptr))
+    limit = int(_GRAPH_TRANSITION_CACHE_LIMIT)
+    while _GRAPH_TRANSITION_CACHE and _GRAPH_TRANSITION_CACHE_BYTES + size > limit:
+        _, previous = _GRAPH_TRANSITION_CACHE.popitem(last=False)
+        _GRAPH_TRANSITION_CACHE_BYTES -= sum(
+            a.nbytes for a in (previous.data,previous.indices,previous.indptr))
+    if size <= limit:
+        _GRAPH_TRANSITION_CACHE[key] = transition
+        _GRAPH_TRANSITION_CACHE_BYTES += size
+    return transition
 
 def _quantize_coordinate_key(coord, tolerance):
     """Deterministic, decomposition-independent integer key for one
@@ -432,18 +465,20 @@ def generate_pseudo_random_field_1d(N=None, Lx=None, rh=None, grid_extension=2, 
             x = np.asarray(x)
             if len(x) != n:
                 raise ValueError(f"coords length {len(x)} does not match N={n}")
-            W = _build_knn_adjacency(
+            P = _cached_graph_transition(
                 x, k_neighbors,
-                coord_tolerance=float(icesee_kwargs.get("coord_key_tolerance", 1e-6)),
+                float(icesee_kwargs.get("coord_key_tolerance", 1e-6)),
+                _build_knn_adjacency,
             )
             mode_used = "coords"
         else:
             W = _build_chain_adjacency(n)
             mode_used = "chain"
 
-        deg = np.asarray(W.sum(axis=1)).ravel()
-        deg_safe = np.where(deg > 0, deg, 1.0)
-        P = sp.diags(1.0 / deg_safe) @ W
+        if mode_used != "coords":
+            deg = np.asarray(W.sum(axis=1)).ravel()
+            deg_safe = np.where(deg > 0, deg, 1.0)
+            P = sp.diags(1.0 / deg_safe) @ W
 
         if num_passes == "auto":
             passes = int(np.clip(round(0.12 * np.sqrt(max(n, 4))), 3, 25))

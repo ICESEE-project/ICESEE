@@ -33,7 +33,7 @@ from ICESEE.src.EnKF._localization_inflation import  LocalizationInflationUtils
 from ICESEE.src.EnKF._generate_synthetic_observations import generate_synthetic_observations
 from ICESEE.src.EnKF._generate_true_wrong_state import generate_true_wrong_state
 from ICESEE.src.EnKF._ensemble_initialization import ensemble_initialization
-from ICESEE.src.utils.localization import prepare_random_field_coordinates
+from ICESEE.src.utils.localization import prepare_random_field_coordinates, active_observation_std
 from ICESEE.src.utils.icesee_context import normalize_execution_mode, normalize_icesee_kwargs
 from ICESEE.src.run_model_da._error_generation import compute_Q_err_random_fields, \
                               compute_noise_random_fields, \
@@ -443,6 +443,7 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
             # get synthetic observations if they exist
             with h5py.File(_synthetic_obs, 'r') as f:
                 hu_obs  = f['hu_obs'][:]
+                icesee_kwargs['error_R'] = f['R'][:]
 
 
             # print(f"R matrix: {R.shape},  cov shape: {Cov_model.shape}")
@@ -466,11 +467,10 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
                 R = model_module.Cov_Obs_fun(sig_obs=icesee_kwargs["sig_obs"][0],  nd=nd, icesee_kwargs=icesee_kwargs)
                 # print(f"R.shape from model module: {R.shape}")
             else:
-                R = np.eye(m_obs)
-                for ii, sig in enumerate(icesee_kwargs["sig_obs"]):
-                    start_idx = ii *2
-                    end_idx = start_idx +2
-                    R[start_idx:end_idx,start_idx:end_idx] = np.eye(2) * sig ** 2
+                # m_obs counts observation times, not observed state rows.
+                observation_rows = utils.JObs_indices(nd)
+                sigma = active_observation_std(icesee_kwargs, km, observation_rows)
+                R = np.diag(sigma**2)
 
             # --- Select Obs_fun ---
             if hasattr(model_module, "Obs_fun") and callable(model_module.Obs_fun):

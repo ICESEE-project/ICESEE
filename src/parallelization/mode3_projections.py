@@ -1,46 +1,16 @@
-# ==============================================================================
-# @des: Operation-count, traffic, and preflight-projection formulas for
-# execution-mode-3's Option-C (out-of-core member store) path. Pure
-# arithmetic, no MPI/Firedrake/HDF5 -- validated against real measured
-# Icepack instrumentation (see module docstring below and this session's
-# derivation), then used to project Ne=40..1000 without fabricating
-# results at scales this Mac cannot run.
-# @date: 2026-09-27
-# ==============================================================================
-"""Derivation and validation (Phase 1 of the four-hour PACE-prep session).
+# Arithmetic projections for streamed analysis operations, traffic and capacity.
+"""Operation-count and storage models for streamed native analysis.
 
-The store-streaming analysis path (``distributed_streaming_runtime.py``)
-issues, per ``run_native_store_streaming_analysis_cycle`` call:
+One analysis pass uses ceil(owned_size_total / row_chunk_size) bulk row blocks.
+owned_size_total sums all packed variable blocks for one member. Transform
+passes occur only on analysis steps; forecast activation/deactivation occurs
+every timestep. Physical member-major selections also scale with members
+scheduled to this ensemble group, not the global ensemble size.
 
-  - ``blocks_per_cycle = ceil(owned_size_total / row_chunk_size)`` bulk
-    get/put pairs -- ONLY on timesteps with a scheduled analysis event
-    (``number_of_batches > 0``), since this session's Phase-1 finding
-    proved the ensemble transform is exactly ``eye(Ne)`` (bit-for-bit, not
-    approximately) when no observation batch contributes, making the full
-    row-block pass a mathematically provable no-op on every other
-    timestep -- and ``run_native_store_streaming_analysis_cycle`` was
-    fixed this session to skip it there (see that module's own comment).
-
-  - ``owned_size_total`` is the SUM across every variable block in one
-    member's packed state (e.g. an application with 5 packed scalar
-    fields would report 5x one field's node count for P=1) -- NOT one
-    field's own size. This was
-    the exact source of an early hand-derivation mismatch this session
-    (54123 vs the correct 270615), corrected and validated below.
-
-Validated against a real P=1, Nens=2 Icepack run (25 timesteps, 2
-scheduled analysis events, row_chunk_size=4096 (the hard-coded function
-default -- icepack's mode3_runner.py does not yet expose this as a CLI
-override), owned_size_total=270615):
-
-  blocks_per_cycle = ceil(270615 / 4096) = 67
-  PRE-optimization bulk_get_count = 25 timesteps * 67 blocks = 1675
-    (measured instrumentation, BEFORE this session's transform-skip fix:
-    exactly 1675 -- confirms the formula and the (undesirable) pattern)
-  POST-optimization bulk_get_count = 2 analysis events * 67 blocks = 134
-    (12.5x fewer HDF5 operations for this specific run's schedule; the
-    reduction factor is exactly nt / n_analysis_events in general)
-"""
+For 270615 owned entries and row_chunk_size=4096, there are 67 blocks. Over
+25 steps with two analyses, the transform pass uses 134 bulk reads rather
+than the 1675 reads required by a pass on every step. These are operation
+counts, not a wall-time speedup or measured performance at larger scales."""
 
 from __future__ import annotations
 
@@ -148,20 +118,11 @@ class TrafficProjection:
 def project_traffic(
     *, logical_member_bytes: float, ne: int, nt: int, n_analysis_events: int
 ) -> TrafficProjection:
-    """Phase 7's 4-pass model, corrected for the transform-skip
-    optimization: forecast activation/deactivation happens every timestep
-    (unavoidable -- every member forecasts every timestep in a standard
-    EnKF cycle); analysis read/write happens ONLY on scheduled analysis
-    events (this session's fix), not on every timestep as the original
-    un-optimized 74TB-style estimate implicitly assumed.
+    """Project forecast activation/deactivation and analysis store traffic.
 
-    L = logical_member_bytes * ne (one variable's full ensemble size).
-    Per timestep: activation read L + deactivation write L = 2L.
-    Per analysis event: analysis read L + analysis write L = 2L (this is
-    where the earlier "74TB per analysis transformation" figure came
-    from -- it was always an accurate PER-EVENT number, never a per-run
-    total; this function makes that distinction explicit).
-    """
+    Let L = logical_member_bytes * ne. Each forecast step reads and writes L;
+    each analysis event adds a read and write of L. Per-event and full-run
+    traffic are reported separately."""
 
     L = float(logical_member_bytes) * int(ne)
     forecast_read = L

@@ -45,7 +45,7 @@ h = firedrake.Function(Q)
 h.dat.data[:] = 100.0
 
 # Mirrors params.yaml's icesee/features-convention Idealized PIG config
-# (2026-09-28 reconciliation): num_years=82, timesteps_per_year=0.05,
+# num_years=82, timesteps_per_year=0.05,
 # bmr_increase_time=0.
 num_years = 82.0
 dt = 0.05
@@ -68,7 +68,7 @@ for label, experiment in (("true", EXPERIMENT_TRUE), ("wrong", EXPERIMENT_WRONG)
     )
     results[label] = [float(melt_max_first), float(melt_max_last)]
 
-# Guards against the exact fragility this reconciliation removed: a caller
+# Guards against the exact fragility typed forcing selectors prevent: a caller
 # passing a Python bool (or anything other than the two canonical strings)
 # must fail loudly, never silently fall into the wrong-trajectory branch
 # via a str/bool type mismatch.

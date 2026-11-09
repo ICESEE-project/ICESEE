@@ -14,6 +14,7 @@
 import h5py
 import numpy as np
 from mpi4py import MPI
+import contextlib
 import copy
 import os
 import re
@@ -606,6 +607,82 @@ class EnKF_fully_parallel_IO:
         handle = h5py.File(path, "r+", driver="mpio", comm=self.mpi_comm)
         return path, handle, handle["states"]
 
+    def _create_rank_analysis_file(self, timestep):
+        """One serial writer per row shard; no shared MPI-HDF5 chunks."""
+        path = self._analysis_file_name(timestep) + f".rank{self.rank:06d}"
+        handle = h5py.File(path, "w")
+        dataset = handle.create_dataset(
+            "states", (self.nd_end_world - self.nd_start_world, self.nens),
+            dtype=self.storage_dtype,
+        )
+        return path, handle, dataset
+
+    def _assemble_rank_analysis_files(self, timestep, local_path):
+        """Collectively assemble completed shards with bounded root memory.
+
+        Only rank zero opens the shared temporary output, using serial HDF5.
+        This avoids partial shared-chunk MPI-IO updates on NFS. Publication
+        and model finalization still use the existing transaction below.
+        """
+        shards = self.mpi_comm.gather(
+            (self.nd_start_world, self.nd_end_world, local_path), root=0
+        )
+        path = self._analysis_file_name(timestep)
+        error = None
+        if self.rank == 0:
+            try:
+                cursor = 0
+                with h5py.File(path, "w") as output:
+                    target = output.create_dataset(
+                        "states", (self.nd, self.nens), dtype=self.storage_dtype,
+                        chunks=(max(1, min(self.h5_file_chunk_size, self.nd)), 1),
+                        compression=self.h5_file_compression,
+                        compression_opts=self.h5_file_compression_options,
+                    )
+                    for first, last, source_path in sorted(shards):
+                        if first != cursor or last < first or last > self.nd:
+                            raise ValueError("Analysis row shards overlap or leave a gap")
+                        with h5py.File(source_path, "r") as source:
+                            values = source["states"]
+                            if values.shape != (last - first, self.nens):
+                                raise ValueError("Analysis row shard has an invalid shape")
+                            for row in range(first, last, 1000):
+                                stop = min(last, row + 1000)
+                                target[row:stop, :] = values[row-first:stop-first, :]
+                        cursor = last
+                    if cursor != self.nd:
+                        raise ValueError("Analysis row shards do not cover the state")
+                    output.flush()
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
+        error = self.mpi_comm.bcast(error, root=0)
+        if error:
+            raise RuntimeError(f"Analysis shard assembly failed: {error}")
+        return path
+
+    def _write_published_analysis_mean(self, timestep):
+        """Stream the published mean with one serial writer and bounded rows."""
+        error = None
+        if self.rank == 0:
+            try:
+                with h5py.File(self._state_file_name(timestep), "r") as source, h5py.File(
+                    f"{self.base_path}/{self.file_prefix}_mean.h5", "a"
+                ) as output:
+                    if "mean" not in output:
+                        output.create_dataset("mean", (self.nd, self.nt),
+                                              chunks=(min(self.nd, 1000), 1), dtype="f8")
+                    for row in range(0, self.nd, 1000):
+                        stop = min(self.nd, row + 1000)
+                        output["mean"][row:stop, timestep] = np.asarray(
+                            source["states"][row:stop, :]
+                        ).mean(axis=1)
+                    output.flush()
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
+        error = self.mpi_comm.bcast(error, root=0)
+        if error:
+            raise RuntimeError(f"Analysis mean write failed: {error}")
+
     @staticmethod
     def _requires_shared_finalization(icesee_kwargs):
         """Whether publishing requires the shared ensemble-level contract."""
@@ -1104,6 +1181,42 @@ class EnKF_fully_parallel_IO:
             tb_str = "".join(traceback.format_exception(*sys.exc_info()))
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
+
+    def _release_batch(self):
+        """Collective: flush and close the read-write window on every rank.
+
+        Afterwards no read-write handle or dataset object remains, and the
+        next ``_ensure_batch_range`` reopens the window (with write access)
+        only when a caller needs it.
+        """
+        for handle in self.files:
+            handle.flush()
+        self._close_batch()
+        self.current_batch_start = -1
+        self.mpi_comm.Barrier()
+
+    @contextlib.contextmanager
+    def _read_only_state(self, timestep):
+        """Collective: yield one state shard's dataset through a read-only handle.
+
+        On NFS, MPI-IO takes a byte-range lock for every access through a
+        read-write handle, and row-slab reads through such handles can stall
+        indefinitely (PACE: the first mode-2 analysis made no progress for
+        over an hour, while the same read-only access took 0.01 s).  Writes
+        keep their locking.  The read-write window is released on every rank
+        first, so no conflicting handle on the shard remains.
+        """
+        self._release_batch()
+        path = self._state_file_name(timestep)
+        if self.size == 1:
+            handle = h5py.File(path, "r")
+        else:
+            handle = h5py.File(path, "r", driver="mpio", comm=self.mpi_comm)
+        try:
+            yield handle["states"]
+        finally:
+            handle.close()
+            self.mpi_comm.Barrier()
 
     def _ensure_batch(self, t):
         """Collective: ensure ``t`` alone is covered by the open window.
@@ -2067,7 +2180,7 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def compute_X5_utils_(self, **icesee_kwargs):
+    def compute_X5_utils_(self, state_dset=None, **icesee_kwargs):
         """Accumulate exact mode-1 analysis products in bounded memory.
 
         Because ICESEE's observation operator selects state-vector rows, the
@@ -2077,10 +2190,16 @@ class EnKF_fully_parallel_IO:
         stochastic observation perturbations are stored as an observation-
         sized temporary factor so every MPI partition consumes the exact same
         seeded sequence as mode 1 without replicating the state ensemble.
+
+        ``state_dset`` is the forecast shard opened read-only (see
+        ``_read_only_state``); without it, this call opens that view itself.
         """
         k = icesee_kwargs.get('k')
         k = k + 1 if k < self.nt - 1 else k
         km = icesee_kwargs.get('km')
+        if state_dset is None:
+            with self._read_only_state(k) as state_dset:
+                return self.compute_X5_utils_(state_dset=state_dset, **icesee_kwargs)
         try:
             Nens = self.nens
             with h5py.File(f"{self.base_path}/H_matrix.h5", "r") as handle:
@@ -2114,8 +2233,6 @@ class EnKF_fully_parallel_IO:
             cross_local = np.zeros((Nens, Nens), dtype=np.float64)
             gram_local = np.zeros((Nens, Nens), dtype=np.float64)
             rhs_local = np.zeros((Nens, Nens), dtype=np.float64)
-            batch_idx = k - self.current_batch_start
-            state_dset = self.datasets[batch_idx]
             obs_file = f"{self.base_path}/synthetic_obs.h5"
             io_start = MPI.Wtime()
             with h5py.File(obs_file, "r") as obs_handle:
@@ -2258,12 +2375,12 @@ class EnKF_fully_parallel_IO:
             print(f"Traceback details:\n{tb_str}")
             self.mpi_comm.Abort(1)
 
-    def compute_X5_modified(self, **icesee_kwargs):
+    def compute_X5_modified(self, state_dset=None, **icesee_kwargs):
         # Eta = HA-Hmean where HA = H*state and Hmean = H*mean(state)
         # Dprime[:ens_idx] = d - Hmean
         try:
             cross, gram, rhs, local_terms, icesee_kwargs = self.compute_X5_utils_(
-                **icesee_kwargs
+                state_dset=state_dset, **icesee_kwargs
             )
             X5 = ensemble_transform_from_products(
                 cross, gram, rhs,
@@ -2340,16 +2457,7 @@ class EnKF_fully_parallel_IO:
             rank = comm.Get_rank()
             size = comm.Get_size()
 
-            batch_idx = k - self.current_batch_start
-
             start = MPI.Wtime()
-
-            # call the compute X5 function
-            # X5 = self.compute_X5_(k, **icesee_kwargs)
-            X5, local_patches, icesee_kwargs = self.compute_X5_modified(
-                **icesee_kwargs
-            )
-            # compute column sums for X5
 
             local_dim = self.nd_end_world - self.nd_start_world
             Nens = self.nens
@@ -2377,66 +2485,67 @@ class EnKF_fully_parallel_IO:
                 icesee_kwargs.get("analysis_row_chunk_size", 0),
                 working_buffers=3,
             )
-            io_start = MPI.Wtime()
-            state_dset = self.datasets[batch_idx]
-            temp_path, temp_handle, temp_dset = self._create_analysis_file(k)
-            try:
-                for local0 in range(0, local_dim, max(1, row_chunk)):
-                    global0 = self.nd_start_world + local0
-                    global1 = min(self.nd_end_world, global0 + row_chunk)
-                    states = np.asarray(state_dset[global0:global1, :])
-                    raw_analysis = states @ X5
-                    raw_analysis = apply_local_patches(
-                        raw_analysis, states,
-                        np.arange(global0, global1, dtype=np.int64),
-                        local_patches,
-                    )
-                    updated = apply_analysis_controls_local(
-                        analysis_vec=raw_analysis,
-                        forecast_vec=states,
-                        global_rows=np.arange(global0, global1, dtype=np.int64),
-                        icesee_kwargs=icesee_kwargs,
-                    )
-                    # Generic mode-1 analysis does not impose a thickness
-                    # floor here; model-specific geometry projection happens
-                    # in the shared finalization stage. Retain the former
-                    # mode-2 safeguard only as an explicit opt-in.
-                    if icesee_kwargs.get("analysis_project_min_thickness", False):
-                        for thick0, thick1 in thickness_ranges:
-                            clip0, clip1 = max(global0, thick0), min(global1, thick1)
-                            if clip0 < clip1:
-                                updated[clip0-global0:clip1-global0, :] = np.maximum(
-                                    updated[clip0-global0:clip1-global0, :], min_thickness
-                                )
-                    temp_dset[global0:global1, :] = updated
-                temp_handle.flush()
-            finally:
-                temp_handle.close()
+            # Every analysis read of the forecast shard goes through one
+            # read-only view (see _read_only_state); the read-write window
+            # is reopened only when the next forecast needs it.
+            with self._read_only_state(k) as state_dset:
+                # call the compute X5 function
+                X5, local_patches, icesee_kwargs = self.compute_X5_modified(
+                    state_dset=state_dset, **icesee_kwargs
+                )
+                # Global transform; localized row patches are applied separately.
+                self.last_analysis_transform = np.asarray(X5).copy()
 
+                io_start = MPI.Wtime()
+                local_path, temp_handle, temp_dset = self._create_rank_analysis_file(k)
+                try:
+                    for local0 in range(0, local_dim, max(1, row_chunk)):
+                        global0 = self.nd_start_world + local0
+                        global1 = min(self.nd_end_world, global0 + row_chunk)
+                        states = np.asarray(state_dset[global0:global1, :])
+                        raw_analysis = states @ X5
+                        raw_analysis = apply_local_patches(
+                            raw_analysis, states,
+                            np.arange(global0, global1, dtype=np.int64),
+                            local_patches,
+                        )
+                        updated = apply_analysis_controls_local(
+                            analysis_vec=raw_analysis,
+                            forecast_vec=states,
+                            global_rows=np.arange(global0, global1, dtype=np.int64),
+                            icesee_kwargs=icesee_kwargs,
+                        )
+                        # Generic mode-1 analysis does not impose a thickness
+                        # floor here; model-specific geometry projection happens
+                        # in the shared finalization stage. Retain the former
+                        # mode-2 safeguard only as an explicit opt-in.
+                        if icesee_kwargs.get("analysis_project_min_thickness", False):
+                            for thick0, thick1 in thickness_ranges:
+                                clip0, clip1 = max(global0, thick0), min(global1, thick1)
+                                if clip0 < clip1:
+                                    updated[clip0-global0:clip1-global0, :] = np.maximum(
+                                        updated[clip0-global0:clip1-global0, :], min_thickness
+                                    )
+                        temp_dset[local0:local0 + global1 - global0, :] = updated
+                    temp_handle.flush()
+                finally:
+                    temp_handle.close()
+
+            temp_path = self._assemble_rank_analysis_files(k, local_path)
             self._publish_analysis_file(k, temp_path, icesee_kwargs)
             self._save_finalization_state(icesee_kwargs)
+            # Publication succeeded; leftover diagnostic shards are harmless
+            # if a filesystem refuses best-effort cleanup.
+            try:
+                os.remove(local_path)
+            except OSError:
+                pass
 
             # Means are derived only after the finalized analysis is published;
             # otherwise diagnostics and restart state can describe different
             # ensembles when geometry/inference modifies the raw transform.
             if bool(icesee_kwargs.get("compute_analysis_mean", False)):
-                self._ensure_batch(k)
-                published_dset = self.datasets[k - self.current_batch_start]
-                file_path = f"{self.base_path}/{self.file_prefix}_mean.h5"
-                with h5py.File(file_path, "a", driver="mpio", comm=comm) as mean_handle:
-                    if "mean" not in mean_handle:
-                        mean_handle.create_dataset(
-                            "mean", (self.nd, self.nt),
-                            chunks=(min(self.nd, 1000), 1), dtype="f8"
-                        )
-                    mean_handle["mean"][self.nd_start_world:self.nd_end_world, k] = (
-                        np.asarray(
-                            published_dset[
-                                self.nd_start_world:self.nd_end_world, :
-                            ]
-                        ).mean(axis=1)
-                    )
-                    mean_handle.flush()
+                self._write_published_analysis_mean(k)
             elapsed_io = MPI.Wtime() - io_start
             icesee_kwargs["time_analysis_file_writing"] += elapsed_io
             icesee_kwargs["time_analysis_ensemble_mean_generation"] += 0.0

@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from src.parallelization.distributed_analysis import (
     StochasticAnalysisProducts,
@@ -310,3 +311,53 @@ def test_native_inversion_failure_rolls_back_owned_fields_collectively():
         np.testing.assert_array_equal(
             pool.member(member_id).pack_owned(), before.members[member_id]
         )
+
+
+def test_collapsed_spread_analysis_is_refused_on_every_rank():
+    """Two Idealized PIG Mode-3 members started from the same unperturbed
+    state carried no process noise, so their observed surfaces differed only
+    by round-off. The relative pseudo-inverse cutoff then regressed ~100 m
+    innovations onto ~1e-13 anomalies, and the first checkpoint after that
+    analysis held thickness 5.4e19 m. The cycle must refuse instead."""
+
+    base = np.arange(5.0) + 1000.0
+
+    def member(member_id, offset):
+        field = _Field(base + offset)
+        registry = DistributedFieldRegistry([field], layout_id="native-cycle-v1")
+        return NativeDistributedMember(member_id, registry, {"field": field})
+
+    class StaticAdapter(_Adapter):
+        def forecast_native_member(self, member, timestep, **kwargs):
+            return None
+
+    pool = NativeDistributedMemberPool({0: member(0, 0.0), 1: member(1, 1e-13)})
+    batch = NativeObservationBatch(np.array([0, 4]), base[[0, 4]] + 100.0)
+
+    # Mechanism: without the guard the transform is innovation / round-off.
+    forecast = np.column_stack([base[[0, 4]], base[[0, 4]] + 1e-13])
+    products = StochasticAnalysisProducts.zeros(2)
+    products.add_chunk(forecast, batch.values, error_mode="legacy_prior_anomalies")
+    assert np.abs(ensemble_transform_from_products(products)).max() > 1e10
+
+    with pytest.raises(RuntimeError, match="spread in observation space has collapsed"):
+        run_native_global_analysis_cycle(
+            pool,
+            StaticAdapter(),
+            10,
+            [batch],
+            number_of_batches=1,
+            topology=_topology(),
+            icesee_kwargs={"Nens": 2},
+            error_mode="legacy_prior_anomalies",
+        )
+    np.testing.assert_array_equal(pool.member(1).pack_owned(), base + 1e-13)
+
+
+def test_forecast_only_step_is_not_affected_by_spread_guard():
+    pool = NativeDistributedMemberPool({0: _member(0), 1: _member(1)})
+    result = run_native_global_analysis_cycle(
+        pool, _Adapter(), 3, [], number_of_batches=0, topology=_topology(),
+        icesee_kwargs={"Nens": 2}, error_mode="legacy_prior_anomalies",
+    )
+    np.testing.assert_array_equal(result.transform, np.eye(2))

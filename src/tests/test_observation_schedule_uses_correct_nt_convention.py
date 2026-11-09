@@ -1,40 +1,4 @@
-# ==============================================================================
-# @des: Regression test for the observation-schedule nt architecture fix
-# (config/_utility_imports.py, 2026-09-28, second pass).
-#
-# Background: different applications interpret `timesteps_per_year`
-# differently (Icepack/Lorenz96/ISSM's own run_da_*.py all self-derive
-# nt=num_years/timesteps_per_year in their OWN code, well AFTER config
-# load -- but config/_utility_imports.py computes its own one-time
-# internal nt/t ONCE, at config-load time, purely to feed the generic
-# generate_observation_schedule() call, before any application gets a
-# chance to self-derive anything). A first pass "fixed" this generic
-# nt by switching its formula from multiplication to division -- but
-# that just swapped one hardcoded, application-blind assumption for
-# another (confirmed: this changed ISSM's and synthetic_ice_stream's
-# internal nt here too, since they never asked for that).
-#
-# The actual fix: config/_utility_imports.py never assumes a
-# convention. An application's own params.yaml may declare its
-# already-resolved `nt` directly (`modeling-parameters.nt`) -- an
-# explicit, application-owned value, not a generic reinterpretation of
-# `timesteps_per_year`. Without that key, the ORIGINAL historical
-# formula (num_years * timesteps_per_year) is used, so every existing
-# configuration that does not opt in behaves EXACTLY as it always has.
-# No model-name conditionals anywhere in this file.
-#
-# These tests exercise the REAL config loader end to end for each
-# application's REAL params.yaml (not a duplicated formula), confirming:
-#   1. Idealized PIG (which opts in via its own `nt: 1640`) keeps its
-#      correct 82-year/1640-step production schedule.
-#   2. ISSM (both examples) and synthetic_ice_stream (which do NOT opt
-#      in) get back their exact ORIGINAL, pre-2026-09-28 nt -- unchanged
-#      by any of this reconciliation's work, despite touching zero ISSM
-#      files.
-#   3. The nt-selection mechanism itself is generic: an explicit `nt`
-#      always wins, and its absence always falls back to the historical
-#      formula, for a synthetic (non-real-application) configuration too.
-# ==============================================================================
+# Test application-declared timestep counts and the legacy loader fallback.
 from __future__ import annotations
 
 import importlib
@@ -86,10 +50,23 @@ def _load_real_kwargs(app_dir, tmp_path, **cli_overrides):
         os.chdir(_cwd_backup)
 
 
-# --- 1. Idealized PIG: production schedule preserved via its own explicit nt ---
+@pytest.fixture
+def long_pig_config(tmp_path):
+    """Explicit long-run schedule, independent of the example's short defaults."""
+    import yaml
+    config = yaml.safe_load((_IDEALIZED_PIG_DIR / "params.yaml").read_text())
+    config["modeling-parameters"].update(num_years=82, timesteps_per_year=0.05, nt=1640)
+    config["enkf-parameters"].update(obs_start_time=10, obs_max_time=40, freq_obs=1)
+    path = tmp_path / "long_run.yaml"
+    path.write_text(yaml.safe_dump(config))
+    return path
 
-def test_idealized_pig_production_keeps_nt_1640(tmp_path):
-    kwargs = _load_real_kwargs(_IDEALIZED_PIG_DIR, tmp_path)
+
+# Explicit application timestep count and physical observation schedule.
+
+def test_idealized_pig_explicit_long_run_keeps_nt_1640(tmp_path, long_pig_config):
+    kwargs = _load_real_kwargs(_IDEALIZED_PIG_DIR, tmp_path / "output",
+                               **{"force-params": str(long_pig_config)})
     assert kwargs["num_years"] == 82
     assert kwargs["timesteps_per_year"] == 0.05
     assert kwargs["nt"] == 1640, (
@@ -99,8 +76,9 @@ def test_idealized_pig_production_keeps_nt_1640(tmp_path):
     )
 
 
-def test_idealized_pig_production_observation_window_gives_31_events_at_years_10_to_40(tmp_path):
-    kwargs = _load_real_kwargs(_IDEALIZED_PIG_DIR, tmp_path)
+def test_idealized_pig_explicit_long_run_observes_years_10_to_40(tmp_path, long_pig_config):
+    kwargs = _load_real_kwargs(_IDEALIZED_PIG_DIR, tmp_path / "output",
+                               **{"force-params": str(long_pig_config)})
     assert kwargs["obs_start_time"] == 10
     assert kwargs["obs_max_time"] == 40
     assert kwargs["freq_obs"] == 1
@@ -135,7 +113,7 @@ def test_idealized_pig_calibration_config_gives_nt_40_and_one_event_at_year_1(tm
 # (config-loading only -- no ISSM/Firedrake application code is imported or run;
 # this reads real params.yaml files nobody has edited, exactly as before.)
 
-def test_issm_ismip_choi_internal_nt_is_unchanged_from_before_this_reconciliation(tmp_path):
+def test_issm_ismip_choi_internal_nt_is_unchanged_from_legacy_configuration(tmp_path):
     kwargs = _load_real_kwargs(_ISMIP_CHOI_DIR, tmp_path)
     assert "nt" not in _read_modeling_section_keys(_ISMIP_CHOI_DIR), (
         "this test's premise is that ISSM has NOT opted in -- if this "
@@ -143,12 +121,7 @@ def test_issm_ismip_choi_internal_nt_is_unchanged_from_before_this_reconciliatio
     )
     assert kwargs["num_years"] == 60
     assert kwargs["timesteps_per_year"] == 0.2
-    # Original historical formula (num_years * timesteps_per_year) --
-    # unaffected by this reconciliation. This is config/_utility_imports.py's
-    # OWN internal nt (feeds only the generic observation-schedule call);
-    # ISSM's REAL simulation nt is computed separately, in ISSM's own
-    # run_da_issm.py (nt=(num_years-tinitial)/timesteps_per_year=300),
-    # which this generic loader has never touched and does not affect.
+    # Retain the historical loader formula when the application does not declare nt.
     assert kwargs["nt"] == 12
 
 

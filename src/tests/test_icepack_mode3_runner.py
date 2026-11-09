@@ -113,8 +113,18 @@ class _SelfComm:
     def bcast(self, value, root=0):
         return value
 
+    def allgather(self, value):
+        return [value]
 
-def _install_runner_fakes(monkeypatch, *, observation_steps):
+    def Free(self):
+        return None
+
+
+# Four mesh nodes; the reference (serial) numbering is the row order here.
+_REFERENCE_COORDS = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+
+
+def _install_runner_fakes(monkeypatch, *, observation_steps, layout_order=(0, 1, 2, 3)):
     """Replace every heavy dependency of ``run_icepack_execution_mode_3``.
 
     Returns a namespace of call records. ``observation_steps`` is the fake
@@ -128,6 +138,8 @@ def _install_runner_fakes(monkeypatch, *, observation_steps):
         checkpoint_calls=[],
         save_all_data_calls=[],
         timing_calls=[],
+        noise_policies=[],
+        noise_closed=[],
     )
     observation_steps = np.asarray(observation_steps, dtype=int)
 
@@ -161,13 +173,16 @@ def _install_runner_fakes(monkeypatch, *, observation_steps):
             return _FakeModelModule()
 
     fake_topology = types.SimpleNamespace(
-        spatial_ranks=1, spatial_comm=None, world_size=1, ensemble_groups=1,
+        spatial_ranks=1, spatial_comm=_SelfComm(), world_size=1, ensemble_groups=1,
         world_rank=0, world=_SelfComm(),
     )
+    # Distributed row r holds reference node layout_order[r].
+    layout_coords = _REFERENCE_COORDS[np.asarray(layout_order)]
+    records.routed_ids = []
 
     class _FakePool:
         member_ids = [0, 1]
-        layout = types.SimpleNamespace(global_size=4)
+        layout = DistributedBlockStateLayout((DistributedStateBlockLayout("h",0,4,0,4),))
 
         def snapshot_owned(self):
             return "initial-ensemble-snapshot"
@@ -176,6 +191,7 @@ def _install_runner_fakes(monkeypatch, *, observation_steps):
             # Single spatial rank (fake_topology.spatial_ranks=1) owns
             # every requested observation -- identity routing.
             ids = np.asarray(global_observation_ids)
+            records.routed_ids.append(ids.copy())
             return np.arange(ids.size, dtype=np.int64), ids
 
     def fake_initialize_pool(adapter, topo, kw):
@@ -197,8 +213,10 @@ def _install_runner_fakes(monkeypatch, *, observation_steps):
             return (observation_steps.astype(float), observation_steps, observation_steps.size)
 
     def fake_run_native_global_analysis_cycle(
-        pool, adapter, k, batches, *, number_of_batches, topology, icesee_kwargs, error_mode
+        pool, adapter, k, batches, *, number_of_batches, topology, icesee_kwargs, error_mode,
+        analysis_row_controls
     ):
+        assert analysis_row_controls is runner.apply_analysis_controls_local
         records.cycle_calls.append((k, number_of_batches))
         return NativeCycleResult(
             local_forecast="forecast",
@@ -212,7 +230,19 @@ def _install_runner_fakes(monkeypatch, *, observation_steps):
     ):
         records.checkpoint_calls.append((root, timestep, ensemble, metadata))
 
+    class FakeNoiseAdapter:
+        def __init__(self,adapter,**options):
+            records.noise_policies.append(options)
+        def close(self):
+            records.noise_closed.append(True)
+    monkeypatch.setattr(runner,"NativeProcessNoiseAdapter",FakeNoiseAdapter)
+    monkeypatch.setattr(runner,"canonical_noise_identity",lambda options:"test-noise")
     monkeypatch.setattr(runner, "initialize_model", fake_initialize_model)
+    monkeypatch.setattr(runner, "node_coordinates", lambda Q: _REFERENCE_COORDS.copy())
+    monkeypatch.setattr(
+        runner, "owned_node_layout",
+        lambda *, topology, icesee_kwargs: (0, len(layout_coords), layout_coords),
+    )
     monkeypatch.setattr(runner, "generate_true_wrong_state", fake_generate_true_wrong_state)
     monkeypatch.setattr(runner, "generate_synthetic_observations", fake_generate_synthetic_observations)
     monkeypatch.setattr(runner, "SupportedModels", _FakeSupportedModels)
@@ -285,6 +315,8 @@ def test_run_icepack_execution_mode_3_orchestration(tmp_path, monkeypatch):
 
     # Analysis batch only requested on the scheduled observation timestep (k=1).
     assert records.cycle_calls == [(0, 0), (1, 1)]
+    np.testing.assert_array_equal(records.noise_policies[0]["canonical_rows"],np.arange(4))
+    assert records.noise_closed == [True]
 
     assert len(records.save_all_data_calls) == 1
     # Exactly one performance report per run. The fused native cycle has no
@@ -312,7 +344,7 @@ def _write_pre_retention_checkpoint(root, step, *, did_analysis):
         root, step,
         LocalMemberEnsemble(layout, {0: np.zeros(4), 1: np.ones(4)}),
         topology,
-        run_id=runner._DEFAULT_RUN_ID,
+        run_id=runner._DEFAULT_RUN_ID+":native-controls-v1:test-noise",
         metadata={"Nens": 2, "did_analysis": did_analysis, "observation_rows": 0,
                   "error_mode": "legacy_prior_anomalies"},
     )
@@ -327,7 +359,7 @@ def test_resume_continues_from_latest_checkpoint_without_reinitializing(tmp_path
     steps = tmp_path / "_mode3_state_history" / "steps"
     _write_pre_retention_checkpoint(steps, 0, did_analysis=False)
     _write_pre_retention_checkpoint(steps, 1, did_analysis=True)
-    staging = steps / f".checkpoint_00000002.{runner._DEFAULT_RUN_ID}.staging"
+    staging = steps / f".checkpoint_00000002.{runner._DEFAULT_RUN_ID}:native-controls-v1:test-noise.staging"
     staging.mkdir()
     (staging / ".shard_00000000.h5.tmp").write_bytes(b"partial")
     with h5py.File(tmp_path / "synthetic_obs.h5", "w") as f:
@@ -352,7 +384,7 @@ def test_resume_continues_from_latest_checkpoint_without_reinitializing(tmp_path
 
     assert [path.read_bytes() for path in profile_files] == profiles_before
     assert records.calls == {"true_wrong": 0, "synth_obs": 0, "init_pool": 0}
-    assert records.restored == [(steps / "checkpoint_00000001", runner._DEFAULT_RUN_ID)]
+    assert records.restored == [(steps / "checkpoint_00000001", runner._DEFAULT_RUN_ID+":native-controls-v1:test-noise")]
     # Cycles 0-1 (and the analysis at 1) are not repeated; 3 is analyzed once.
     assert records.cycle_calls == [(2, 0), (3, 1)]
     assert [c[1] for c in records.checkpoint_calls] == [2, 3]  # no initial rewrite
@@ -389,3 +421,28 @@ def test_release_model_topology_never_frees_world_or_alias_twice(monkeypatch):
     assert freed == [owned]
     runner._release_model_topology(types.SimpleNamespace(world=world, ensemble_comm=world, spatial_comm=world))
     assert freed == [owned]
+
+
+@pytest.mark.parametrize("legacy_value", [None, False])
+def test_mode3_runs_without_an_experimental_opt_in(tmp_path, monkeypatch, legacy_value):
+    records = _install_runner_fakes(monkeypatch, observation_steps=[0])
+    kwargs = _runner_kwargs(tmp_path, nt=1)
+    assert "mode3_experimental" not in kwargs
+    if legacy_value is not None:
+        kwargs["mode3_experimental"] = legacy_value
+    runner.run_icepack_execution_mode_3(**kwargs)
+    assert records.calls["init_pool"] == 1
+    assert records.cycle_calls == [(0, 1)]
+
+
+def test_observations_are_routed_in_distributed_numbering(tmp_path, monkeypatch):
+    """Observation ids come from the serial reference mesh. A model group
+    that renumbers the nodes must receive, for each canonical id, the
+    distributed row of the same physical node (here a reversal)."""
+
+    records = _install_runner_fakes(
+        monkeypatch, observation_steps=[0], layout_order=(3, 2, 1, 0)
+    )
+    runner.run_icepack_execution_mode_3(**_runner_kwargs(tmp_path, nt=1))
+    # JObs_indices(nd=4) observes reference nodes 0..3 in that order.
+    np.testing.assert_array_equal(records.routed_ids[0], [3, 2, 1, 0])

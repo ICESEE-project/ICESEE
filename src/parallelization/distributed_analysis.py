@@ -270,6 +270,10 @@ class StochasticAnalysisProducts:
     gram: np.ndarray
     rhs: np.ndarray
     observation_rows: int = 0
+    # Largest |forecast - ensemble mean| and |forecast| over observed rows;
+    # see collapsed_spread_message.
+    max_abs_anomaly: float = 0.0
+    max_abs_forecast: float = 0.0
 
     @classmethod
     def zeros(cls, number_of_members: int) -> "StochasticAnalysisProducts":
@@ -311,6 +315,9 @@ class StochasticAnalysisProducts:
                 "error_mode must be stochastic_R, generated_R, or "
                 "legacy_prior_anomalies"
             )
+        if forecast.size:
+            self.max_abs_anomaly = max(self.max_abs_anomaly, float(np.abs(yprime).max()))
+            self.max_abs_forecast = max(self.max_abs_forecast, float(np.abs(forecast).max()))
         factor = yprime + eta
         self.cross += yprime.T @ factor
         self.gram += factor.T @ factor
@@ -326,10 +333,46 @@ class StochasticAnalysisProducts:
             communicator.Allreduce(local, target)
             reduced_arrays.append(target)
         row_counts = communicator.allgather(int(self.observation_rows))
+        extremes = communicator.allgather(
+            (float(self.max_abs_anomaly), float(self.max_abs_forecast))
+        )
         return StochasticAnalysisProducts(
             *reduced_arrays,
             observation_rows=sum(int(value) for value in row_counts),
+            max_abs_anomaly=max(value[0] for value in extremes),
+            max_abs_forecast=max(value[1] for value in extremes),
         )
+
+
+def collapsed_spread_message(
+    products: StochasticAnalysisProducts,
+    *,
+    relative_tolerance: float = 1e-8,
+) -> str | None:
+    """Describe why an analysis must be refused, or return ``None``.
+
+    The stochastic transform regresses innovations onto the forecast
+    observation anomalies with a pseudo-inverse whose cutoff is relative to
+    the largest anomaly eigenvalue. When the members are identical up to
+    round-off, that cutoff keeps the round-off directions and the update is
+    innovation / round-off. Refuse instead: the ensemble carries no
+    observed-space spread to assimilate with.
+    """
+
+    if products.observation_rows <= 0:
+        return None
+    if products.max_abs_anomaly > float(relative_tolerance) * products.max_abs_forecast:
+        return None
+    return (
+        "ensemble spread in observation space has collapsed: "
+        f"max |forecast anomaly| = {products.max_abs_anomaly:.3e} for forecast "
+        f"values up to {products.max_abs_forecast:.3e} over "
+        f"{products.observation_rows} observations (relative tolerance "
+        f"{float(relative_tolerance):.1e}). The members are identical up to "
+        "round-off, so the analysis would divide innovations by round-off. "
+        "Give the ensemble a spread source (initial perturbation or process "
+        "noise) before assimilating."
+    )
 
 
 def ensemble_transform_from_products(

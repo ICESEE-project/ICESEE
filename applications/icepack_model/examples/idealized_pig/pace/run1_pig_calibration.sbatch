@@ -1,49 +1,5 @@
 #!/bin/bash
-# ==============================================================================
-# PACE RUN 1 -- real Idealized PIG Mode-3 calibration run (2026-09-28 PACE
-# calibration prep, revised after the nt-formula fix). Exercises the REAL
-# reconciled Idealized PIG physics and the full Mode-3 mechanics
-# (P_model>1, rounds>1, HDF5 member-major store, store-streaming analysis)
-# at a deliberately shortened duration -- production's own timestep size
-# (timesteps_per_year=0.05) is kept unchanged (a coarser dt was found to
-# make Icepack's nonlinear solver diverge -- see the calibration-history
-# note below), only num_years and the observation window are shortened.
-#
-# This is a CALIBRATION run, never the production 82-year science
-# configuration. params.yaml on disk is NEVER modified.
-#
-# Two kinds of deviation from production, for two different reasons:
-#   1) Nens/model_nprocs/execution_mode/use_member_streaming/
-#      use_store_streaming_analysis/member_store_backend/member_store_root/
-#      data_path -- ordinary --key=value CLI overrides (config/
-#      _utility_imports.py's apply_generic_cli_overrides). These apply
-#      correctly and immediately.
-#   2) num_years/obs_start_time/obs_max_time -- NOT overridden via CLI.
-#      config/_utility_imports.py computes its own internal nt/t/
-#      obs_index ONCE from the YAML file's modeling-parameters/
-#      enkf-parameters sections, before any --key=value override is
-#      applied -- confirmed directly that overriding these five specific
-#      keys via CLI does not recompute the schedule, so a CLI override
-#      would silently keep using production's own 82-year schedule
-#      instead of a calibration one. Using a whole separate YAML file
-#      (params_calibration.yaml, --force-params) makes num_years/nt/t/
-#      obs_index self-consistent for this shortened run instead.
-#
-# Calibration-history note: an earlier version of this file used
-# timesteps_per_year=1.0 (chosen only to dodge what was, at the time, an
-# unfixed observation-schedule bug) -- Icepack's nonlinear velocity solve
-# diverged (DIVERGED_MAX_IT) at that coarse a timestep. That bug is now
-# fixed (see params_calibration.yaml's own header and
-# test_observation_schedule_uses_correct_nt_convention.py), so this
-# version keeps production's real dt=0.05 and gets a genuine, normally-
-# configured, mid-run analysis event (year 1 of 2, timestep 20 of 40) via
-# params_calibration.yaml -- not a t=0 workaround.
-#
-# Environment/SLURM pattern reused from ../run_icesee_spack.sh /
-# ../run_icesee_spack.sbatch (this repo's own known-working idealized_pig
-# launcher) -- not invented here.
-#
-# ==== STUDENT-EDITABLE (only these) ====
+# Short native PIG calibration using params_calibration.yaml.
 #SBATCH -J icesee-run1-pig-calib
 #SBATCH -A gts-arobel3-atlas          # ACCOUNT
 #SBATCH -p inferno                    # PARTITION/QOS
@@ -56,13 +12,10 @@
 #SBATCH -o run1-calib-%j.out
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=CHANGE_ME@gatech.edu
-# ==== END STUDENT-EDITABLE ====
 
 set -euo pipefail
 
-# Anchor every path off THIS SCRIPT's own location, never off
-# $SLURM_SUBMIT_DIR (which depends on where the student happened to run
-# `sbatch` from and should not matter).
+# Resolve the example directory from this script path.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IDEALIZED_PIG_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$IDEALIZED_PIG_DIR"

@@ -18,7 +18,7 @@ from scipy.stats import multivariate_normal
 # src_dir = os.path.join(project_root, 'src', 'parallelization')
 # sys.path.insert(0, src_dir)
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
-from ICESEE.config._utility_imports import icesee_get_index
+from ICESEE.src.utils.tools import icesee_get_index
 from ICESEE.src.run_model_da._error_generation import generate_enkf_field
 from ICESEE.src.utils.random_streams import process_noise_seed
 
@@ -133,7 +133,7 @@ class EnsembleKalmanFilter:
                 old_rng_state = np.random.get_state()
                 try:
                     for ii, sig in enumerate(icesee_kwargs["sig_Q"]):
-                        if ii <=icesee_kwargs["num_state_vars"]:
+                        if ii < icesee_kwargs["num_state_vars"]:
                             for jj, key in enumerate(icesee_kwargs['vec_inputs']):
                                 if ii == jj:
                                     seed = process_noise_seed(base_seed, k, ens, ii)
@@ -436,9 +436,13 @@ class EnsembleKalmanFilter:
         virtual_observations  = np.zeros((m,Nens))
         ensemble_analysis     = np.zeros_like(ensemble)
 
+        # Factor the common observation covariance once for the whole ensemble.
+        # The row-major draw order matches one rvs call per member.
+        perturbations = np.asarray(multivariate_normal.rvs(
+            mean=np.zeros(m), cov=self.Cov_obs, size=Nens
+        )).reshape(Nens, m)
         for ens in range(Nens):
-            # Generate virtual observations
-            virtual_observations[:,ens] =  self.Observation_vec+ multivariate_normal.rvs(mean=np.zeros(m), cov=self.Cov_obs)
+            virtual_observations[:,ens] = self.Observation_vec + perturbations[ens]
             # Compute the analysis step
             ensemble_analysis[:,ens] = ensemble[:,ens] + KalGain @ (virtual_observations[:,ens] - self.Observation_function(ensemble[:,ens]))
 

@@ -120,34 +120,8 @@ def test_execution_mode_4_is_rejected():
         icesee_model_data_assimilation(execution_mode=4, model_name="anything")
 
 
-# --- Stage 4D.3 production bootstrap fix: self-healing mode-3 registration ---
-#
-# A real production run reached "Execution mode 3: spatially distributed
-# (application-specific)" and then failed with "Currently registered
-# models: none" even though idealized_pig's own mode3_runner.py (which
-# registers "icepack" as a module-level side effect of being imported)
-# exists and is unmodified. Root cause could not be reproduced exactly in
-# this sandbox (a separate, unrelated Firedrake/UFL API-version crash in
-# idealized_pig's own run_da_icepack.py -- "Non-contiguous argument
-# numbers in interpolate" -- blocked the real script from ever reaching
-# the mode-3 dispatch call at all here, before mode3_runner.py's own
-# import could even matter); every import-order/import-prefix hypothesis
-# tested directly (manual import, full-bootstrap-matching import order,
-# with/without the "ICESEE." prefix) registered correctly. Given
-# registration's only failure mode that DOES reproduce is "some entry
-# point reaches icesee_model_data_assimilation without mode3_runner.py's
-# side-effect import having happened" -- exactly what these tests
-# simulate by calling the dispatcher directly, cwd'd into the real
-# example directory, without ever importing mode3_runner first -- the fix
-# is a self-healing fallback (_jit_import_mode3_runner in
-# icesee_da_distributed.py) rather than a one-off patch to a single
-# import line, so it is robust to whichever exact entry point or stale-
-# import scenario caused the original failure.
-#
-# These tests exercise the REAL application bootstrap convention (cwd +
-# model_name -> <model>_model.examples.<dir>.mode3_runner, mirroring
-# SupportedModels.call_model()'s own dynamic resolution), not a manual
-# "import mode3_runner first" shortcut.
+# Exercise model-runner discovery from the example directory when no
+# registration side-effect import has occurred before dispatch.
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -206,13 +180,17 @@ def _temporarily_unregistered(model_name):
     """
     from ICESEE.src.parallelization import distributed_mode3_registry as module
 
-    previous = module._REGISTRY.pop(model_name, None)
+    previous = {key:value for key,value in module._REGISTRY.items()
+                if key == model_name or key.startswith(model_name+"@")}
+    for key in previous:
+        del module._REGISTRY[key]
     try:
         yield
     finally:
-        module._REGISTRY.pop(model_name, None)
-        if previous is not None:
-            module._REGISTRY[model_name] = previous
+        for key in list(module._REGISTRY):
+            if key == model_name or key.startswith(model_name+"@"):
+                del module._REGISTRY[key]
+        module._REGISTRY.update(previous)
 
 
 def test_icepack_real_bootstrap_self_heals_without_a_prior_mode3_runner_import():
@@ -270,17 +248,22 @@ def test_genuinely_unsupported_model_still_fails_clearly_via_real_bootstrap():
     assert isinstance(exc, NotImplementedError)
 
 
-def test_model_with_no_mode3_runner_in_this_example_dir_still_fails_clearly():
-    # A real, supported model (icepack) run from a real example directory
-    # that has no mode3_runner.py of its own (synthetic_ice_stream) must
-    # still raise NotImplementedError, not silently pick up a different
-    # example's registration or crash differently.
-    example_dir = os.path.join(
-        _REPO_ROOT, "applications", "icepack_model", "examples", "synthetic_ice_stream",
-    )
-    from ICESEE.src.parallelization.distributed_mode3_registry import get_execution_mode_3
-
+def test_model_with_no_mode3_runner_in_this_example_dir_still_fails_clearly(tmp_path):
+    example_dir=tmp_path/"unregistered_icepack_example"
+    example_dir.mkdir()
     with _temporarily_unregistered("icepack"):
-        assert get_execution_mode_3("icepack") is None
-        exc = _real_bootstrap_registers("icepack", example_dir)
-        assert isinstance(exc, NotImplementedError)
+        exc=_real_bootstrap_registers("icepack",str(example_dir))
+        assert isinstance(exc,NotImplementedError)
+
+
+def test_synthetic_example_bootstraps_its_own_native_runner():
+    pytest.importorskip("firedrake", reason="Native Icepack bootstrap requires Firedrake")
+    pytest.importorskip("icepack", reason="Native Icepack bootstrap requires Icepack")
+    example_dir=os.path.join(_REPO_ROOT,"applications","icepack_model","examples","synthetic_ice_stream")
+    from ICESEE.src.parallelization.distributed_mode3_registry import get_execution_mode_3
+    with _temporarily_unregistered("icepack"):
+        exc=_real_bootstrap_registers("icepack",example_dir)
+        assert not isinstance(exc,NotImplementedError)
+        registration=get_execution_mode_3("icepack",application="synthetic_ice_stream")
+        assert registration is not None, f"Native runner import failed: {exc!r}"
+        assert registration.application=="synthetic_ice_stream"

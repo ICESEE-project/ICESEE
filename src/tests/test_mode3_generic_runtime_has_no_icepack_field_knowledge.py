@@ -1,19 +1,4 @@
-# ==============================================================================
-# @des: Architectural regression test (2026-09-28 reconciliation, item 2):
-# the generic Mode-3 execution infrastructure -- distributed runtime,
-# streaming runtime, member stores, scheduling/registry, projections --
-# must never encode knowledge of any specific application's field names,
-# state-vector bookkeeping flags, or physics. That knowledge belongs
-# exclusively to the application's own adapter (e.g. applications/
-# icepack_model/examples/idealized_pig/_icepack_native.py for Icepack).
-#
-# This is a plain source scan, not a behavioral test: it fails loudly (and
-# names the offending file/line) the moment any generic runtime module
-# starts referencing an Icepack-specific field name or bookkeeping flag,
-# which is exactly the class of abstraction leak this reconciliation fixed
-# in _icepack_native.py (a `joint_estimation`-keyed predicate that should
-# have been driven by the already-generic `vec_inputs` instead).
-# ==============================================================================
+# Keep model-specific field names out of generic native runtime modules.
 from __future__ import annotations
 
 from pathlib import Path
@@ -32,12 +17,7 @@ _GENERIC_RUNTIME_FILES = sorted(
     p for p in _PARALLELIZATION_DIR.glob("distributed_*.py")
 ) + [_PARALLELIZATION_DIR / "mode3_projections.py"]
 
-# Field names / bookkeeping flags that are legitimately known ONLY to a
-# specific application's own adapter file -- never to generic execution
-# infrastructure. This list is Icepack-focused (the application this
-# reconciliation touched) but the test's shape generalizes to any
-# application: if a future app's adapter needs a new field name, that
-# name must never appear in these generic files either.
+# Field names belong to application adapters, not generic execution modules.
 _FORBIDDEN_SUBSTRINGS = (
     "basal_melt_field",
     "joint_estimation",

@@ -175,7 +175,7 @@ def test_discovery_selects_highest_valid_committed_checkpoint(tmp_path):
 
 
 def test_discovery_ignores_incomplete_staging_transaction(tmp_path):
-    # The student's failure: 525 committed, 526 died in staging (ENOSPC).
+    # Checkpoint 525 is committed; checkpoint 526 fails during staging (ENOSPC).
     steps = tmp_path / "steps"
     _write_legacy(steps, 525, did_analysis=False)
     _leave_interrupted_transaction(steps, 526)
@@ -244,7 +244,7 @@ def test_discovery_rejects_wrong_run_and_ensemble_size(tmp_path):
 # --- 5-8: resume semantics ----------------------------------------------------
 
 def test_resume_continues_after_completed_step_with_correct_time_and_analyses(tmp_path):
-    # Student-like schedule: nt=600, dt=0.05, analyses every 20 steps from 200.
+    # Long-run schedule: nt=600, dt=0.05, analyses every 20 steps from 200.
     nt = 600
     t = np.linspace(0, 30, nt + 1)
     analysis = list(range(200, 600, 20))
@@ -429,7 +429,7 @@ def test_checkpoint_every_writes_interval_and_final_step(tmp_path):
 
 
 def test_retention_never_deletes_pre_retention_checkpoints(tmp_path):
-    # Resuming the student's run must not delete her existing history.
+    # Resume must preserve existing history.
     steps = _legacy_history(tmp_path, upto=5, analysis_steps=set())
     manager = _manager(tmp_path, nt=12, analysis_steps=[])
     plan = manager.prepare_resume()
