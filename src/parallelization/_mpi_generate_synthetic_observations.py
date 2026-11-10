@@ -11,6 +11,7 @@ import gc
 from mpi4py import MPI
 
 from ICESEE.src.utils.utils import UtilsFunctions
+from ICESEE.src.utils.timestep_contract import observation_cycle_steps
 from ICESEE.src.utils.tools import icesee_get_index
 
 
@@ -97,6 +98,7 @@ def synchronize_observation_schedule(icesee_kwargs, obs_file=None):
     obs_index = np.asarray(obs_index, dtype=np.int64)
     obs_t = np.asarray(obs_t, dtype=float)
     bed_snap_cols = np.asarray(bed_snap_cols, dtype=np.int64)
+    observation_cycle_steps(obs_index, icesee_kwargs.get("nt"))
     m_obs = int(obs_index.size)
     mapping = {int(step): int(col) for col, step in enumerate(obs_index)}
     icesee_kwargs.update({

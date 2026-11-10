@@ -5,11 +5,17 @@ assimilation. It includes truth generation, synthetic observations, an optional
 unassimilated reference trajectory, ensemble forecasts, assimilation, flowline
 diagnostics and restart checkpoints.
 
-The runtime fixes described here are on `features_debug`, verified at
-`6e54239b9c551f82c8d15defaa050cf0bbf3219d` on 9 November 2026. Do not assume
-an older `main`, installation directory or notebook uses that code. Select and
-record the scientific checkout explicitly. This guide concerns this example;
-other model adapters have their own mode and dependency requirements.
+The runtime and output changes described here are on `features_debug`. The
+completed full-history PACE case used `da6f9dde` on 9 November 2026; the recovery
+extension is tested separately below. Record the exact source revision for each
+run. Do not assume an older `main`, installation directory or notebook uses the
+same code. Other adapters have their own mode and dependency requirements.
+
+Initialization and observation scheduling now use a shared state-column clock.
+The initial state is saved without an extra forecast, and observations and
+configured process noise are aligned with their actual model times. See
+[time grid, observations and restart](#time-grid-observations-and-restart) for
+validation, supported boundaries and updating older runs.
 
 ## 1. Choose the source and retain your working environment
 
@@ -258,33 +264,67 @@ ranks. Strong scaling holds `Nens`, mesh and scientific settings fixed.
 
 ## 6. Submit a fresh PACE run
 
-Run from this example directory with the roots exported as in section 2.
-A fresh output target must not exist, including as a symlink.
+Submit directly from `applications/icepack_model/examples/idealized_pig` in the
+checkout you want to execute. The launcher discovers that checkout from
+`SLURM_SUBMIT_DIR`. In the source-only layout it reuses the sibling
+`ICESEE-Spack` installation; explicit `ICESEE_SOURCE_ROOT` and
+`ICESEE_SPACK_ROOT` exports take precedence.
 
-The common launcher defaults to 32 members, two nodes, eight ranks per node,
-two spatial ranks per group, 96 GB per node and a two-hour cap:
+The default allocation is 24 members, one node, eight MPI ranks, two spatial
+ranks per group, 48 GB and a two-hour cap:
 
 ```bash
-export ICESEE_DATA_PATH="$PWD/_modelrun_datasets_trial01"
+cd "$HOME/r-arobel3-0/ICESEE-Spack-source/ICESEE/applications/icepack_model/examples/idealized_pig"
 sbatch run_idealized_1.sbatch
 ```
 
-The 24-member, eight-rank reference allocation is:
+The default result directory is this example's `_modelrun_datasets`. It must
+not already exist, including as a symlink. Keep completed results and select a
+new path for each additional run:
 
 ```bash
-export ICESEE_DATA_PATH="$PWD/_modelrun_datasets_24members_trial01"
-sbatch pace/validate_mode3_24.sbatch
+export ICESEE_DATA_PATH="$PWD/_modelrun_datasets_trial02"
+sbatch run_idealized_1.sbatch
 ```
 
-Both run five years with `dt=0.05`, observations at years 2/3/4 and requested
-profiles at years 0/2/3/4. Check account/partition access and override scheduler
-options for your allocation. Do not copy another user's email directives.
+The parameter file is selected in this order: explicit `ICESEE_PARAMS_FILE`,
+`$HOME/r-arobel3-0/ICESEE-run-configs/idealized_pig.yaml` in the standard lab
+layout (beside the two installation directories), then this example's tracked
+`params.yaml`. The launcher prints the selected paths and saves a copy of the
+parameters in `pace_runs/mode3-JOBID/params.yaml`. To select another configuration:
 
-For a personal `-F` configuration, copy the launcher outside the repository,
-then add `--force-params=/absolute/path/to/idealized_pig.yaml` to its `ARGS`
-array. Preserve its allocation checks, output guards, exact launch arguments
-and exit reporting. The common launcher does not forward arbitrary positional
-arguments; appending `-F` after `sbatch run_idealized_1.sbatch` is insufficient.
+```bash
+export ICESEE_PARAMS_FILE="$HOME/r-arobel3-0/ICESEE-run-configs/idealized_pig.yaml"
+sbatch run_idealized_1.sbatch
+```
+
+The launcher passes that file through `--force-params`; editing the tracked
+script or copying it elsewhere is unnecessary. Arguments after the script name
+are not forwarded to Python. Defaults are five years, `dt=0.05`, observations at
+years 2/3/4 and requested profiles at years 0/2/3/4. Select another timestep at
+submission with `ICESEE_DT`; `ICESEE_NUM_YEARS` selects duration. A changed duration
+still needs a valid observation window.
+
+```bash
+export ICESEE_DT=0.1
+export ICESEE_DATA_PATH="$PWD/_modelrun_datasets_dt01_trial01"
+sbatch run_idealized_1.sbatch
+```
+
+The launch record prints resolved forecast steps and history columns. Explicit
+launcher arguments override the YAML timestep/duration, so inspect `launch.txt`.
+
+For the two-node, 32-member allocation:
+
+```bash
+export ICESEE_NENS=32
+export ICESEE_DATA_PATH="$PWD/_modelrun_datasets_32members_trial01"
+sbatch --nodes=2 --ntasks=16 --ntasks-per-node=8 --mem=96G run_idealized_1.sbatch
+```
+
+Check account/partition access before submitting. Email notifications can be
+requested with `sbatch --mail-user=you@gatech.edu --mail-type=BEGIN,END,FAIL
+run_idealized_1.sbatch`; keep personal addresses outside tracked scripts.
 
 For a standalone MPI run on resources where you are allowed to run it:
 
@@ -361,7 +401,9 @@ DATA_DIR/
   synthetic_obs.h5
   true_nurged_states.h5
   performance.json
+  icesee_ensemble_data.h5       # published after successful full-history finalization
   _mode3_state_history/
+    reference_layout.h5        # serial-reference to native-row mapping
     initial_condition/checkpoint_00000000/
     steps/checkpoint_00000099/
       manifest.json
@@ -399,10 +441,182 @@ can still be physically unreasonable.
 
 Native member profiles are sampled after forecast advancement, before any analysis in that cycle. They are flowline forecast diagnostics, not a complete analyzed-state history. Use the committed checkpoint to inspect analyzed fields.
 
-Native Mode 3 writes rank-sharded checkpoints rather than requiring the generic
-aggregate ensemble-history file. A missing generic aggregate alone is not a
-native failure. Modes 1/2 have different output layouts; their result readers
-must match the corresponding history format.
+### Distributed checkpoints during the run, one plotting file at completion
+
+The PIG launcher and example YAML retain every native timestep. During the
+run, each rank writes its owned state rows to checkpoint shards. This avoids
+first gathering the entire ensemble onto one rank. Each committed manifest
+describes member/field ownership; keep it with all referenced shards for restart.
+
+After all cycles complete, the runner materializes **`icesee_ensemble_data.h5`**
+from those closed checkpoints. It reads bounded row chunks and one member at a
+time, computes the ensemble mean, and atomically publishes the finished file.
+A failed finalization preserves checkpoints and any previously published file;
+the run reports failure instead of publishing an incomplete aggregate. Its
+`analysis_file_io/ensemble_history_export` timer is a subset of total
+`analysis_file_io`, allowing benchmarks to separate finalization from forecasts.
+
+The combined file is standalone HDF5, with no external links to the shards:
+
+| Dataset | Shape | Content |
+|---|---|---|
+| `ensemble` | `(state, member, time)` | Initial ensemble and every completed cycle |
+| `ensemble_mean` | `(state, time)` | Member mean at each saved time |
+| `t` | `(time,)` | Physical model years |
+| `checkpoint_steps` | `(time,)` | `-1` for the initial state, then zero-based cycle indices |
+| `analysis_applied` | `(time,)` | Whether that cycle included an analysis update |
+
+Rows are reordered into the **serial reference numbering used by truth and
+observations**. Native MPI row numbers alone are not guaranteed to identify the
+same physical node. The coordinate-derived permutations are saved once in
+`_mode3_state_history/reference_layout.h5`; finalization refuses incompatible
+numbering, incomplete member/field ownership or missing snapshots. Initial
+thickness, forcing, random streams and filtering/solver settings are not altered
+by this storage path.
+
+The aggregate includes the updated ensemble on analysis cycles. It does not
+add a separately saved pre-analysis ensemble at the same time. Flowline files
+remain forecast diagnostics sampled at their requested years.
+
+Older completed runs made with rolling retention may have only the initial
+checkpoint and the newest two steps, and no aggregate file. Changing readers
+cannot recreate their pruned snapshots. The full-history behavior applies to
+new runs made with the updated launcher/configuration.
+
+### Time columns follow the chosen timestep
+
+The exporter reads the resolved `nt` and physical `model_time` values from
+checkpoint manifests. It does not hard-code 100 cycles or 101 columns. For this
+PIG driver, requested duration `T` and user-selected `dt` resolve to
+`K = int(round(T / dt))` cycles, `K + 1` columns including the initial state,
+and `t[j] = j * dt`. Final checkpoint index is `K - 1`.
+
+| Five-year example | Forecast cycles | Time columns |
+|---|---|---|
+| `dt=0.1` | 50 | 51 |
+| `dt=0.05` | 100 | 101 |
+| `dt=0.025` | 200 | 201 |
+
+If `T / dt` is not an integer, the driver's rounded cycle count means the
+actual final time is `K * dt`. The file preserves that actual time grid; it does
+not stretch the labels to end at the requested duration. Check the launch
+schedule when choosing such values. `ICESEE_DT=0.1 sbatch run_idealized_1.sbatch`
+selects the first example without editing the script.
+
+### Does `checkpoint_00000099` contain every timestep?
+
+**No. Each checkpoint contains one ensemble snapshot.** Its shards partition
+that snapshot across ranks; they are not different times or necessarily one
+file per member. The final aggregate is what combines snapshots over time.
+
+For a run starting at year zero, five years with `dt=0.05` means 100 cycles:
+
+| Location under `_mode3_state_history/` | Snapshot time | Aggregate time column |
+|---|---|---|
+| `initial_condition/checkpoint_00000000/` | 0 years, before forecasting | 0 |
+| `steps/checkpoint_00000000/` | 0.05 years, after cycle 0 | 1 |
+| `steps/checkpoint_00000098/` | 4.95 years | 99 |
+| `steps/checkpoint_00000099/` | 5.0 years, final state | 100 |
+
+The initial and step checkpoint zero have different meanings and live in
+separate directories. With all cycles retained, the combined file has **101
+columns: the initial state plus 100 completed steps**. The final manifest has
+`timestep=99`, `metadata.next_step=100`, `metadata.nt=100` and
+`metadata.model_time=5.0`. `analysis_events_completed=3` is a cumulative count;
+it does not mean that three earlier states are inside checkpoint 99.
+
+Consult each manifest for other run lengths. To list retained snapshots without
+opening their state shards:
+
+```bash
+python - "$ICESEE_DATA_PATH" <<'PYTHON'
+from pathlib import Path
+import json, sys
+root = Path(sys.argv[1]) / '_mode3_state_history' / 'steps'
+for path in sorted(root.glob('checkpoint_*/manifest.json')):
+    manifest = json.loads(path.read_text())
+    metadata = manifest.get('metadata', {})
+    print(path.parent.name, 'complete=', manifest.get('complete'),
+          'time=', metadata.get('model_time'),
+          'next_step=', metadata.get('next_step'), 'nt=', metadata.get('nt'))
+PYTHON
+```
+
+### Full-history settings and recovery of finalization
+
+The PIG launcher passes `--checkpoint_every=1 --checkpoint_keep_last=0
+--mode3_export_ensemble_history=True`; the example YAML has the same defaults.
+No extra Mode-3 opt-in is needed. Other native applications keep their own
+checkpoint policies. Enabling this exporter requires both writing every cycle
+and keeping every checkpoint; incompatible retention is rejected before model
+setup. `mode3_export_row_chunk_size` bounds the number of reference rows in a
+finalization buffer (default 8192).
+
+Keep the checkpoint tree for restart. The standalone aggregate can be copied or
+downloaded by itself for plotting. Retaining both duplicates state payload on
+disk: for 270615 state rows, 24 members, float64 and 101 times, raw checkpoint
+state is about 5.25 GB, the aggregate ensemble about 5.25 GB and its mean about
+0.22 GB, before HDF5/metadata overhead. This is a size calculation, not measured
+throughput or a new scaling benchmark. The earlier measured PACE cases below
+predate full-history finalization; they do not establish its production-scale
+I/O time. Export tests cover reordered/split fields, complete time coverage,
+atomic failure, standalone reads and collective error handling.
+
+If all checkpoints and `reference_layout.h5` exist but finalization was
+interrupted, rerun only the export in an environment permitted for that I/O:
+
+```bash
+python -m ICESEE.src.parallelization.distributed_history_export   /absolute/path/to/completed-data --row-chunk-size=8192
+```
+
+The default command requires the complete requested history. For a failed or
+interrupted simulation, stop its processes first, then export the committed
+prefix without rerunning the model:
+
+```bash
+python "$ICESEE_SOURCE_ROOT/src/parallelization/distributed_history_export.py" \
+  /absolute/path/to/failed-data --allow-partial
+```
+
+Run this in the existing Python environment with NumPy and h5py; it does not
+initialize MPI or import Firedrake. The output contains the initial ensemble
+and every consecutive committed cycle through the last available checkpoint.
+An uncommitted trailing checkpoint is ignored. Missing middle snapshots,
+incompatible row numbering, missing shards and nonfinite fields are errors;
+recovery never fabricates missing time columns. Old pruned archives cannot be
+reconstructed.
+
+The common batch script attempts this recovery automatically **after `srun`
+returns a nonzero status**. It records `finalizer.log` and
+`finalizer-exit-status` beside the original logs. The job and `exit-status`
+retain the original simulation failure even when recovery succeeds. A hard
+node failure, forced termination or exhausted allocation may prevent that
+recovery process from running; use the standalone command afterward in an
+environment permitted for its I/O and memory use. For manual `mpirun` launches,
+run the standalone command after the failed MPI processes have exited.
+
+Partial output uses the same dataset names and serial-reference row order as
+a complete history. Read `t` for its actual available time columns. Attributes
+`history_status="partial"`, `complete=False`, `export_complete=True`,
+`requested_steps`, `completed_steps`, `last_completed_step` and
+`last_model_time` describe its extent. `simulation_exit_code` is recorded by
+batch recovery when available. Here `export_complete` describes a finished
+file export; it does not say that the simulation succeeded. If all cycles
+were saved before a later error, `complete=True` can coexist with a nonzero
+simulation exit code.
+
+Partial recovery refuses to replace a complete, unrelated or longer published
+history. Use `--output /absolute/path/to/recovered-history.h5` for a separate
+file when necessary. A later successful full export can replace a partial
+file atomically. The checkpoint tree and previous published file are preserved
+if export fails. The common `sbatch` script does not forward arbitrary trailing
+Python flags.
+
+The notebook and `load_da_outputs` accept finalized partial histories and
+restrict their time axes and observation columns to the available prefix.
+End-of-run summary metadata is optional for native exports; the initial
+checkpoint records the observation plan. A missing optional background
+trajectory is reported and shown as unavailable, not replaced with zeros.
 
 ## 9. Resume without destroying output
 
@@ -428,20 +642,50 @@ resource binding and provenance, with an existing-data check appropriate for
 resume. **Do not reuse the common fresh-run launcher unchanged:** it correctly
 refuses an existing data target. Do not remove its guards for routine fresh runs.
 
-Default native policy writes every step and retains the newest two step
-checkpoints plus the initial checkpoint. `checkpoint_keep_last=0` retains all;
-`checkpoint_keep_analysis` optionally retains analysis steps. These settings
-affect storage and restart availability. Do not delete old checkpoints until a
-new one has committed. Arbitrary mesh/topology migration is not established by
+The generic native policy can retain only the newest two step checkpoints;
+the PIG plotting workflow instead sets `checkpoint_every=1` and
+`checkpoint_keep_last=0` to retain the full history. Do not enable aggregate
+export for an older rolling archive with missing times. These settings affect
+storage and restart availability. Arbitrary mesh/topology migration is not established by
 the short same-topology restart test.
 
 ## 10. Plot and compare runs
 
-Use the `read_results.ipynb` data-path settings for the run you actually launched;
-check its expected history format before opening native results. For portable
+Use the data path for the run you actually launched. New native aggregate output
+has the familiar `ensemble`/`ensemble_mean` datasets. Load only the requested
+rows/times rather than copying the entire ensemble history into memory. For portable
 flowline plots, h5py/NumPy/Matplotlib can read `h_profiles`, `s_profiles`,
 `distances`, `bed_values`, `profile_times` and `written_steps` directly without
 loading Firedrake or a full spin-up history.
+
+For a complete ensemble time series at one serial-reference state row:
+
+```python
+from pathlib import Path
+import h5py
+import matplotlib.pyplot as plt
+
+data = Path("/absolute/path/to/completed-data")
+row = 0  # Choose the desired row within the documented state blocks.
+with h5py.File(data / "icesee_ensemble_data.h5", "r") as f:
+    if not f.attrs.get("export_complete", f.attrs.get("complete", False)):
+        raise ValueError("Ensemble history export did not finish")
+    if not f.attrs.get("complete", False):
+        print("Partial history through", f.attrs["last_model_time"], "years")
+    t = f["t"][:]
+    members = f["ensemble"][row, :, :].T
+    mean = f["ensemble_mean"][row, :]
+    analysis = f["analysis_applied"][:]
+plt.plot(t, members, color="gray", alpha=0.3)
+plt.plot(t, mean, color="blue", label="Ensemble mean")
+plt.scatter(t[analysis], mean[analysis], label="Analysis cycles")
+plt.xlabel("Time (years)")
+plt.legend()
+```
+
+The existing notebook's ensemble-loading cells can use those same dataset names.
+Mesh-map cells must use the actual PIG mesh and compatible row ordering; a
+rectangular template mesh is not evidence of a correct physical map.
 
 The standalone comparison utility needs NumPy, h5py and Matplotlib, not
 Firedrake. Run it on **completed** native outputs:
@@ -540,3 +784,142 @@ cache locations, scheduler and process exits, last committed checkpoint,
 relevant log/traceback, profile metadata and field extrema. Remove credentials
 and private input contents. Preserve the failing run; do not clear HDF5
 consistency flags or overwrite outputs to make a reader proceed.
+
+
+## Time grid, observations and restart
+
+The initial physical model fields are copied without advancing the forecast.
+Column zero therefore represents the initial state at `t[0]`. The existing
+configured generic initial perturbations are separate from this correction;
+native PIG initial physical fields remain unperturbed.
+
+Forecast cycle `k` advances from `t[k]` to `t[k+1]`. An observation indexed by
+state column `j` is used after cycle `j-1`. Modes 1–3 apply configured observation-scheduled
+process noise at that same boundary, before analysis. The analyzed
+state is saved in column `j`. With `dt=0.05`, observations at years 2, 3 and 4
+therefore update state columns 40, 60 and 80, rather than 41, 61 and 81. Base seeds, member identities and coordinate
+keying are unchanged. Moving a noise event to its correct cycle changes its
+timestep-keyed draw, so corrected runs are not bitwise replicas of old-clock
+trajectories.
+`analysis_applied` marks these columns in native full-history output. Completed
+analysis logs record both the state and observation columns and model time.
+
+Observations at the final simulated state are supported. Initial-time
+observations (`obs_index=0`) require a pre-forecast analysis stage, which is not
+implemented; choose observation times strictly after `t[0]`. A time-zero
+physical initial state and a time-zero observation are distinct concepts.
+
+New runs record `time_grid_contract.json` (`state-columns-v2`). Native run and
+noise identities, and generic checkpoint metadata, also distinguish the new
+clock. Preserve existing output and choose a fresh `data_path` when upgrading:
+older state cannot be silently resumed under the corrected schedule. Different
+time grids are rejected on reuse. Previously saved files remain readable and
+are not relabelled or repaired by export. A restart consumes observations
+already included in the checkpoint and replays the configured stochastic
+history before the next due event.
+
+### Historical timing findings
+
+Full-history job 15384953 (`da6f9dde`) preserved a pre-existing initialization
+and observation offset. Its initial thickness differed from truth at zero by
+up to 40.123212 m but matched truth at 0.05 years within 1.14e-12 m. Its
+2/3/4-year observations updated states at 2.05/3.05/4.05. Those archived outputs
+remain unchanged. Exact export of their saved values did not establish correct
+scientific timing; use a fresh run with the corrected clock for new analyses.
+
+### Corrected-clock validation
+
+PACE job **15432397** completed the one-year, two-member tests in Modes 1–3,
+a four-rank noise ownership/replay check, and a native restart. All steps exited
+zero. Analyses occurred at 0.5, 0.75 and 1.0 years, including the final state.
+Restart from checkpoint 13 through 19 crossed two analysis events; its final
+relative L2 difference from the uninterrupted run was 6.57e-13 (maximum absolute
+difference 2.99e-9), within the declared `rtol=1e-9`, `atol=1e-7` checks.
+This replay used copied completed output, not an interrupted partial-profile test.
+
+The three five-year, 32-member simulations in job **15433074** also exited zero:
+
+| Execution mode | MPI ranks / ranks per model | Simulation step | Elapsed |
+| --- | --- | --- | --- |
+| 1 | 8 / 1 | 15433074.2 | 42:15 |
+| 2 | 8 / 1 | 15433074.0 | 1:38:31 |
+| 3 | 16 / 2 | 15433074.1 | 37:11 |
+
+These concurrent runs shared a two-node allocation; these times are operational
+measurements, not a controlled scaling comparison. Each output has ensemble
+shape `(270615, 32, 101)` at `dt=0.05`, three analyses at years 2/3/4
+(columns 40/60/80), and 33 finite truth/member profile files of shape `(415, 4)`
+with written times 0/2/3/4. Native output retains the initial condition and all
+100 committed forecast steps; checkpoint 99 records next step 100 and time 5.
+
+The original allocation **timed out during post-run verification**, after all
+three simulations had finished successfully and the Mode 1–2 output scans had
+passed. Verification-only job **15439331** also timed out in repeated virtual
+HDF5 reads. These allocation failures are retained in the record. A subsequent
+read-only row-slab reader reproduced every short-case check and completed the
+remaining full native field/mean/profile/manifest checks. Together those checks
+took 67.37 seconds wall time; this is reader validation, not model runtime.
+No simulation was rerun to obtain that result.
+
+All final Mode 1–2 members were compared in bounded slabs: the largest per-field
+relative L2 difference was 9.12e-13. Native initial thickness and surface exactly
+matched truth at zero; initial velocity differences were at most 9.10e-13.
+The native five-year thickness range was 29.94–4180.72 m, with final values
+30.00–4180.68 m; velocity components stayed within approximately -7013 to 1550
+in model units. Assimilation produced transient basal-melt values -0.3664 to
+20.0441, returning to 0–20 at the final state; no unreviewed clipping was added.
+These checks establish timing, output integrity and the stated restart behavior,
+not scientific accuracy. Generic and native initial perturbation paths differ,
+so the three modes are not claimed to have identical member trajectories.
+
+To reproduce the prepared cases from this example directory (requires a PACE
+allocation and existing lab inputs):
+
+```bash
+export ICESEE_SOURCE_ROOT="$(git rev-parse --show-toplevel)"
+export ICESEE_SPACK_ROOT="$HOME/r-arobel3-0/ICESEE-Spack"
+sbatch pace/test_modes_1_3_year.sbatch
+# After checking the short case:
+sbatch pace/validate_production_modes.sbatch
+```
+
+Both scripts run `tools/verify_timing_outputs.py` on their closed outputs. This
+checker targets these fixed observation/profile schedules and geometry; it is
+not a general validator for arbitrary PIG configurations.
+
+
+### Full-history output verification
+
+PACE job **15384953**, source `da6f9dde`, completed with 24 members, eight MPI
+ranks, two spatial ranks/model, five years and `dt=0.05`. Parent and all steps
+exited zero (parent 1:29:27; MPI step 1:28:54). It retained initial state and all
+100 cycles, ending at checkpoint 99/next step 100/model time 5.0 with three
+analyses and eight final shards. The standalone ensemble has shape
+`(270615,24,101)` and mean `(270615,101)`; its file size is 5,634,162,632 bytes.
+
+An independent reader compared **all 655,970,760 ensemble values** with the
+source shards in serial-reference order: every value matched exactly, as did
+all sequential-member means. All 25 truth/member profiles had finite `h`/`s`
+arrays of shape `(415,4)`, written steps `[0,40,60,80]` and profile times
+`[0,2,3,4]`. Final thickness was 30..4181.5861 m, with basal melt 0..20 in model
+units. These are historical output-integrity results from before the clock
+correction, not validation of that trajectory's time alignment.
+
+The original point-selection exporter took 2485.64 seconds in that PACE run;
+truth generation took 371.96 seconds and the forecast-loop timer 2347.68
+seconds. Phase timers are not an additive partition of the entire job. The
+revised reader uses bounded contiguous HDF5 reads instead of long point lists.
+A local Mac replay and recovery test use the same closed checkpoint archive;
+their timings are not a PACE speedup measurement. No new PDE trajectory or
+solver setting is introduced by replaying finalization.
+
+
+Recovery verification includes 132 focused checks covering HDF5 export, batch
+status propagation, output readers, runner wiring and checkpoint behavior. The
+revised full reader replayed the closed production archive in 54.72 seconds on
+a Mac, and an independent shard reader again matched every value exactly.
+A read-only 12-cycle prefix fixture exported 13 time columns through recorded
+time 0.6, with all 84,431,880 values matching the corresponding full-history
+prefix. That fixture is not a newly failed model run; separate MPI-abort tests
+exercise recovery after an actual process failure. Local replay timings do not
+measure cold-cache performance or PACE speedup.

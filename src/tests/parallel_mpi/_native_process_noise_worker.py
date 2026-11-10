@@ -48,16 +48,16 @@ with tempfile.TemporaryDirectory() as scratch:
  wrapped=policy();physical=member()
  expected=np.zeros(2*n)
  options=dict(wrapped.options,data_path=scratch,_modelrun_datasets=scratch)
- for k in (1,3):
+ for k in (0,2):
   options["k"]=k
   expected=canonical.add_member_process_noise(expected,9,options)
   wrapped.forecast_native_member(physical,k,topology=topology,icesee_kwargs=kw)
   errors+=not np.array_equal(physical.pack_owned(),expected[rows])
  saved=physical.pack_owned().copy()
- options["k"]=5
+ options["k"]=4
  expected=canonical.add_member_process_noise(expected,9,options)
  restarted=policy();restored=member(saved)
- restarted.forecast_native_member(restored,5,topology=topology,icesee_kwargs=kw)
+ restarted.forecast_native_member(restored,4,topology=topology,icesee_kwargs=kw)
  errors+=not np.array_equal(restored.pack_owned(),expected[rows])
  wrapped.close();restarted.close()
 total=world.allreduce(int(errors))

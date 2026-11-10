@@ -3,12 +3,13 @@ from pathlib import Path
 import json,sys
 import h5py,numpy as np
 first,second=map(Path,sys.argv[1:3])
+expected_analyses=int(sys.argv[3])
 a=first/"_mode3_state_history/steps/checkpoint_00000019"
 b=second/"_mode3_state_history/steps/checkpoint_00000019"
 for directory in (a,b):
  manifest=json.loads((directory/"manifest.json").read_text())
  assert manifest["complete"] and manifest["metadata"]["completed_step"]==19
- assert manifest["metadata"]["analysis_events_completed"]==2
+ assert manifest["metadata"]["analysis_events_completed"]==expected_analyses
 maxdiff=0.;normdiff=0.;normbase=0.
 for path in sorted(a.glob("shard_*.h5")):
  with h5py.File(path,"r") as f,h5py.File(b/path.name,"r") as g:

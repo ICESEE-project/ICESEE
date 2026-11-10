@@ -20,7 +20,7 @@ import h5py
 import numpy as np
 import pytest
 
-from ICESEE.src.tests._mpi_launcher import find_compatible_mpi_launcher
+from ICESEE.src.tests._mpi_launcher import find_compatible_mpi_launcher, mpi_test_command
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _LORENZ96_DIR = _REPO_ROOT / "applications" / "lorenz_model" / "examples" / "lorenz96"
@@ -90,7 +90,7 @@ def _run_mode3(tmp_path: Path, nprocs: int) -> subprocess.CompletedProcess:
     if nprocs > 1 and mpirun is None:
         pytest.skip("no compatible mpirun available in this environment")
     if nprocs > 1:
-        cmd = [mpirun, "-n", str(nprocs), sys.executable, str(_RUN_SCRIPT), "-F", str(params_path)]
+        cmd = mpi_test_command(mpirun, nprocs) + [sys.executable, str(_RUN_SCRIPT), "-F", str(params_path)]
     else:
         cmd = [sys.executable, str(_RUN_SCRIPT), "-F", str(params_path)]
 

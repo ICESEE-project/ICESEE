@@ -10,14 +10,31 @@ SCRIPT = (Path(__file__).resolve().parents[2] /
           "applications/icepack_model/examples/idealized_pig/run_idealized_1.sbatch")
 
 
-def _run(tmp_path, *, counts=None, existing=False, step_exit=0):
-    source = tmp_path / "scientific source" / "ICESEE"
+def _run(tmp_path, *, counts=None, existing=False, step_exit=0, finalizer_exit=0, discover=False, local_params=False):
+    lab = tmp_path / "lab space"
+    source = lab / "ICESEE-Spack-source" / "ICESEE"
     pig = source / "applications/icepack_model/examples/idealized_pig"
     (pig / "pace").mkdir(parents=True)
     (pig / "pace/resolve_environment.sh").write_text(
         'ICESEE_ROOT="$ICESEE_SOURCE_ROOT"\n'
+        'SPACK_REPO="$ICESEE_SPACK_ROOT"\n'
         'PIG_DIR="$ICESEE_ROOT/applications/icepack_model/examples/idealized_pig"\n'
         'cd "$PIG_DIR"\n')
+    exporter = source / "src/parallelization/distributed_history_export.py"
+    exporter.parent.mkdir(parents=True)
+    exporter.write_text(
+        'import json, os, sys\n'
+        'with open(os.environ["FINALIZER_CAPTURE"], "w") as f: json.dump(sys.argv[1:], f)\n'
+        'sys.exit(int(os.environ["FINALIZER_EXIT"]))\n')
+    (pig / "params.yaml").write_text("science: tracked\n")
+    deps = lab / "ICESEE-Spack"
+    (deps / "scripts").mkdir(parents=True)
+    (deps / "scripts/activate.sh").write_text(":\n")
+    (deps / ".spack-env/icesee").mkdir(parents=True)
+    if local_params:
+        config = lab / "ICESEE-run-configs/idealized_pig.yaml"
+        config.parent.mkdir()
+        config.write_text("science: retained\n")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "srun").write_text(
@@ -33,11 +50,17 @@ def _run(tmp_path, *, counts=None, existing=False, step_exit=0):
         (data / "keep.txt").write_text("previous results")
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("SLURM_", "ICESEE_"))}
-    env.update(ICESEE_SOURCE_ROOT=str(source), ICESEE_SPACK_ROOT=str(tmp_path / "deps"),
+    env.update(ICESEE_SOURCE_ROOT=str(source), ICESEE_SPACK_ROOT=str(deps),
                SLURM_JOB_NUM_NODES="2", SLURM_NTASKS="16", SLURM_NTASKS_PER_NODE="8",
                SLURM_CPUS_PER_TASK="1", SLURM_JOB_ID="12345",
                PATH=str(bin_dir) + os.pathsep + env["PATH"],
-               CAPTURE=str(tmp_path / "argv.json"), STEP_EXIT=str(step_exit))
+               CAPTURE=str(tmp_path / "argv.json"), STEP_EXIT=str(step_exit),
+               FINALIZER_EXIT=str(finalizer_exit),
+               FINALIZER_CAPTURE=str(tmp_path / "finalizer-argv.json"))
+    if discover:
+        env.pop("ICESEE_SOURCE_ROOT")
+        env.pop("ICESEE_SPACK_ROOT")
+        env["SLURM_SUBMIT_DIR"] = str(pig)
     env.update(counts or {})
     result = subprocess.run(["bash", str(SCRIPT)], env=env, text=True,
                             capture_output=True, timeout=10)
@@ -45,12 +68,14 @@ def _run(tmp_path, *, counts=None, existing=False, step_exit=0):
 
 
 def test_validated_allocation_has_16_ranks_and_32_members(tmp_path):
-    result, pig, capture = _run(tmp_path)
+    result, pig, capture = _run(tmp_path, counts={"ICESEE_NENS": "32"})
     assert result.returncode == 0, result.stderr
     args = json.loads(capture.read_text())
     for expected in ("--nodes=2", "--ntasks=16", "--ntasks-per-node=8",
                      "--cpus-per-task=1", "--distribution=block:block",
                      "--execution_mode=3",
+                     "--checkpoint_every=1", "--checkpoint_keep_last=0",
+                     "--mode3_export_ensemble_history=True",
                      "--Nens=32", "--model_nprocs=2", "--save_steps=[2,3,4]",
                      "--data_path=" + str(pig / "_modelrun_datasets")):
         assert expected in args
@@ -95,3 +120,70 @@ def test_srun_failure_propagates_and_releases_launch_lock(tmp_path):
     assert result.returncode == 17
     assert (pig / "pace_runs/mode3-12345/exit-status").read_text().strip() == "17"
     assert not (pig / "_modelrun_datasets.launch-lock").exists()
+
+
+def test_direct_submission_discovers_source_dependencies_and_saved_parameters(tmp_path):
+    result, pig, capture = _run(tmp_path, discover=True, local_params=True, counts={
+        "SLURM_JOB_NUM_NODES": "1", "SLURM_NTASKS": "8",
+    })
+    assert result.returncode == 0, result.stderr
+    args = json.loads(capture.read_text())
+    config = pig.parents[5] / "ICESEE-run-configs/idealized_pig.yaml"
+    assert "--force-params=" + str(config) in args
+    assert "--Nens=24" in args
+    assert "--ntasks=8" in args
+    assert (pig / "pace_runs/mode3-12345/params.yaml").read_text() == "science: retained\n"
+    assert str(pig.parents[5] / "ICESEE-Spack") in result.stdout
+
+
+def test_explicit_parameter_file_takes_precedence(tmp_path):
+    config = tmp_path / "explicit.yaml"
+    config.write_text("science: explicit\n")
+    result, pig, capture = _run(tmp_path, local_params=True, counts={
+        "ICESEE_PARAMS_FILE": str(config),
+    })
+    assert result.returncode == 0, result.stderr
+    assert "--force-params=" + str(config) in json.loads(capture.read_text())
+    assert (pig / "pace_runs/mode3-12345/params.yaml").read_text() == config.read_text()
+
+
+def test_missing_explicit_parameters_fail_before_launch(tmp_path):
+    result, _, capture = _run(tmp_path, counts={
+        "ICESEE_PARAMS_FILE": str(tmp_path / "absent.yaml"),
+    })
+    assert result.returncode == 2
+    assert not capture.exists()
+
+
+@pytest.mark.parametrize('dt,columns', [('0.1', 51), ('0.025', 201)])
+def test_chosen_dt_reaches_driver_and_history_column_report(tmp_path, dt, columns):
+    result, _, capture = _run(tmp_path, counts={'ICESEE_DT': dt})
+    assert result.returncode == 0, result.stderr
+    assert '--dt=' + dt in json.loads(capture.read_text())
+    assert f'history_columns={columns}' in result.stdout
+
+
+@pytest.mark.parametrize('dt', ['0', '-0.1', 'nan', 'inf', 'invalid'])
+def test_invalid_dt_is_rejected_before_launch(tmp_path, dt):
+    result, _, capture = _run(tmp_path, counts={'ICESEE_DT': dt})
+    assert result.returncode == 2
+    assert not capture.exists()
+
+
+@pytest.mark.parametrize("finalizer_exit", [0, 4])
+def test_failed_step_recovers_history_without_hiding_simulation_failure(tmp_path, finalizer_exit):
+    result, pig, _ = _run(tmp_path, step_exit=17, finalizer_exit=finalizer_exit)
+    assert result.returncode == 17
+    log = pig / "pace_runs/mode3-12345"
+    assert (log / "exit-status").read_text().strip() == "17"
+    assert (log / "finalizer-exit-status").read_text().strip() == str(finalizer_exit)
+    args = json.loads((tmp_path / "finalizer-argv.json").read_text())
+    assert args == [str(pig / "_modelrun_datasets"), "--allow-partial", "--simulation-exit-code", "17"]
+    assert (log / "finalizer.log").is_file()
+
+
+def test_successful_step_does_not_run_failure_recovery(tmp_path):
+    result, pig, _ = _run(tmp_path)
+    assert result.returncode == 0
+    assert not (tmp_path / "finalizer-argv.json").exists()
+    assert not (pig / "pace_runs/mode3-12345/finalizer-exit-status").exists()

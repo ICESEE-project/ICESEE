@@ -44,7 +44,7 @@ class BedUpdateDomainTests(unittest.TestCase):
                 "t": np.array([0.0, 1.963636, 2.1818]),
                 "obs_t": np.array([2.0]),
             },
-            k=1,
+            k=0,
             km=0,
         )
         self.assertEqual(cycle_time, 2.0)
@@ -52,7 +52,7 @@ class BedUpdateDomainTests(unittest.TestCase):
 
     def test_analysis_cycle_time_falls_back_for_legacy_schedule(self):
         cycle_time, model_time = resolve_analysis_cycle_time(
-            {"t": np.array([0.0, 1.5])}, k=1, km=0
+            {"t": np.array([0.0, 1.5])}, k=0, km=0
         )
         self.assertEqual(cycle_time, 1.5)
         self.assertEqual(model_time, 1.5)

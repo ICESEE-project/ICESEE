@@ -35,9 +35,9 @@ def resolve_analysis_cycle_time(icesee_kwargs, k, km):
     nearest model indices (``obs_index``).  Controls such as
     ``inversion_start_time`` describe the observation schedule, so they must
     be evaluated against ``obs_t[km]`` rather than the slightly offset model
-    grid time ``t[k]``.  The latter is returned as well for transparent logs.
+    grid time ``t[k + 1]``.  The latter is returned as well for transparent logs.
     """
-    model_time = float(np.asarray(icesee_kwargs["t"], dtype=float)[int(k)])
+    model_time = float(np.asarray(icesee_kwargs["t"], dtype=float)[int(k) + 1])
     observation_times = np.asarray(
         icesee_kwargs.get("obs_t", []), dtype=float
     ).reshape(-1)

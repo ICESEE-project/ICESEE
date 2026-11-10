@@ -58,13 +58,16 @@ assert not target.exists()
 assert sum(p.stat().st_size for p in source.rglob("*") if p.is_file()) < 1024**3
 shutil.copytree(source,target)
 steps=target/"_mode3_state_history/steps"
-assert (steps/"checkpoint_00000014/manifest.json").is_file()
+assert (steps/"checkpoint_00000013/manifest.json").is_file()
 for directory in steps.glob("checkpoint_*"):
-    if int(directory.name.split("_")[-1])>=15:
+    if int(directory.name.split("_")[-1])>=14:
         shutil.rmtree(directory)
 PY
  srun --mpi=pmix --exact --exclusive --mem=24G -N2 -n4 --ntasks-per-node=2 --cpus-per-task=1 --hint=nomultithread --distribution=block:block --cpu-bind=cores "$PIG_DIR/pace/launch_rank.sh" "$PIG_DIR/run_da_icepack.py" --execution_mode=3 --model_nprocs=2 --Nens=2 --num_years=1 --dt=0.05 --obs_start_time=0.5 --obs_max_time=1 --freq_obs=0.25 '--save_steps=[0.5,0.75,1.0]' --checkpoint_keep_last=0 --resume_from_checkpoint=True --data_path="$RUN/mode3-resume/data" > "$RUN/mode3-resume/stdout.log" 2> "$RUN/mode3-resume/stderr.log"
- python "$ICESEE_SOURCE_ROOT/src/tests/parallel_mpi/_validate_native_resume.py" "$RUN/mode3/data" "$RUN/mode3-resume/data" > "$RUN/resume-comparison.log"
+ python "$ICESEE_SOURCE_ROOT/src/tests/parallel_mpi/_validate_native_resume.py" "$RUN/mode3/data" "$RUN/mode3-resume/data" 3 > "$RUN/resume-comparison.log"
+fi
+if [[ "$FAILED" == 0 ]]; then
+ python "$PIG_DIR/tools/verify_timing_outputs.py" "$RUN" 1 .05 2 > "$RUN/timing-verification.log" 2>&1
 fi
 printf 'Results: %s\n' "$RUN"
 exit "$FAILED"

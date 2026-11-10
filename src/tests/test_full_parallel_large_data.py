@@ -384,10 +384,12 @@ def test_process_noise_schedule_is_execution_mode_independent():
         "obs_index": [2, 5, 9],
         "number_obs_instants": 3,
     }
-    assert not process_noise_is_due(settings, 1)
-    assert process_noise_is_due(settings, 2)
-    assert not process_noise_is_due(settings, 3)
-    assert process_noise_is_due(settings, 9)
+    assert not process_noise_is_due(settings, 0)
+    assert process_noise_is_due(settings, 1)
+    assert not process_noise_is_due(settings, 2)
+    assert process_noise_is_due(settings, 4)
+    assert process_noise_is_due(settings, 8)
+    assert not process_noise_is_due(settings, 9)
     assert process_noise_is_due(
         {"process_noise_schedule": "every_step"}, 3
     )

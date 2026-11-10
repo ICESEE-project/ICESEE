@@ -19,11 +19,16 @@ Restart state is written as owned-row HDF5 shards under
 <data_path>/_mode3_state_history/, with a manifest committed after all shards.
 Initial state is in initial_condition/checkpoint_00000000; step k checkpoints
 contain state after cycle k (history column k+1). Retention and resume use
-Mode3CheckpointManager. These checkpoints differ from the generic aggregate
-ensemble-history schema; flowline diagnostics are separate HDF5 files."""
+Mode3CheckpointManager. Full-history retention can additionally materialize
+icesee_ensemble_data.h5 in serial reference numbering after the run. Flowline
+diagnostics are separate HDF5 files."""
 
 from __future__ import annotations
 
+from ICESEE.src.utils.timestep_contract import (
+    TIME_GRID_CONTRACT, observation_is_due, observation_cycle_steps, completed_observations,
+    prepare_timestep_contract, format_analysis_event,
+)
 import os
 import gc
 
@@ -60,6 +65,10 @@ from ICESEE.src.parallelization.mode3_checkpointing import (
     CheckpointPolicy,
     Mode3CheckpointManager,
     fresh_start_plan,
+)
+from ICESEE.src.parallelization.distributed_history_export import (
+    finalize_ensemble_history,
+    prepare_reference_layout,
 )
 from ICESEE.src.parallelization.distributed_mode3_registry import (
     register_execution_mode_3,
@@ -216,6 +225,13 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     model = icesee_kwargs.get("model_name")
     Nens = int(icesee_kwargs["Nens"])
     nt = int(icesee_kwargs["nt"])
+    export_history = bool(icesee_kwargs.get("mode3_export_ensemble_history", False))
+    export_rows = int(icesee_kwargs.get("mode3_export_row_chunk_size", 8192))
+    checkpoint_policy = CheckpointPolicy.from_kwargs(icesee_kwargs)
+    if export_history and (checkpoint_policy.every != 1 or checkpoint_policy.keep_last != 0):
+        raise ValueError("Mode-3 plotting history requires checkpoint_every=1 and checkpoint_keep_last=0")
+    if export_history and export_rows < 1:
+        raise ValueError("mode3_export_row_chunk_size must be positive")
 
     model_module = SupportedModels(
         model=model, verbose=icesee_kwargs.get("verbose")
@@ -234,6 +250,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
 
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
+    prepare_timestep_contract(world, _modelrun_datasets, time_grid=icesee_kwargs.get("t"))
     if world_rank == 0 and not os.path.exists(_modelrun_datasets):
         os.makedirs(_modelrun_datasets, exist_ok=True)
     trace_init("mode3 runner entered", Nens=Nens, nt=nt,
@@ -330,15 +347,15 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         {"obs_t": obs_t, "obs_index": ind_m, "number_obs_instants": m_obs, "m_obs": m_obs}
     )
 
-    run_id = str(icesee_kwargs.get("run_id", _DEFAULT_RUN_ID)) + ":native-controls-v1:" + canonical_noise_identity(icesee_kwargs)
+    run_id = str(icesee_kwargs.get("run_id", _DEFAULT_RUN_ID)) + ":time-grid-v2:native-controls-v1:" + canonical_noise_identity(icesee_kwargs)
     checkpoints = Mode3CheckpointManager(
         os.path.join(_modelrun_datasets, HISTORY_DIRNAME),
         run_id=run_id,
         topology=topology,
         number_of_members=Nens,
         nt=nt,
-        analysis_steps=[int(step) for step in np.asarray(ind_m)[:m_obs]],
-        policy=CheckpointPolicy.from_kwargs(icesee_kwargs),
+        analysis_steps=observation_cycle_steps(np.asarray(ind_m)[:m_obs], nt).tolist(),
+        policy=checkpoint_policy,
         time_grid=icesee_kwargs.get("t"),
         layout_fingerprint=native_layout_fingerprint(adapter, topology, icesee_kwargs),
     )
@@ -413,6 +430,12 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         topology.spatial_comm,
         global_nodes,
     )
+    if export_history:
+        prepare_reference_layout(
+            world, checkpoints.history_root, run_id=run_id,
+            layout_id=pool.layout.layout_id,
+            row_maps={block.name: reference_to_layout for block in pool.layout.blocks},
+        )
     # Apply the same configured forecast noise as modes 1/2, at the native
     # model boundary. Initial thickness remains unperturbed. Noise is keyed
     # in serial reference numbering, then scattered to physical owned rows.
@@ -479,7 +502,12 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         _initial_snapshot = pool.snapshot_owned()
         _t = MPI.Wtime()
         checkpoints.write_initial(
-            _initial_snapshot, extra={"description": "initial (pre-forecast) ensemble"}
+            _initial_snapshot, extra={
+                "description": "initial (pre-forecast) ensemble",
+                "observation_columns": np.asarray(ind_m, dtype=int).tolist(),
+                "observation_max_time": float(icesee_kwargs["obs_max_time"]),
+                "execution_flag": int(icesee_kwargs["execution_flag"]),
+            }
         )
         init_file_time = MPI.Wtime() - _t
         _record_checkpoint(_initial_snapshot, init_file_time)
@@ -488,7 +516,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     analyses_this_run = 0
 
     for k in range(plan.start_step, nt):
-        do_analysis = bool(km < m_obs and k == ind_m[km])
+        do_analysis = observation_is_due(k, km, ind_m[:m_obs])
         batches = []
         if do_analysis:
             # `d`/`sigma`/`eta` are computed over the FULL, world-identical
@@ -546,6 +574,8 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         if icesee_kwargs.get("verbose") and world_rank == 0:
             print(f"[ICESEE] mode3 forecast step {k}: wall={_step_wall:.4f}s did_analysis={do_analysis}", flush=True)
         if do_analysis:
+            if world_rank == 0:
+                print(format_analysis_event(k, km, icesee_kwargs), flush=True)
             km += 1
             analyses_this_run += 1
 
@@ -567,6 +597,14 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
             _record_checkpoint(result.local_analysis, _checkpoint_s)
 
     world.Barrier()
+
+    history_export_time = 0.0
+    if export_history:
+        _t = MPI.Wtime()
+        with traced_init("native ensemble history finalization"):
+            finalize_ensemble_history(world, _modelrun_datasets, row_chunk_size=export_rows)
+        if world_rank == 0:
+            history_export_time = MPI.Wtime() - _t
 
     # Inactive-member store I/O stats (Gate 11) and cleanup (Gate 3):
     # every rank owns and cleans up only its OWN store file -- no
@@ -605,7 +643,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
                         break
                     _parent = os.path.dirname(_parent)
 
-    analysis_file_time = 0.0
+    analysis_file_time = history_export_time
     if world_rank == 0:
         Lx = icesee_kwargs.get("Lx", 1.0)
         Ly = icesee_kwargs.get("Ly", 1.0)
@@ -626,7 +664,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
             obs_index=icesee_kwargs["obs_index"],
             run_mode=np.array([icesee_kwargs["execution_flag"]]),
         )
-        analysis_file_time = MPI.Wtime() - _t
+        analysis_file_time += MPI.Wtime() - _t
 
     # ─────────────────────────────────────────────────────────────
     #  End Timer and Aggregate Elapsed Time Across Ranks
@@ -642,6 +680,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         checkpoints=checkpoint_io["writes"],
         checkpoint_policy=checkpoints.policy.describe(),
         checkpoints_pruned=len(checkpoints.pruned),
+        ensemble_history_export=export_history,
         resumed_from_step=plan.completed_step if plan.resumed else None,
         member_store_backend=icesee_kwargs.get("member_store_backend", "memory"),
         store_streaming_analysis=bool(icesee_kwargs.get("use_store_streaming_analysis", False)),
@@ -670,6 +709,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
             "init_file_io": init_file_time,
             "forecast_file_io": time_forecast_file_writing,
             "analysis_file_io": analysis_file_time,
+            "analysis_file_io/ensemble_history_export": history_export_time,
         },
         counts={
             "forecast_step": steps_run,
@@ -678,6 +718,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
             # A resumed run restores the ensemble instead of initializing it.
             "ensemble_init": 0 if plan.resumed else 1,
             "restart_restore": 1 if plan.resumed else 0,
+            "analysis_file_io/ensemble_history_export": int(export_history and world_rank == 0),
         },
         output_dir=_modelrun_datasets,
     )
@@ -694,9 +735,8 @@ register_execution_mode_3(
         "Production mode-3 DA-cycle runner for idealized_pig using "
         "IDEALIZED_PIG_NATIVE_ADAPTER (_icepack_native.py) and "
         "src/parallelization/distributed_native_cycle.py. Per-timestep "
-        "output uses rank-sharded distributed checkpoints (no gather), not "
-        "modes 0-2's icesee_ensemble_data.h5 schema -- see this module's "
-        "docstring for the checkpoint directory layout and other "
-        "divergences."
+        "output uses rank-sharded distributed checkpoints. With full retention, "
+        "bounded finalization publishes icesee_ensemble_data.h5 in serial "
+        "reference row order for plotting."
     ),
 )

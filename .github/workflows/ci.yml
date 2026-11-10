@@ -89,6 +89,7 @@ jobs:
             --ignore=src/tests/test_enkf_readonly_analysis.py \
             --ignore=src/tests/test_lorenz_mode3_runner.py \
             --ignore=src/tests/test_mode3_large_state_benchmark.py \
+            --ignore=src/tests/test_distributed_history_export_mpi.py \
             --ignore=src/tests/test_func.py \
             --ignore=src/tests/test_icepack_checkpoint_communicator.py \
             --ignore=src/tests/test_icepack_compact_initialization.py \
@@ -174,7 +175,8 @@ jobs:
             src/tests/test_enkf_parallel_io_topology.py \
             src/tests/test_enkf_readonly_analysis.py \
             src/tests/test_lorenz_mode3_runner.py \
-            src/tests/test_mode3_large_state_benchmark.py
+            src/tests/test_mode3_large_state_benchmark.py \
+            src/tests/test_distributed_history_export_mpi.py
 
       # A skipped MPI test means no usable launcher or parallel HDF5 was found,
       # not that the behavior was verified.

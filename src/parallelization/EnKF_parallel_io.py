@@ -1472,10 +1472,9 @@ class EnKF_fully_parallel_IO:
 
     def compute_forecast_mean_chunked_v2(self, k, flag=None):
         """
-        Simple & hang-free:
-        - running sum in RAM (length = local_rows)
-        - collective dataset creation
-        - collective write with empty selection for zero-row ranks
+        Accumulate local row means and write them collectively.
+
+        Ranks with no rows participate with empty selections.
         """
         from mpi4py import MPI
         import numpy as np, h5py
@@ -1493,13 +1492,6 @@ class EnKF_fully_parallel_IO:
             local_rows = nd1 - nd0
             if local_rows < 0:
                 raise ValueError("Invalid local row bounds")
-
-            # ---- Optional per-rank Zarr cache (safe; not required) ---------------
-            # If you keep this, it's fine—just per-rank path to avoid contention.
-            # import zarr
-            # zarr.create_array(f"{self.base_path}/{self.file_prefix}_forecast_updates_{rank}.zarr",
-            #                   shape=(local_rows, self.nens),
-            #                   chunks=(min(local_rows, 1000), 1), dtype='f8', overwrite=True)
 
             # ---- Running sum while reading ensembles ------------------------------
             local_sum = np.zeros(max(local_rows, 0), dtype='f8')

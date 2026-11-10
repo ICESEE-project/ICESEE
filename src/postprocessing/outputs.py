@@ -147,6 +147,11 @@ def _read_observations(path: Path) -> np.ndarray:
     return dense
 
 
+def load_observations(path: Path | str) -> np.ndarray:
+    """Read dense or compact observations without initializing a model or MPI."""
+    return _read_observations(Path(path))
+
+
 def _read(path: Path, keys: tuple[str, ...], *, optional: tuple[str, ...] = ()) -> dict:
     import h5py
 
@@ -258,12 +263,99 @@ def find_data_dir(run_dir: Path | str, *, model_name: str, data_dir_name: str = 
     return max(found, key=lambda d: (d / name).stat().st_mtime)
 
 
+def native_history_metadata(path: Path | str, *, summary=None) -> dict:
+    """Read a materialized native history, including a committed partial export.
+
+    The available time axis comes from the aggregate. Observation identities
+    retain their original columns in synthetic_obs.h5 when the run stops early.
+    """
+    import h5py
+
+    with h5py.File(path, "r") as handle:
+        if handle.attrs.get("format") != "icesee-ensemble-history-v1":
+            raise ResultsError("incomplete", "not a materialized native history")
+        if not handle.attrs.get("export_complete", handle.attrs.get("complete", False)):
+            raise ResultsError("incomplete", "native history finalization did not complete")
+        times = np.asarray(handle["t"][:], dtype=float)
+        if (times.ndim != 1 or not times.size or not np.isfinite(times).all()
+                or np.any(np.diff(times) <= 0)
+                or handle["ensemble"].shape[2] != times.size
+                or handle["ensemble_mean"].shape[1] != times.size):
+            raise ResultsError("incomplete", "native ensemble and time dimensions disagree")
+        summary = {} if summary is None else summary
+        if "t" in summary:
+            planned_times = np.asarray(summary["t"], dtype=float)
+            if (planned_times.size < times.size
+                    or not np.allclose(planned_times[:times.size], times)):
+                raise ResultsError("incomplete", "summary and exported model times disagree")
+        if "obs_index" in summary:
+            planned = np.asarray(summary["obs_index"], dtype=int)
+        else:
+            planned = np.asarray(handle.get("planned_obs_index", []), dtype=int)
+        available = (planned >= 0) & (planned < times.size)
+        complete = bool(handle.attrs.get("complete", False))
+        requested = int(handle.attrs.get("requested_steps", times.size - 1))
+        messages = [] if complete else [
+            f"Partial history: {times.size - 1}/{requested} forecast steps; last model time {times[-1]:g}"]
+        if not summary and not handle.attrs.get("observation_schedule_available", "planned_obs_index" in handle):
+            messages.append("Observation schedule metadata is unavailable")
+        return dict(t=times, obs_index=planned[available],
+                    obs_column_indices=np.flatnonzero(available),
+                    obs_max_time=float(np.ravel(summary.get("obs_max_time", handle.attrs.get("obs_max_time", np.nan)))[0]),
+                    run_mode=int(np.ravel(summary.get("run_mode", handle.attrs.get("run_mode", 0)))[0]),
+                    complete=complete, requested_steps=requested,
+                    simulation_exit_code=handle.attrs.get("simulation_exit_code"), warnings=messages)
+
+
 def load_da_outputs(data_dir: Path | str, *, model_name: str, filter_type: str = "EnKF",
                     results_dir: Path | str | None = None) -> DAOutputs:
     """Load a run the way ``read_results.ipynb`` does (cells "true-wrong",
     "ensemble", "true/nurged states", "observations")."""
     data_dir = Path(data_dir)
     results_dir = Path(results_dir) if results_dir is not None else data_dir
+
+    aggregate = data_dir / ENSEMBLE
+    if aggregate.is_file():
+        import h5py
+
+        try:
+            with h5py.File(aggregate, "r") as handle:
+                native = handle.attrs.get("format") == "icesee-ensemble-history-v1"
+        except OSError as exc:
+            raise ResultsError("corrupt", f"{aggregate.name} could not be read ({exc})",
+                               files=(aggregate,)) from exc
+        if native:
+            summary_path = data_dir / TRUE_WRONG.format(model=model_name)
+            summary = (_read(summary_path, ("t", "obs_index", "obs_max_time", "run_mode"),
+                             optional=("Lxy", "nxy", "b_io")) if summary_path.is_file() else {})
+            meta = native_history_metadata(aggregate, summary=summary)
+            count = len(meta["t"])
+            states = _read(data_dir / STATES, ("true_state",), optional=("nurged_state",))
+            truth = states["true_state"][:, :count]
+            background = states.get("nurged_state")
+            messages = list(meta["warnings"])
+            if background is None:
+                background = np.full(truth.shape, np.nan)
+                messages.append("background trajectory was not generated")
+            else:
+                background = background[:, :count]
+            observations = _read_observations(data_dir / OBSERVATIONS)
+            columns = meta["obs_column_indices"]
+            if columns.size and columns[-1] >= observations.shape[1]:
+                raise ResultsError("incomplete", "observation schedule exceeds stored observation columns")
+            with h5py.File(aggregate, "r") as handle:
+                mean = handle["ensemble_mean"][:]
+            out = DAOutputs(
+                data_dir=data_dir, model_name=model_name, filter_type=filter_type,
+                t=meta["t"], obs_index=meta["obs_index"], obs_max_time=meta["obs_max_time"],
+                run_mode=meta["run_mode"], true_state=truth, nurged_state=background,
+                ensemble_mean=mean, observations=observations[:, columns],
+                metadata={**{key: summary[key] for key in ("Lxy", "nxy", "b_io") if key in summary},
+                          "history_complete": meta["complete"], "requested_steps": meta["requested_steps"],
+                          "simulation_exit_code": meta["simulation_exit_code"]},
+                ensemble_file=aggregate, warnings=messages)
+            _check_consistency(out)
+            return out
 
     tw = _read(data_dir / TRUE_WRONG.format(model=model_name),
                ("t", "obs_index", "obs_max_time", "run_mode"),

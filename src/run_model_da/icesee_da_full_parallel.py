@@ -7,6 +7,10 @@
 # ==============================================================================
 
 # ==== Imports ========================================================
+from ICESEE.src.utils.timestep_contract import (
+    TIME_GRID_CONTRACT, observation_is_due, observation_cycle_steps, completed_observations,
+    prepare_timestep_contract, format_analysis_event,
+)
 import os
 import sys
 import gc # garbage collector to free up memory
@@ -160,6 +164,7 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
     # --- check if the modelrun dataset directory is present ---
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
+    prepare_timestep_contract(comm_world, _modelrun_datasets, time_grid=icesee_kwargs.get("t"))
     if rank_world == 0 and not os.path.exists(_modelrun_datasets):
         # cretate the directory
         os.makedirs(_modelrun_datasets, exist_ok=True)
@@ -174,6 +179,8 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
         if rank_world == 0:
             ckpt = load_checkpoint(_modelrun_datasets)
         ckpt = comm_world.bcast(ckpt, root=0)
+        if ckpt is not None and ckpt.get("time_grid_contract") != TIME_GRID_CONTRACT:
+            raise ValueError("checkpoint uses a different time-grid contract; preserve it and start a fresh output directory")
 
     comm_world.Barrier()
     # --- file_names
@@ -186,6 +193,7 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
     # Build a reproducibility fingerprint from current config
     fp = icesee_fingerprint({
         "model_name": model,
+        "time_grid_contract": TIME_GRID_CONTRACT,
         "nd": nd,
         "nt": nt,
         "Nens": Nens,
@@ -745,7 +753,7 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
                         # if (km < m_obs) and (k+1 == tobserve[km]):
                         # if (km < m_obs) and (k == tobserve[km]):
                         obs_index = icesee_kwargs["obs_index"]
-                        if (km < icesee_kwargs["number_obs_instants"]) and (k == obs_index[km]):
+                        if observation_is_due(k, km, obs_index[:icesee_kwargs["number_obs_instants"]]):
                             # -- time global analysis step ---
                             _time_analysis_step = MPI.Wtime()
                             icesee_kwargs.update({'km': km, 'k': k})
@@ -788,6 +796,8 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
                                 time_analysis_file_writing = icesee_kwargs.get("time_analysis_file_writing", 0.0)
 
                             # update the observation index
+                            if rank_world == 0:
+                                print(format_analysis_event(k, km, icesee_kwargs), flush=True)
                             km += 1
         #
                             # --- end time analysis step ---
@@ -809,6 +819,7 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
                         # Build a minimal state; only rank 0 writes
                         if rank_world == 0:
                             ck = {
+                                "time_grid_contract": TIME_GRID_CONTRACT,
                                 "last_done_k": k,
                                 "km": int(km),
                                 "nt": int(nt),
@@ -1073,6 +1084,7 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
                 if (restart_enabled and history_mode != "rolling"
                         and cur_k is not None):
                     ck = {
+                        "time_grid_contract": TIME_GRID_CONTRACT,
                         "last_done_k": max(int(cur_k) - 1, -1),  # last fully done; conservative
                         "km": int(cur_km) if cur_km is not None else None,
                         "nt": int(icesee_kwargs.get("nt", icesee_kwargs["nt"])),

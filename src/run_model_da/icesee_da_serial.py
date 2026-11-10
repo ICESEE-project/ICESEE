@@ -6,6 +6,10 @@
 # ==============================================================================
 
 # ==== Imports ========================================================
+from ICESEE.src.utils.timestep_contract import (
+    TIME_GRID_CONTRACT, observation_is_due, observation_cycle_steps, completed_observations,
+    prepare_timestep_contract, format_analysis_event,
+)
 import os
 import sys
 import gc # garbage collector to free up memory
@@ -105,6 +109,7 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
 
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
+    prepare_timestep_contract(MPI.COMM_WORLD, _modelrun_datasets, time_grid=icesee_kwargs.get("t"))
     if rank_world == 0 and not os.path.exists(_modelrun_datasets):
         # cretate the directory
         os.makedirs(_modelrun_datasets, exist_ok=True)
@@ -387,7 +392,7 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
         ).generate_observation_schedule(**icesee_kwargs)
         icesee_kwargs.update({"number_obs_instants": m_obs, 'obs_index': ind_m})
         icesee_kwargs.update({"m_obs": m_obs, "obs_t": obs_t, "obs_index": ind_m})
-        if (km < m_obs) and (k == ind_m[km]):
+        if observation_is_due(k, km, ind_m[:m_obs]):
             _time_analysis_step = MPI.Wtime()
 
             # read the ensemble mean from file
@@ -525,6 +530,8 @@ def icesee_model_data_assimilation_serial(**icesee_kwargs):
             time_analysis_file_writing += MPI.Wtime() - _time_analysis_file_writing
 
             # update the ensemble with observations instants
+            if 0 == 0:
+                print(format_analysis_event(k, km, icesee_kwargs), flush=True)
             km += 1
 
             # inflate the ensemble

@@ -1,11 +1,10 @@
-# Execution mode 3: spatially distributed design
+# Execution mode 3: implemented architecture and retained design gates
 
 ## Status and purpose
 
-`execution_mode: 3` is a proposed large-scale execution architecture. It is not
-yet accepted by the runtime configuration. Mode 3 will distribute both ensemble
-members and each member's spatial state so that no rank must hold or reconstruct
-a complete high-dimensional member.
+At the inspected `features_debug` commit `3748e416d3a8120cc860119bd7224c6f9ad41ff7` (10 November 2026), `execution_mode: 3` is selectable through a registered native adapter. The specialized Idealized PIG runner supports native forecast, bounded analysis, checkpoints and history export; this is implemented code, not an unaccepted proposal. See the [current architecture handbook](handbook/architecture.md), [adapter guide](model-adapter.md), [operations protocol](handbook/operations.md), and [accepted decision 0006](architecture/0006-native-runtime-and-time-contract.md).
+
+This document retains design rationale and application gates. Historical future-tense passages below must not be read as a uniform support matrix. Capability, physical-memory and restart claims are adapter-specific. The PIG process-noise bridge still has a canonical global-size stochastic workspace; the tiny Lorenz adapter can gather legacy output. Bounded analysis does not establish that every allocation in every native adapter is independent of global state size.
 
 Execution mode and filter choice are orthogonal. The default mode-3 analysis
 must preserve ICESEE's existing stochastic EnKF equations, observation-factor
@@ -78,9 +77,7 @@ wrappers for native initialization, forecast, observation, and post-analysis
 finalization. Applications may additionally supply inversion and checkpoint-
 restore callbacks. Those optional capabilities are exposed only when the
 application configures them, so state-only adapters cannot accidentally claim
-hybrid or restart support. Wiring the production PIG physics callbacks and
-passing its forecast/restart/scale gates remain necessary before that
-application can select mode 3.
+hybrid or restart support. The specialized PIG runner now wires these callbacks and has recorded forecast, restart and output-integrity checks. Controlled scaling and broader scientific evaluation remain separate, uncompleted gates; direct mode-3 selection is already enabled.
 
 Hybrid adapters expose a distributed inversion callback; the inversion
 requirement is not imposed on state-only models. ICESEE snapshots locally owned
@@ -205,6 +202,30 @@ history is scientific output that is only kept when asked for. Policy keys
 | `checkpoint_keep_last` | `2` | retain the newest N step checkpoints; `0` keeps every checkpoint written |
 | `checkpoint_keep_analysis` | `false` | also keep the checkpoint of every analysis step |
 | `resume_from_checkpoint` | `false` | continue from the newest valid checkpoint in `data_path` |
+| `mode3_export_ensemble_history` | `false` | PIG runner: finalize a standalone reference-ordered `icesee_ensemble_data.h5`; requires every step retained |
+| `mode3_export_row_chunk_size` | `8192` | maximum reference rows per finalization buffer |
+
+The PIG example overrides the generic retention default: its YAML and common
+launcher use `checkpoint_every=1`, `checkpoint_keep_last=0` and enable history
+export. Each checkpoint contains one completed cycle; the final plotting file
+contains the initial state and all cycles, with `ensemble` (state/member/time),
+`ensemble_mean` (state/time) and physical time labels. Finalization reads closed
+HDF5 shards in bounded chunks and applies the stored reference/native row
+permutations. It publishes atomically, preserves restart shards and refuses
+missing timesteps rather than fabricating a full history from a rolling archive.
+Other model runners do not automatically enable this optional exporter.
+
+Standalone finalization also accepts `--allow-partial` after failed processes
+have stopped. It materializes the consecutive committed prefix, including the
+initial state, and marks requested versus available steps. `export_complete`
+means that file assembly finished; `complete` means that all requested history
+columns are present. Neither substitutes for the process exit status. A partial
+export cannot overwrite a complete or longer history, and missing middle
+snapshots remain errors. The PIG batch launcher attempts this serial recovery
+after a failed MPI step and preserves its original exit code. Hard allocation
+or node termination can prevent automatic recovery, so the same operation is
+available as a standalone NumPy/h5py command. No recovery path changes shard
+contents, checkpoint commits, model fields, RNG streams or analysis scheduling.
 
 New checkpoints record a `checkpoint_role` (`restart`, `analysis`,
 `history`, `initial`); only `restart` checkpoints are ever deleted, and
@@ -224,7 +245,7 @@ target filesystem; the warning never stops a run. With the defaults the
 footprint is three checkpoints (the initial ensemble plus the newest two),
 independent of the number of timesteps.
 
-**Resuming.** Re-run the original command unchanged except for
+**Resuming a supported adapter.** First confirm that the application implements restore (the specialized PIG runner does; the generic native application refuses unsupported resume). Re-run the original command unchanged except for
 `--resume_from_checkpoint=True`. The config loader then keeps `data_path`
 instead of cleaning it, and a resumed run reuses the original
 `true_nurged_states.h5`/`synthetic_obs.h5` when their shapes match. A run
@@ -235,7 +256,9 @@ spatial rank. Thread counts must be explicit to prevent oversubscription. Dask
 may support preprocessing and workflow scheduling, but is not part of the MPI
 collective analysis path.
 
-## Phased implementation
+## Historical phased implementation and remaining validation
+
+The list records the original staged development sequence. PIG physics callbacks are now connected and direct native dispatch is enabled. Future-tense steps below retain historical rationale; use the current handbook and ADR 0006 for present status.
 
 1. **Adapter API and topology:** add non-selectable interfaces, ownership tests,
    and communicator construction. Contiguous and segmented block contracts,
@@ -287,20 +310,16 @@ collective analysis path.
    compact snapshots, bounded state/observation chunks, ensemble-space
    products, and one minimum resident native-state copy separately. The budget
    intentionally excludes additional nonlinear-solver vectors, MPI/HDF5
-   buffers, Python overhead, and filesystem cache; every production adapter
-   must add a measured application-specific peak before mode 3 is enabled.
+   buffers, Python overhead, and filesystem cache; each production memory or scaling claim requires a measured application-specific peak, even when dispatch is already enabled.
 
 The immediate production path is therefore: retain persistent model-native
 distributed fields for each locally scheduled member; pack only owned pieces
 for analysis; call the model with native halo exchange; evaluate observations
-from local fields; and checkpoint owned member/block shards. The required
-memory invariant is that no rank allocates a complete member, the complete
-ensemble, or the complete time history. Analysis work arrays must remain
-bounded by configured state-row and observation-row chunk sizes.
+from local fields; and checkpoint owned member/block shards. The bounded-analysis contract avoids complete-member, complete-ensemble and complete-history materialization during its row updates. State-row and observation-row chunk sizes bound its work arrays. This is not a universal process-memory invariant: PIG has a guarded canonical stochastic workspace and small adapters may gather legacy output. Account for solver vectors, stores and every adapter-specific allocation separately.
 
-Mode 3 remains non-selectable until the state-only ice-model, restart, hybrid
-inversion, and scale gates pass. Passing the small algebraic gates alone is not
-sufficient to expose it as a production execution mode.
+> Current policy: native dispatch is enabled for registered adapters. The following original acceptance goals are retained for review; they are not a current global dispatch gate. See the handbook for capabilities and evidence.
+
+The original design proposed waiting for state-only ice-model, restart, hybrid inversion and scale gates before enabling mode 3. Current dispatch is capability-based and PIG is enabled. Small algebraic gates alone still do not establish scientific validity, adapter-complete support or scaling.
 
 For example, a state with approximately 37 GiB per member can be preflighted
 without allocating it:

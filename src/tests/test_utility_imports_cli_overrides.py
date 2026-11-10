@@ -233,3 +233,16 @@ def test_data_path_empty_string_does_not_silently_resolve_to_cwd_or_delete_it():
     with pytest.raises(ValueError):
         _reload_with_argv(["--data_path", ""])
     _reload_with_argv(["--data_path", _fresh_tmp_data_path()])
+
+
+def test_native_plotting_history_cli_options_are_recognized():
+    try:
+        _reload_with_argv(["--data_path", _fresh_tmp_data_path(),
+                           "--checkpoint_every=1", "--checkpoint_keep_last=0",
+                           "--mode3_export_ensemble_history=True", "--mode3_export_row_chunk_size=2"])
+        kwargs = cli_module.icesee_kwargs
+        assert kwargs["checkpoint_every"] == 1 and kwargs["checkpoint_keep_last"] == 0
+        assert kwargs["mode3_export_ensemble_history"] is True
+        assert kwargs["mode3_export_row_chunk_size"] == 2
+    finally:
+        _reload_with_argv(["--data_path", _fresh_tmp_data_path()])

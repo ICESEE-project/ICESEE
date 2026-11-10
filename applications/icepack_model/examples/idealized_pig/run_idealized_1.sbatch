@@ -2,19 +2,38 @@
 #SBATCH --job-name=PIG-mode3
 #SBATCH --account=gts-arobel3-atlas
 #SBATCH --partition=cpu-small
-#SBATCH --nodes=2
-#SBATCH --ntasks=16
+#SBATCH --nodes=1
+#SBATCH --ntasks=8
 #SBATCH --ntasks-per-node=8
 #SBATCH --cpus-per-task=1
 #SBATCH --hint=nomultithread
-#SBATCH --mem=96G
+#SBATCH --mem=48G
 #SBATCH --time=02:00:00
 #SBATCH --output=pig-mode3-%j.out
 
 set -euo pipefail
 
-# Select scientific source explicitly; Slurm executes a spooled script copy.
-: "${ICESEE_SOURCE_ROOT:?Set ICESEE_SOURCE_ROOT to the updated ICESEE checkout}"
+# Slurm executes a spooled copy; discover source from the submission directory.
+if [[ -z "${ICESEE_SOURCE_ROOT:-}" ]]; then
+  ROOT_HINT="${SLURM_SUBMIT_DIR:-$(dirname "${BASH_SOURCE[0]}")}"
+  ROOT_HINT="$(cd "$ROOT_HINT" && pwd -P)"
+  while [[ "$ROOT_HINT" != / && ! -f "$ROOT_HINT/applications/icepack_model/examples/idealized_pig/pace/resolve_environment.sh" ]]; do
+    ROOT_HINT="$(dirname "$ROOT_HINT")"
+  done
+  [[ "$ROOT_HINT" != / ]] || { echo "Submit from the ICESEE checkout or set ICESEE_SOURCE_ROOT" >&2; exit 2; }
+  export ICESEE_SOURCE_ROOT="$ROOT_HINT"
+fi
+ICESEE_SOURCE_ROOT="$(cd "$ICESEE_SOURCE_ROOT" && pwd -P)"
+export ICESEE_SOURCE_ROOT
+LAB_ROOT="$(dirname "$(dirname "$ICESEE_SOURCE_ROOT")")"
+if [[ -z "${ICESEE_SPACK_ROOT:-}" ]]; then
+  for DEP_ROOT in "$(dirname "$ICESEE_SOURCE_ROOT")" "$ICESEE_SOURCE_ROOT" "$LAB_ROOT/ICESEE-Spack"; do
+    if [[ -f "$DEP_ROOT/scripts/activate.sh" && -d "$DEP_ROOT/.spack-env/icesee" ]]; then
+      export ICESEE_SPACK_ROOT="$DEP_ROOT"
+      break
+    fi
+  done
+fi
 : "${ICESEE_SPACK_ROOT:?Set ICESEE_SPACK_ROOT to the installed dependency environment}"
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 PYTHONUNBUFFERED=1
@@ -22,9 +41,37 @@ unset SLURM_OVERCOMMIT SLURM_OVERLAP
 source "$ICESEE_SOURCE_ROOT/applications/icepack_model/examples/idealized_pig/pace/resolve_environment.sh"
 set -euo pipefail
 
-# Defaults match the successful 32-member, five-year Mode-3 validation.
-NENS="${ICESEE_NENS:-32}"
+# Keep local scientific configuration outside the tracked source.
+RUN_PARAMETERS="${ICESEE_PARAMS_FILE:-}"
+if [[ -z "$RUN_PARAMETERS" ]]; then
+  RUN_PARAMETERS="$PIG_DIR/params.yaml"
+  if [[ -f "$LAB_ROOT/ICESEE-run-configs/idealized_pig.yaml" ]]; then
+    RUN_PARAMETERS="$LAB_ROOT/ICESEE-run-configs/idealized_pig.yaml"
+  fi
+fi
+[[ "$RUN_PARAMETERS" == /* ]] || RUN_PARAMETERS="$PIG_DIR/$RUN_PARAMETERS"
+[[ -f "$RUN_PARAMETERS" ]] || { echo "Missing ICESEE_PARAMS_FILE: $RUN_PARAMETERS" >&2; exit 2; }
+printf 'Source: %s\nDependencies: %s\nParameters: %s\n' "$ICESEE_ROOT" "$SPACK_REPO" "$RUN_PARAMETERS"
+
+# Five-year, 24-member reference allocation; scheduler options may be overridden.
+NENS="${ICESEE_NENS:-24}"
 MODEL_NPROCS="${ICESEE_MODEL_NPROCS:-2}"
+DT="${ICESEE_DT:-0.05}"
+NUM_YEARS="${ICESEE_NUM_YEARS:-5}"
+STEP_COUNT="$(python - "$NUM_YEARS" "$DT" <<'PYTHON'
+import math, sys
+try:
+    years, dt = map(float, sys.argv[1:])
+except ValueError:
+    raise SystemExit('ICESEE_NUM_YEARS and ICESEE_DT must be numbers')
+if not all(math.isfinite(v) and v > 0 for v in (years, dt)):
+    raise SystemExit('ICESEE_NUM_YEARS and ICESEE_DT must be finite and positive')
+ratio = years / dt
+if not math.isfinite(ratio) or round(ratio) < 1:
+    raise SystemExit('Duration and dt must produce at least one finite forecast step')
+print(int(round(ratio)))
+PYTHON
+)" || exit 2
 NODES="${SLURM_JOB_NUM_NODES:?Run this script with sbatch}"
 NP="${SLURM_NTASKS:?Missing Slurm task count}"
 TPN="${ICESEE_TASKS_PER_NODE:-${SLURM_NTASKS_PER_NODE:-8}}"
@@ -56,10 +103,14 @@ trap 'rmdir "$DATA_LOCK" 2>/dev/null || true' EXIT
 mkdir -p "$OUTDIR"
 { git -C "$ICESEE_ROOT" rev-parse HEAD; git -C "$ICESEE_ROOT" status --short; } > "$OUTDIR/source.txt"
 
+cp -- "$RUN_PARAMETERS" "$OUTDIR/params.yaml"
+
 export ICESEE_DEBUG_INIT="${ICESEE_DEBUG_INIT:-1}"
 export ICESEE_HANG_DUMP_S="${ICESEE_HANG_DUMP_S:-900}"
-ARGS=(--execution_mode=3 --Nens="$NENS"
-      --model_nprocs="$MODEL_NPROCS" --num_years=5 --dt=0.05
+ARGS=(--execution_mode=3 --force-params="$RUN_PARAMETERS" --Nens="$NENS"
+      --model_nprocs="$MODEL_NPROCS" --num_years="$NUM_YEARS" --dt="$DT"
+      --checkpoint_every=1 --checkpoint_keep_last=0
+      --mode3_export_ensemble_history=True
       --obs_start_time=2 --obs_max_time=4 --freq_obs=1
       '--save_steps=[2,3,4]' --data_path="$DATA_DIR")
 CMD=(srun --mpi=pmix --exact --exclusive --nodes="$NODES" --ntasks="$NP"
@@ -69,7 +120,9 @@ CMD=(srun --mpi=pmix --exact --exclusive --nodes="$NODES" --ntasks="$NP"
 {
   printf 'Nodes=%s MPI_ranks=%s tasks_per_node=%s members=%s spatial_ranks=%s model_groups=%s\n' \
     "$NODES" "$NP" "$TPN" "$NENS" "$MODEL_NPROCS" "$GROUPS_COUNT"
-  printf 'Datasets=%s\nLogs=%s\nCommand:' "$DATA_DIR" "$OUTDIR"
+  printf 'Requested_years=%s dt=%s forecast_steps=%s history_columns=%s\n' \
+    "$NUM_YEARS" "$DT" "$STEP_COUNT" "$((STEP_COUNT + 1))"
+  printf 'Parameters=%s\nDatasets=%s\nLogs=%s\nCommand:' "$RUN_PARAMETERS" "$DATA_DIR" "$OUTDIR"
   printf ' %q' "${CMD[@]}"
   printf '\n'
 } | tee "$OUTDIR/launch.txt"
@@ -79,5 +132,16 @@ set +e
 RESULT=$?
 set -e
 printf '%s\n' "$RESULT" > "$OUTDIR/exit-status"
+if (( RESULT != 0 )); then
+  # MPI has stopped: recover only snapshots with committed manifests.
+  set +e
+  python "$ICESEE_ROOT/src/parallelization/distributed_history_export.py" \
+    "$DATA_DIR" --allow-partial --simulation-exit-code "$RESULT" \
+    > "$OUTDIR/finalizer.log" 2>&1
+  FINALIZER_RESULT=$?
+  set -e
+  printf '%s\n' "$FINALIZER_RESULT" > "$OUTDIR/finalizer-exit-status"
+  printf 'History recovery exit=%s; log: %s/finalizer.log\n' "$FINALIZER_RESULT" "$OUTDIR"
+fi
 printf 'Mode 3 exit=%s; results: %s; logs: %s\n' "$RESULT" "$DATA_DIR" "$OUTDIR"
 exit "$RESULT"

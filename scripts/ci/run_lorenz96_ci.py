@@ -83,6 +83,7 @@ def load_lorenz_outputs(data_dir):
 
     with h5py.File(ensemble_file, "r") as f:
         ensemble_vec_mean = f["ensemble_mean"][:]
+        ensemble = f["ensemble"][:]
 
     with h5py.File(true_nudged_file, "r") as f:
         ensemble_true_state = f["true_state"][:]
@@ -118,6 +119,7 @@ def load_lorenz_outputs(data_dir):
         "ensemble_true_state": ensemble_true_state,
         "ensemble_nurged_state": ensemble_nurged_state,
         "ensemble_vec_mean": ensemble_vec_mean,
+        "ensemble": ensemble,
         "w": w,
     }
 
@@ -130,18 +132,46 @@ def validate_mode_outputs(outputs):
             raise AssertionError(f"execution mode {mode} produced an invalid ensemble mean")
         print(f"[ICESEE CI] mode {mode}: valid ensemble mean {mean.shape}")
 
-    # Modes 1 and 2 implement the same stochastic filter and are the strict
-    # numerical-parity pair. Mode 0 is a separate serial filter path and is a
-    # smoke/finite-output check here.
-    partial = np.asarray(loaded[1]["ensemble_vec_mean"])
-    full = np.asarray(loaded[2]["ensemble_vec_mean"])
-    if partial.shape != full.shape:
-        raise AssertionError(f"mode 1/2 output shapes differ: {partial.shape} vs {full.shape}")
-    max_difference = float(np.max(np.abs(partial - full)))
-    if not np.allclose(partial, full, rtol=1e-7, atol=1e-7):
-        raise AssertionError(f"mode 1/2 parity failed: max difference={max_difference:.6g}")
-    print(f"[ICESEE CI] mode 1/2 parity max difference: {max_difference:.6g}")
+    validate_parallel_parity(loaded[1], loaded[2])
     return loaded
+
+
+def validate_parallel_parity(partial, full):
+    """Check the assimilation window pointwise and complete histories by norm."""
+    np.testing.assert_array_equal(partial["t"], full["t"])
+    np.testing.assert_array_equal(partial["ind_m"], full["ind_m"])
+    np.testing.assert_array_equal(partial["ensemble_true_state"], full["ensemble_true_state"])
+    np.testing.assert_allclose(partial["w"], full["w"], rtol=0, atol=0, equal_nan=True)
+    columns = np.asarray(full["ind_m"], dtype=np.int64)
+    if columns.size == 0:
+        raise AssertionError("the CI parity case requires observations")
+    window = slice(0, int(columns[-1]) + 1)
+    rtol, atol = 1e-7, 1e-7
+    metrics = {}
+    for name in ("ensemble_vec_mean", "ensemble"):
+        actual = np.asarray(partial[name])
+        expected = np.asarray(full[name])
+        if actual.shape != expected.shape or not np.isfinite(actual).all() or not np.isfinite(expected).all():
+            raise AssertionError(f"mode 1/2 {name}: incompatible or non-finite histories")
+        np.testing.assert_allclose(
+            actual[..., window], expected[..., window], rtol=rtol, atol=atol,
+            err_msg=f"mode 1/2 {name} assimilation-window parity",
+        )
+        # After the last observation, compare each variable's full trajectory
+        # in norm: a near-zero crossing should not set its relative scale.
+        error = np.linalg.norm((actual - expected).reshape(actual.shape[0], -1), axis=1)
+        scale = np.linalg.norm(expected.reshape(expected.shape[0], -1), axis=1)
+        count = int(np.prod(expected.shape[1:]))
+        bound = atol * np.sqrt(count) + rtol * scale
+        if np.any(error > bound):
+            raise AssertionError(f"mode 1/2 {name} full-history norm parity: {error} > {bound}")
+        metrics[name] = {
+            "max_abs": float(np.max(np.abs(actual - expected))),
+            "assimilation_window_max_abs": float(np.max(np.abs(actual[..., window] - expected[..., window]))),
+            "relative_l2_by_variable": (error / np.maximum(scale, np.finfo(float).tiny)).tolist(),
+        }
+    print(f"[ICESEE CI] mode 1/2 parity: {metrics}")
+    return metrics
 
 
 def plot_lorenz_outputs(data):

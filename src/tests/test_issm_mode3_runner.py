@@ -233,7 +233,7 @@ def test_run_issm_execution_mode_3_orchestration(tmp_path, monkeypatch):
 
     # Analysis batch only requested on the scheduled observation timestep
     # (k=1); inversion_start_time=5.0 defers inversion at that cycle time.
-    assert cycle_calls == [(0, 0, False), (1, 1, False)]
+    assert cycle_calls == [(0, 1, False), (1, 0, False)]
 
     assert len(save_all_data_calls) == 1
     assert len(timing_calls) == 1
@@ -295,4 +295,4 @@ def test_run_issm_execution_mode_3_enables_inversion_once_start_time_reached(tmp
 
     # Observation lands at k=1 (obs_t=[1.0]); inversion_start_time=0.0 is
     # already reached, so inversion is enabled at that cycle.
-    assert cycle_calls == [(0, False), (1, True)]
+    assert cycle_calls == [(0, True), (1, False)]

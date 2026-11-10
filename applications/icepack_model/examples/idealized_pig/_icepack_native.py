@@ -272,12 +272,7 @@ def _nudge_basal_melt(basal_melt_field: Any, icesee_kwargs: Mapping[str, Any], Q
 def initialize_member(
     member_id: int, *, topology: Any, icesee_kwargs: Mapping[str, Any]
 ) -> IcepackNativeState:
-    """Take the initial model step from unperturbed, locally owned thickness.
-
-    This matches the approved Idealized PIG scientific initialization update
-    in modes 0-2. Copy h0 so member initialization cannot mutate the shared
-    inflow/reference thickness. Forecast/process-noise streams are unchanged.
-    """
+    """Copy the unperturbed physical fields at the initial model time."""
 
     ctx = _shared_context(topology, icesee_kwargs)
 
@@ -306,18 +301,9 @@ def initialize_member(
     if icesee_kwargs.get("joint_estimation"):
         basal_melt_field = _nudge_basal_melt(basal_melt_field, icesee_kwargs, ctx.Q)
 
-    run_kwargs = _icepack_run_kwargs(ctx, icesee_kwargs)
-    h, u, s, _floating, _grounded = Icepack(
-        ctx.forward_solver,
-        h_p,
-        ctx.u0,
-        ctx.smb,
-        basal_melt_field,
-        ctx.bed,
-        float(icesee_kwargs["dt"]),
-        ctx.h0,
-        run_kwargs,
-    )
+    h = h_p
+    u = ctx.u0.copy(deepcopy=True)
+    s = ctx.s0.copy(deepcopy=True)
 
     return IcepackNativeState(
         thickness=h,
