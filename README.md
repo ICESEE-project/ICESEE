@@ -78,8 +78,8 @@ Explore the Wiki to find:
 For memory- and storage-bounded execution of large ensembles, including rolling
 history, compact observations, restart behavior, and capacity limits, see the
 [large-scale execution guide](docs/large-scale-execution.md).
-The validated mode-2 parity contract and proposed spatially distributed mode-3
-architecture are documented in the
+The mode-2 parity contract and implemented native mode-3 architecture, including
+adapter-specific capability limits, are documented in the
 [mode-2 development contract](docs/execution-mode-2-development.md) and
 [mode-3 design](docs/execution-mode-3-design.md), respectively.
 Architectural decisions and their status (Proposed/Accepted) are tracked in
@@ -87,6 +87,12 @@ Architectural decisions and their status (Proposed/Accepted) are tracked in
 boundary target is described in [`docs/model-adapter.md`](docs/model-adapter.md).
 
 ---
+
+## Production handover and technical documentation
+
+The [student and developer handbook](docs/handbook/README.md) documents the inspected `features_debug` implementation at commit `3748e416d3a8120cc860119bd7224c6f9ad41ff7`: [first run](docs/handbook/student-tutorial.md), [architecture](docs/handbook/architecture.md), [analysis mathematics](docs/handbook/numerics.md), [configuration](docs/handbook/configuration.md), [HPC and containers](docs/handbook/deployment.md), [production and recovery](docs/handbook/operations.md), and [testing](docs/handbook/testing-and-contributing.md). The [technical-report preprint source](paper/production-report/README.md) explains the updated developments and their validation limits.
+
+Use a unique output directory for a fresh run. Configuration loading can remove an existing `data_path`; `restart_enabled` alone does not protect it. Follow the documented explicit resume path before touching a valuable run. The [wiki](https://github.com/ICESEE-project/ICESEE/wiki) provides task-oriented entry points.
 
 ## Key Features
 

@@ -12,15 +12,15 @@ from ICESEE.config._utility_imports import icesee_get_index
 
 # --- model initialization ---
 def initialize_model(**icesee_kwargs):
-    """des: initialize the icepack model"""
+    """Retain the example setup hook; this small model needs no setup here."""
     pass
 
 # --- run function for the lorenz96 model ---
 def Lorenz96(state, **icesee_kwargs):
-    """des: Lorenz96 model function
-        inputs: state - current state of the model
-                **icesee_kwargs - additional arguments for the model
-       outputs: f - the derivative of the state vector
+    """Evaluate the three-variable Lorenz-63 right-hand side.
+
+    The historical function/directory name is retained for compatibility.
+    State is ordered x, y, z; sigma_96, beta_96 and rho_96 supply constants.
     """
     # Unpack the arguments
     sigma = icesee_kwargs.get('sigma_96', None)
@@ -54,10 +54,10 @@ def RK4(rhs, state, **icesee_kwargs):
 
 # --- Run similation for the Lorenz96 model ---
 def run_model(ensemble, **icesee_kwargs):
-    """des: Lorenz96 model function
-        inputs: ensemble - current ensemble state of the model
-                **icesee_kwargs - additional arguments for the model
-        outputs: model run
+    """Advance one three-component member by one configured RK4 interval.
+
+    Returns x/y/z blocks using ICESEE's current state index mapping.
+    The input is one member, rather than a complete ensemble history.
     """
 
     # call the icesee_get_index function to get the indices of the state variables

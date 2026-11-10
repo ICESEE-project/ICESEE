@@ -1,9 +1,9 @@
-"""Two-dimensional MPI topology for the proposed execution mode 3.
+"""Two-dimensional MPI topology used by application-specific mode 3.
 
-This module intentionally does not register execution mode 3.  It provides the
-first independently testable building block for distributing work across both
-ensemble groups and model spatial subdomains.  Runtime selection remains
-disabled until the distributed adapter and analysis parity contracts exist.
+The rectangular grid separates model spatial ranks from ensemble groups.
+This module constructs communicators; it does not register an application
+or establish adapter support. Registered native runners consume this grid
+with their own spatial, scientific-feature, and restart capability limits.
 """
 
 from dataclasses import dataclass
