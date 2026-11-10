@@ -1,5 +1,9 @@
 # 0002 — Model-adapter boundary between orchestration and model internals
 
+## Current implementation note
+
+This is a historical proposal, partially superseded by [ADR 0006](0006-native-runtime-and-time-contract.md). Native mode-3 adapters now expose owned fields, separate spatial/ensemble topology and checkpoints. This does not mean the proposed wholesale modes-0–2 boundary/topology rewrite was completed. Statements below describing mode 3 as non-selectable or local ownership as wholly absent refer to the earlier design state. Use the [current handbook](../handbook/architecture.md) for implemented capabilities and limits.
+
 ## Status
 
 Proposed. The current implemented mechanism is the function-hook contract

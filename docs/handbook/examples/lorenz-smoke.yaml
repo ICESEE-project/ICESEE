@@ -1,0 +1,56 @@
+# One model-time unit, 50 forecast cycles, four interior analyses.
+# Historical path name lorenz96; implemented equations are Lorenz-63.
+physical-parameters:
+  sigma_96: 10.0
+  beta_96: 8.0/3.0
+  rho_96: 28.0
+modeling-parameters:
+  dt: 0.02
+  num_years: 1
+  timesteps_per_year: 50
+  example_name: lorenz96
+enkf-parameters:
+  Nens: 8
+  model_name: lorenz
+  filter_type: EnKF
+  execution_mode: 0
+  state_distribution: replicated
+  num_state_vars: 3
+  num_param_vars: 0
+  vec_inputs: [x, y, z]
+  observed_vars: [x, y, z]
+  sig_model: [0.01, 0.01, 0.01]
+  sig_obs: [0.1, 0.1, 0.1]
+  sig_Q: [0.01, 0.01, 0.01]
+  length_scale: [2, 2, 2]
+  obs_start_time: 0.2
+  obs_max_time: 0.8
+  freq_obs: 0.2
+  generate_true_state: true
+  generate_nurged_state: true
+  generate_synthetic_obs: true
+  sequential_ensemble_initialization: true
+  initialize_ensemble: true
+  state_estimation: true
+  parameter_estimation: false
+  joint_estimation: false
+  seed: 1
+  base_seed: 42
+  inflation_factor: 1.0
+  localization_flag: false
+  local_analysis: false
+  global_analysis: true
+  use_ensemble_pertubations: true
+  enkf_observation_error_mode: legacy_prior_anomalies
+  process_noise_schedule: observations
+  observation_operator_storage: indices
+  synthetic_observation_storage: compact
+  ensemble_history_mode: full
+  ensemble_storage_dtype: float64
+  ensemble_finalize_mode: vds
+  batch_size: 2
+  restart_enabled: false
+  force_fresh_start: true
+  resume_from_checkpoint: false
+  commandlinerun: true
+  data_path: _handbook_smoke_data

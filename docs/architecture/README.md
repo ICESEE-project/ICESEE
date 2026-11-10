@@ -9,6 +9,8 @@ Wiki). Each ADR is numbered, short, and has one of these statuses:
   new ADR that supersedes this one, not a silent rewrite.
 - **Superseded by NNNN** — replaced; kept for history.
 
+Current native-runtime status is recorded in [0006](0006-native-runtime-and-time-contract.md). Earlier proposals are retained as historical design records; several were partially implemented through a separate native path rather than a wholesale rewrite of modes 0–2.
+
 ## Index
 
 | ADR | Title | Status |
@@ -18,6 +20,7 @@ Wiki). Each ADR is numbered, short, and has one of these statuses:
 | [0003](0003-hierarchical-mpi-communicator-topology.md) | Hierarchical ensemble/model MPI communicator topology | Proposed |
 | [0004](0004-distributed-state-ownership.md) | Distributed, rank-local state ownership (no global materialization) | Proposed |
 | [0005](0005-state-ownership-replicated-vs-distributed.md) | State ownership: `replicated` vs `distributed` | Accepted |
+| [0006](0006-native-runtime-and-time-contract.md) | Native runtime capabilities, bounded analysis and state-column clock | Accepted |
 
 ## Writing a new ADR
 

@@ -1,0 +1,875 @@
+{
+  "schema_version": 1,
+  "as_of": "2026-11-10",
+  "repository": "https://github.com/ICESEE-project/ICESEE",
+  "source_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+  "source_branch": "features_debug",
+  "scientific_timing_commit": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+  "ci_url": "https://github.com/ICESEE-project/ICESEE/actions/runs/42890166512",
+  "ci_scope": {
+    "fast_passed": 754,
+    "fast_skipped": 3,
+    "fast_deselected": 1,
+    "mpi_passed": 42,
+    "mpi_skipped": 0
+  },
+  "new_local_scope": {
+    "focused_passed": 184,
+    "focused_skipped": 0,
+    "real_mpi_passed": 12,
+    "real_mpi_skipped": 0,
+    "lorenz_modes": [
+      0,
+      1,
+      2
+    ],
+    "lorenz_ensemble_shape": [
+      3,
+      30,
+      1001
+    ]
+  },
+  "claims": [
+    {
+      "id": "C01",
+      "statement": "Published features_debug source contains the timing repair and CI parity follow-up",
+      "category": "provenance",
+      "value": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "limitation": "The stored PR base is main 3d7e6e757e07b80dcca1fdd65dffb8ca8853316a. These records do not imply a main merge or a release tag.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/utils/timestep_contract.py",
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/scripts/ci/run_lorenz96_ci.py"
+      ],
+      "retained_records": [
+        {
+          "filename": "publication.log",
+          "sha256": "d0b43d612bc3533b5d36922c8029ee59076832990c558553552e6a046d58715c"
+        },
+        {
+          "filename": "ci-parity-publication.log",
+          "sha256": "04cf1431aff409655f4ad85677443f158992212593f02460d2c40a16bf130ed2"
+        },
+        {
+          "filename": "pr72-published.json",
+          "sha256": "93d9313d0c47955d7e7bddbc4df377742cf9a9cd285ab8866c86113fc8862b15"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "C02",
+      "statement": "All five-year PIG simulation steps exited zero",
+      "category": "completion",
+      "value": {
+        "1": 0,
+        "2": 0,
+        "3": 0
+      },
+      "limitation": "The parent allocation timed out during verification; zero simulation exits alone do not prove scientific correctness.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/applications/icepack_model/examples/idealized_pig/pace/validate_production_modes.sbatch"
+      ],
+      "retained_records": [
+        {
+          "filename": "job-15433074-latest.json",
+          "sha256": "3ed1d7a2e19d987a4b7c6725caf841bdaa461a6c356039964a3a1c7028c901c9"
+        },
+        {
+          "filename": "full-15433074-terminal.log",
+          "sha256": "1e88c076d0a576b38659a46ae297b80a1e4daf7f8de423381284758164edad7a"
+        },
+        {
+          "filename": "full-15433074-verification.json",
+          "sha256": "0f0d8e4591b3b8c4626e2d937b3ad738feb9bf568595725f45d60d11a5d2fb0c"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "C03",
+      "statement": "Corrected five-year analyses use the saved state at years 2, 3 and 4",
+      "category": "timing",
+      "value": [
+        {
+          "cycle": 39,
+          "model_time": 2.0,
+          "observation_column": 0,
+          "observation_state_column": 40,
+          "state_column": 40
+        },
+        {
+          "cycle": 59,
+          "model_time": 3.0,
+          "observation_column": 1,
+          "observation_state_column": 60,
+          "state_column": 60
+        },
+        {
+          "cycle": 79,
+          "model_time": 4.0,
+          "observation_column": 2,
+          "observation_state_column": 80,
+          "state_column": 80
+        }
+      ],
+      "limitation": "Fixed configuration dt=0.05, 100 cycles; verifier is not generic for arbitrary PIG schedules.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/utils/timestep_contract.py"
+      ],
+      "retained_records": [
+        {
+          "filename": "full-15433074-verification.json",
+          "sha256": "0f0d8e4591b3b8c4626e2d937b3ad738feb9bf568595725f45d60d11a5d2fb0c"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "C04",
+      "statement": "Each full-case ensemble history contains an initial state and 100 cycles",
+      "category": "output_integrity",
+      "value": [
+        270615,
+        32,
+        101
+      ],
+      "limitation": "HDF5 VDS is an index over source shards and must be archived with those sources.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/parallelization/distributed_history_export.py"
+      ],
+      "retained_records": [
+        {
+          "filename": "full-15433074-verification.json",
+          "sha256": "0f0d8e4591b3b8c4626e2d937b3ad738feb9bf568595725f45d60d11a5d2fb0c"
+        },
+        {
+          "filename": "composite-verification.log",
+          "sha256": "fc668560def556b727d4d3240e9603406317ee4317119d4ccc7cecbfdffd95f7"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "C05",
+      "statement": "Mode1 and Mode2 final members agree to the recorded norms",
+      "category": "numerical_comparison",
+      "value": {
+        "h": {
+          "max_abs": 3.957438821089454e-09,
+          "rmse": 3.2263666726529094e-10,
+          "relative_l2": 1.828230504239657e-13,
+          "values_compared": 1731936
+        },
+        "u": {
+          "max_abs": 1.6231727073545699e-09,
+          "rmse": 1.758887701018733e-10,
+          "relative_l2": 4.20080956393013e-13,
+          "values_compared": 1731936
+        },
+        "v": {
+          "max_abs": 2.0922925614286214e-09,
+          "rmse": 3.01627344573848e-10,
+          "relative_l2": 2.441151070912218e-13,
+          "values_compared": 1731936
+        },
+        "s": {
+          "max_abs": 3.957438821089454e-09,
+          "rmse": 3.2230049764833195e-10,
+          "relative_l2": 3.528486499362813e-13,
+          "values_compared": 1731936
+        },
+        "basal_melt_field": {
+          "max_abs": 1.3637801998811483e-10,
+          "rmse": 2.240651834125636e-12,
+          "relative_l2": 9.113163700983316e-13,
+          "values_compared": 1731936
+        }
+      },
+      "limitation": "This is final-member comparison across five fields, not a proof of every intermediate value or an independently chosen scientific tolerance.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/applications/icepack_model/examples/idealized_pig/tools/verify_timing_outputs.py"
+      ],
+      "retained_records": [
+        {
+          "filename": "full-15433074-comparison.json",
+          "sha256": "97256e992de36f4f4aceb0b948a91774302728c2f2c91e471ba3df5435564c10"
+        },
+        {
+          "filename": "composite-verification.log",
+          "sha256": "fc668560def556b727d4d3240e9603406317ee4317119d4ccc7cecbfdffd95f7"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "C06",
+      "statement": "Native full output passed a bounded closed-output scan",
+      "category": "output_integrity",
+      "value": {
+        "short_results_identical": true,
+        "native_full_checks_passed": true,
+        "elapsed_seconds": 67.37205314601306,
+        "cpu_limit_seconds": 60,
+        "address_space_limit_bytes": 2147483648
+      },
+      "limitation": "67.372 seconds is postprocessing wall time including the short-case oracle, not model runtime. No additional PDE run was performed.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/applications/icepack_model/examples/idealized_pig/tools/verify_timing_outputs.py"
+      ],
+      "retained_records": [
+        {
+          "filename": "native-slab-integrity.log",
+          "sha256": "a3a082dd447570e1ca811e5d53d1ab62c018a3e109cde17ba12cfbfeafb8769f"
+        },
+        {
+          "filename": "cached-reader-short-check-confirmed.json",
+          "sha256": "48eaa05032a867ca662796134d9103f7a99e7832cdcaa37d0d3b5e7a589eb076"
+        },
+        {
+          "filename": "full-15433074-verification.json",
+          "sha256": "0f0d8e4591b3b8c4626e2d937b3ad738feb9bf568595725f45d60d11a5d2fb0c"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "C07",
+      "statement": "Native initial physical fields preserve the intended unperturbed prior",
+      "category": "initialization",
+      "value": {
+        "h": {
+          "max_abs_from_truth": 0.0,
+          "max_member_range": 0.0
+        },
+        "u": {
+          "max_abs_from_truth": 4.547473508864641e-13,
+          "max_member_range": 0.0
+        },
+        "v": {
+          "max_abs_from_truth": 9.094947017729282e-13,
+          "max_member_range": 0.0
+        },
+        "s": {
+          "max_abs_from_truth": 0.0,
+          "max_member_range": 0.0
+        }
+      },
+      "limitation": "Generic Modes1/2 retain different initial perturbations; three-mode member equivalence is not claimed.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/applications/icepack_model/examples/idealized_pig/_icepack_native.py"
+      ],
+      "retained_records": [
+        {
+          "filename": "full-15433074-verification.json",
+          "sha256": "0f0d8e4591b3b8c4626e2d937b3ad738feb9bf568595725f45d60d11a5d2fb0c"
+        },
+        {
+          "filename": "short-15432397-verification.json",
+          "sha256": "f8c3d31f4f91306995e69f86ae28d826860b4aa4acd56ad6d2a4986c9217e1ab"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "C08",
+      "statement": "Native completed fields are finite with recorded extrema",
+      "category": "output_integrity",
+      "value": {
+        "h": {
+          "min": 29.94079517627003,
+          "max": 4180.719190378359,
+          "final_min": 30.0,
+          "final_max": 4180.682705492512
+        },
+        "u": {
+          "min": -3718.8500039472174,
+          "max": 307.2884758423527,
+          "final_min": -2320.685246893193,
+          "final_max": 306.7463591053161
+        },
+        "v": {
+          "min": -7012.929989438795,
+          "max": 1549.9518765746063,
+          "final_min": -3867.409090724707,
+          "final_max": 978.8793674238735
+        },
+        "s": {
+          "min": 3.122408290016434,
+          "max": 2632.731558328627,
+          "final_min": 3.1347656249999964,
+          "final_max": 2632.731558328627
+        },
+        "basal_melt_field": {
+          "min": -0.3663383800532765,
+          "max": 20.044028152161292,
+          "final_min": 0.0,
+          "final_max": 20.0
+        }
+      },
+      "limitation": "Transient h drops below the nominal 30-m floor and posterior basal melt extends below 0 and above 20. Finite numbers and final bounds do not prove physical acceptability.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/applications/icepack_model/examples/idealized_pig/tools/verify_timing_outputs.py"
+      ],
+      "retained_records": [
+        {
+          "filename": "full-15433074-verification.json",
+          "sha256": "0f0d8e4591b3b8c4626e2d937b3ad738feb9bf568595725f45d60d11a5d2fb0c"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "C09",
+      "statement": "Native restart crosses two analyses in the one-year case",
+      "category": "restart",
+      "value": {
+        "max_abs": 2.98769009532e-09,
+        "relative_l2": 6.56562745152e-13,
+        "finite": true,
+        "from_checkpoint": 13,
+        "through_checkpoint": 19,
+        "rtol": 1e-09,
+        "atol": 1e-07
+      },
+      "limitation": "Replay used copied completed output. It is not evidence of a killed-run partial-profile recovery experiment, nor arbitrary topology/configuration restart.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/parallelization/mode3_checkpointing.py",
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/tests/test_mode3_checkpoint_recovery.py"
+      ],
+      "retained_records": [
+        {
+          "filename": "short-15432397-resume-progress.log",
+          "sha256": "6a3d9844cb137d08a8318d7d72c8686dd9e9be38bb825e3429ac59fffae59fb0"
+        },
+        {
+          "filename": "short-15432397-terminal.log",
+          "sha256": "3697864a575a3821ec2e65584be11818f618db08933887f54429984e358ad802"
+        },
+        {
+          "filename": "RESULTS.txt",
+          "sha256": "fbde3a2cf943474d6635120ff45693ee20ee996e01ee6c3961223124ff4403c0"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "C10",
+      "statement": "First/interior/final observation times align in the short PIG case",
+      "category": "timing",
+      "value": [
+        {
+          "cycle": 9,
+          "model_time": 0.5,
+          "observation_column": 0,
+          "observation_state_column": 10,
+          "state_column": 10
+        },
+        {
+          "cycle": 14,
+          "model_time": 0.75,
+          "observation_column": 1,
+          "observation_state_column": 15,
+          "state_column": 15
+        },
+        {
+          "cycle": 19,
+          "model_time": 1.0,
+          "observation_column": 2,
+          "observation_state_column": 20,
+          "state_column": 20
+        }
+      ],
+      "limitation": "Initial-time observations remain explicitly unsupported by the state-column contract.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/utils/timestep_contract.py",
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/tests/test_timestep_contract.py"
+      ],
+      "retained_records": [
+        {
+          "filename": "short-15432397-verification.json",
+          "sha256": "f8c3d31f4f91306995e69f86ae28d826860b4aa4acd56ad6d2a4986c9217e1ab"
+        },
+        {
+          "filename": "short-15432397-terminal.log",
+          "sha256": "3697864a575a3821ec2e65584be11818f618db08933887f54429984e358ad802"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "C11",
+      "statement": "Native member groups are node-local with unique member assignment",
+      "category": "topology",
+      "value": {
+        "world_ranks": 16,
+        "ranks_per_model": 2,
+        "model_groups": 8,
+        "members": 32,
+        "groups_node_local": true,
+        "member_ids_unique": true
+      },
+      "limitation": "This specific 16-rank, two-rank/model layout does not establish arbitrary cluster-placement support.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/parallelization/distributed_topology.py"
+      ],
+      "retained_records": [
+        {
+          "filename": "full-15433074-topology.json",
+          "sha256": "1b0b112c203c605c027730012dc13141c96880b0e2fe4c83eaff81d5609a274e"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "C12",
+      "statement": "Operational simulation durations are recorded",
+      "category": "operational_timing",
+      "value": {
+        "1": {
+          "elapsed": "00:42:15",
+          "world_ranks": 8,
+          "ranks_per_model": 1
+        },
+        "2": {
+          "elapsed": "01:38:31",
+          "world_ranks": 8,
+          "ranks_per_model": 1
+        },
+        "3": {
+          "elapsed": "00:37:11",
+          "world_ranks": 16,
+          "ranks_per_model": 2
+        }
+      },
+      "limitation": "Runs were concurrent in a shared two-node/40-core allocation with unequal process counts and different priors. No scaling efficiency, acceleration factor, or superiority may be inferred.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/applications/icepack_model/examples/idealized_pig/pace/validate_production_modes.sbatch"
+      ],
+      "retained_records": [
+        {
+          "filename": "job-15433074-latest.json",
+          "sha256": "3ed1d7a2e19d987a4b7c6725caf841bdaa461a6c356039964a3a1c7028c901c9"
+        },
+        {
+          "filename": "full-15433074-topology.json",
+          "sha256": "1b0b112c203c605c027730012dc13141c96880b0e2fe4c83eaff81d5609a274e"
+        },
+        {
+          "filename": "RESULTS.txt",
+          "sha256": "fbde3a2cf943474d6635120ff45693ee20ee996e01ee6c3961223124ff4403c0"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "C13",
+      "statement": "Published source passed the recorded GitHub CI",
+      "category": "automated_tests",
+      "value": {
+        "conclusion": "success",
+        "headSha": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+        "fast_passed": 754,
+        "fast_optional_skips": 3,
+        "fast_deselected": 1,
+        "mpi_passed": 42,
+        "mpi_skipped": 0,
+        "url": "https://github.com/ICESEE-project/ICESEE/actions/runs/42890166512"
+      },
+      "limitation": "This is a historical CI record for the source SHA, not a new local test run, Icepack/PETSc scientific validation, or coverage of all integrations.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/.github/workflows/ci.yml"
+      ],
+      "retained_records": [
+        {
+          "filename": "ci-final.json",
+          "sha256": "e8b1b8193783cb38df6904be73a68f825700424c067fcca8bc28ef44c0f915bf"
+        },
+        {
+          "filename": "ci-final.log",
+          "sha256": "a87891171a735cb69de32a2b19e621a09f7b97160858b4c9a02da81f191927c0"
+        },
+        {
+          "filename": "RESULTS.txt",
+          "sha256": "fbde3a2cf943474d6635120ff45693ee20ee996e01ee6c3961223124ff4403c0"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "C14",
+      "statement": "Published runtime ASTs match the scientific candidate used in PACE",
+      "category": "provenance",
+      "value": {
+        "scientific_runtime_ast_unchanged": true,
+        "compared_against": "validated-scientific-candidate-15433074.tar.gz plus unchanged C5 EnKF_parallel_io",
+        "files": [
+          "applications/flowline_model/examples/flowline_1d/mode3_runner.py",
+          "applications/icepack_model/examples/idealized_pig/_icepack_enkf.py",
+          "applications/icepack_model/examples/idealized_pig/_icepack_model.py",
+          "applications/icepack_model/examples/idealized_pig/_icepack_native.py",
+          "applications/icepack_model/examples/idealized_pig/mode3_runner.py",
+          "applications/issm_model/examples/ISMIP_Choi/mode3_runner.py",
+          "applications/lorenz_model/lorenz_utils/mode3_runner.py",
+          "src/parallelization/EnKF_parallel_io.py",
+          "src/parallelization/_mpi_forecast_functions.py",
+          "src/parallelization/_mpi_generate_synthetic_observations.py",
+          "src/parallelization/native_application.py",
+          "src/parallelization/native_process_noise.py",
+          "src/run_model_da/icesee_da_full_parallel.py",
+          "src/run_model_da/icesee_da_partial_parallel.py",
+          "src/run_model_da/icesee_da_serial.py",
+          "src/utils/inference_plugin.py",
+          "src/utils/timestep_contract.py"
+        ]
+      },
+      "limitation": "AST equivalence excludes comments/docstrings and covers the listed 17 runtime files only. It does not assert byte identity or prove every repository file was unchanged.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/parallelization/distributed_analysis.py"
+      ],
+      "retained_records": [
+        {
+          "filename": "runtime-equivalence-after-cleanup.json",
+          "sha256": "fae9415b4567dff5691b8de3692a60178b2a2a4c739bcf3abbeb567afda31770"
+        },
+        {
+          "filename": "filter-method-parity.json",
+          "sha256": "c4380f0241f7a35e0ad6c8e863313f90de80f1e561a0181f73c35e6b34738c52"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "C15",
+      "statement": "Both verifier allocation timeouts remain part of the record",
+      "category": "known_failure",
+      "value": {
+        "15433074": "TIMEOUT after PDE steps",
+        "15439331": "TIMEOUT in verification-only VDS reads"
+      },
+      "limitation": "A later successful reader does not convert these scheduler allocations to COMPLETED.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [],
+      "retained_records": [
+        {
+          "filename": "job-15433074-latest.json",
+          "sha256": "3ed1d7a2e19d987a4b7c6725caf841bdaa461a6c356039964a3a1c7028c901c9"
+        },
+        {
+          "filename": "job-15439331-latest.json",
+          "sha256": "3066e7c524b1ac16439f98d3ce7fa6cc5637b279cc253e4659354aac6a4bfe5f"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "C16",
+      "statement": "Whole-history Lorenz comparator policy was revised after the first CI failed",
+      "category": "validation_policy",
+      "value": {
+        "analysis_window": "pointwise all members and means",
+        "whole_history": "per-variable relative norms",
+        "rtol": 1e-07,
+        "atol": 1e-07
+      },
+      "limitation": "State the policy change explicitly. The revised check is not an all-time pointwise guarantee and must not be presented as unchanged acceptance semantics.",
+      "status": "supported",
+      "scientific_revision": "11be3b4ca43ef9bc211953f9ca10e551045fc156",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/scripts/ci/run_lorenz96_ci.py",
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/tests/test_lorenz_ci_parity.py"
+      ],
+      "retained_records": [
+        {
+          "filename": "RESULTS.txt",
+          "sha256": "fbde3a2cf943474d6635120ff45693ee20ee996e01ee6c3961223124ff4403c0"
+        },
+        {
+          "filename": "ci-first-result.json",
+          "sha256": "a1aec282c9ed1358b5cc33a213e46082e1c95914b397d2a188f467b28dd13510"
+        },
+        {
+          "filename": "ci-parity-tests.log",
+          "sha256": "4a372a72e53f28381843e889ad3a76589427dc59ea165e4a96185878899503a9"
+        },
+        {
+          "filename": "local-lorenz-parity-complete.json",
+          "sha256": "60124e0c572308462bc7fce16023f4696510d4bafdab9c643f6b9225aaef44d8"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "L01",
+      "statement": "184 focused current-source contract tests passed without skips",
+      "category": "new_local_validation",
+      "value": {
+        "source_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+        "python_version": "Python 3.11.12",
+        "elapsed_seconds": 3.353350874996977,
+        "exit_code": 0,
+        "counts": {
+          "tests": 184,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "scope": "184 existing focused tests in a single-process pytest invocation; most distributed contracts use fake communicators; no MPI launch or PDE/HPC run",
+        "initial_failure": "3 noise tests could not create scratch under inherited unwritable TMPDIR; rerun uses task-private writable scratch; no source edit"
+      },
+      "limitation": "Single-process pytest; many distributed contracts use fake communicators. Initial scratch-path environment failure retained separately; task-private TMPDIR resolved it without source edits.",
+      "status": "supported",
+      "scientific_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/tests/test_timestep_contract.py",
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/tests/test_distributed_analysis.py",
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/tests/test_distributed_checkpoint.py"
+      ],
+      "retained_records": [
+        {
+          "filename": "focused-tests-result.json",
+          "sha256": "a0a12248e83f893fdf396399fe1851db529715326fba778b6b0db9d40a8e98af"
+        },
+        {
+          "filename": "focused-tests.log",
+          "sha256": "863e13bde3eccc33925aaa259f16e1b4bf31dd48e9765e6c5de216988aeeab22"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "L02",
+      "statement": "12 real local MPI tests passed without skips",
+      "category": "new_local_validation",
+      "value": {
+        "source_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+        "python_version": "Python 3.11.12",
+        "counts": {
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "status": "pass",
+        "elapsed_seconds": 12.946,
+        "test_files": [
+          "src/tests/test_mode3_checkpoint_recovery_mpi.py",
+          "src/tests/test_distributed_history_export_mpi.py",
+          "src/tests/test_resource_plan_mpi_topology.py",
+          "src/tests/test_mpi_failure_handling.py"
+        ],
+        "scope": "Real local MPI tests: injected ENOSPC on one rank, changed process-grid resume, actual synthetic MPI Abort and partial export, 4/8/10-rank topology, failure/healthy controls. No ice-sheet PDE or scheduler run."
+      },
+      "limitation": "Synthetic local MPI workers with injected ENOSPC/Abort and topology changes; does not validate an interrupted ice-sheet PDE run or every adapter.",
+      "status": "supported",
+      "scientific_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/tests/test_mode3_checkpoint_recovery_mpi.py",
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/tests/test_distributed_history_export_mpi.py",
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/tests/test_resource_plan_mpi_topology.py",
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/src/tests/test_mpi_failure_handling.py"
+      ],
+      "retained_records": [
+        {
+          "filename": "mpi-tests-result.json",
+          "sha256": "a1950f28bfd8496a9e1a536b23dfc9d2aeefd0056b94abec56b9e9746bdb9e83"
+        },
+        {
+          "filename": "mpi-tests.log",
+          "sha256": "833289f9cd71674e8b44b4d5c4f2217d9c6a99d5a01e2d26493291e0d1e02760"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    },
+    {
+      "id": "L03",
+      "statement": "Existing three-variable Lorenz CI integration passed in modes0/1/2",
+      "category": "new_local_validation",
+      "value": {
+        "source_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+        "numpy_version": "2.2.6",
+        "h5py_version": "3.13.0",
+        "h5py_mpi": true,
+        "scope": "Local existing CI example modes0/1/2, 30 members and 1000 cycles; no Icepack or HPC run",
+        "scientific_source_edited": false,
+        "status": "pass",
+        "elapsed_seconds": 63.050375499995425,
+        "parity": {
+          "ensemble_vec_mean": {
+            "max_abs": 2.313903095796377e-07,
+            "assimilation_window_max_abs": 2.3320438913287944e-08,
+            "relative_l2_by_variable": [
+              2.541281552848591e-09,
+              3.6116385244083033e-09,
+              1.4760901906173237e-09
+            ]
+          },
+          "ensemble": {
+            "max_abs": 2.3672896176663016e-07,
+            "assimilation_window_max_abs": 2.335415416609976e-08,
+            "relative_l2_by_variable": [
+              2.541452331103589e-09,
+              3.6119792327831735e-09,
+              1.4762119185617578e-09
+            ]
+          }
+        },
+        "shapes": {
+          "0": {
+            "ensemble": [
+              3,
+              30,
+              1001
+            ],
+            "ensemble_vec_mean": [
+              3,
+              1001
+            ],
+            "t": [
+              1001
+            ],
+            "ind_m": [
+              10
+            ]
+          },
+          "1": {
+            "ensemble": [
+              3,
+              30,
+              1001
+            ],
+            "ensemble_vec_mean": [
+              3,
+              1001
+            ],
+            "t": [
+              1001
+            ],
+            "ind_m": [
+              10
+            ]
+          },
+          "2": {
+            "ensemble": [
+              3,
+              30,
+              1001
+            ],
+            "ensemble_vec_mean": [
+              3,
+              1001
+            ],
+            "t": [
+              1001
+            ],
+            "ind_m": [
+              10
+            ]
+          }
+        },
+        "python_version": "3.11.12",
+        "open_mpi_version": "5.0.9"
+      },
+      "limitation": "Repository lorenz96 path actually implements Lorenz-63 equations. Existing comparator checks pointwise only through assimilation, then whole-history norms. No Icepack/PDE/HPC run or new scaling claim.",
+      "status": "supported",
+      "scientific_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "current_published_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "source_urls": [
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/scripts/ci/run_lorenz96_ci.py",
+        "https://github.com/ICESEE-project/ICESEE/blob/3748e416d3a8120cc860119bd7224c6f9ad41ff7/applications/lorenz_model/examples/lorenz96/_lorenz96_model.py"
+      ],
+      "retained_records": [
+        {
+          "filename": "lorenz-integration-result.json",
+          "sha256": "2c68ae55f45e5c1e3580ed83b9e3e56998cfc98db6a7ab4e9326ac610f8bde65"
+        },
+        {
+          "filename": "lorenz-integration.log",
+          "sha256": "07a30a86ebba74862f785cb275e5120b20dc30a1aee690c1daf9b8bcf0a1e323"
+        }
+      ],
+      "record_availability": "Full cited PACE/local records retained in the companion handover evidence bundle; raw PACE data not newly deposited with this draft."
+    }
+  ],
+  "availability": "This curated summary contains measured verification results and record hashes, not all raw code/data needed to reproduce the PACE experiments. No new persistent archive DOI is assigned.",
+  "privacy": "Curated summary omits personal filesystem paths, account names, node hostnames and raw command logs.",
+  "student_tutorial_validation": {
+    "source_revision": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+    "execution_mode": 0,
+    "exit_code": 0,
+    "forecast_cycles": 50,
+    "ensemble_shape": [
+      3,
+      8,
+      51
+    ],
+    "mean_shape": [
+      3,
+      51
+    ],
+    "observation_state_columns": [
+      10,
+      20,
+      30,
+      40
+    ],
+    "analysis_model_times": [
+      0.2,
+      0.4,
+      0.6,
+      0.8
+    ],
+    "finite_values": true,
+    "mean_max_abs_difference": 7.105427357601002e-15,
+    "configuration": "docs/handbook/examples/lorenz-smoke.yaml",
+    "config_sha256": "91442cdda54b8324b40272d89313fc186700329a317b9a9a8511121b42477f7d",
+    "h5py_parallel": false,
+    "scope": "Serial tutorial completion, complete member/mean shapes, clock and finite integrity; no real multi-rank validation. The local MPI singleton emitted a sandbox transport bind warning, then the serial run completed."
+  }
+}

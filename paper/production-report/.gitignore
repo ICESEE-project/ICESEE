@@ -1,0 +1,9 @@
+build/
+*.aux
+*.log
+*.out
+*.toc
+
+# This report source and reviewed PDF are intentional versioned artifacts.
+!main.tex
+!ICESEE-technical-report.pdf

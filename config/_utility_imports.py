@@ -1,8 +1,8 @@
-# =============================================================================
-# @author: Brian Kyanjo
-# @date: 2025-01-13
-# @description: ICESEE model applications utility imports
-# =============================================================================
+"""Build CLI/YAML runtime settings and prepare output at import time.
+
+Fresh runs delete the selected data_path before creating it. A supported
+resume must explicitly set resume_from_checkpoint; restart_enabled alone
+does not preserve existing output. Do not import this module to list defaults."""
 
 # --- Imports ---
 import os
