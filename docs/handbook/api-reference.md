@@ -1767,4 +1767,3 @@ No top-level function/class declarations; this module supplies imports, constant
   - `_get_project_root(self)` ([L57](../../applications/supported_models.py#L57))
   - `list_models(self)` ([L70](../../applications/supported_models.py#L70))
   - `call_model(self)` ([L77](../../applications/supported_models.py#L77))
-

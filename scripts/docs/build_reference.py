@@ -50,7 +50,7 @@ def configuration_index(root: Path) -> str:
                 continue
             seen.add(default)
             lines.append(f"| `{key}` | `{escaped(default)}` | [L{line}]({source_link(relative, line)}) |")
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def included(path: Path, root: Path) -> bool:
@@ -112,7 +112,7 @@ def api_index(root: Path) -> str:
                     lines.append(f"- `{signature}` ([L{node.lineno}]({source_link(relative, node.lineno)}))")
             lines.append("")
     lines[2] += f" Indexed {modules} modules and {symbols} function/class/method declarations."
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def main() -> None:
