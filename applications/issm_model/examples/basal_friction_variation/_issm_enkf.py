@@ -109,6 +109,7 @@ def generate_true_state(**icesee_kwargs):
 
     if isinstance(statevec_true, h5py.Dataset):
         statevec_true.flush()
+        os.chdir(icesee_path)
         return None
 
     updated_state = {}
@@ -238,6 +239,7 @@ def generate_nurged_state(**icesee_kwargs):
 
     if isinstance(statevec_nurged, h5py.Dataset):
         statevec_nurged.flush()
+        os.chdir(icesee_path)
         return None
 
     updated_state = {}
