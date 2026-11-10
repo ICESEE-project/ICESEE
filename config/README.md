@@ -107,6 +107,8 @@
 | `localized_vars` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `m_obs` | Parameter for m obs in dictionary | Unknown | Computed(num_observations) | No | None | Dictionary |
 | `mesh_coordinate_scale_to_m` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
+| `mode3_export_ensemble_history` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
+| `mode3_export_row_chunk_size` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `model_name` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
 | `model_nprocs` | Re-apply normalized and command-line-resolved values after the raw YAML update.  Without this step, e.g. ``--Nens=40`` is silently replaced by the YAML value while constructing the canonical dictionary. | Unknown | Computed(model_nprocs) | No | None | Dictionary |
 | `n_modeltasks` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
