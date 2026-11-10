@@ -157,7 +157,11 @@ def inverse_member(
     call_kwargs.update({"ens_id": state.model_context["ens_id"]})
     updated_state = run_model_inverse(ensemble, **call_kwargs)
     if updated_state is None:
-        return None
+        raise RuntimeError(
+            "ISSM inversion returned no result for member "
+            f"{state.model_context['ens_id']} at timestep {int(timestep)}; "
+            "inspect the preceding model-adapter/ISSM error."
+        )
     return {
         name: np.asarray(updated_state[name]).ravel()
         for name in vec_inputs
