@@ -105,6 +105,11 @@ class _FakeFunction:
     def function_space(self):
         return self.space
 
+    def copy(self, deepcopy=False):
+        clone = _FakeFunction(self.space)
+        clone.dat.values = self.dat.values.copy()
+        return clone
+
     def interpolate(self, expr):
         if isinstance(expr, _FakeCoordExpr):
             self.dat.values = np.array(expr.values, dtype=float)
@@ -168,6 +173,7 @@ def _install_fake_mesh_pipeline(monkeypatch, *, build_calls):
     s0 = _FakeFunction(Q)
     s0.dat.values[:] = [1.0, 2.0, 3.0, 4.0]
     u0 = _FakeFunction(V)
+    u0.dat.values = np.arange(8.0).reshape(4, 2)
     bed = _FakeFunction(Q)
     floating0 = _FakeFunction(Q)
     A0 = _FakeFunction(Q)
@@ -318,15 +324,13 @@ def test_initialize_member_preserves_initial_thickness_and_forcing(monkeypatch):
     state = native.initialize_member(7, topology=topo, icesee_kwargs=icesee_kwargs)
 
     assert isinstance(state, IcepackNativeState)
-    np.testing.assert_allclose(
-        icepack_calls[0]["h"].dat.data_ro,
-        ctx_objs["h0"].dat.data_ro,
-    )
-    assert icepack_calls[0]["u"] is ctx_objs["u0"]
-    assert icepack_calls[0]["smb"] is ctx_objs["smb"]
-    assert icepack_calls[0]["bed"] is ctx_objs["bed"]
-    assert icepack_calls[0]["h0"] is ctx_objs["h0"]
-    assert icepack_calls[0]["basal_melt_field"] == "melt-field"
+    assert icepack_calls == []
+    for actual, initial in [(state.thickness, ctx_objs["h0"]),
+                            (state.velocity, ctx_objs["u0"]),
+                            (state.surface, ctx_objs["s0"])]:
+        np.testing.assert_array_equal(actual.dat.data_ro, initial.dat.data_ro)
+        assert actual is not initial
+        assert not np.shares_memory(actual.dat.data_ro, initial.dat.data_ro)
     assert state.basal_melt is None  # basal_melt_field not in vec_inputs
 
 
@@ -360,8 +364,9 @@ def _run_initialize_member(monkeypatch, member_id, *, icesee_kwargs=None):
 
     kwargs = icesee_kwargs if icesee_kwargs is not None else _no_basal_melt_kwargs()
     topo = _topology()
-    native.initialize_member(member_id, topology=topo, icesee_kwargs=kwargs)
-    return ctx_objs, np.array(icepack_calls[0].dat.data_ro)
+    state = native.initialize_member(member_id, topology=topo, icesee_kwargs=kwargs)
+    assert icepack_calls == []
+    return ctx_objs, np.array(state.thickness.dat.data_ro)
 
 
 def test_initialize_member_uses_unperturbed_owned_thickness(monkeypatch):

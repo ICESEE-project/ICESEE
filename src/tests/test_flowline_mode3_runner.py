@@ -217,8 +217,8 @@ def test_run_flowline_execution_mode_3_orchestration(tmp_path, monkeypatch):
     assert [c[2] for c in checkpoint_calls[1:]] == [f"analysis-{k}" for k in range(nt)]
 
     # Analysis batch only requested on the scheduled observation timestep
-    # (k=1); flowline_1d has no inversion mechanism at all.
-    assert cycle_calls == [(k, 1 if k == 1 else 0) for k in range(nt)]
+    # (cycle k=0); flowline_1d has no inversion mechanism at all.
+    assert cycle_calls == [(k, 1 if k == 0 else 0) for k in range(nt)]
 
     assert len(save_all_data_calls) == 1
     assert len(timing_calls) == 1

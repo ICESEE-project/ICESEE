@@ -49,5 +49,8 @@ for mode in 1 2 3; do
  printf 'Mode %s exit=%s\n' "$mode" "$result"
  [[ "$result" == 0 ]] || FAILED=1
 done
+if [[ "$FAILED" == 0 ]]; then
+ python "$PIG_DIR/tools/verify_timing_outputs.py" "$RUN" 5 .05 32 > "$RUN/timing-verification.log" 2>&1
+fi
 printf 'Results: %s\n' "$RUN"
 exit "$FAILED"

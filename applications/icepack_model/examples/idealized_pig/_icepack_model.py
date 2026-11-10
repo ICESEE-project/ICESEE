@@ -98,38 +98,11 @@ def initializeMesh(**icesee_kwargs):
 
 def initializeRun(icesee_kwargs, forward_solver, mesh, Q, V):
 
-    # Forward whatever communicator this call's mesh/model context already
-    # uses, rather than accepting CheckpointFile's own default (COMM_WORLD,
-    # baked into firedrake.checkpointing.CheckpointFile.__init__). That
-    # default is harmless for modes 0-2 (one Firedrake mesh partitioned
-    # across the whole run's model communicator, which IS COMM_WORLD in
-    # practice) but is a genuine correctness bug for mode 3's native
-    # adapter (_icepack_native.py), which builds one independent
-    # mesh/solver context per ensemble group on topology.spatial_comm and
-    # calls this function once per rank, group by group, not in lockstep
-    # across the whole world. A tiny 2-rank/2-independent-group probe
-    # confirmed this concretely: with no comm= (both ranks collectively
-    # opening CheckpointFile on COMM_WORLD despite each naming a different
-    # file), the read did not hang but returned silently WRONG values
-    # (cross-contaminated between the two groups' files) -- worse than a
-    # deadlock, since it fails without any visible error. Explicit
-    # comm=icesee_kwargs["comm"] (falling back to COMM_WORLD only if that
-    # key is absent, matching Firedrake's own `comm or COMM_WORLD`
-    # convention elsewhere in checkpointing.py) scopes the collective open
-    # to exactly the ranks that own this call's mesh, for every mode --
-    # not a mode-name conditional, just using the communicator the caller
-    # already established. See src/tests/test_icepack_checkpoint_communicator.py.
+    # Checkpoint collectives must use the communicator that owns this mesh.
     checkpoint_comm = icesee_kwargs.get("comm") or firedrake.COMM_WORLD
     if checkpoint_comm.Get_size() == 1:
         checkpoint_comm = firedrake.COMM_SELF
-    # Optional, explicitly opt-in (default False -- the full spin-up-
-    # history checkpoint's read path below is byte-for-byte unchanged):
-    # a "compact" initFile built by tools/build_compact_initialization.py
-    # stores velocity/thickness/surface in NORMAL (non-timestepping) mode,
-    # not at idx=20000 -- see that script's own docstring for why
-    # (measured: idx-mode storage is proportional to the index value, not
-    # to how many indices are written, so preserving idx=20000 on write
-    # produced a 34.67 GB file instead of a compact one).
+    # Compact inputs store fields without the spin-up history's timestep index.
     compact_initialization = bool(icesee_kwargs.get("compact_initialization", False))
     with traced_init("checkpoint field load", comm=checkpoint_comm, compact=compact_initialization), \
             firedrake.CheckpointFile(icesee_kwargs["initFile"], 'r', comm=checkpoint_comm) as checkpoint:
@@ -633,7 +606,7 @@ def run_model(ensemble, **icesee_kwargs):
     # per-member .h5 schema and respect the run's data_path.
     columns = [
         index + 1 for index, year in enumerate(save_steps)
-        if np.isclose(float(step) * float(dt), float(year), rtol=0.0, atol=1e-9)
+        if np.isclose(float(step + 1) * float(dt), float(year), rtol=0.0, atol=1e-9)
     ]
     if columns:
         _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
@@ -645,6 +618,8 @@ def run_model(ensemble, **icesee_kwargs):
             for column in columns:
                 F["h_profiles"][:, column] = h_profiles
                 F["s_profiles"][:, column] = s_profiles
+                if "written_steps" in F:
+                    F["written_steps"][column] = step + 1
 
     return updated_state
 

@@ -250,7 +250,9 @@ def initialize_ensemble(ens, **icesee_kwargs):
         basal_melt_field = Function(Q)
         basal_melt_field.dat.data[:] = basal_melt_field_nudged
 
-    h, u, s, floating, grounded = Icepack(solver, h0, u0, smb, basal_melt_field, bed, dt, h0, icesee_kwargs)
+    h = h0.copy(deepcopy=True)
+    u = u0.copy(deepcopy=True)
+    s = s0.copy(deepcopy=True)
 
     # basal_melt_field is always part of the packed state (field existence
     # is driven by the application's configured state definition, vec_inputs
@@ -270,13 +272,15 @@ def initialize_ensemble(ens, **icesee_kwargs):
     hs_ensemble_files = f"{_modelrun_datasets}/hs_ensemble_profiles{ens}.h5"
 
     with h5py.File(hs_ensemble_files, "w") as F:
-        dataset_h_ensemble = F.create_dataset("h_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8")
-        dataset_s_ensemble = F.create_dataset("s_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8")
+        dataset_h_ensemble = F.create_dataset("h_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8", fillvalue=np.nan)
+        dataset_s_ensemble = F.create_dataset("s_profiles", (len(valid_points), len(save_steps) + 1), dtype = "f8", fillvalue=np.nan)
         dataset_s_ensemble[:,0] = s_profiles # save the initial surface elevation profile
         dataset_h_ensemble[:,0] = h_profiles # save the initial thickness profile
         dataset_bed_ensemble = F.create_dataset("bed_values", data = bed_values)
         dataset_distances_ensemble = F.create_dataset("distances", data = distances)
         dataset_valid_points_ensemble = F.create_dataset("valid_points", data = valid_points)
+        F.create_dataset("profile_times", data=[0.0, *save_steps])
+        F.create_dataset("written_steps", data=[0, *([-1] * len(save_steps))], dtype="i8")
 
 
     return initialized_state

@@ -310,11 +310,11 @@ def test_run_icepack_execution_mode_3_orchestration(tmp_path, monkeypatch):
     assert all(os.path.basename(r) == "steps" for r in step_roots)
     assert step_timesteps == [0, 1]
     assert [c[2] for c in checkpoint_calls[1:]] == ["analysis-0", "analysis-1"]
-    assert [c[3]["did_analysis"] for c in checkpoint_calls[1:]] == [False, True]
-    assert [c[3]["analysis_events_completed"] for c in checkpoint_calls[1:]] == [0, 1]
+    assert [c[3]["did_analysis"] for c in checkpoint_calls[1:]] == [True, False]
+    assert [c[3]["analysis_events_completed"] for c in checkpoint_calls[1:]] == [1, 1]
 
-    # Analysis batch only requested on the scheduled observation timestep (k=1).
-    assert records.cycle_calls == [(0, 0), (1, 1)]
+    # Analysis batch only requested on the observation state column 1 (cycle k=0).
+    assert records.cycle_calls == [(0, 1), (1, 0)]
     np.testing.assert_array_equal(records.noise_policies[0]["canonical_rows"],np.arange(4))
     assert records.noise_closed == [True]
 
@@ -344,7 +344,7 @@ def _write_pre_retention_checkpoint(root, step, *, did_analysis):
         root, step,
         LocalMemberEnsemble(layout, {0: np.zeros(4), 1: np.ones(4)}),
         topology,
-        run_id=runner._DEFAULT_RUN_ID+":native-controls-v1:test-noise",
+        run_id=runner._DEFAULT_RUN_ID+":time-grid-v2:native-controls-v1:test-noise",
         metadata={"Nens": 2, "did_analysis": did_analysis, "observation_rows": 0,
                   "error_mode": "legacy_prior_anomalies"},
     )
@@ -356,10 +356,11 @@ def test_resume_continues_from_latest_checkpoint_without_reinitializing(tmp_path
     their analyses, and leaves the pre-existing history in place."""
 
     records = _install_runner_fakes(monkeypatch, observation_steps=[1, 3])
+    runner.prepare_timestep_contract(MPI.COMM_WORLD, tmp_path, time_grid=np.linspace(0,1,5))
     steps = tmp_path / "_mode3_state_history" / "steps"
-    _write_pre_retention_checkpoint(steps, 0, did_analysis=False)
-    _write_pre_retention_checkpoint(steps, 1, did_analysis=True)
-    staging = steps / f".checkpoint_00000002.{runner._DEFAULT_RUN_ID}:native-controls-v1:test-noise.staging"
+    _write_pre_retention_checkpoint(steps, 0, did_analysis=True)
+    _write_pre_retention_checkpoint(steps, 1, did_analysis=False)
+    staging = steps / f".checkpoint_00000002.{runner._DEFAULT_RUN_ID}:time-grid-v2:native-controls-v1:test-noise.staging"
     staging.mkdir()
     (staging / ".shard_00000000.h5.tmp").write_bytes(b"partial")
     with h5py.File(tmp_path / "synthetic_obs.h5", "w") as f:
@@ -384,11 +385,11 @@ def test_resume_continues_from_latest_checkpoint_without_reinitializing(tmp_path
 
     assert [path.read_bytes() for path in profile_files] == profiles_before
     assert records.calls == {"true_wrong": 0, "synth_obs": 0, "init_pool": 0}
-    assert records.restored == [(steps / "checkpoint_00000001", runner._DEFAULT_RUN_ID+":native-controls-v1:test-noise")]
+    assert records.restored == [(steps / "checkpoint_00000001", runner._DEFAULT_RUN_ID+":time-grid-v2:native-controls-v1:test-noise")]
     # Cycles 0-1 (and the analysis at 1) are not repeated; 3 is analyzed once.
-    assert records.cycle_calls == [(2, 0), (3, 1)]
+    assert records.cycle_calls == [(2, 1), (3, 0)]
     assert [c[1] for c in records.checkpoint_calls] == [2, 3]  # no initial rewrite
-    assert [c[3]["analysis_events_completed"] for c in records.checkpoint_calls] == [1, 2]
+    assert [c[3]["analysis_events_completed"] for c in records.checkpoint_calls] == [2, 2]
     assert not staging.exists()
     assert (steps / "checkpoint_00000000").is_dir() and (steps / "checkpoint_00000001").is_dir()
     counts = records.timing_calls[0]["counts"]
@@ -425,7 +426,7 @@ def test_release_model_topology_never_frees_world_or_alias_twice(monkeypatch):
 
 @pytest.mark.parametrize("legacy_value", [None, False])
 def test_mode3_runs_without_an_experimental_opt_in(tmp_path, monkeypatch, legacy_value):
-    records = _install_runner_fakes(monkeypatch, observation_steps=[0])
+    records = _install_runner_fakes(monkeypatch, observation_steps=[1])
     kwargs = _runner_kwargs(tmp_path, nt=1)
     assert "mode3_experimental" not in kwargs
     if legacy_value is not None:
@@ -441,7 +442,7 @@ def test_observations_are_routed_in_distributed_numbering(tmp_path, monkeypatch)
     distributed row of the same physical node (here a reversal)."""
 
     records = _install_runner_fakes(
-        monkeypatch, observation_steps=[0], layout_order=(3, 2, 1, 0)
+        monkeypatch, observation_steps=[1], layout_order=(3, 2, 1, 0)
     )
     runner.run_icepack_execution_mode_3(**_runner_kwargs(tmp_path, nt=1))
     # JObs_indices(nd=4) observes reference nodes 0..3 in that order.

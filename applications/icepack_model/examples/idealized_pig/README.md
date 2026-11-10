@@ -11,11 +11,11 @@ extension is tested separately below. Record the exact source revision for each
 run. Do not assume an older `main`, installation directory or notebook uses the
 same code. Other adapters have their own mode and dependency requirements.
 
-Runtime completion and exact output reconstruction do not establish scientific
-time alignment. The current initializer advances one extra model step, and
-analysis scheduling has a one-cycle observation offset. See
-[time alignment under review](#time-alignment-under-review) before interpreting
-assimilation plots.
+Initialization and observation scheduling now use a shared state-column clock.
+The initial state is saved without an extra forecast, and observations and
+configured process noise are aligned with their actual model times. See
+[time grid, observations and restart](#time-grid-observations-and-restart) for
+validation, supported boundaries and updating older runs.
 
 ## 1. Choose the source and retain your working environment
 
@@ -786,29 +786,107 @@ and private input contents. Preserve the failing run; do not clear HDF5
 consistency flags or overwrite outputs to make a reader proceed.
 
 
-### Time alignment under review
+## Time grid, observations and restart
 
-A full-history validation exposed a pre-existing one-cycle observation offset
-in the PIG native schedule: the forecast advances before the cycle index is
-compared with the observation time-grid column. With `dt=0.05`, observation
-columns at years 2/3/4 were applied to saved states at 2.05/3.05/4.05. The
-exporter preserves those actual model times and records `analysis_applied`;
-it does not relabel or change the trajectory. This output validation is not
-evidence that observation timing is scientifically correct. Boundary cases
-(initial, interior and final observations) require a separate reviewed
-scheduling correction and validation across execution modes.
+The initial physical model fields are copied without advancing the forecast.
+Column zero therefore represents the initial state at `t[0]`. The existing
+configured generic initial perturbations are separate from this correction;
+native PIG initial physical fields remain unperturbed.
 
+Forecast cycle `k` advances from `t[k]` to `t[k+1]`. An observation indexed by
+state column `j` is used after cycle `j-1`. Modes 1–3 apply configured observation-scheduled
+process noise at that same boundary, before analysis. The analyzed
+state is saved in column `j`. With `dt=0.05`, observations at years 2, 3 and 4
+therefore update state columns 40, 60 and 80, rather than 41, 61 and 81. Base seeds, member identities and coordinate
+keying are unchanged. Moving a noise event to its correct cycle changes its
+timestep-keyed draw, so corrected runs are not bitwise replicas of old-clock
+trajectories.
+`analysis_applied` marks these columns in native full-history output. Completed
+analysis logs record both the state and observation columns and model time.
 
-There is a separate initialization offset. Both the existing generic
-`initialize_ensemble` and native `initialize_member` call `Icepack` for one
-`dt` before the ensemble is saved at metadata time zero. In job 15384953,
-initial ensemble thickness differed from truth at zero by up to 40.123212 m,
-but matched truth at 0.05 years within 1.14e-12 m; velocity and surface matched
-that first truth step within 3e-12 in their stored units. Members had identical
-initial thickness, so this is an extra initial advance, not added thickness
-noise. The aggregate preserves the checkpoint's declared times and values;
-it does not correct either scheduling convention. Changing initialization and
-observation alignment requires a separate scientific review and validation.
+Observations at the final simulated state are supported. Initial-time
+observations (`obs_index=0`) require a pre-forecast analysis stage, which is not
+implemented; choose observation times strictly after `t[0]`. A time-zero
+physical initial state and a time-zero observation are distinct concepts.
+
+New runs record `time_grid_contract.json` (`state-columns-v2`). Native run and
+noise identities, and generic checkpoint metadata, also distinguish the new
+clock. Preserve existing output and choose a fresh `data_path` when upgrading:
+older state cannot be silently resumed under the corrected schedule. Different
+time grids are rejected on reuse. Previously saved files remain readable and
+are not relabelled or repaired by export. A restart consumes observations
+already included in the checkpoint and replays the configured stochastic
+history before the next due event.
+
+### Historical timing findings
+
+Full-history job 15384953 (`da6f9dde`) preserved a pre-existing initialization
+and observation offset. Its initial thickness differed from truth at zero by
+up to 40.123212 m but matched truth at 0.05 years within 1.14e-12 m. Its
+2/3/4-year observations updated states at 2.05/3.05/4.05. Those archived outputs
+remain unchanged. Exact export of their saved values did not establish correct
+scientific timing; use a fresh run with the corrected clock for new analyses.
+
+### Corrected-clock validation
+
+PACE job **15432397** completed the one-year, two-member tests in Modes 1–3,
+a four-rank noise ownership/replay check, and a native restart. All steps exited
+zero. Analyses occurred at 0.5, 0.75 and 1.0 years, including the final state.
+Restart from checkpoint 13 through 19 crossed two analysis events; its final
+relative L2 difference from the uninterrupted run was 6.57e-13 (maximum absolute
+difference 2.99e-9), within the declared `rtol=1e-9`, `atol=1e-7` checks.
+This replay used copied completed output, not an interrupted partial-profile test.
+
+The three five-year, 32-member simulations in job **15433074** also exited zero:
+
+| Execution mode | MPI ranks / ranks per model | Simulation step | Elapsed |
+| --- | --- | --- | --- |
+| 1 | 8 / 1 | 15433074.2 | 42:15 |
+| 2 | 8 / 1 | 15433074.0 | 1:38:31 |
+| 3 | 16 / 2 | 15433074.1 | 37:11 |
+
+These concurrent runs shared a two-node allocation; these times are operational
+measurements, not a controlled scaling comparison. Each output has ensemble
+shape `(270615, 32, 101)` at `dt=0.05`, three analyses at years 2/3/4
+(columns 40/60/80), and 33 finite truth/member profile files of shape `(415, 4)`
+with written times 0/2/3/4. Native output retains the initial condition and all
+100 committed forecast steps; checkpoint 99 records next step 100 and time 5.
+
+The original allocation **timed out during post-run verification**, after all
+three simulations had finished successfully and the Mode 1–2 output scans had
+passed. Verification-only job **15439331** also timed out in repeated virtual
+HDF5 reads. These allocation failures are retained in the record. A subsequent
+read-only row-slab reader reproduced every short-case check and completed the
+remaining full native field/mean/profile/manifest checks. Together those checks
+took 67.37 seconds wall time; this is reader validation, not model runtime.
+No simulation was rerun to obtain that result.
+
+All final Mode 1–2 members were compared in bounded slabs: the largest per-field
+relative L2 difference was 9.12e-13. Native initial thickness and surface exactly
+matched truth at zero; initial velocity differences were at most 9.10e-13.
+The native five-year thickness range was 29.94–4180.72 m, with final values
+30.00–4180.68 m; velocity components stayed within approximately -7013 to 1550
+in model units. Assimilation produced transient basal-melt values -0.3664 to
+20.0441, returning to 0–20 at the final state; no unreviewed clipping was added.
+These checks establish timing, output integrity and the stated restart behavior,
+not scientific accuracy. Generic and native initial perturbation paths differ,
+so the three modes are not claimed to have identical member trajectories.
+
+To reproduce the prepared cases from this example directory (requires a PACE
+allocation and existing lab inputs):
+
+```bash
+export ICESEE_SOURCE_ROOT="$(git rev-parse --show-toplevel)"
+export ICESEE_SPACK_ROOT="$HOME/r-arobel3-0/ICESEE-Spack"
+sbatch pace/test_modes_1_3_year.sbatch
+# After checking the short case:
+sbatch pace/validate_production_modes.sbatch
+```
+
+Both scripts run `tools/verify_timing_outputs.py` on their closed outputs. This
+checker targets these fixed observation/profile schedules and geometry; it is
+not a general validator for arbitrary PIG configurations.
+
 
 ### Full-history output verification
 
@@ -824,8 +902,8 @@ source shards in serial-reference order: every value matched exactly, as did
 all sequential-member means. All 25 truth/member profiles had finite `h`/`s`
 arrays of shape `(415,4)`, written steps `[0,40,60,80]` and profile times
 `[0,2,3,4]`. Final thickness was 30..4181.5861 m, with basal melt 0..20 in model
-units. These are output-integrity results; the time-alignment issues above
-remain unresolved.
+units. These are historical output-integrity results from before the clock
+correction, not validation of that trajectory's time alignment.
 
 The original point-selection exporter took 2485.64 seconds in that PACE run;
 truth generation took 371.96 seconds and the forecast-loop timer 2347.68

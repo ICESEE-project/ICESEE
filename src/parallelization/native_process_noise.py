@@ -18,6 +18,7 @@ import json
 import tempfile
 import numpy as np
 
+from ICESEE.src.utils.timestep_contract import TIME_GRID_CONTRACT
 from ICESEE.src.parallelization._mpi_forecast_functions import (
     add_member_process_noise, process_noise_is_due,
 )
@@ -31,9 +32,10 @@ def canonical_noise_identity(options):
             "k_neighbors", "num_passes", "blend",
             "process_noise_schedule", "obs_index")
     payload = {name:options.get(name) for name in keys}
+    payload["time_grid_contract"] = TIME_GRID_CONTRACT
     encoded = json.dumps(payload,sort_keys=True,
                          default=lambda value:np.asarray(value).tolist())
-    return "canonical-noise-v1-" + hashlib.sha256(encoded.encode()).hexdigest()[:16]
+    return "canonical-noise-v2-" + hashlib.sha256(encoded.encode()).hexdigest()[:16]
 
 
 class NativeProcessNoiseAdapter:

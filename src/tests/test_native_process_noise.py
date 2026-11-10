@@ -59,17 +59,19 @@ def test_checkpoint_resume_replays_ar_history_without_perturbing_initial_fields(
     first,topology,options,rows = setup_adapter(monkeypatch)
     uninterrupted = member()
     try:
-        first.forecast_native_member(uninterrupted,0,topology=topology,icesee_kwargs=options)
         np.testing.assert_array_equal(uninterrupted.pack_owned(),np.zeros(9))
-        first.forecast_native_member(uninterrupted,1,topology=topology,icesee_kwargs=options)
+        for k in range(2):
+            first.forecast_native_member(uninterrupted,k,topology=topology,icesee_kwargs=options)
         saved = uninterrupted.pack_owned().copy()
-        first.forecast_native_member(uninterrupted,3,topology=topology,icesee_kwargs=options)
+        for k in range(2,6):
+            first.forecast_native_member(uninterrupted,k,topology=topology,icesee_kwargs=options)
         restored,_,_,_ = setup_adapter(monkeypatch)
         resumed = member(values=saved)
         try:
             # Constructing/restoring the policy introduces no initial noise.
             np.testing.assert_array_equal(resumed.pack_owned(),saved)
-            restored.forecast_native_member(resumed,3,topology=topology,icesee_kwargs=options)
+            for k in range(2,6):
+                restored.forecast_native_member(resumed,k,topology=topology,icesee_kwargs=options)
             np.testing.assert_array_equal(resumed.pack_owned(),uninterrupted.pack_owned())
         finally:
             restored.close()
@@ -89,3 +91,29 @@ def test_ownership_map_cannot_duplicate_or_omit_a_reference_row():
         NativeProcessNoiseAdapter(object(),topology=SimpleNamespace(spatial_comm=MPI.COMM_SELF),
                                   canonical_rows=np.array([0,0,2]),reference_coords=np.zeros((1,1)),
                                   icesee_kwargs={'nd':3})
+
+
+def test_configured_noise_precedes_first_analysis_without_initial_perturbation(monkeypatch):
+    wrapped, topology, options, rows = setup_adapter(monkeypatch)
+    options.update(obs_index=np.array([10,15,20]), number_obs_instants=3)
+    members = [member(0),member(1)]
+    try:
+        for k in range(9):
+            for physical in members:
+                wrapped.forecast_native_member(physical,k,topology=topology,icesee_kwargs=options)
+        for physical in members:
+            np.testing.assert_array_equal(physical.pack_owned(),np.zeros(9))
+        for physical in members:
+            wrapped.forecast_native_member(physical,9,topology=topology,icesee_kwargs=options)
+        assert np.any(members[0].pack_owned()[:6] != members[1].pack_owned()[:6])
+        assert [k for k in range(20) if canonical.process_noise_is_due(options,k)] == [9,14,19]
+    finally:
+        wrapped.close()
+
+
+def test_noise_checkpoint_identity_includes_time_contract(monkeypatch):
+    from ICESEE.src.parallelization import native_process_noise as native
+    original=native.canonical_noise_identity({})
+    assert original.startswith('canonical-noise-v2-')
+    monkeypatch.setattr(native,'TIME_GRID_CONTRACT','other-clock')
+    assert native.canonical_noise_identity({}) != original

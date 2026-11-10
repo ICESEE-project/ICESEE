@@ -82,6 +82,10 @@ mode-3 output directly. Directory layout under
 
 from __future__ import annotations
 
+from ICESEE.src.utils.timestep_contract import (
+    TIME_GRID_CONTRACT, observation_is_due, observation_cycle_steps, completed_observations,
+    prepare_timestep_contract,
+)
 import os
 
 import h5py
@@ -178,6 +182,7 @@ def run_flowline_execution_mode_3(**icesee_kwargs):
 
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
+    prepare_timestep_contract(world, _modelrun_datasets, time_grid=icesee_kwargs.get("t"))
     if world_rank == 0 and not os.path.exists(_modelrun_datasets):
         os.makedirs(_modelrun_datasets, exist_ok=True)
     world.Barrier()
@@ -257,7 +262,7 @@ def run_flowline_execution_mode_3(**icesee_kwargs):
     init_file_time = MPI.Wtime() - _t
 
     for k in range(nt):
-        do_analysis = bool(km < m_obs and k == ind_m[km])
+        do_analysis = observation_is_due(k, km, ind_m[:m_obs])
         batches = []
         if do_analysis:
             y_full = np.asarray(hu_obs[:, km], dtype=np.float64).copy()

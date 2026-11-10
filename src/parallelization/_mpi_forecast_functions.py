@@ -3,10 +3,13 @@
 # @date: 2025-03-06
 # @description: computes the X5 matrix for the EnKF
 #               - the new formulation is based on the paper by Geir Evensen: The Ensemble Kalman Filter: Theoretical Formulation And Practical Implementation
-#               - this formulation supports our need for mpi parallelization and no need for localizations
+#               - this formulation supports our need for mpi parallelization
 # =============================================================================
 
 import gc
+from ICESEE.src.utils.timestep_contract import (
+    TIME_GRID_CONTRACT, observation_is_due, observation_cycle_steps, completed_observations,
+)
 import os
 import copy
 import tempfile
@@ -33,9 +36,8 @@ from ICESEE.src.parallelization._parallel_i_o import (write_ensemble_member_dire
 def process_noise_is_due(icesee_kwargs, k=None):
     """Return whether process noise is applied at this forecast step.
 
-    ``observations`` is the historical mode-1 contract for the normal
-    Nens >= MPI-size path.  Keeping the decision here prevents execution
-    mode and MPI layout from silently changing the stochastic model.
+    Observation column j belongs to the state after forecast cycle j-1.
+    All parallel modes apply configured noise before that state's analysis.
     """
     schedule = str(
         icesee_kwargs.get("process_noise_schedule", "observations")
@@ -56,7 +58,7 @@ def process_noise_is_due(icesee_kwargs, k=None):
     number_obs = int(
         icesee_kwargs.get("number_obs_instants", obs_index.size)
     )
-    return bool(np.any(obs_index[:number_obs] == int(k)))
+    return bool(np.any(observation_cycle_steps(obs_index[:number_obs]) == int(k)))
 
 
 def _forecast_member_seed(base_seed, timestep, ens_id):
@@ -768,8 +770,8 @@ def parallel_forecast_step_default_full_parallel_run(**icesee_kwargs):
     km = icesee_kwargs.get("km", 0)
     obs_index = icesee_kwargs["obs_index"]
 
-    if (km < icesee_kwargs["number_obs_instants"]) and (k == obs_index[km]):
-        write_k = k + 1 if k < nt - 1 else k
+    if observation_is_due(k, km, obs_index[:icesee_kwargs["number_obs_instants"]]):
+        write_k = k + 1
         enkf_parallel_io.compute_forecast_mean_chunked_v2(
             write_k,
             flag="initial",

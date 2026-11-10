@@ -25,6 +25,10 @@ diagnostics are separate HDF5 files."""
 
 from __future__ import annotations
 
+from ICESEE.src.utils.timestep_contract import (
+    TIME_GRID_CONTRACT, observation_is_due, observation_cycle_steps, completed_observations,
+    prepare_timestep_contract, format_analysis_event,
+)
 import os
 import gc
 
@@ -246,6 +250,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
 
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
+    prepare_timestep_contract(world, _modelrun_datasets, time_grid=icesee_kwargs.get("t"))
     if world_rank == 0 and not os.path.exists(_modelrun_datasets):
         os.makedirs(_modelrun_datasets, exist_ok=True)
     trace_init("mode3 runner entered", Nens=Nens, nt=nt,
@@ -342,14 +347,14 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         {"obs_t": obs_t, "obs_index": ind_m, "number_obs_instants": m_obs, "m_obs": m_obs}
     )
 
-    run_id = str(icesee_kwargs.get("run_id", _DEFAULT_RUN_ID)) + ":native-controls-v1:" + canonical_noise_identity(icesee_kwargs)
+    run_id = str(icesee_kwargs.get("run_id", _DEFAULT_RUN_ID)) + ":time-grid-v2:native-controls-v1:" + canonical_noise_identity(icesee_kwargs)
     checkpoints = Mode3CheckpointManager(
         os.path.join(_modelrun_datasets, HISTORY_DIRNAME),
         run_id=run_id,
         topology=topology,
         number_of_members=Nens,
         nt=nt,
-        analysis_steps=[int(step) for step in np.asarray(ind_m)[:m_obs]],
+        analysis_steps=observation_cycle_steps(np.asarray(ind_m)[:m_obs], nt).tolist(),
         policy=checkpoint_policy,
         time_grid=icesee_kwargs.get("t"),
         layout_fingerprint=native_layout_fingerprint(adapter, topology, icesee_kwargs),
@@ -511,7 +516,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     analyses_this_run = 0
 
     for k in range(plan.start_step, nt):
-        do_analysis = bool(km < m_obs and k == ind_m[km])
+        do_analysis = observation_is_due(k, km, ind_m[:m_obs])
         batches = []
         if do_analysis:
             # `d`/`sigma`/`eta` are computed over the FULL, world-identical
@@ -569,6 +574,8 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         if icesee_kwargs.get("verbose") and world_rank == 0:
             print(f"[ICESEE] mode3 forecast step {k}: wall={_step_wall:.4f}s did_analysis={do_analysis}", flush=True)
         if do_analysis:
+            if world_rank == 0:
+                print(format_analysis_event(k, km, icesee_kwargs), flush=True)
             km += 1
             analyses_this_run += 1
 

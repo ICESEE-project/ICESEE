@@ -6,6 +6,10 @@
 # ==============================================================================
 
 # ==== Imports ========================================================
+from ICESEE.src.utils.timestep_contract import (
+    TIME_GRID_CONTRACT, observation_is_due, observation_cycle_steps, completed_observations,
+    prepare_timestep_contract, format_analysis_event,
+)
 import os
 import sys
 import gc # garbage collector to free up memory
@@ -103,6 +107,7 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
         # --- check if the modelrun dataset directory is present ---
         _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
         os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
+        prepare_timestep_contract(comm_world, _modelrun_datasets, time_grid=icesee_kwargs.get("t"))
         if rank_world == 0 and not os.path.exists(_modelrun_datasets):
             # cretate the directory
             os.makedirs(_modelrun_datasets, exist_ok=True)
@@ -368,6 +373,7 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
 
         _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
         os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
+        prepare_timestep_contract(comm_world, _modelrun_datasets, time_grid=icesee_kwargs.get("t"))
         if rank_world == 0 and not os.path.exists(_modelrun_datasets):
             os.makedirs(_modelrun_datasets, exist_ok=True)
 
@@ -467,7 +473,7 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
     params_analysis_0 = np.zeros((2, Nens))
     if resume_timestep:
         obs_index = np.asarray(icesee_kwargs.get("obs_index", []), dtype=int)
-        km = int(np.searchsorted(obs_index, resume_timestep, side="left"))
+        km = int(completed_observations(obs_index, resume_timestep))
     else:
         km = 0
     km_at_start = km
@@ -531,7 +537,7 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
                 if icesee_kwargs.get('global_analysis', True) or icesee_kwargs.get('local_analysis', False):
 
                     obs_index = icesee_kwargs["obs_index"]
-                    if (km < icesee_kwargs["number_obs_instants"]) and (k == obs_index[km]):
+                    if observation_is_due(k, km, obs_index[:icesee_kwargs["number_obs_instants"]]):
                         _time_analysis_step = MPI.Wtime()
                         icesee_kwargs.update({"km": km})
                         inversion_enabled = bool(icesee_kwargs.get(
@@ -765,6 +771,8 @@ def icesee_model_data_assimilation_partial_parallel(**icesee_kwargs):
                             analysis_Denkf_update(k, ens_mean, ensemble_vec, shape_ens, X5, UtilsFunctions, icesee_kwargs, smb_scale)
                         # ============================================== END FIXED SECTION
 
+                        if rank_world == 0:
+                            print(format_analysis_event(k, km, icesee_kwargs), flush=True)
                         km += 1
                         del hu_obs
                         gc.collect()

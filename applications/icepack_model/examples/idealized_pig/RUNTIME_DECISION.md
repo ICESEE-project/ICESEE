@@ -1,6 +1,19 @@
-# Idealized PIG runtime validation — 9 November 2026
+# Idealized PIG runtime validation — 10 November 2026
 
 ## Current status
+
+The initial-state and observation/process-noise clock defects are corrected.
+Modes 1–3 completed the five-year, 32-member PIG simulations with aligned
+2/3/4-year analyses. Output verification and native restart checks passed;
+post-run verifier allocation timeouts are recorded separately below.
+See [the corrected-clock validation](README.md#corrected-clock-validation)
+for the complete measured results and limits.
+
+The measurements below predate the corrected state-column clock. They establish
+the stated runtime/output properties for their recorded revisions, not timing
+correctness of those older trajectories.
+
+## Earlier runtime validations
 
 Native Mode 3 completed the 32-member, five-year PACE validation in job
 15125921.2: 100 forecast steps, three analyses, exit zero in 34 minutes 24
@@ -196,19 +209,76 @@ The notebook and generic output reader can use the partial file without the
 end-of-run summary. Hard node/allocation termination may prevent automatic
 recovery, so manual finalization remains necessary in that case.
 
-The output validation also exposed an existing one-cycle observation-time
-offset: with `dt=.05`, observations at years 2/3/4 were applied to native states
-saved at 2.05/3.05/4.05. Export retains those actual timestamps. A scheduling
-correction and new scientific validation remain separate work; complete file
-coverage does not establish correct observation timing.
+The historical full-history run exposed an extra initial forecast and a
+one-cycle observation offset. Its initial thickness matched truth at `dt=.05`
+instead of zero, and observations at 2/3/4 years updated states at
+2.05/3.05/4.05. Those saved values and timestamps remain unchanged.
 
+The corrected clock copies initial physical fields without advancing, analyzes
+observation column `j` after cycle `j-1`, and applies configured process noise
+before that analysis. Restart metadata and native noise identities distinguish
+this contract from older output. Choose a fresh data path when upgrading;
+initial-time observations require an unimplemented pre-forecast analysis stage
+and are rejected. See the README's time-grid section for details.
 
-The initializer also takes one model step before saving its ensemble at metadata
-time zero. In job 15384953 its initial thickness matched truth at `dt=.05`
-within `1.14e-12` m, while differing from truth at zero by up to `40.123212` m.
-This existing generic/native initialization behavior is distinct from thickness
-perturbations; initial member thickness was identical. Neither timing behavior
-is changed or relabelled by the exporter.
+PACE job **15432397** completed the one-year, two-member tests in Modes 1–3,
+a four-rank noise ownership/replay check, and a native restart. All steps exited
+zero. Analyses occurred at 0.5, 0.75 and 1.0 years, including the final state.
+Restart from checkpoint 13 through 19 crossed two analysis events; its final
+relative L2 difference from the uninterrupted run was 6.57e-13 (maximum absolute
+difference 2.99e-9), within the declared `rtol=1e-9`, `atol=1e-7` checks.
+This replay used copied completed output, not an interrupted partial-profile test.
+
+The three five-year, 32-member simulations in job **15433074** also exited zero:
+
+| Execution mode | MPI ranks / ranks per model | Simulation step | Elapsed |
+| --- | --- | --- | --- |
+| 1 | 8 / 1 | 15433074.2 | 42:15 |
+| 2 | 8 / 1 | 15433074.0 | 1:38:31 |
+| 3 | 16 / 2 | 15433074.1 | 37:11 |
+
+These concurrent runs shared a two-node allocation; these times are operational
+measurements, not a controlled scaling comparison. Each output has ensemble
+shape `(270615, 32, 101)` at `dt=0.05`, three analyses at years 2/3/4
+(columns 40/60/80), and 33 finite truth/member profile files of shape `(415, 4)`
+with written times 0/2/3/4. Native output retains the initial condition and all
+100 committed forecast steps; checkpoint 99 records next step 100 and time 5.
+
+The original allocation **timed out during post-run verification**, after all
+three simulations had finished successfully and the Mode 1–2 output scans had
+passed. Verification-only job **15439331** also timed out in repeated virtual
+HDF5 reads. These allocation failures are retained in the record. A subsequent
+read-only row-slab reader reproduced every short-case check and completed the
+remaining full native field/mean/profile/manifest checks. Together those checks
+took 67.37 seconds wall time; this is reader validation, not model runtime.
+No simulation was rerun to obtain that result.
+
+All final Mode 1–2 members were compared in bounded slabs: the largest per-field
+relative L2 difference was 9.12e-13. Native initial thickness and surface exactly
+matched truth at zero; initial velocity differences were at most 9.10e-13.
+The native five-year thickness range was 29.94–4180.72 m, with final values
+30.00–4180.68 m; velocity components stayed within approximately -7013 to 1550
+in model units. Assimilation produced transient basal-melt values -0.3664 to
+20.0441, returning to 0–20 at the final state; no unreviewed clipping was added.
+These checks establish timing, output integrity and the stated restart behavior,
+not scientific accuracy. Generic and native initial perturbation paths differ,
+so the three modes are not claimed to have identical member trajectories.
+
+To reproduce the prepared cases from this example directory (requires a PACE
+allocation and existing lab inputs):
+
+```bash
+export ICESEE_SOURCE_ROOT="$(git rev-parse --show-toplevel)"
+export ICESEE_SPACK_ROOT="$HOME/r-arobel3-0/ICESEE-Spack"
+sbatch pace/test_modes_1_3_year.sbatch
+# After checking the short case:
+sbatch pace/validate_production_modes.sbatch
+```
+
+Both scripts run `tools/verify_timing_outputs.py` on their closed outputs. This
+checker targets these fixed observation/profile schedules and geometry; it is
+not a general validator for arbitrary PIG configurations.
+
 
 Job 15384953 (`da6f9dde`, 24 members/eight ranks) completed the full five-year
 history path in 1:29:27 with every step exiting zero. The aggregate contains
@@ -218,4 +288,4 @@ checkpoint shards; all 25 profiles passed shape, written-time and finite-value
 checks. Export took 2485.64 seconds in that baseline. The revised contiguous
 reader/recovery implementation is verified separately on the closed archive;
 a new PACE performance result is not implied. See the README for the measured
-scope and outstanding scientific timing work.
+scope of the historical storage test and the separate corrected-clock validation.
