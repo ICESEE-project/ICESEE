@@ -1,0 +1,4658 @@
+{
+  "schema_version": 2,
+  "date": "2026-11-11",
+  "initial_verification_date": "2026-11-10",
+  "application": "basal_friction_variation",
+  "runtime_commit": "02ac5496d3d6cacf0ded737cd821e3e6f43c9d42",
+  "scientific_pre_handover_baseline": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+  "environment": {
+    "MATLAB": "R2025b 25.2.0.2998904",
+    "ISSM_banner_version": "4.24",
+    "python": "3.11.12",
+    "machine": "arm64",
+    "host_logical_cpu_count": 12,
+    "numpy": "2.2.6",
+    "h5py": "3.13.0",
+    "hdf5": "2.0.0",
+    "h5py_mpi": true,
+    "mpi4py": "4.0.1"
+  },
+  "isolation": {
+    "source": "Physical scratch copy of handover source; no application/research writes in installed tree.",
+    "installation": "Scratch ISSM view with private examples/execution; bin is an actual directory of target symlinks plus an unchanged physical issmdir.m copy because MATLAB resolves a directory symlink to its original target.",
+    "verified": "MATLAB issmdir and generic.executionpath explicitly resolved inside scratch; model/BAMG probe completed with 55 vertices.",
+    "matlab_preferences": "Task-owned MATLAB_PREFDIR; task-owned caches and temporary paths."
+  },
+  "source_files": [
+    {
+      "path": "applications/issm_model/examples/basal_friction_variation/_issm_enkf.py",
+      "sha256": "8867af3f6566598f17d2af7442ee2441b6d36715fb0afd83025cbaad690cadae",
+      "bytes": 17001,
+      "role": "runtime source or scientific input",
+      "matches_runtime_commit": true
+    },
+    {
+      "path": "applications/issm_model/examples/basal_friction_variation/_issm_model.py",
+      "sha256": "ff43c2b18f86050752f273ceabb44808272574f3ae9d9597b2986f57676a04db",
+      "bytes": 13495,
+      "role": "runtime source or scientific input",
+      "matches_runtime_commit": true
+    },
+    {
+      "path": "applications/issm_model/examples/basal_friction_variation/run_model.m",
+      "sha256": "e3bf3fe55dba1df28c7f48be0edadf535ddfa23d02d4e57e7954e65b7e7a8627",
+      "bytes": 44252,
+      "role": "runtime source or scientific input",
+      "matches_runtime_commit": true
+    },
+    {
+      "path": "applications/issm_model/examples/basal_friction_variation/run_da_issm.py",
+      "sha256": "1f8a66a648032d7ec04ad57a30ac97a6281b62798066b68367855d70d0212bac",
+      "bytes": 8162,
+      "role": "runtime source or scientific input",
+      "matches_runtime_commit": true
+    },
+    {
+      "path": "applications/issm_model/examples/basal_friction_variation/Mismip2.par",
+      "sha256": "ad44ac0fcc2ad060b3b9ee772d89600f3a0bb1761d76deaee24b3210ccacc2bc",
+      "bytes": 5068,
+      "role": "runtime source or scientific input",
+      "matches_runtime_commit": true
+    },
+    {
+      "path": "applications/issm_model/examples/basal_friction_variation/Domain.exp",
+      "sha256": "d5a43e6da081298f0d276dec38870a29d02716283ff74762962ba4b68a5f2713",
+      "bytes": 180,
+      "role": "runtime source or scientific input",
+      "matches_runtime_commit": true
+    },
+    {
+      "path": "applications/issm_model/examples/basal_friction_variation/data/ISMIP.reference_simulation_0.mat",
+      "sha256": "8c794c945029bd17351fe52b01573704fa3aa00e439968d995d9f1f569674c4a",
+      "bytes": 1409861,
+      "role": "runtime source or scientific input",
+      "matches_runtime_commit": true
+    },
+    {
+      "path": "src/run_model_da/icesee_da_partial_parallel.py",
+      "sha256": "90f4ffdfeba35e30479fa8043828073620115454c410f04cb68da53be2c5cff9",
+      "bytes": 49054,
+      "role": "runtime source or scientific input",
+      "matches_runtime_commit": true
+    },
+    {
+      "path": "src/parallelization/_mpi_ensemble_intialization.py",
+      "sha256": "43c942bb05b1c0303596885a13bbad1d96d1a07537cbd69b4a4df63ec080aad1",
+      "bytes": 51225,
+      "role": "runtime source or scientific input",
+      "matches_runtime_commit": true
+    },
+    {
+      "path": "src/parallelization/_parallel_i_o.py",
+      "sha256": "11c889572c7868bca7a8948832953ad0b12610a26fabaf70fcf20b410778ddf7",
+      "bytes": 68463,
+      "role": "runtime source or scientific input",
+      "matches_runtime_commit": true
+    },
+    {
+      "path": "src/parallelization/_mpi_generate_synthetic_observations.py",
+      "sha256": "bc81ce12aba526392d0321ba84b6942252c7f274c586d7e692b2854684e29243",
+      "bytes": 15993,
+      "role": "runtime source or scientific input",
+      "matches_runtime_commit": true
+    },
+    {
+      "path": "src/parallelization/_mpi_generate_true_wrong_state.py",
+      "sha256": "d0b6475bd2743f751dcc65bd311d3e4454890134f5aeea20399e9169483e0bd3",
+      "bytes": 19544,
+      "role": "runtime source or scientific input",
+      "matches_runtime_commit": true
+    },
+    {
+      "path": "src/tests/test_issm_basal_generation_cwd.py",
+      "sha256": "752104823a2b4cb63a7fdaa2ba1d0a09277db9692d1065261e21c635d460c7d2",
+      "bytes": 3859,
+      "role": "test",
+      "matches_runtime_commit": true
+    },
+    {
+      "path": "src/tests/test_issm_basal_inversion_schedule.py",
+      "sha256": "444d8dff37ba6c370f128404abd2df2d419c840e247886cbfde245126400c4e3",
+      "bytes": 3027,
+      "role": "test",
+      "matches_runtime_commit": true
+    },
+    {
+      "path": "src/tests/test_issm_tutorial_outputs.py",
+      "sha256": "a70b74af2bb891787e6b01e84c54e6878fdbd58c9ef129824f497fbda2349763",
+      "bytes": 2783,
+      "role": "test",
+      "matches_runtime_commit": null
+    },
+    {
+      "path": "applications/issm_model/examples/basal_friction_variation/tutorials/short_assimilation/run_case.py",
+      "sha256": "3a9a2800f87d02b7f83174cb104059e8cf843807e50141d0c23de7a4dee8f2e2",
+      "bytes": 9288,
+      "role": "tutorial profile or wrapper",
+      "matches_runtime_commit": null
+    },
+    {
+      "path": "applications/issm_model/examples/basal_friction_variation/tutorials/short_assimilation/common.yaml",
+      "sha256": "2057e07bc31cb5884173dac84518a59bd3262497c57edf7f6a3a9a9e2e77d4ee",
+      "bytes": 879,
+      "role": "tutorial profile or wrapper",
+      "matches_runtime_commit": null
+    },
+    {
+      "path": "applications/issm_model/examples/basal_friction_variation/tutorials/short_assimilation/params-fixed.yaml",
+      "sha256": "74a923c167cca106c69782a4a5d909905e4711122ea1c8a60294a23064aa21ba",
+      "bytes": 215,
+      "role": "tutorial profile or wrapper",
+      "matches_runtime_commit": null
+    },
+    {
+      "path": "applications/issm_model/examples/basal_friction_variation/tutorials/short_assimilation/params-hybrid.yaml",
+      "sha256": "6569dfea22affadaa72c2c3a8316f913dae2619cfe95e18d12e876f5b22fe8c3",
+      "bytes": 214,
+      "role": "tutorial profile or wrapper",
+      "matches_runtime_commit": null
+    },
+    {
+      "path": "applications/issm_model/examples/basal_friction_variation/tutorials/short_assimilation/params-enkf.yaml",
+      "sha256": "2f7e1ab3661f27b180a733e25c556a920bb7c67972b568120c29bbbe4e4950bb",
+      "bytes": 194,
+      "role": "tutorial profile or wrapper",
+      "matches_runtime_commit": null
+    }
+  ],
+  "prior_spinup": {
+    "duration_years": 1.0,
+    "time_step_years": 0.2,
+    "policy": "Existing basal initializer retained; distinct from the saved assimilation time-zero clock."
+  },
+  "hybrid_objective": {
+    "control": "FrictionCoefficient",
+    "cost_functions": [
+      101,
+      103,
+      501
+    ],
+    "cost_function_names": [
+      "absolute surface velocity misfit",
+      "logarithmic surface speed misfit",
+      "coefficient gradient penalty"
+    ],
+    "weights": [
+      1.0,
+      100.0,
+      1e-14
+    ],
+    "bounds": [
+      2000,
+      6500
+    ],
+    "maxsteps": 40,
+    "maxiter": 40,
+    "dxmin": 0.1,
+    "gttol": 0.0001,
+    "inversion_start_time_years": 2.0,
+    "scope": "Basal application values; do not substitute the different Choi objective/bounds or claim Choi backend validation."
+  },
+  "unaccepted_attempts": [
+    {
+      "label": "original callback",
+      "process_exit_code": 0,
+      "elapsed_seconds": 36.915216708992375,
+      "status": "failed before assimilation",
+      "reason": "HDF5 dataset callback returned before restoring cwd; relative synthetic-observation lookup failed; application caught exception and exited 0."
+    },
+    {
+      "label": "cwd-only correction",
+      "process_exit_code": 0,
+      "elapsed_seconds": 154.43294545801473,
+      "status": "execution completed but clock invalid",
+      "reason": "Legacy Python shifted post-step 1..nt into columns 0..nt-1, leaving the terminal reference column zero."
+    }
+  ],
+  "test_gates": {
+    "clock_and_handoff_and_wrapper_tests": 16,
+    "passed": 16,
+    "skipped": 0,
+    "duration_seconds": 0.51,
+    "scope": "Eight callback/HDF5 clock cases, two actual driver/runner scheduling cases, six wrapper artifact cases; external solver stubbed in unit tests.",
+    "baseline_sensitivity": "Old shifted clock fails all 8 new clock cases; original cwd branches failed 2 HDF5 cases and passed 2 NumPy controls.",
+    "schedule_baseline_sensitivity": "Enabled delayed request fails on original driver; disabled control passes."
+  },
+  "runs": [
+    {
+      "run_id": "bounded20261110fixed",
+      "variant": "fixed",
+      "issues": [],
+      "process_exit_code": 0,
+      "elapsed_seconds": 118.75105841702316,
+      "timed_out": false,
+      "model_command_summary": {
+        "true_state.mat": {
+          "count": 1,
+          "members": [
+            0
+          ],
+          "internal_process_counts": [
+            1
+          ]
+        },
+        "nurged_state.mat": {
+          "count": 1,
+          "members": [
+            0
+          ],
+          "internal_process_counts": [
+            1
+          ]
+        },
+        "initialize_ensemble.mat": {
+          "count": 4,
+          "members": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "internal_process_counts": [
+            1
+          ]
+        },
+        "enkf_state.mat": {
+          "count": 40,
+          "members": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "internal_process_counts": [
+            1
+          ]
+        }
+      },
+      "launch_sources": [
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/run_da_issm.py",
+          "sha256": "1f8a66a648032d7ec04ad57a30ac97a6281b62798066b68367855d70d0212bac"
+        },
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/_issm_enkf.py",
+          "sha256": "8867af3f6566598f17d2af7442ee2441b6d36715fb0afd83025cbaad690cadae"
+        },
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/run_model.m",
+          "sha256": "e3bf3fe55dba1df28c7f48be0edadf535ddfa23d02d4e57e7954e65b7e7a8627"
+        },
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/tutorials/short_assimilation/common.yaml",
+          "sha256": "2057e07bc31cb5884173dac84518a59bd3262497c57edf7f6a3a9a9e2e77d4ee"
+        },
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/tutorials/short_assimilation/params-fixed.yaml",
+          "sha256": "74a923c167cca106c69782a4a5d909905e4711122ea1c8a60294a23064aa21ba"
+        }
+      ],
+      "requested_resource_policy_flag": true,
+      "model_error_markers_detected": [],
+      "python_ranks": 1,
+      "requested_model_nprocs": 1,
+      "analysis_events": [
+        {
+          "cycle": 4,
+          "model_time": 1.0,
+          "observation_column": 0,
+          "observation_state_column": 5,
+          "state_column": 5
+        },
+        {
+          "cycle": 9,
+          "model_time": 2.0,
+          "observation_column": 1,
+          "observation_state_column": 10,
+          "state_column": 10
+        }
+      ],
+      "ensemble": {
+        "shape": [
+          20082,
+          4,
+          11
+        ],
+        "mean_shape": [
+          20082,
+          11
+        ],
+        "finite": true,
+        "mean_finite": true,
+        "maximum_absolute_mean_error": 0.0,
+        "all_stored_columns_nonzero": true,
+        "variables": {
+          "Thickness": {
+            "all_time_minimum": 2.668086299264252,
+            "all_time_maximum": 2537.2301374993845,
+            "final_minimum": 4.76029964377392,
+            "final_maximum": 2532.8267992158353
+          },
+          "Surface": {
+            "all_time_minimum": 0.2854956156800268,
+            "all_time_maximum": 2518.9878251814876,
+            "final_minimum": 0.5140012261273395,
+            "final_maximum": 2516.6887800759278
+          },
+          "Vx": {
+            "all_time_minimum": -7.11299694358595,
+            "all_time_maximum": 1487.2021825965344,
+            "final_minimum": -7.11299694358595,
+            "final_maximum": 1377.7421322844646
+          },
+          "Vy": {
+            "all_time_minimum": -288.85339905870575,
+            "all_time_maximum": 214.5679680365434,
+            "final_minimum": -265.58749429661833,
+            "final_maximum": 208.21686500730172
+          },
+          "Bed": {
+            "all_time_minimum": -1337.9863442902017,
+            "all_time_maximum": 500.21539551941675,
+            "final_minimum": -1337.9737396637863,
+            "final_maximum": 500.2027775881106
+          },
+          "FrictionCoefficient": {
+            "all_time_minimum": 1812.6426370524687,
+            "all_time_maximum": 4329.779812901598,
+            "final_minimum": 1812.6426370524687,
+            "final_maximum": 4329.779812901598
+          }
+        }
+      },
+      "reference_clock": {
+        "true_state": {
+          "shape": [
+            20082,
+            11
+          ],
+          "finite": true,
+          "initial_all_zero": false,
+          "terminal_all_zero": false,
+          "initial_max_abs_mapping_error": 0.0,
+          "terminal_max_abs_mapping_error": 0.0
+        },
+        "nurged_state": {
+          "shape": [
+            20082,
+            11
+          ],
+          "finite": true,
+          "initial_all_zero": false,
+          "terminal_all_zero": false,
+          "initial_max_abs_mapping_error": 0.0,
+          "terminal_max_abs_mapping_error": 0.0
+        }
+      },
+      "artifacts": [
+        {
+          "path": "ensemble_init_0.h5",
+          "bytes": 163440,
+          "sha256": "21385029ae0e54473c42fbbd59de8b91d1e5287dd64d8824b5d622aace8837e4"
+        },
+        {
+          "path": "ensemble_nurged_state_0.h5",
+          "bytes": 1789926,
+          "sha256": "812c34048371ca8e9ea5468252ed1a9727065d29eea661b8efad230209b216c8"
+        },
+        {
+          "path": "ensemble_nurged_state_scalar_0.h5",
+          "bytes": 1664,
+          "sha256": "b1f2432e4993529f6a6f22a5f08a9bdb5ce8e5f874528f507ba9e1053fec825b"
+        },
+        {
+          "path": "ensemble_out_0.h5",
+          "bytes": 163448,
+          "sha256": "fb79043a3f01b6b4a817c58890c7ff3fa10b0ec9148e1929c249f78c786c3d2e"
+        },
+        {
+          "path": "ensemble_out_1.h5",
+          "bytes": 163448,
+          "sha256": "38519d17f0c81d0be17243ded790dd06a4b0726fcab22332ee7f73bb7772f138"
+        },
+        {
+          "path": "ensemble_out_2.h5",
+          "bytes": 163448,
+          "sha256": "1caaf061aa428e8ca63d507bb35a63399f61538bebeb4d8d3e7ea762e634b30e"
+        },
+        {
+          "path": "ensemble_out_3.h5",
+          "bytes": 163448,
+          "sha256": "ce70dc68dc1fa753ba4176308507bdf45a079f4166ff0215830c157e83808e1c"
+        },
+        {
+          "path": "ensemble_out_scalar_0.h5",
+          "bytes": 2208,
+          "sha256": "b2e525abdedde86b5086745eee6c068f11911618ea2dde01184121d0b3a23237"
+        },
+        {
+          "path": "ensemble_out_scalar_1.h5",
+          "bytes": 2208,
+          "sha256": "df63f99ab2ede21ae01fcc9ffd53ea732d95f4e407b5be5b7949114f48e6269f"
+        },
+        {
+          "path": "ensemble_out_scalar_2.h5",
+          "bytes": 2208,
+          "sha256": "ceed0b1d3502b46d7ad715ee7bbc64fe734e8e27d30ca4dc3200f01b4047c756"
+        },
+        {
+          "path": "ensemble_out_scalar_3.h5",
+          "bytes": 2208,
+          "sha256": "77533cc90a506838984fef0d831ae87d91ce0a6f39b7d1491292a09eb0a8882c"
+        },
+        {
+          "path": "ensemble_output_0.h5",
+          "bytes": 163448,
+          "sha256": "af0217ceab28cd62d5afb66a89b8eae9273a4e1c2f5af9a0e3f46c314bbd9c3c"
+        },
+        {
+          "path": "ensemble_output_1.h5",
+          "bytes": 163448,
+          "sha256": "a8931f439e895e3649c8082724c2d232ebb33e614bc200b852cf7dbd57a02dd1"
+        },
+        {
+          "path": "ensemble_output_2.h5",
+          "bytes": 163448,
+          "sha256": "6d852345c136e154cf96a830425ccbc80419bb387297dd886c8163817ce94612"
+        },
+        {
+          "path": "ensemble_output_3.h5",
+          "bytes": 163448,
+          "sha256": "3dc0bae969b6aee83378f042c4bd6a2438d9de9f179817151c782868767871c8"
+        },
+        {
+          "path": "ensemble_scalar_output.h5",
+          "bytes": 2208,
+          "sha256": "a20c98ae11574bf531806ab7333a248bc74639cc044b077f54d4eb5562e52b6f"
+        },
+        {
+          "path": "ensemble_true_state_0.h5",
+          "bytes": 1789926,
+          "sha256": "d9b5cc5b9878ea04bbc4e07d1ab9a98ead7ce404c3427f839eb5df2e08a9b686"
+        },
+        {
+          "path": "ensemble_true_state_scalar_0.h5",
+          "bytes": 1664,
+          "sha256": "7eb764ece9463e2b0a0e659e8019950f72423b12a9ad96d6186f130ac015321c"
+        },
+        {
+          "path": "friction_bed_0.h5",
+          "bytes": 28824,
+          "sha256": "6c6c9937f9366808c64ddbaf5be59897cbf8b2275f139090144deac0c558ed30"
+        },
+        {
+          "path": "friction_bed_1.h5",
+          "bytes": 28824,
+          "sha256": "725723b4567cc920c459f625fefe2ece3fd4d91c1f714b82a7c6ba752434a830"
+        },
+        {
+          "path": "friction_bed_2.h5",
+          "bytes": 28824,
+          "sha256": "b620347daaf3b78675db7f6159a4c046256ff19ec994a07ce2aeccc6ba4f4b79"
+        },
+        {
+          "path": "friction_bed_3.h5",
+          "bytes": 28824,
+          "sha256": "6b3c2fea5743b2f3106d9939634f6883cdd8e60f6e9c1891eaa369f3b41131f8"
+        },
+        {
+          "path": "icesee_ensemble_data.h5",
+          "bytes": 14437888,
+          "sha256": "55b6c5c0b68e4a2462431a8103f88a6c9f0e307495db460f868b647a053a1fdb"
+        },
+        {
+          "path": "mesh_idxy_0.h5",
+          "bytes": 82152,
+          "sha256": "58e7c04398ef07cd0b314f0cbd56ff0ce3b00076c24e76eff75e63fb03fe97ad"
+        },
+        {
+          "path": "synthetic_obs.h5",
+          "bytes": 657120,
+          "sha256": "65eb0cebfccea3c825d63be978125752329ec42e2a9f046dfcfdf531dc8e99a8"
+        },
+        {
+          "path": "true-wrong-issm.h5",
+          "bytes": 19752,
+          "sha256": "5f88ae63534071e2729114f1db40557e74f674eec41d11c93a2e98f145f4d064"
+        },
+        {
+          "path": "true_nurged_states.h5",
+          "bytes": 3551800,
+          "sha256": "73dc633f9c6e12bdf771b2a94ae20ea30d2ab2db8c91b0871eb2bdd564b60743"
+        }
+      ],
+      "completion_status": "passed bounded backend execution and stated output checks",
+      "limitations": [
+        "One Python rank, Mode1 only; no multi-rank ICESEE execution or restart test.",
+        "All logged outgoing model commands retained requested internal process count1 under the explicit resource-policy flag.",
+        "Fixed/EnKF/hybrid labels do not establish calibrated uncertainty, physical skill or scaling.",
+        "Base application retains its one-year,0.2-year-step prior spin-up.",
+        "Scalar diagnostic exports retain their existing post-step schema, separate from corrected full-state0..nt arrays."
+      ],
+      "started_utc": "2026-11-10T21:50:38.070917+00:00"
+    },
+    {
+      "run_id": "bounded20261110hybrid",
+      "variant": "hybrid",
+      "issues": [],
+      "process_exit_code": 0,
+      "elapsed_seconds": 153.0710442920099,
+      "timed_out": false,
+      "model_command_summary": {
+        "true_state.mat": {
+          "count": 1,
+          "members": [
+            0
+          ],
+          "internal_process_counts": [
+            1
+          ]
+        },
+        "nurged_state.mat": {
+          "count": 1,
+          "members": [
+            0
+          ],
+          "internal_process_counts": [
+            1
+          ]
+        },
+        "initialize_ensemble.mat": {
+          "count": 4,
+          "members": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "internal_process_counts": [
+            1
+          ]
+        },
+        "enkf_state.mat": {
+          "count": 40,
+          "members": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "internal_process_counts": [
+            1
+          ]
+        },
+        "inverse_state.mat": {
+          "count": 4,
+          "members": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "internal_process_counts": [
+            1
+          ]
+        }
+      },
+      "launch_sources": [
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/run_da_issm.py",
+          "sha256": "1f8a66a648032d7ec04ad57a30ac97a6281b62798066b68367855d70d0212bac"
+        },
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/_issm_enkf.py",
+          "sha256": "8867af3f6566598f17d2af7442ee2441b6d36715fb0afd83025cbaad690cadae"
+        },
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/run_model.m",
+          "sha256": "e3bf3fe55dba1df28c7f48be0edadf535ddfa23d02d4e57e7954e65b7e7a8627"
+        },
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/tutorials/short_assimilation/common.yaml",
+          "sha256": "2057e07bc31cb5884173dac84518a59bd3262497c57edf7f6a3a9a9e2e77d4ee"
+        },
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/tutorials/short_assimilation/params-hybrid.yaml",
+          "sha256": "6569dfea22affadaa72c2c3a8316f913dae2619cfe95e18d12e876f5b22fe8c3"
+        }
+      ],
+      "requested_resource_policy_flag": true,
+      "model_error_markers_detected": [],
+      "python_ranks": 1,
+      "requested_model_nprocs": 1,
+      "analysis_events": [
+        {
+          "cycle": 4,
+          "model_time": 1.0,
+          "observation_column": 0,
+          "observation_state_column": 5,
+          "state_column": 5
+        },
+        {
+          "cycle": 9,
+          "model_time": 2.0,
+          "observation_column": 1,
+          "observation_state_column": 10,
+          "state_column": 10
+        }
+      ],
+      "ensemble": {
+        "shape": [
+          20082,
+          4,
+          11
+        ],
+        "mean_shape": [
+          20082,
+          11
+        ],
+        "finite": true,
+        "mean_finite": true,
+        "maximum_absolute_mean_error": 0.0,
+        "all_stored_columns_nonzero": true,
+        "variables": {
+          "Thickness": {
+            "all_time_minimum": 2.668086299264252,
+            "all_time_maximum": 2537.2301374993845,
+            "final_minimum": 4.76029964377392,
+            "final_maximum": 2532.8267992158353
+          },
+          "Surface": {
+            "all_time_minimum": 0.2854956156800268,
+            "all_time_maximum": 2518.9878251814876,
+            "final_minimum": 0.5140012261273395,
+            "final_maximum": 2516.6887800759278
+          },
+          "Vx": {
+            "all_time_minimum": -7.11299694358595,
+            "all_time_maximum": 1487.2021825965344,
+            "final_minimum": -7.11299694358595,
+            "final_maximum": 1377.7421322844646
+          },
+          "Vy": {
+            "all_time_minimum": -288.85339905870575,
+            "all_time_maximum": 214.5679680365434,
+            "final_minimum": -265.58749429661833,
+            "final_maximum": 208.21686500730172
+          },
+          "Bed": {
+            "all_time_minimum": -1337.9863442902017,
+            "all_time_maximum": 500.21539551941675,
+            "final_minimum": -1337.9737396637863,
+            "final_maximum": 500.2027775881106
+          },
+          "FrictionCoefficient": {
+            "all_time_minimum": 1812.6426370524687,
+            "all_time_maximum": 4329.779812901598,
+            "final_minimum": 1999.9999999999998,
+            "final_maximum": 4327.428577532863
+          }
+        }
+      },
+      "reference_clock": {
+        "true_state": {
+          "shape": [
+            20082,
+            11
+          ],
+          "finite": true,
+          "initial_all_zero": false,
+          "terminal_all_zero": false,
+          "initial_max_abs_mapping_error": 0.0,
+          "terminal_max_abs_mapping_error": 0.0
+        },
+        "nurged_state": {
+          "shape": [
+            20082,
+            11
+          ],
+          "finite": true,
+          "initial_all_zero": false,
+          "terminal_all_zero": false,
+          "initial_max_abs_mapping_error": 0.0,
+          "terminal_max_abs_mapping_error": 0.0
+        }
+      },
+      "artifacts": [
+        {
+          "path": "ensemble_before_analysis_step_0010.h5",
+          "bytes": 644672,
+          "sha256": "fb8e87b77d2ceec677d2357b032529860e011d3411b32e2995dd464151f88168"
+        },
+        {
+          "path": "ensemble_init_0.h5",
+          "bytes": 163440,
+          "sha256": "9baccda639d997a2f1b315a6a1858db18d931028e3fdc75a5f16afa774f726e3"
+        },
+        {
+          "path": "ensemble_nurged_state_0.h5",
+          "bytes": 1789926,
+          "sha256": "98951a10336f70f41e862ca5ddc5eed5ae6aa54961e73263c2ba7cad1de65660"
+        },
+        {
+          "path": "ensemble_nurged_state_scalar_0.h5",
+          "bytes": 1664,
+          "sha256": "d051c59d2a2b49d91964f9e5004080014f86a203a6556757c4e28e251378180c"
+        },
+        {
+          "path": "ensemble_out_0.h5",
+          "bytes": 163448,
+          "sha256": "ca012745cbd9496d3c96d060d3fd81f2ebda8b4ee13670222d108aafb9626d04"
+        },
+        {
+          "path": "ensemble_out_1.h5",
+          "bytes": 163448,
+          "sha256": "bb9010e23b14c79af9ff354198adab39b444f721478866bfd3a9dafc8f7e1cc8"
+        },
+        {
+          "path": "ensemble_out_2.h5",
+          "bytes": 163448,
+          "sha256": "245b21cc796ffdc6a53e6acacc03267e3051ddec856bdd29cb79c7ad729f54c4"
+        },
+        {
+          "path": "ensemble_out_3.h5",
+          "bytes": 163448,
+          "sha256": "c21ec3c036ad0156935ccc15f9bfbdf982b2351e10c0d13df748800431d0a6f5"
+        },
+        {
+          "path": "ensemble_out_scalar_0.h5",
+          "bytes": 2208,
+          "sha256": "b2e525abdedde86b5086745eee6c068f11911618ea2dde01184121d0b3a23237"
+        },
+        {
+          "path": "ensemble_out_scalar_1.h5",
+          "bytes": 2208,
+          "sha256": "df63f99ab2ede21ae01fcc9ffd53ea732d95f4e407b5be5b7949114f48e6269f"
+        },
+        {
+          "path": "ensemble_out_scalar_2.h5",
+          "bytes": 2208,
+          "sha256": "ceed0b1d3502b46d7ad715ee7bbc64fe734e8e27d30ca4dc3200f01b4047c756"
+        },
+        {
+          "path": "ensemble_out_scalar_3.h5",
+          "bytes": 2208,
+          "sha256": "77533cc90a506838984fef0d831ae87d91ce0a6f39b7d1491292a09eb0a8882c"
+        },
+        {
+          "path": "ensemble_output_0.h5",
+          "bytes": 163448,
+          "sha256": "a24d4fe34e96ab53407d4af6d9580f0a403b5dc26bb8bb134fa3d2847911eb87"
+        },
+        {
+          "path": "ensemble_output_1.h5",
+          "bytes": 163448,
+          "sha256": "edcef60c7c1e96002f28e0588c73eaaa7748ed722f90eb14ee4b12abb7943ab4"
+        },
+        {
+          "path": "ensemble_output_2.h5",
+          "bytes": 163448,
+          "sha256": "9ece9fc42b592ee36c7926faae2653a889923686c2ce95b64ebd5d5c154cec8d"
+        },
+        {
+          "path": "ensemble_output_3.h5",
+          "bytes": 163448,
+          "sha256": "51259154e9174570a0cfbb844a85db03707ef15570873cbe4b00139b52d0257d"
+        },
+        {
+          "path": "ensemble_scalar_output.h5",
+          "bytes": 2208,
+          "sha256": "a20c98ae11574bf531806ab7333a248bc74639cc044b077f54d4eb5562e52b6f"
+        },
+        {
+          "path": "ensemble_true_state_0.h5",
+          "bytes": 1789926,
+          "sha256": "918e88038e3c730db7108732c1f7a28846ace8d162b4707498df7447d739b5f4"
+        },
+        {
+          "path": "ensemble_true_state_scalar_0.h5",
+          "bytes": 1664,
+          "sha256": "4c11b69ce9b3e2e2bd7568880f7d3b8e0a59434dc12db49706e55d25dbd52d0e"
+        },
+        {
+          "path": "friction_bed_0.h5",
+          "bytes": 28824,
+          "sha256": "6c6c9937f9366808c64ddbaf5be59897cbf8b2275f139090144deac0c558ed30"
+        },
+        {
+          "path": "friction_bed_1.h5",
+          "bytes": 28824,
+          "sha256": "725723b4567cc920c459f625fefe2ece3fd4d91c1f714b82a7c6ba752434a830"
+        },
+        {
+          "path": "friction_bed_2.h5",
+          "bytes": 28824,
+          "sha256": "b620347daaf3b78675db7f6159a4c046256ff19ec994a07ce2aeccc6ba4f4b79"
+        },
+        {
+          "path": "friction_bed_3.h5",
+          "bytes": 28824,
+          "sha256": "6b3c2fea5743b2f3106d9939634f6883cdd8e60f6e9c1891eaa369f3b41131f8"
+        },
+        {
+          "path": "icesee_ensemble_data.h5",
+          "bytes": 14437888,
+          "sha256": "3290a828432f61c95c74e876c3735d19826edf2c0718214a53b6281d0e2803ca"
+        },
+        {
+          "path": "mesh_idxy_0.h5",
+          "bytes": 82152,
+          "sha256": "914bae3af899ec78a21e1586dcceaf3c26c592252b78536c4a2279d475f38d3f"
+        },
+        {
+          "path": "synthetic_obs.h5",
+          "bytes": 657120,
+          "sha256": "65eb0cebfccea3c825d63be978125752329ec42e2a9f046dfcfdf531dc8e99a8"
+        },
+        {
+          "path": "true-wrong-issm.h5",
+          "bytes": 19752,
+          "sha256": "5f88ae63534071e2729114f1db40557e74f674eec41d11c93a2e98f145f4d064"
+        },
+        {
+          "path": "true_nurged_states.h5",
+          "bytes": 3551800,
+          "sha256": "73dc633f9c6e12bdf771b2a94ae20ea30d2ab2db8c91b0871eb2bdd564b60743"
+        }
+      ],
+      "completion_status": "passed bounded backend execution and stated output checks",
+      "limitations": [
+        "One Python rank, Mode1 only; no multi-rank ICESEE execution or restart test.",
+        "All logged outgoing model commands retained requested internal process count1 under the explicit resource-policy flag.",
+        "Fixed/EnKF/hybrid labels do not establish calibrated uncertainty, physical skill or scaling.",
+        "Base application retains its one-year,0.2-year-step prior spin-up.",
+        "Scalar diagnostic exports retain their existing post-step schema, separate from corrected full-state0..nt arrays."
+      ],
+      "started_utc": "2026-11-10T21:47:54.598741+00:00",
+      "optimizer_diagnostics": {
+        "members": [
+          {
+            "member_id": 0,
+            "printed_cost_rows": 29,
+            "first_printed_cost": 1670.5,
+            "last_printed_cost": 2040.3,
+            "first_printed_gradient_norm": 1.51,
+            "last_printed_gradient_norm": 1.69,
+            "termination": [
+              "stopped on dxmin during line search"
+            ],
+            "returned_coefficient_count": 3347,
+            "finite": true,
+            "returned_minimum": 1999.9999999999998,
+            "returned_maximum": 4327.4050814294405,
+            "maximum_absolute_change_from_forecast": 2329.7798129015982,
+            "l2_change_from_forecast": 57445.183917829054,
+            "nodes_changed_above_1e_minus_10": 3347,
+            "maximum_absolute_stored_handoff_error": 0.0
+          },
+          {
+            "member_id": 1,
+            "printed_cost_rows": 29,
+            "first_printed_cost": 1670.1,
+            "last_printed_cost": 2039.9,
+            "first_printed_gradient_norm": 1.51,
+            "last_printed_gradient_norm": 1.69,
+            "termination": [
+              "stopped on dxmin during line search"
+            ],
+            "returned_coefficient_count": 3347,
+            "finite": true,
+            "returned_minimum": 1999.9999999999998,
+            "returned_maximum": 4327.420715768107,
+            "maximum_absolute_change_from_forecast": 2329.7599773649554,
+            "l2_change_from_forecast": 57445.16550426436,
+            "nodes_changed_above_1e_minus_10": 3347,
+            "maximum_absolute_stored_handoff_error": 0.0
+          },
+          {
+            "member_id": 2,
+            "printed_cost_rows": 29,
+            "first_printed_cost": 1670.2,
+            "last_printed_cost": 2040.0,
+            "first_printed_gradient_norm": 1.51,
+            "last_printed_gradient_norm": 1.69,
+            "termination": [
+              "stopped on dxmin during line search"
+            ],
+            "returned_coefficient_count": 3347,
+            "finite": true,
+            "returned_minimum": 1999.9999999999998,
+            "returned_maximum": 4327.428577532863,
+            "maximum_absolute_change_from_forecast": 2329.7790042314473,
+            "l2_change_from_forecast": 57445.174996485366,
+            "nodes_changed_above_1e_minus_10": 3347,
+            "maximum_absolute_stored_handoff_error": 0.0
+          },
+          {
+            "member_id": 3,
+            "printed_cost_rows": 29,
+            "first_printed_cost": 1670.6,
+            "last_printed_cost": 2040.5,
+            "first_printed_gradient_norm": 1.51,
+            "last_printed_gradient_norm": 1.69,
+            "termination": [
+              "stopped on dxmin during line search"
+            ],
+            "returned_coefficient_count": 3347,
+            "finite": true,
+            "returned_minimum": 1999.9999999999998,
+            "returned_maximum": 4327.416960557018,
+            "maximum_absolute_change_from_forecast": 2329.770656489477,
+            "l2_change_from_forecast": 57445.17614757361,
+            "nodes_changed_above_1e_minus_10": 3347,
+            "maximum_absolute_stored_handoff_error": 0.0
+          }
+        ],
+        "interpretation": "All four external inverse calls returned finite coefficient fields and were stored exactly. Printed objective rows are function/trial evaluations; the last printed trial is not established as the accepted final-control objective. Every solve stopped on dxmin during line search. No gradient-tolerance convergence, objective improvement or scientific skill is asserted. Coefficient differences are observed packed-array changes; nodal correspondence after BAMG remeshing was not independently validated.",
+        "printed_table_precision": "Costs and gradient norms are rounded values as printed by ISSM, not full-precision accepted-final objective records."
+      }
+    },
+    {
+      "run_id": "bounded20261111enkf",
+      "variant": "enkf",
+      "issues": [],
+      "process_exit_code": 0,
+      "elapsed_seconds": 109.87141933399835,
+      "timed_out": false,
+      "model_command_summary": {
+        "true_state.mat": {
+          "count": 1,
+          "members": [
+            0
+          ],
+          "internal_process_counts": [
+            1
+          ]
+        },
+        "nurged_state.mat": {
+          "count": 1,
+          "members": [
+            0
+          ],
+          "internal_process_counts": [
+            1
+          ]
+        },
+        "initialize_ensemble.mat": {
+          "count": 4,
+          "members": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "internal_process_counts": [
+            1
+          ]
+        },
+        "enkf_state.mat": {
+          "count": 40,
+          "members": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "internal_process_counts": [
+            1
+          ]
+        }
+      },
+      "launch_sources": [
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/run_da_issm.py",
+          "sha256": "1f8a66a648032d7ec04ad57a30ac97a6281b62798066b68367855d70d0212bac"
+        },
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/_issm_enkf.py",
+          "sha256": "8867af3f6566598f17d2af7442ee2441b6d36715fb0afd83025cbaad690cadae"
+        },
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/run_model.m",
+          "sha256": "e3bf3fe55dba1df28c7f48be0edadf535ddfa23d02d4e57e7954e65b7e7a8627"
+        },
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/tutorials/short_assimilation/common.yaml",
+          "sha256": "2057e07bc31cb5884173dac84518a59bd3262497c57edf7f6a3a9a9e2e77d4ee"
+        },
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/tutorials/short_assimilation/params-enkf.yaml",
+          "sha256": "2f7e1ab3661f27b180a733e25c556a920bb7c67972b568120c29bbbe4e4950bb"
+        }
+      ],
+      "requested_resource_policy_flag": true,
+      "model_error_markers_detected": [],
+      "python_ranks": 1,
+      "requested_model_nprocs": 1,
+      "analysis_events": [
+        {
+          "cycle": 4,
+          "model_time": 1.0,
+          "observation_column": 0,
+          "observation_state_column": 5,
+          "state_column": 5
+        },
+        {
+          "cycle": 9,
+          "model_time": 2.0,
+          "observation_column": 1,
+          "observation_state_column": 10,
+          "state_column": 10
+        }
+      ],
+      "ensemble": {
+        "shape": [
+          20082,
+          4,
+          11
+        ],
+        "mean_shape": [
+          20082,
+          11
+        ],
+        "finite": true,
+        "mean_finite": true,
+        "maximum_absolute_mean_error": 0.0,
+        "all_stored_columns_nonzero": true,
+        "variables": {
+          "Thickness": {
+            "all_time_minimum": 2.668086299264252,
+            "all_time_maximum": 2537.2301374993845,
+            "final_minimum": 4.7626619723998855,
+            "final_maximum": 2532.8147500692507
+          },
+          "Surface": {
+            "all_time_minimum": 0.2854956156800268,
+            "all_time_maximum": 2518.9878251814876,
+            "final_minimum": 0.5142563024673033,
+            "final_maximum": 2516.693869517895
+          },
+          "Vx": {
+            "all_time_minimum": -7.110952372895881,
+            "all_time_maximum": 1487.2021825965344,
+            "final_minimum": -7.110952372895881,
+            "final_maximum": 1377.7437552961296
+          },
+          "Vy": {
+            "all_time_minimum": -288.85339905870575,
+            "all_time_maximum": 214.5679680365434,
+            "final_minimum": -265.59460396587366,
+            "final_maximum": 208.210233778939
+          },
+          "Bed": {
+            "all_time_minimum": -1337.9863442902017,
+            "all_time_maximum": 500.21539551941675,
+            "final_minimum": -1337.9737396637863,
+            "final_maximum": 500.2027775881106
+          },
+          "FrictionCoefficient": {
+            "all_time_minimum": 1807.68624192439,
+            "all_time_maximum": 4335.244057789155,
+            "final_minimum": 1807.68624192439,
+            "final_maximum": 4335.244057789155
+          }
+        }
+      },
+      "reference_clock": {
+        "true_state": {
+          "shape": [
+            20082,
+            11
+          ],
+          "finite": true,
+          "initial_all_zero": false,
+          "terminal_all_zero": false,
+          "initial_max_abs_mapping_error": 0.0,
+          "terminal_max_abs_mapping_error": 0.0
+        },
+        "nurged_state": {
+          "shape": [
+            20082,
+            11
+          ],
+          "finite": true,
+          "initial_all_zero": false,
+          "terminal_all_zero": false,
+          "initial_max_abs_mapping_error": 0.0,
+          "terminal_max_abs_mapping_error": 0.0
+        }
+      },
+      "artifacts": [
+        {
+          "path": "ensemble_init_0.h5",
+          "bytes": 163440,
+          "sha256": "44da8b8b54faf941660de13995d9f4f3f4665bd4e6d78f0630d80c9eed148f69"
+        },
+        {
+          "path": "ensemble_nurged_state_0.h5",
+          "bytes": 1789926,
+          "sha256": "cc7f2b644e46e9edf9612ada53d908a96d2dc3369ef2730eab522500acd0ed0d"
+        },
+        {
+          "path": "ensemble_nurged_state_scalar_0.h5",
+          "bytes": 1664,
+          "sha256": "c5c9d816e373bb99ae1a21a059db4f3991caa855e185fe4705dc52dbd95fc0c9"
+        },
+        {
+          "path": "ensemble_out_0.h5",
+          "bytes": 163448,
+          "sha256": "51b1cfbf4e27dd90db7f6523beececee73e9e57aa26bdf07a693b8be554821b8"
+        },
+        {
+          "path": "ensemble_out_1.h5",
+          "bytes": 163448,
+          "sha256": "6bdacb8529ff6ebe68200c559da6c83db99a8910506d558fb598ffe70aa6f0f3"
+        },
+        {
+          "path": "ensemble_out_2.h5",
+          "bytes": 163448,
+          "sha256": "e940cd5168b9aa65a302f3e6aa0c2e68501ddc339773d0c935a23c23563b93c7"
+        },
+        {
+          "path": "ensemble_out_3.h5",
+          "bytes": 163448,
+          "sha256": "a9e66e21e3da86114c7859df4c84b29047bc8686bf67ae0c969ab99eb3084e57"
+        },
+        {
+          "path": "ensemble_out_scalar_0.h5",
+          "bytes": 2208,
+          "sha256": "05c7734f8549a9edb46ce529f7346e26293337dfec48555fbc3ed38006295c5d"
+        },
+        {
+          "path": "ensemble_out_scalar_1.h5",
+          "bytes": 2208,
+          "sha256": "bfed0dcb68f189ac4722ff59e9e21ca7b2c10c0b5acb2ba26f4b4cf503c41861"
+        },
+        {
+          "path": "ensemble_out_scalar_2.h5",
+          "bytes": 2208,
+          "sha256": "85040b22c386ab02fec882e7e1007d70ac76faacb91c5988691decbe45ef31b5"
+        },
+        {
+          "path": "ensemble_out_scalar_3.h5",
+          "bytes": 2208,
+          "sha256": "591d3edb25e0782fe2d9ee3fa3c2afed92385f125ec777851215c3804d81ff82"
+        },
+        {
+          "path": "ensemble_output_0.h5",
+          "bytes": 163448,
+          "sha256": "15f8f8ab7bc0c9fb00b0eed27240b0f28dc565c8122a1198811416823d5c79ed"
+        },
+        {
+          "path": "ensemble_output_1.h5",
+          "bytes": 163448,
+          "sha256": "846a5d9ea81aecc418a383910bc530bb23863853935def46501a5684547e9260"
+        },
+        {
+          "path": "ensemble_output_2.h5",
+          "bytes": 163448,
+          "sha256": "05f81ea763271f9444f2855f8a2c1802828cdaabf27284da970fea3eac5f0450"
+        },
+        {
+          "path": "ensemble_output_3.h5",
+          "bytes": 163448,
+          "sha256": "68364ead1d275b8a0ee51f7749925575322eff472fe5eef3da2b440a90aca6ab"
+        },
+        {
+          "path": "ensemble_scalar_output.h5",
+          "bytes": 2208,
+          "sha256": "ab83b651dac2793735c7ece6ba99e4dd2dfd5574dfdc336058cb0e3244051498"
+        },
+        {
+          "path": "ensemble_true_state_0.h5",
+          "bytes": 1789926,
+          "sha256": "ed6913090834be93cd20338b1d68a580a17a1d337c620aaa4545ab7b7057eba0"
+        },
+        {
+          "path": "ensemble_true_state_scalar_0.h5",
+          "bytes": 1664,
+          "sha256": "26f00e79a7d62261f93ffcd182d6cd8f28f3fe5f64ee9c79af47fbf1a88c54c9"
+        },
+        {
+          "path": "friction_bed_0.h5",
+          "bytes": 28824,
+          "sha256": "6c6c9937f9366808c64ddbaf5be59897cbf8b2275f139090144deac0c558ed30"
+        },
+        {
+          "path": "friction_bed_1.h5",
+          "bytes": 28824,
+          "sha256": "725723b4567cc920c459f625fefe2ece3fd4d91c1f714b82a7c6ba752434a830"
+        },
+        {
+          "path": "friction_bed_2.h5",
+          "bytes": 28824,
+          "sha256": "b620347daaf3b78675db7f6159a4c046256ff19ec994a07ce2aeccc6ba4f4b79"
+        },
+        {
+          "path": "friction_bed_3.h5",
+          "bytes": 28824,
+          "sha256": "6b3c2fea5743b2f3106d9939634f6883cdd8e60f6e9c1891eaa369f3b41131f8"
+        },
+        {
+          "path": "icesee_ensemble_data.h5",
+          "bytes": 14437888,
+          "sha256": "9bcc83ccf29a715f1dfc8a22a095222bde6e0d4dca86fd7148f863b96eb09c0c"
+        },
+        {
+          "path": "mesh_idxy_0.h5",
+          "bytes": 82152,
+          "sha256": "53ae55508c709500cd8258d6b55ce9d9f8fda2ac20cba40bc745c2f96f7a48d1"
+        },
+        {
+          "path": "synthetic_obs.h5",
+          "bytes": 657120,
+          "sha256": "65eb0cebfccea3c825d63be978125752329ec42e2a9f046dfcfdf531dc8e99a8"
+        },
+        {
+          "path": "true-wrong-issm.h5",
+          "bytes": 19752,
+          "sha256": "5f88ae63534071e2729114f1db40557e74f674eec41d11c93a2e98f145f4d064"
+        },
+        {
+          "path": "true_nurged_states.h5",
+          "bytes": 3551800,
+          "sha256": "73dc633f9c6e12bdf771b2a94ae20ea30d2ab2db8c91b0871eb2bdd564b60743"
+        }
+      ],
+      "completion_status": "passed bounded backend execution and stated output checks",
+      "limitations": [
+        "One Python rank, Mode1 only; no multi-rank ICESEE execution or restart test.",
+        "All logged outgoing model commands retained requested internal process count1 under the explicit resource-policy flag.",
+        "Fixed/EnKF/hybrid labels do not establish calibrated uncertainty, physical skill or scaling.",
+        "Base application retains its one-year,0.2-year-step prior spin-up.",
+        "Scalar diagnostic exports retain their existing post-step schema, separate from corrected full-state0..nt arrays."
+      ],
+      "started_utc": "2026-11-11T13:26:59.652044+00:00",
+      "hdf5_integrity": {
+        "scope": "All closed HDF5 files recursively beneath this run output directory; numeric datasets read in bounded slabs. Intentional NaNs in /hu_obs and its transposed /R error array are checked against matching missing-observation masks.",
+        "files": [
+          {
+            "path": "_process_noise_state/member_000000.h5",
+            "datasets": [
+              {
+                "path": "/noise",
+                "shape": [
+                  13388
+                ],
+                "dtype": "float64",
+                "elements": 13388,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "_process_noise_state/member_000001.h5",
+            "datasets": [
+              {
+                "path": "/noise",
+                "shape": [
+                  13388
+                ],
+                "dtype": "float64",
+                "elements": 13388,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "_process_noise_state/member_000002.h5",
+            "datasets": [
+              {
+                "path": "/noise",
+                "shape": [
+                  13388
+                ],
+                "dtype": "float64",
+                "elements": 13388,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "_process_noise_state/member_000003.h5",
+            "datasets": [
+              {
+                "path": "/noise",
+                "shape": [
+                  13388
+                ],
+                "dtype": "float64",
+                "elements": 13388,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_init_0.h5",
+            "datasets": [
+              {
+                "path": "/Surface",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/bed",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/coefficient",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_nurged_state_0.h5",
+            "datasets": [
+              {
+                "path": "/Bed_0",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_1",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_10",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_2",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_3",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_4",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_5",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_6",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_7",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_8",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_9",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_0",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_1",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_10",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_2",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_3",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_4",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_5",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_6",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_7",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_8",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_9",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_0",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_1",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_10",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_2",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_3",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_4",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_5",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_6",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_7",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_8",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_9",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_0",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_1",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_10",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_2",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_3",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_4",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_5",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_6",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_7",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_8",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_9",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_0",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_1",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_10",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_2",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_3",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_4",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_5",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_6",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_7",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_8",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_9",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_0",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_1",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_10",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_2",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_3",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_4",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_5",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_6",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_7",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_8",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_9",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_nurged_state_scalar_0.h5",
+            "datasets": [
+              {
+                "path": "/IceVolume",
+                "shape": [
+                  1,
+                  10
+                ],
+                "dtype": "float64",
+                "elements": 10,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/IceVolumeAboveFloatation",
+                "shape": [
+                  1,
+                  10
+                ],
+                "dtype": "float64",
+                "elements": 10,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_out_0.h5",
+            "datasets": [
+              {
+                "path": "/Bed",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_out_1.h5",
+            "datasets": [
+              {
+                "path": "/Bed",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_out_2.h5",
+            "datasets": [
+              {
+                "path": "/Bed",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_out_3.h5",
+            "datasets": [
+              {
+                "path": "/Bed",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_out_scalar_0.h5",
+            "datasets": [
+              {
+                "path": "/IceVolume",
+                "shape": [
+                  10
+                ],
+                "dtype": "float64",
+                "elements": 10,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/IceVolumeAboveFloatation",
+                "shape": [
+                  10
+                ],
+                "dtype": "float64",
+                "elements": 10,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_out_scalar_1.h5",
+            "datasets": [
+              {
+                "path": "/IceVolume",
+                "shape": [
+                  10
+                ],
+                "dtype": "float64",
+                "elements": 10,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/IceVolumeAboveFloatation",
+                "shape": [
+                  10
+                ],
+                "dtype": "float64",
+                "elements": 10,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_out_scalar_2.h5",
+            "datasets": [
+              {
+                "path": "/IceVolume",
+                "shape": [
+                  10
+                ],
+                "dtype": "float64",
+                "elements": 10,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/IceVolumeAboveFloatation",
+                "shape": [
+                  10
+                ],
+                "dtype": "float64",
+                "elements": 10,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_out_scalar_3.h5",
+            "datasets": [
+              {
+                "path": "/IceVolume",
+                "shape": [
+                  10
+                ],
+                "dtype": "float64",
+                "elements": 10,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/IceVolumeAboveFloatation",
+                "shape": [
+                  10
+                ],
+                "dtype": "float64",
+                "elements": 10,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_output_0.h5",
+            "datasets": [
+              {
+                "path": "/Bed",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_output_1.h5",
+            "datasets": [
+              {
+                "path": "/Bed",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_output_2.h5",
+            "datasets": [
+              {
+                "path": "/Bed",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_output_3.h5",
+            "datasets": [
+              {
+                "path": "/Bed",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_scalar_output.h5",
+            "datasets": [
+              {
+                "path": "/IceVolume",
+                "shape": [
+                  10
+                ],
+                "dtype": "float64",
+                "elements": 10,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/IceVolumeAboveFloatation",
+                "shape": [
+                  10
+                ],
+                "dtype": "float64",
+                "elements": 10,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_true_state_0.h5",
+            "datasets": [
+              {
+                "path": "/Bed_0",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_1",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_10",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_2",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_3",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_4",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_5",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_6",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_7",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_8",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Bed_9",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_0",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_1",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_10",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_2",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_3",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_4",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_5",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_6",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_7",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_8",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/FrictionCoefficient_9",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_0",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_1",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_10",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_2",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_3",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_4",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_5",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_6",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_7",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_8",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Surface_9",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_0",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_1",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_10",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_2",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_3",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_4",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_5",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_6",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_7",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_8",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Thickness_9",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_0",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_1",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_10",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_2",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_3",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_4",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_5",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_6",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_7",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_8",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vx_9",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_0",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_1",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_10",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_2",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_3",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_4",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_5",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_6",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_7",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_8",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/Vy_9",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "ensemble_true_state_scalar_0.h5",
+            "datasets": [
+              {
+                "path": "/IceVolume",
+                "shape": [
+                  1,
+                  10
+                ],
+                "dtype": "float64",
+                "elements": 10,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/IceVolumeAboveFloatation",
+                "shape": [
+                  1,
+                  10
+                ],
+                "dtype": "float64",
+                "elements": 10,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "friction_bed_0.h5",
+            "datasets": [
+              {
+                "path": "/FrictionCoefficient",
+                "shape": [
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "friction_bed_1.h5",
+            "datasets": [
+              {
+                "path": "/FrictionCoefficient",
+                "shape": [
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "friction_bed_2.h5",
+            "datasets": [
+              {
+                "path": "/FrictionCoefficient",
+                "shape": [
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "friction_bed_3.h5",
+            "datasets": [
+              {
+                "path": "/FrictionCoefficient",
+                "shape": [
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "icesee_ensemble_data.h5",
+            "datasets": [
+              {
+                "path": "/ensemble",
+                "shape": [
+                  20082,
+                  4,
+                  11
+                ],
+                "dtype": "float64",
+                "elements": 883608,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/ensemble_mean",
+                "shape": [
+                  20082,
+                  11
+                ],
+                "dtype": "float64",
+                "elements": 220902,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "mesh_idxy_0.h5",
+            "datasets": [
+              {
+                "path": "/fric_idx",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/fric_x",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/fric_y",
+                "shape": [
+                  1,
+                  3347
+                ],
+                "dtype": "float64",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "synthetic_obs.h5",
+            "datasets": [
+              {
+                "path": "/R",
+                "shape": [
+                  2,
+                  20082
+                ],
+                "dtype": "float64",
+                "elements": 40164,
+                "nan_count": 13388,
+                "infinity_count": 0
+              },
+              {
+                "path": "/bed_masks/cols/Bed",
+                "shape": [
+                  3347,
+                  2
+                ],
+                "dtype": "uint8",
+                "elements": 6694,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/bed_masks/static/Bed",
+                "shape": [
+                  3347
+                ],
+                "dtype": "uint8",
+                "elements": 3347,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/bed_snap_cols",
+                "shape": [
+                  0
+                ],
+                "dtype": "int64",
+                "elements": 0,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/hu_obs",
+                "shape": [
+                  20082,
+                  2
+                ],
+                "dtype": "float64",
+                "elements": 40164,
+                "nan_count": 13388,
+                "infinity_count": 0
+              },
+              {
+                "path": "/ind_m",
+                "shape": [
+                  2
+                ],
+                "dtype": "int64",
+                "elements": 2,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/obs_index",
+                "shape": [
+                  2
+                ],
+                "dtype": "int64",
+                "elements": 2,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/obs_max_time",
+                "shape": [
+                  1
+                ],
+                "dtype": "float64",
+                "elements": 1,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/obs_model_to_col_keys",
+                "shape": [
+                  2
+                ],
+                "dtype": "int64",
+                "elements": 2,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/obs_model_to_col_vals",
+                "shape": [
+                  2
+                ],
+                "dtype": "int64",
+                "elements": 2,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/obs_t",
+                "shape": [
+                  2
+                ],
+                "dtype": "float64",
+                "elements": 2,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "true-wrong-issm.h5",
+            "datasets": [
+              {
+                "path": "/Lxy",
+                "shape": [
+                  2
+                ],
+                "dtype": "int64",
+                "elements": 2,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/b_io",
+                "shape": [
+                  2
+                ],
+                "dtype": "float64",
+                "elements": 2,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/nxy",
+                "shape": [
+                  2
+                ],
+                "dtype": "int64",
+                "elements": 2,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/obs_index",
+                "shape": [
+                  2
+                ],
+                "dtype": "int64",
+                "elements": 2,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/obs_max_time",
+                "shape": [
+                  1
+                ],
+                "dtype": "int64",
+                "elements": 1,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/run_mode",
+                "shape": [
+                  1
+                ],
+                "dtype": "int64",
+                "elements": 1,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/t",
+                "shape": [
+                  11
+                ],
+                "dtype": "float64",
+                "elements": 11,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          },
+          {
+            "path": "true_nurged_states.h5",
+            "datasets": [
+              {
+                "path": "/nurged_state",
+                "shape": [
+                  20082,
+                  11
+                ],
+                "dtype": "float64",
+                "elements": 220902,
+                "nan_count": 0,
+                "infinity_count": 0
+              },
+              {
+                "path": "/true_state",
+                "shape": [
+                  20082,
+                  11
+                ],
+                "dtype": "float64",
+                "elements": 220902,
+                "nan_count": 0,
+                "infinity_count": 0
+              }
+            ]
+          }
+        ],
+        "issues": [],
+        "observation_missing_value_schema": {
+          "error_array_transposed": true,
+          "missing_masks_match": true,
+          "active_errors_finite_and_nonnegative": true
+        },
+        "file_count": 31,
+        "dataset_count": 233,
+        "status": "passed stated HDF5 readability/nonfinite checks"
+      }
+    }
+  ],
+  "limits": [
+    "Mode 1 with 1 Python rank only; no multi-rank ICESEE scaling or coupled restart claim.",
+    "Completed arrays and aligned event records are numerical/runtime evidence, not calibrated physical skill.",
+    "Generic inverse geometry/remeshing and returned-velocity caveats remain; actual optimizer return status is recorded separately.",
+    "Scalar diagnostic files retain their existing post-step schema and are not silently promoted to full-state 0..nt arrays."
+  ],
+  "historical_uncapped_profile_runs": [
+    {
+      "run_id": "clock20261110fixed",
+      "variant": "fixed",
+      "issues": [],
+      "process_exit_code": 0,
+      "elapsed_seconds": 142.85706208398915,
+      "timed_out": false,
+      "model_command_summary": {
+        "true_state.mat": {
+          "count": 1,
+          "members": [
+            0
+          ],
+          "internal_process_counts": [
+            3
+          ]
+        },
+        "nurged_state.mat": {
+          "count": 1,
+          "members": [
+            0
+          ],
+          "internal_process_counts": [
+            3
+          ]
+        },
+        "initialize_ensemble.mat": {
+          "count": 4,
+          "members": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "internal_process_counts": [
+            3
+          ]
+        },
+        "enkf_state.mat": {
+          "count": 40,
+          "members": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "internal_process_counts": [
+            13
+          ]
+        }
+      },
+      "python_ranks": 1,
+      "requested_model_nprocs": 1,
+      "analysis_events": [
+        {
+          "cycle": 4,
+          "model_time": 1.0,
+          "observation_column": 0,
+          "observation_state_column": 5,
+          "state_column": 5
+        },
+        {
+          "cycle": 9,
+          "model_time": 2.0,
+          "observation_column": 1,
+          "observation_state_column": 10,
+          "state_column": 10
+        }
+      ],
+      "ensemble": {
+        "shape": [
+          20082,
+          4,
+          11
+        ],
+        "mean_shape": [
+          20082,
+          11
+        ],
+        "finite": true,
+        "mean_finite": true,
+        "maximum_absolute_mean_error": 0.0,
+        "all_stored_columns_nonzero": true,
+        "variables": {
+          "Thickness": {
+            "all_time_minimum": 2.668086299264235,
+            "all_time_maximum": 2537.230137499379,
+            "final_minimum": 4.760299635674378,
+            "final_maximum": 2532.826802091918
+          },
+          "Surface": {
+            "all_time_minimum": 0.285495615680025,
+            "all_time_maximum": 2518.987825181486,
+            "final_minimum": 0.5140012252527777,
+            "final_maximum": 2516.688782394479
+          },
+          "Vx": {
+            "all_time_minimum": -7.112996917168163,
+            "all_time_maximum": 1487.2021825966697,
+            "final_minimum": -7.112996917168163,
+            "final_maximum": 1377.7421332147705
+          },
+          "Vy": {
+            "all_time_minimum": -288.85339905869046,
+            "all_time_maximum": 214.5679680365378,
+            "final_minimum": -265.58749453994545,
+            "final_maximum": 208.2168647535435
+          },
+          "Bed": {
+            "all_time_minimum": -1337.9863442902017,
+            "all_time_maximum": 500.21539551941675,
+            "final_minimum": -1337.9737396637863,
+            "final_maximum": 500.2027775881106
+          },
+          "FrictionCoefficient": {
+            "all_time_minimum": 1812.6426370524687,
+            "all_time_maximum": 4329.779812901598,
+            "final_minimum": 1812.6426370524687,
+            "final_maximum": 4329.779812901598
+          }
+        }
+      },
+      "reference_clock": {
+        "true_state": {
+          "shape": [
+            20082,
+            11
+          ],
+          "finite": true,
+          "initial_all_zero": false,
+          "terminal_all_zero": false,
+          "initial_max_abs_mapping_error": 0.0,
+          "terminal_max_abs_mapping_error": 0.0
+        },
+        "nurged_state": {
+          "shape": [
+            20082,
+            11
+          ],
+          "finite": true,
+          "initial_all_zero": false,
+          "terminal_all_zero": false,
+          "initial_max_abs_mapping_error": 0.0,
+          "terminal_max_abs_mapping_error": 0.0
+        }
+      },
+      "artifacts": [
+        {
+          "path": "ensemble_init_0.h5",
+          "bytes": 163440,
+          "sha256": "b9190915eba39e267b74db716c7e7c543c0444579e1ae0253606bb0a36a5e8f1"
+        },
+        {
+          "path": "ensemble_nurged_state_0.h5",
+          "bytes": 1789926,
+          "sha256": "c8abdef96b0cbfc8758a7f39482033d6597087d2a82c512ce69e00e057dad318"
+        },
+        {
+          "path": "ensemble_nurged_state_scalar_0.h5",
+          "bytes": 1664,
+          "sha256": "c5ee3733fe5a1e5a25e23f98ad7d0a692bc5dac71dd2d1ae6dd125eb7dd4728b"
+        },
+        {
+          "path": "ensemble_out_0.h5",
+          "bytes": 163448,
+          "sha256": "6a6b37e54a94140bc4e1f509d695745cd8578b5a258e09ff613bbb6928efe60e"
+        },
+        {
+          "path": "ensemble_out_1.h5",
+          "bytes": 163448,
+          "sha256": "d09f2104298ae850117b04e3a02da1f2f4cc8ece50804ca36ff59c2b39811417"
+        },
+        {
+          "path": "ensemble_out_2.h5",
+          "bytes": 163448,
+          "sha256": "e4e681a3892db6a96e6f0f410050e9f67d01bb4a9a9f7a0e8f25203291a6f2e8"
+        },
+        {
+          "path": "ensemble_out_3.h5",
+          "bytes": 163448,
+          "sha256": "ea2ca40d6405364ee03fb708c99739e183db1f7d21eb3a3a20100205fc6938b6"
+        },
+        {
+          "path": "ensemble_out_scalar_0.h5",
+          "bytes": 2208,
+          "sha256": "b2af7a58f22f94d7749428909bde294d756c56c75af98925a9f814fd3db9316f"
+        },
+        {
+          "path": "ensemble_out_scalar_1.h5",
+          "bytes": 2208,
+          "sha256": "711907229935ac49c30d2efd53ceac66b75b2fd58d9c034ecefcb1bb606b31e7"
+        },
+        {
+          "path": "ensemble_out_scalar_2.h5",
+          "bytes": 2208,
+          "sha256": "db464484d542c714ca20e29b3ee5d69f28f3b57fbdbbc645f9a12e859c61e88e"
+        },
+        {
+          "path": "ensemble_out_scalar_3.h5",
+          "bytes": 2208,
+          "sha256": "045ac89304991d2c70039f32ff257b2abfb3b07c1dd78ae722a653022e91bd8e"
+        },
+        {
+          "path": "ensemble_output_0.h5",
+          "bytes": 163448,
+          "sha256": "598b900cd63812289864aa1e039e0a53216657773fbb7922e12f30bb00ec452e"
+        },
+        {
+          "path": "ensemble_output_1.h5",
+          "bytes": 163448,
+          "sha256": "e4aee307d6b2d19ca7b7b969f570b8f6cd69deb05cc3bf3d99c406470d6819dc"
+        },
+        {
+          "path": "ensemble_output_2.h5",
+          "bytes": 163448,
+          "sha256": "5974629acd678c63e29ebccb23bbe81d3480a21ea56e9d2d60455dc92fd3312d"
+        },
+        {
+          "path": "ensemble_output_3.h5",
+          "bytes": 163448,
+          "sha256": "ad4c32c5ccadb6682009d043fefdd1d1ff17be885bb5931f732ddf3fc894f4f1"
+        },
+        {
+          "path": "ensemble_scalar_output.h5",
+          "bytes": 2208,
+          "sha256": "cc62f681c415f8aa3f0e99da9f0bec33f4def45b0526529d182096b769bfa3b3"
+        },
+        {
+          "path": "ensemble_true_state_0.h5",
+          "bytes": 1789926,
+          "sha256": "a05f4214768f025cf9f6333bde0b01f249b2d9ba0ed3ce8039f1010fea887618"
+        },
+        {
+          "path": "ensemble_true_state_scalar_0.h5",
+          "bytes": 1664,
+          "sha256": "4f977733dba3d63705de0a96c8e22389667be65980aa5369c008c6edb3559bf5"
+        },
+        {
+          "path": "friction_bed_0.h5",
+          "bytes": 28824,
+          "sha256": "6c6c9937f9366808c64ddbaf5be59897cbf8b2275f139090144deac0c558ed30"
+        },
+        {
+          "path": "friction_bed_1.h5",
+          "bytes": 28824,
+          "sha256": "725723b4567cc920c459f625fefe2ece3fd4d91c1f714b82a7c6ba752434a830"
+        },
+        {
+          "path": "friction_bed_2.h5",
+          "bytes": 28824,
+          "sha256": "b620347daaf3b78675db7f6159a4c046256ff19ec994a07ce2aeccc6ba4f4b79"
+        },
+        {
+          "path": "friction_bed_3.h5",
+          "bytes": 28824,
+          "sha256": "6b3c2fea5743b2f3106d9939634f6883cdd8e60f6e9c1891eaa369f3b41131f8"
+        },
+        {
+          "path": "icesee_ensemble_data.h5",
+          "bytes": 14437888,
+          "sha256": "53eee518d3d7c98a9381e0f53b9bf17396256dcbdeb95d0385d1cd56592ac321"
+        },
+        {
+          "path": "mesh_idxy_0.h5",
+          "bytes": 82152,
+          "sha256": "32fd27d74b60fe8d06517baee7bef47f544e5ccac4b6eb93a793d8563ffa9326"
+        },
+        {
+          "path": "synthetic_obs.h5",
+          "bytes": 657120,
+          "sha256": "0040b6d5d3e3f8394a9cab90b3c8f879b8701a4c9c74e536b8b39d5f70de25af"
+        },
+        {
+          "path": "true-wrong-issm.h5",
+          "bytes": 19752,
+          "sha256": "5f88ae63534071e2729114f1db40557e74f674eec41d11c93a2e98f145f4d064"
+        },
+        {
+          "path": "true_nurged_states.h5",
+          "bytes": 3551800,
+          "sha256": "ed7c4a1b760932c003caab128170788863aecfd523e4f03795c984dd10a23003"
+        }
+      ],
+      "completion_status": "passed bounded backend execution and stated output checks",
+      "limitations": [
+        "One Python rank, Mode1 only; no multi-rank ICESEE execution or restart test.",
+        "Requested model_nprocs1 was redistributed to observed internal counts; retain command summary.",
+        "Fixed/EnKF/hybrid labels do not establish calibrated uncertainty, physical skill or scaling.",
+        "Base application retains its one-year,0.2-year-step prior spin-up.",
+        "Scalar diagnostic exports retain their existing post-step schema, separate from corrected full-state0..nt arrays."
+      ]
+    },
+    {
+      "run_id": "clock20261110hybrid",
+      "variant": "hybrid",
+      "issues": [
+        "Hybrid did not invoke all four member inversions at the final analysis"
+      ],
+      "process_exit_code": 0,
+      "elapsed_seconds": 135.8149590420071,
+      "timed_out": false,
+      "model_command_summary": {
+        "true_state.mat": {
+          "count": 1,
+          "members": [
+            0
+          ],
+          "internal_process_counts": [
+            3
+          ]
+        },
+        "nurged_state.mat": {
+          "count": 1,
+          "members": [
+            0
+          ],
+          "internal_process_counts": [
+            3
+          ]
+        },
+        "initialize_ensemble.mat": {
+          "count": 4,
+          "members": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "internal_process_counts": [
+            3
+          ]
+        },
+        "enkf_state.mat": {
+          "count": 40,
+          "members": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "internal_process_counts": [
+            13
+          ]
+        }
+      },
+      "launch_sources": [],
+      "requested_resource_policy_flag": false,
+      "model_error_markers_detected": [],
+      "python_ranks": 1,
+      "requested_model_nprocs": 1,
+      "analysis_events": [
+        {
+          "cycle": 4,
+          "model_time": 1.0,
+          "observation_column": 0,
+          "observation_state_column": 5,
+          "state_column": 5
+        },
+        {
+          "cycle": 9,
+          "model_time": 2.0,
+          "observation_column": 1,
+          "observation_state_column": 10,
+          "state_column": 10
+        }
+      ],
+      "ensemble": {
+        "shape": [
+          20082,
+          4,
+          11
+        ],
+        "mean_shape": [
+          20082,
+          11
+        ],
+        "finite": true,
+        "mean_finite": true,
+        "maximum_absolute_mean_error": 0.0,
+        "all_stored_columns_nonzero": true,
+        "variables": {
+          "Thickness": {
+            "all_time_minimum": 2.668086299264216,
+            "all_time_maximum": 2537.230137499382,
+            "final_minimum": 4.760299649037701,
+            "final_maximum": 2532.826800453964
+          },
+          "Surface": {
+            "all_time_minimum": 0.28549561568002296,
+            "all_time_maximum": 2518.987825181486,
+            "final_minimum": 0.5140012266957052,
+            "final_maximum": 2516.688781061876
+          },
+          "Vx": {
+            "all_time_minimum": -7.112996923726523,
+            "all_time_maximum": 1487.2021825965737,
+            "final_minimum": -7.112996923726523,
+            "final_maximum": 1377.7421324970526
+          },
+          "Vy": {
+            "all_time_minimum": -288.8533990586879,
+            "all_time_maximum": 214.5679680365412,
+            "final_minimum": -265.5874943909114,
+            "final_maximum": 208.216864782142
+          },
+          "Bed": {
+            "all_time_minimum": -1337.9863442902017,
+            "all_time_maximum": 500.21539551941675,
+            "final_minimum": -1337.9737396637863,
+            "final_maximum": 500.2027775881106
+          },
+          "FrictionCoefficient": {
+            "all_time_minimum": 1812.6426370524687,
+            "all_time_maximum": 4329.779812901598,
+            "final_minimum": 1812.6426370524687,
+            "final_maximum": 4329.779812901598
+          }
+        }
+      },
+      "reference_clock": {
+        "true_state": {
+          "shape": [
+            20082,
+            11
+          ],
+          "finite": true,
+          "initial_all_zero": false,
+          "terminal_all_zero": false,
+          "initial_max_abs_mapping_error": 0.0,
+          "terminal_max_abs_mapping_error": 0.0
+        },
+        "nurged_state": {
+          "shape": [
+            20082,
+            11
+          ],
+          "finite": true,
+          "initial_all_zero": false,
+          "terminal_all_zero": false,
+          "initial_max_abs_mapping_error": 0.0,
+          "terminal_max_abs_mapping_error": 0.0
+        }
+      },
+      "artifacts": [
+        {
+          "path": "ensemble_init_0.h5",
+          "bytes": 163440,
+          "sha256": "30ab36481c1fe4c4e808afd6898f597840e93b775fa0347aa7c9574ef936d5a9"
+        },
+        {
+          "path": "ensemble_nurged_state_0.h5",
+          "bytes": 1789926,
+          "sha256": "c6cfbdd02f1fe607840b54e026ad4b55ce36306db64d8895834722ac808384ff"
+        },
+        {
+          "path": "ensemble_nurged_state_scalar_0.h5",
+          "bytes": 1664,
+          "sha256": "a2bc6d0f7768ae502eade60369585b3a6dd13f8b4e2824fad5ed181e4a24f8c0"
+        },
+        {
+          "path": "ensemble_out_0.h5",
+          "bytes": 163448,
+          "sha256": "e83a0d708be7a78caf10c980d9e83f459a43828ccf99d591d9cdfd91cff9c41a"
+        },
+        {
+          "path": "ensemble_out_1.h5",
+          "bytes": 163448,
+          "sha256": "c2b59b8ffcb52babdcd00b789d39f41f499a88f128fc6e940621b646707e6288"
+        },
+        {
+          "path": "ensemble_out_2.h5",
+          "bytes": 163448,
+          "sha256": "a4fddc612b2fda03289a494a23046cd4e98997528ce0c6f007f46ef5dc0a4a7b"
+        },
+        {
+          "path": "ensemble_out_3.h5",
+          "bytes": 163448,
+          "sha256": "54a3df9542d1885e9ec29c4f49b98abf45845b91a8a05682913be34deeea21b2"
+        },
+        {
+          "path": "ensemble_out_scalar_0.h5",
+          "bytes": 2208,
+          "sha256": "675054580bc8ec4e1495cce418f6c51b7d18bc72c5c688e8eb97bc457718b426"
+        },
+        {
+          "path": "ensemble_out_scalar_1.h5",
+          "bytes": 2208,
+          "sha256": "d57469995bb6f6ca3d646e35c4415dc7f399d57128a88341ef63985fe0824438"
+        },
+        {
+          "path": "ensemble_out_scalar_2.h5",
+          "bytes": 2208,
+          "sha256": "5ba87058299d828f6f785658719ee6b22d43f6667a46d657b2939f0d7df7b83e"
+        },
+        {
+          "path": "ensemble_out_scalar_3.h5",
+          "bytes": 2208,
+          "sha256": "a0c18d3d54159fec5befa5900cae3c8c42e6ccd3a44c6d1db6ab6607266e795c"
+        },
+        {
+          "path": "ensemble_output_0.h5",
+          "bytes": 163448,
+          "sha256": "e0c59b1d278458160de4c429748bf7981d8e45c61c9091d459cab0821251ede7"
+        },
+        {
+          "path": "ensemble_output_1.h5",
+          "bytes": 163448,
+          "sha256": "854900b79c1475a086f82fd3d2bfa91116c229d64e041bb5910c2f6296ca6c75"
+        },
+        {
+          "path": "ensemble_output_2.h5",
+          "bytes": 163448,
+          "sha256": "daddbb10fdf38f38f04b05a02689381402dab97198e50cb0e4c1425a588d25e0"
+        },
+        {
+          "path": "ensemble_output_3.h5",
+          "bytes": 163448,
+          "sha256": "09086c2d709ec4a6c8d00bc1361c3374a1f4790a39aa7dd2e6c3f29f2cf6d986"
+        },
+        {
+          "path": "ensemble_scalar_output.h5",
+          "bytes": 2208,
+          "sha256": "9f537cc1a47b0b7a356baf1e0836302df5116ddaa63c2e8706059c750bd29a75"
+        },
+        {
+          "path": "ensemble_true_state_0.h5",
+          "bytes": 1789926,
+          "sha256": "64484d24cfc7c891640ac102d76c9054d64739fe2a9c222624a77bcd4335782e"
+        },
+        {
+          "path": "ensemble_true_state_scalar_0.h5",
+          "bytes": 1664,
+          "sha256": "e19e79b0f5d9dfaad12a2ee734f953155977e981a07fb242ec1f9a8e6b8d44da"
+        },
+        {
+          "path": "friction_bed_0.h5",
+          "bytes": 28824,
+          "sha256": "6c6c9937f9366808c64ddbaf5be59897cbf8b2275f139090144deac0c558ed30"
+        },
+        {
+          "path": "friction_bed_1.h5",
+          "bytes": 28824,
+          "sha256": "725723b4567cc920c459f625fefe2ece3fd4d91c1f714b82a7c6ba752434a830"
+        },
+        {
+          "path": "friction_bed_2.h5",
+          "bytes": 28824,
+          "sha256": "b620347daaf3b78675db7f6159a4c046256ff19ec994a07ce2aeccc6ba4f4b79"
+        },
+        {
+          "path": "friction_bed_3.h5",
+          "bytes": 28824,
+          "sha256": "6b3c2fea5743b2f3106d9939634f6883cdd8e60f6e9c1891eaa369f3b41131f8"
+        },
+        {
+          "path": "icesee_ensemble_data.h5",
+          "bytes": 14437888,
+          "sha256": "ce9d2dfec9e880e4da775c5f4631d3e13aafed6a6f994c2ceb93cd09b2302bfb"
+        },
+        {
+          "path": "mesh_idxy_0.h5",
+          "bytes": 82152,
+          "sha256": "fafcf660913cad7d5abae17ebea39c848c7666bc3f435d7cb721d5cc158eb7b4"
+        },
+        {
+          "path": "synthetic_obs.h5",
+          "bytes": 657120,
+          "sha256": "8b03a04540dad53087d9b317b5af2e0d119bc4ecc0212b9e8933da4680279f4a"
+        },
+        {
+          "path": "true-wrong-issm.h5",
+          "bytes": 19752,
+          "sha256": "5f88ae63534071e2729114f1db40557e74f674eec41d11c93a2e98f145f4d064"
+        },
+        {
+          "path": "true_nurged_states.h5",
+          "bytes": 3551800,
+          "sha256": "891cf4d14e8e7758a89258a85534c9e731aecd18f6948b6e93cbb5d8db199433"
+        }
+      ],
+      "completion_status": "failed acceptance checks",
+      "limitations": [
+        "One Python rank, Mode1 only; no multi-rank ICESEE execution or restart test.",
+        "Requested model_nprocs1 was redistributed to observed internal counts; retain command summary.",
+        "Fixed/EnKF/hybrid labels do not establish calibrated uncertainty, physical skill or scaling.",
+        "Base application retains its one-year,0.2-year-step prior spin-up.",
+        "Scalar diagnostic exports retain their existing post-step schema, separate from corrected full-state0..nt arrays."
+      ]
+    }
+  ],
+  "current_tutorial_resource_policy": {
+    "ICESEE_PERFORMANCE_TEST": true,
+    "meaning": "Existing resource-retention branch, not a benchmark claim; requests 1 internal process and avoids extra host-local redistribution. Actual per-run counts must still be checked."
+  },
+  "resources": {
+    "requested_python_ranks": 1,
+    "requested_model_nprocs": 1,
+    "current_profile_flag": true,
+    "historical_profile_flag_false": {
+      "requested_python_ranks": 1,
+      "requested_model_nprocs": 1,
+      "observed_reference_and_initialization_model_nprocs": 3,
+      "observed_forecast_model_nprocs": 13,
+      "policy": "Existing host-local redistribution; no resource override applied.",
+      "source_trace": [
+        {
+          "path": "src/run_model_da/icesee_da_partial_parallel.py",
+          "line": 131,
+          "meaning": "Requested 1, host cores 12, base total 2, difference 10; root adds 2 to 1, producing 3."
+        },
+        {
+          "path": "src/parallelization/_mpi_ensemble_intialization.py",
+          "line": 396,
+          "meaning": "Updated 3 is combined with the unchanged difference of 10 and redistributed after initialization, producing 13."
+        },
+        {
+          "path": "applications/issm_model/examples/basal_friction_variation/_issm_model.py",
+          "line": 98,
+          "meaning": "Current model_nprocs is forwarded to the MATLAB command."
+        }
+      ],
+      "limitation": "The requested count is not a strict cap; observed 13 internal processes plus the Python worker can oversubscribe this 12-core host."
+    },
+    "current_observed_counts_by_variant": {
+      "fixed": {
+        "true_state.mat": [
+          1
+        ],
+        "nurged_state.mat": [
+          1
+        ],
+        "initialize_ensemble.mat": [
+          1
+        ],
+        "enkf_state.mat": [
+          1
+        ]
+      },
+      "hybrid": {
+        "true_state.mat": [
+          1
+        ],
+        "nurged_state.mat": [
+          1
+        ],
+        "initialize_ensemble.mat": [
+          1
+        ],
+        "enkf_state.mat": [
+          1
+        ],
+        "inverse_state.mat": [
+          1
+        ]
+      },
+      "enkf": {
+        "true_state.mat": [
+          1
+        ],
+        "nurged_state.mat": [
+          1
+        ],
+        "initialize_ensemble.mat": [
+          1
+        ],
+        "enkf_state.mat": [
+          1
+        ]
+      }
+    }
+  },
+  "finalized_utc": "2026-11-11T13:29:58.965914+00:00",
+  "verification_status": "all three capped tutorial variants verified"
+}

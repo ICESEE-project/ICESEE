@@ -1,0 +1,63 @@
+# Small configured application built on the existing synthetic ice-stream hooks.
+# Inheritance is resolved relative to this file by config/config_loader.py.
+extends: ../../params.yaml
+physical-parameters:
+  nx: 6
+  ny: 4
+  degree: 1
+modeling-parameters:
+  num_years: 1
+  timesteps_per_year: 10
+  example_name: synthetic_ice_stream
+enkf-parameters:
+  Nens: 4
+  execution_mode: 2
+  ranks_per_model: 1
+  model_nprocs: 1
+  obs_start_time: 0.5
+  obs_max_time: 1.0
+  freq_obs: 0.5
+  random_field_method: graph
+  k_neighbors: 6
+  sig_model: [0.05, 0.05, 0.02, 0.01]
+  sig_Q: [0.5, 0.1, 0.05, 0.02]
+  sig_obs: [2.0, 0.5, 0.2, 0.05]
+  length_scale: 244.9489742783178
+  h_nurge_ic: 20.0
+  u_nurge_ic: 0.0
+  initial_spread_factor: 1.01
+  sequential_ensemble_initialization: false
+  localization_flag: false
+  local_analysis: false
+  global_analysis: true
+  inference_plugin_enabled: false
+  physics_smb_inference: false
+  physics_bed_inference: false
+  inversion_flag: false
+  joint_estimation: true
+  parameter_estimation: true
+  joint_estimated_params: [smb]
+  observed_params: [smb]
+  inflation_factor: 1.0
+  state_inflation_factor: 1.0
+  param_inflation_factor: 1.0
+  enkf_observation_error_mode: legacy_prior_anomalies
+  process_noise_schedule: observations
+  generate_true_state: true
+  generate_nurged_state: true
+  generate_synthetic_obs: true
+  initialize_ensemble: true
+  batch_size: 2
+  ensemble_history_mode: full
+  ensemble_storage_dtype: float64
+  ensemble_finalize_mode: vds
+  observation_operator_storage: indices
+  synthetic_observation_storage: compact
+  restart_enabled: false
+  force_fresh_start: true
+  resume_from_checkpoint: false
+  k_start_override: null
+  checkpoint_every: 1
+  h5_file_compression: null
+  base_seed: 42
+  data_path: _coarse_assimilation_data

@@ -12,6 +12,26 @@ existed.
 
 ## [Unreleased]
 
+
+### Added
+
+- Expanded student/developer handbook covering execution modes, Icepack and
+  ISSM coupling, application templates, inversion, physical inference and
+  closed-output verification; companion wiki pages and a scholarly technical
+  report with verified references.
+- Reproducible Lorenz endpoint experiment, coarse Icepack teaching case and
+  compact ISSM fixed/EnKF/hybrid profiles with explicit execution evidence.
+
+### Fixed
+
+- Choi's native inverse wrapper now raises for a missing backend result rather
+  than treating it as successful in-place completion.
+- Basal-friction reference generation restores the application directory and
+  preserves actual pre-solve and terminal states at matching history columns;
+  initial-only generation no longer advances the reference clock.
+- Basal-friction delayed inversion retains the requested switch across early
+  deferred analyses, allowing the configured later inverse to activate.
+
 ### Changed
 - `idealized_pig` (icepack): restored the gate on the per-timestep flowline
   diagnostic (`applications/icepack_model/examples/idealized_pig/_icepack_model.py`)

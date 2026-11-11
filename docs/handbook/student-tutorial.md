@@ -10,6 +10,10 @@ dz/dt = x*y-beta*z
 
 The example advances them with classical fourth-order Runge–Kutta. It is useful for learning orchestration, observations, ensembles and output without a glacier dataset. It does not validate distributed Firedrake meshes or glacier physics.
 
+## Reading the execution modes
+
+Before the parallel exercise, read [parallelization modes and the assimilation cycle](parallelization-modes.md). Follow the Mode-0 diagram while running the serial case, then compare Mode 1's root transform and state-row scatter with Mode 2's file-backed row reductions. The worked `P=8`, `Ne=12` examples show why member IDs, MPI ranks, and ranks per model are different quantities. Mode 3 is registered per application and needs its own model/environment procedure; it is not a general replacement for the other commands in this tutorial.
+
 ## 1. Establish source and imports
 
 Use the [deployment guide](deployment.md) to activate a compatible Python/MPI environment. In the ICESEE checkout root, record the commit and prepare imports. The checkout directory should be named `ICESEE` for this simple setup:
@@ -23,7 +27,7 @@ git status --short
 python -c 'import ICESEE, sys; print(sys.executable); print(ICESEE.__file__)'
 ```
 
-The inspected implementation baseline is `3748e416d3a8120cc860119bd7224c6f9ad41ff7` on `features_debug`. Do not replace an active research checkout's branch merely to follow the tutorial. Use a clean dedicated checkout or record your actual source and treat differences as part of the experiment.
+The inspected implementation baseline is `3748e416d3a8120cc860119bd7224c6f9ad41ff7` on `features_debug`. The new teaching files and ISSM corrections are included in the immutable snapshot selected by [deployment](deployment.md#2-select-the-scientific-source-explicitly). Do not replace an active research checkout's branch merely to follow the tutorial. Use a clean dedicated checkout or record your actual source and treat differences as part of the experiment.
 
 Create a new absolute working location for this exercise, outside any existing result tree:
 

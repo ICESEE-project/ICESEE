@@ -1,0 +1,74 @@
+"""Incomplete legacy application hooks; not an installed ICESEE backend.
+
+Copy into the chosen application package only after selecting its real family
+and example names. Importing this scaffold performs no configuration loading,
+file cleanup, model initialization, registration or simulation.
+
+The core signatures follow the current Icepack PIG example. The application's
+entrypoint chooses and documents initialize_model's return convention.
+"""
+
+
+def initialize_model(**icesee_kwargs):
+    """Construct physics on the supplied model communicator.
+
+    Define dimensions, units, initial fields, forcing, observation metadata and
+    solver lifetime. A new entrypoint may use a context dictionary; existing
+    PIG setup returns a tuple and its driver adapts that explicitly.
+    """
+    raise NotImplementedError("Implement and validate the application model setup")
+
+
+def initialize_ensemble(ens, **icesee_kwargs):
+    """Return this stable member ID's initialized variable blocks.
+
+    The return dictionary must match vec_inputs order and dimensions. Do not
+    take a hidden forecast here. Do not assume statevec_ens is materialized:
+    shared initialization may provide only a lightweight shape proxy.
+    """
+    raise NotImplementedError("Implement the prior without advancing model time")
+
+
+def forecast_step_single(ensemble=None, **icesee_kwargs):
+    """Advance one packed member through exactly one resolved interval.
+
+    The active generic path supplies ens_id and k in icesee_kwargs. Unpack
+    using the declared block map, run physics on the model communicator and
+    return the updated blocks expected by the selected caller.
+    """
+    raise NotImplementedError("Implement one model forecast interval")
+
+
+def generate_true_state(**icesee_kwargs):
+    """Write physical initial column 0 and forecast columns k+1.
+
+    If statevec_true is a supplied file-backed dataset, write it in place and
+    return None. A replicated in-memory result may return blocks as expected
+    by its active caller. Designate the correct writer/collective participant
+    set rather than allowing every member to create the same reference file.
+    """
+    raise NotImplementedError("Implement the reference trajectory when required")
+
+
+def generate_nurged_state(**icesee_kwargs):
+    """Implement the optional wrong/unassimilated reference on the same clock.
+
+    Preserve the historical hook spelling. Honor a supplied file-backed target
+    and the selected caller's return convention, as for generate_true_state.
+    """
+    raise NotImplementedError("Implement or explicitly disable this reference")
+
+
+# Optional capabilities are deliberately NOT defined here. Defining a callable
+# can advertise a feature through hasattr/callable checks. Add only when the
+# selected runner actually consumes the operation and its tests pass:
+#
+# inverse_step_single(ensemble=None, **icesee_kwargs)
+#   Generic inversion callers pass ensemble=member; inspect member_kwargs.
+# post_analysis_update(ensemble_vec, **icesee_kwargs)
+#   The serial caller expects (updated_kwargs, updated_ensemble).
+# Cov_Obs_fun(sig_obs=..., nd=..., icesee_kwargs=...)
+#   This is the serial covariance override call, not a universal signature.
+# Obs_fun / JObs_fun
+#   Match the filter constructor/call site; nonlinear observations evaluate
+#   forecast members before centering their observation equivalents.

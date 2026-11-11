@@ -1,12 +1,13 @@
 # Integrating and maintaining model adapters
 
+For concrete model walkthroughs, read [Icepack coupling](coupling-icepack.md) and [ISSM coupling](coupling-issm.md). The [application onboarding procedure](application-onboarding.md) and [copyable scaffolds](templates/README.md) connect the contracts below to a new application.
 ICESEE has an established generic hook API and a newer native field API. Select the boundary that matches what the model can actually expose. A MATLAB interface returning a complete member is a whole-member boundary even if the solver uses many internal ranks. A Firedrake field can expose owned degrees of freedom and halo operations, enabling a spatial native boundary. The documentation should describe these facts without forcing all models into one abstraction.
 
 ## Generic hook resolution
 
 [`SupportedModels.call_model`](../../applications/supported_models.py) recognizes model families `icepack`, `issm`, `lorenz`, and `flowline`. From the application's working-directory basename it first tries `<model>_model.examples.<example>._<model>_enkf`, then the family-level module in `MODEL_CONFIG`. Names must be valid Python identifiers. An import failure inside an existing example module is a real failure, not a reason to run a different model quietly.
 
-This makes the entry script and working directory part of the integration contract. Most example drivers change cwd to their own directory before loading settings. Avoid launching a hook file directly; use the example entrypoint and absolute paths for external configuration/output. Extending `MODEL_CONFIG` is not enough: you also need a runnable example, physics/input initialization and hooks expected by the selected runner.
+This makes the entry script and working directory part of the integration contract. Most example drivers change cwd to their own directory before loading settings. Avoid launching a hook file directly; use the example entrypoint and an absolute configuration path. Choose output paths according to the backend: the generic array examples accept absolute output directories, while the current MATLAB/ISSM bridge requires a relative `data_path` beneath its isolated application workspace. Extending `MODEL_CONFIG` is not enough: you also need a runnable example, physics/input initialization and hooks expected by the selected runner.
 
 | Hook or operation | Required behavior to verify against the runner |
 |---|---|

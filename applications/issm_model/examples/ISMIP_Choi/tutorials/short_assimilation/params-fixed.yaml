@@ -1,0 +1,7 @@
+# Prescribed initial/prior friction during assimilation.
+extends: common.yaml
+
+enkf-parameters:
+  inversion_flag: false
+  inversion_start_time: 2.0
+  frozen_analysis_vars: ['coefficient']

@@ -741,11 +741,11 @@ No top-level function/class declarations; this module supplies imports, constant
 
 [Source](../../src/parallelization/distributed_mode3_registry.py)
 
-- [class Mode3Registration](../../src/parallelization/distributed_mode3_registry.py#L31)
-- `register_execution_mode_3(model_name: str, runner: Callable[..., object], *, notes: str='', application: str &#124; None=None) -> None` ([L50](../../src/parallelization/distributed_mode3_registry.py#L50))
-- `get_execution_mode_3(model_name: str &#124; None, *, application: str &#124; None=None) -> Mode3Registration &#124; None` ([L82](../../src/parallelization/distributed_mode3_registry.py#L82))
-- `registered_execution_mode_3_models() -> tuple[str, ...]` ([L97](../../src/parallelization/distributed_mode3_registry.py#L97))
-- `register_native_application(model_name, *, application, adapter, setup, analysis_cycle=None, supported_features=())` ([L103](../../src/parallelization/distributed_mode3_registry.py#L103))
+- [class Mode3Registration](../../src/parallelization/distributed_mode3_registry.py#L24)
+- `register_execution_mode_3(model_name: str, runner: Callable[..., object], *, notes: str='', application: str &#124; None=None) -> None` ([L43](../../src/parallelization/distributed_mode3_registry.py#L43))
+- `get_execution_mode_3(model_name: str &#124; None, *, application: str &#124; None=None) -> Mode3Registration &#124; None` ([L75](../../src/parallelization/distributed_mode3_registry.py#L75))
+- `registered_execution_mode_3_models() -> tuple[str, ...]` ([L90](../../src/parallelization/distributed_mode3_registry.py#L90))
+- `register_native_application(model_name, *, application, adapter, setup, analysis_cycle=None, supported_features=())` ([L96](../../src/parallelization/distributed_mode3_registry.py#L96))
 
 ### src/parallelization/distributed_native_cycle.py
 
@@ -1675,8 +1675,8 @@ No top-level function/class declarations; this module supplies imports, constant
 - `forecast_step_single(ensemble=None, **icesee_kwargs)` ([L28](../../applications/issm_model/examples/basal_friction_variation/_issm_enkf.py#L28))
 - `inverse_step_single(ensemble=None, **icesee_kwargs)` ([L42](../../applications/issm_model/examples/basal_friction_variation/_issm_enkf.py#L42))
 - `generate_true_state(**icesee_kwargs)` ([L58](../../applications/issm_model/examples/basal_friction_variation/_issm_enkf.py#L58))
-- `generate_nurged_state(**icesee_kwargs)` ([L128](../../applications/issm_model/examples/basal_friction_variation/_issm_enkf.py#L128))
-- `initialize_ensemble(ens, **icesee_kwargs)` ([L254](../../applications/issm_model/examples/basal_friction_variation/_issm_enkf.py#L254))
+- `generate_nurged_state(**icesee_kwargs)` ([L131](../../applications/issm_model/examples/basal_friction_variation/_issm_enkf.py#L131))
+- `initialize_ensemble(ens, **icesee_kwargs)` ([L260](../../applications/issm_model/examples/basal_friction_variation/_issm_enkf.py#L260))
 
 ### applications/issm_model/examples/basal_friction_variation/run_da_issm.py
 
