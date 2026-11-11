@@ -20,7 +20,8 @@ Do not copy a working environment's directory as a portable installation: absolu
 
 | Component | Audited revision | Consequence |
 |---|---|---|
-| ICESEE `features_debug` | `3748e416d3a8120cc860119bd7224c6f9ad41ff7` | Runtime and clock baseline used by this handbook |
+| ICESEE scientific baseline | `3748e416d3a8120cc860119bd7224c6f9ad41ff7` | Core numerical/PIG evidence baseline |
+| ICESEE teaching/report snapshot | `2fa088a1f8bba8f0e11f1dfc2f94b9f77fde1289` | Includes the new teaching files and later ISSM lifecycle corrections |
 | ICESEE `main` at audit | `3d7e6e757e07b80dcca1fdd65dffb8ca8853316a` | Different source; do not infer it contains the same runtime repairs |
 | ICESEE-Spack `main` | `68e37fffcd13cc60636028d051d4637e7f573d4f` | Uses Git submodules and legacy Firedrake defaults |
 | ICESEE-Spack legacy tag | `v0.1.0-icepack-legacy` -> `c512f4b4a253e9342cf7366d0e226f1304c8c301` | Older installer release; inspect its own scripts and submodule/tree layout |
@@ -31,12 +32,12 @@ The Spack parent at the audited revision records `ICESEE/` at `a793cd198ab39eedc
 
 ## 2 Select the scientific source explicitly
 
-Use a fresh checkout for an experiment that must remain reproducible:
+Use a fresh checkout for an experiment that must remain reproducible. The commands below select the complete teaching/report snapshot, including the ISSM corrections. The earlier scientific baseline above predates the new tutorial files; use it only when deliberately reproducing that earlier source. Later documentation-only commits can add prose while retaining this executable snapshot.
 
 ```bash
 git clone https://github.com/ICESEE-project/ICESEE.git ICESEE
 cd ICESEE
-git checkout --detach 3748e416d3a8120cc860119bd7224c6f9ad41ff7
+git checkout --detach 2fa088a1f8bba8f0e11f1dfc2f94b9f77fde1289
 git status --short
 git rev-parse HEAD
 export ICESEE_SOURCE_ROOT="$PWD"

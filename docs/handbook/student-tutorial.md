@@ -27,7 +27,7 @@ git status --short
 python -c 'import ICESEE, sys; print(sys.executable); print(ICESEE.__file__)'
 ```
 
-The inspected implementation baseline is `3748e416d3a8120cc860119bd7224c6f9ad41ff7` on `features_debug`. Do not replace an active research checkout's branch merely to follow the tutorial. Use a clean dedicated checkout or record your actual source and treat differences as part of the experiment.
+The inspected implementation baseline is `3748e416d3a8120cc860119bd7224c6f9ad41ff7` on `features_debug`. The new teaching files and ISSM corrections are included in the immutable snapshot selected by [deployment](deployment.md#2-select-the-scientific-source-explicitly). Do not replace an active research checkout's branch merely to follow the tutorial. Use a clean dedicated checkout or record your actual source and treat differences as part of the experiment.
 
 Create a new absolute working location for this exercise, outside any existing result tree:
 
