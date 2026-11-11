@@ -1,0 +1,7 @@
+# EnKF state update followed by ISSM friction inversion at year2.
+extends: common.yaml
+
+enkf-parameters:
+  inversion_flag: true
+  inversion_start_time: 2.0
+  frozen_analysis_vars: ['coefficient']

@@ -2,6 +2,8 @@
 
 ICESEE combines model forecasts with ensemble analysis through a flat runtime context and application hooks. Its scalability depends on three different objects: the state needed by one model member, the rows needed by one analysis block, and the ensemble history retained over time. Keeping one of these bounded does not automatically bound the others. This distinction is essential when sizing production jobs and when describing the updated architecture.
 
+Read [parallelization modes and the assimilation cycle](parallelization-modes.md) for the complete Mode 0/1/2/3 lifecycle, worked rank/member assignments, communication diagrams, storage boundaries, and selection guidance. The overview below locates the code; the detailed guide explains where each operation actually executes.
+
 ## Code map
 
 | Responsibility | Active implementation and reading notes |

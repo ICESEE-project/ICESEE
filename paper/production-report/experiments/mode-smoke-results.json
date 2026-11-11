@@ -1,0 +1,125 @@
+{
+  "source_runtime_baseline": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+  "documentation_start": "f0f04e23ded7be0d5f49258f8a0d68c9e88d691a",
+  "configuration": "experiments/lorenz-endpoint.yaml",
+  "scope": "Two local MPI ranks, eight members, 50 forecast cycles, five observations including the terminal state. Modes1/2 member parity; Mode3 completion and integrity only.",
+  "modes": {
+    "1": {
+      "mode": 1,
+      "exit_code": 0,
+      "ranks": 2,
+      "ensemble_shape": [
+        3,
+        8,
+        51
+      ],
+      "finite": true,
+      "mean_consistent": true,
+      "analysis_events": [
+        {
+          "cycle": 9,
+          "model_time": 0.2,
+          "observation_column": 0,
+          "observation_state_column": 10,
+          "state_column": 10
+        },
+        {
+          "cycle": 19,
+          "model_time": 0.4,
+          "observation_column": 1,
+          "observation_state_column": 20,
+          "state_column": 20
+        },
+        {
+          "cycle": 29,
+          "model_time": 0.6,
+          "observation_column": 2,
+          "observation_state_column": 30,
+          "state_column": 30
+        },
+        {
+          "cycle": 39,
+          "model_time": 0.8,
+          "observation_column": 3,
+          "observation_state_column": 40,
+          "state_column": 40
+        },
+        {
+          "cycle": 49,
+          "model_time": 1.0,
+          "observation_column": 4,
+          "observation_state_column": 50,
+          "state_column": 50
+        }
+      ]
+    },
+    "2": {
+      "mode": 2,
+      "exit_code": 0,
+      "ranks": 2,
+      "ensemble_shape": [
+        3,
+        8,
+        51
+      ],
+      "finite": true,
+      "mean_consistent": true,
+      "analysis_events": [
+        {
+          "cycle": 9,
+          "model_time": 0.2,
+          "observation_column": 0,
+          "observation_state_column": 10,
+          "state_column": 10
+        },
+        {
+          "cycle": 19,
+          "model_time": 0.4,
+          "observation_column": 1,
+          "observation_state_column": 20,
+          "state_column": 20
+        },
+        {
+          "cycle": 29,
+          "model_time": 0.6,
+          "observation_column": 2,
+          "observation_state_column": 30,
+          "state_column": 30
+        },
+        {
+          "cycle": 39,
+          "model_time": 0.8,
+          "observation_column": 3,
+          "observation_state_column": 40,
+          "state_column": 40
+        },
+        {
+          "cycle": 49,
+          "model_time": 1.0,
+          "observation_column": 4,
+          "observation_state_column": 50,
+          "state_column": 50
+        }
+      ]
+    },
+    "3": {
+      "mode": 3,
+      "exit_code": 0,
+      "ranks": 2,
+      "ensemble_shape": [
+        3,
+        8,
+        51
+      ],
+      "finite": true,
+      "mean_consistent": true,
+      "analysis_events": [],
+      "analysis_events_reported": 5,
+      "analysis_audit_format_emitted": false
+    }
+  },
+  "mode1_mode2_max_abs": 5.3071289585204795e-09,
+  "mode1_mode2_final_max_abs": 9.100062925426755e-10,
+  "status": "pass",
+  "configuration_sha256": "04abf528e4f7486c1a2e63ace926acc89e537013ab94c00a60ba9a2d57683253"
+}

@@ -1,23 +1,16 @@
-"""Per-application opt-in registry for ``execution_mode: 3``.
+"""Application-scoped registration for execution mode 3.
 
-``execution_mode`` 0, 1, and 2 are available to every ICESEE application
-unconditionally. Mode 3 is different: per
-``docs/execution-mode-3-design.md``, it requires a model adapter that
-exposes genuinely distributed state (no rank holding a complete member) plus
-a production DA-cycle runner built on
-``src/parallelization/distributed_native_cycle.py``. Most applications do not
-have one yet, and a reference-only adapter (for example
-``applications/lorenz_model/lorenz_utils/distributed_adapter.py``, whose own
-docstring states it is "used only for state-only parity development") must
-not be mistaken for production support.
+Mode 3 dispatches only through a registered application runner; unregistered
+applications raise a named error instead of silently using another mode.
+Registration can bind native distributed fields or an explicit whole-member
+boundary. It does not certify uniform spatial ownership, restart, inversion,
+localization, filtering or memory behavior across applications.
 
-This module makes mode-3 access application-specific rather than globally
-on/off: an application registers itself here only once it has a real
-production adapter and runner, and every other application continues to get
-a clear, named error instead of either a silent global block or a
-misleadingly "successful" run through unfinished machinery. See
-``src/run_model_da/icesee_da_distributed.py`` for the runner that consults
-this registry.
+Each runner advertises and validates its actual adapter capabilities. A
+reference-only state/forecast adapter is not by itself a complete assimilation
+lifecycle. See the current model integration and parallelization handbooks for
+the distinction between array hooks, whole-member native wrappers and owned
+field runtimes. The numerical method remains separate from execution mode.
 """
 
 from __future__ import annotations

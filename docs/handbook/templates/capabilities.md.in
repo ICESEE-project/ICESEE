@@ -1,0 +1,30 @@
+# Application capability record
+
+This is an unfilled record. Replace every unresolved entry with source and
+test evidence; a template cell is not a declaration of support.
+
+Application and family: unresolved
+Source commit and actual hook import: unresolved
+Entrypoint and working-directory requirement: unresolved
+Physical inputs, provenance and units: unresolved
+State order, block sizes, owned/ghost convention: unresolved
+Observation identities, coordinates, times and uncertainties: unresolved
+
+| Capability | Implementation boundary | Validation evidence | Limit |
+| --- | --- | --- | --- |
+| Model-only forecast | Not implemented | None | Physics and units unresolved |
+| Mode 0 | Not implemented | None | No accepted serial experiment |
+| Mode 1 | Not implemented | None | No member parity/MPI evidence |
+| Mode 2 | Not implemented | None | No file-backed/collective evidence |
+| Mode 3 whole-member | Not implemented | None | No registration or native policy |
+| Mode 3 spatial | Not implemented | None | No owned-field/observation mapping |
+| Observation-error modes | Not implemented | None | Declare each mode separately |
+| Global/local analysis | Not implemented | None | Algorithm and target support unresolved |
+| Physics finalization | Not implemented | None | State whether immediate projection occurs |
+| Hybrid inversion/inference | Not implemented | None | No callback/rollback evidence |
+| Restart | Not implemented | None | Shard writing alone is insufficient |
+| Full/rolling output | Not implemented | None | Retention/publication semantics unresolved |
+| Failure behavior | Not implemented | None | No single-rank failure/healthy control |
+
+Acceptance experiments and declared tolerances: unresolved
+Scientific reviewer decision and remaining limitations: unresolved
