@@ -79,6 +79,9 @@ icesee_kwargs.update({
                 'smb': float(icesee_kwargs.get('smb', 0.0)),
                 'vel_idx': int(float(icesee_kwargs.get('vel_idx', 2))),
                 'inversion_flag': icesee_kwargs.get('inversion_flag', False),
+                # Preserve the requested switch when an early cycle is deferred.
+                'inversion_enabled': icesee_kwargs.get('inversion_flag', False),
+                'inversion_start_time': float(icesee_kwargs.get('inversion_start_time', 0.0)),
                 'friction_idx': int(float(icesee_kwargs.get('friction_idx', 5))),
                 'min_friction': float(icesee_kwargs.get('min_friction', 2000)),
                 'max_friction': float(icesee_kwargs.get('max_friction', 4000)),
