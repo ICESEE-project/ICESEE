@@ -36,9 +36,13 @@ sbatch run_idealized_1.sbatch
 ```
 
 Explicit `ICESEE_SOURCE_ROOT` and `ICESEE_SPACK_ROOT` exports override discovery.
-The parameter file comes from `ICESEE_PARAMS_FILE` when set, otherwise the
-adjacent `ICESEE-run-configs/idealized_pig.yaml` when present, then the tracked
-`params.yaml`. The selected paths and a parameter copy are recorded with logs.
+The launcher defaults to this example's `params.yaml`. Only an explicit
+`sbatch run_idealized_1.sbatch -F /path/to/params.yaml` selects another file.
+Execution mode, ensemble size, timestep and observation/profile schedules come
+from that YAML. Set `execution_mode: 3` and the desired `model_nprocs` there for
+native execution. The saved `pace_runs/mode3-JOBID/params.yaml` is the resolved
+snapshot actually read by the job; `params.source.yaml` preserves its source.
+Legacy configuration/scientific `ICESEE_*` overrides are ignored with a message.
 
 The existing PIG mesh, parameter, SMB and compact spin-up input files must be
 available in this checkout's `data/`. They are not downloaded by the launcher.
@@ -48,8 +52,8 @@ PACE account; override `--account` or `--partition` at submission if required by
 your allocation.
 
 Defaults are one node, eight MPI ranks, one CPU/thread per rank, 48 GB and a
-two-hour limit. Two spatial ranks per model group provide four model groups;
-24 members run in six rounds.
+two-hour limit. When the YAML requests two spatial ranks per model group, eight MPI ranks
+provide four model groups; 24 members then run in six rounds.
 For this native Icepack path the total is `model_groups * model_nprocs`;
 there is no additional coordinator rank per member. Nodes/ranks are resources,
 not the ensemble size. The script checks divisibility and uses block placement
@@ -141,7 +145,7 @@ For five years from time zero with `dt=0.05`, `checkpoint_00000099` is one final
 snapshot at year 5, not all timesteps. That example's aggregate has 101 columns:
 initial state plus 100 completed cycles numbered 0–99. Column counts follow the
 chosen duration and `dt`: `K=int(round(T/dt))` cycles and `K+1` saved times. Use
-`ICESEE_DT=0.1 sbatch run_idealized_1.sbatch` for 51 columns over five years.
+`modeling-parameters.timesteps_per_year: 0.1` in the selected YAML for 51 columns over five years.
 Actual physical labels come from the run's model times, including when `T/dt`
 is not an integer. At an analysis cycle its column
 contains the updated ensemble. Flowline diagnostics remain separate and are

@@ -3,6 +3,9 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
+import sys
+import yaml
 
 import pytest
 
@@ -10,7 +13,7 @@ SCRIPT = (Path(__file__).resolve().parents[2] /
           "applications/icepack_model/examples/idealized_pig/run_idealized_1.sbatch")
 
 
-def _run(tmp_path, *, counts=None, existing=False, step_exit=0, finalizer_exit=0, discover=False, local_params=False):
+def _run(tmp_path, *, counts=None, existing=False, step_exit=0, finalizer_exit=0, discover=False, local_params=False, args=(), config_updates=None):
     lab = tmp_path / "lab space"
     source = lab / "ICESEE-Spack-source" / "ICESEE"
     pig = source / "applications/icepack_model/examples/idealized_pig"
@@ -26,7 +29,15 @@ def _run(tmp_path, *, counts=None, existing=False, step_exit=0, finalizer_exit=0
         'import json, os, sys\n'
         'with open(os.environ["FINALIZER_CAPTURE"], "w") as f: json.dump(sys.argv[1:], f)\n'
         'sys.exit(int(os.environ["FINALIZER_EXIT"]))\n')
-    (pig / "params.yaml").write_text("science: tracked\n")
+    cfg = {"science": "tracked", "modeling-parameters": {"num_years": 5, "timesteps_per_year": 0.05},
+           "enkf-parameters": {"Nens": 24, "model_nprocs": 2, "execution_mode": 3,
+                               "checkpoint_every": 1, "checkpoint_keep_last": 0,
+                               "mode3_export_ensemble_history": True}}
+    for section, values in (config_updates or {}).items():
+        cfg[section].update(values)
+    (pig / "params.yaml").write_text(yaml.safe_dump(cfg))
+    (source / "config").mkdir()
+    shutil.copy2(SCRIPT.parents[4] / "config/config_loader.py", source / "config/config_loader.py")
     deps = lab / "ICESEE-Spack"
     (deps / "scripts").mkdir(parents=True)
     (deps / "scripts/activate.sh").write_text(":\n")
@@ -34,7 +45,7 @@ def _run(tmp_path, *, counts=None, existing=False, step_exit=0, finalizer_exit=0
     if local_params:
         config = lab / "ICESEE-run-configs/idealized_pig.yaml"
         config.parent.mkdir()
-        config.write_text("science: retained\n")
+        config.write_text(yaml.safe_dump(dict(cfg, science="retained")))
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "srun").write_text(
@@ -44,6 +55,7 @@ def _run(tmp_path, *, counts=None, existing=False, step_exit=0, finalizer_exit=0
     (bin_dir / "git").write_text('#!/bin/sh\nprintf "test-source\\n"\n')
     for path in bin_dir.iterdir():
         path.chmod(0o755)
+    (bin_dir / "python").symlink_to(sys.executable)
     data = pig / "_modelrun_datasets"
     if existing:
         data.mkdir()
@@ -62,21 +74,23 @@ def _run(tmp_path, *, counts=None, existing=False, step_exit=0, finalizer_exit=0
         env.pop("ICESEE_SPACK_ROOT")
         env["SLURM_SUBMIT_DIR"] = str(pig)
     env.update(counts or {})
-    result = subprocess.run(["bash", str(SCRIPT)], env=env, text=True,
+    # GNU time is specific to PACE; mock only its wrapper on other hosts.
+    launcher = tmp_path / "launcher.sbatch"
+    launcher.write_text(SCRIPT.read_text().replace('/usr/bin/time -v', 'env'))
+    result = subprocess.run(["bash", str(launcher), *args], env=env, text=True,
                             capture_output=True, timeout=10)
     return result, pig, tmp_path / "argv.json"
 
 
 def test_validated_allocation_has_16_ranks_and_32_members(tmp_path):
-    result, pig, capture = _run(tmp_path, counts={"ICESEE_NENS": "32"})
+    result, pig, capture = _run(tmp_path, config_updates={"enkf-parameters": {"Nens": 32}})
     assert result.returncode == 0, result.stderr
     args = json.loads(capture.read_text())
     for expected in ("--nodes=2", "--ntasks=16", "--ntasks-per-node=8",
                      "--cpus-per-task=1", "--distribution=block:block",
                      "--execution_mode=3",
-                     "--checkpoint_every=1", "--checkpoint_keep_last=0",
-                     "--mode3_export_ensemble_history=True",
-                     "--Nens=32", "--model_nprocs=2", "--save_steps=[2,3,4]",
+
+                     "--Nens=32", "--model_nprocs=2",
                      "--data_path=" + str(pig / "_modelrun_datasets")):
         assert expected in args
     assert not any("mode3_experimental" in arg for arg in args)
@@ -129,43 +143,41 @@ def test_direct_submission_discovers_source_dependencies_and_saved_parameters(tm
     assert result.returncode == 0, result.stderr
     args = json.loads(capture.read_text())
     config = pig.parents[5] / "ICESEE-run-configs/idealized_pig.yaml"
-    assert "--force-params=" + str(config) in args
+    assert "--force-params=" + str(pig / "pace_runs/mode3-12345/params.yaml") in args
     assert "--Nens=24" in args
     assert "--ntasks=8" in args
-    assert (pig / "pace_runs/mode3-12345/params.yaml").read_text() == "science: retained\n"
+    assert yaml.safe_load((pig / "pace_runs/mode3-12345/params.yaml").read_text())["science"] == "tracked"
     assert str(pig.parents[5] / "ICESEE-Spack") in result.stdout
 
 
 def test_explicit_parameter_file_takes_precedence(tmp_path):
     config = tmp_path / "explicit.yaml"
-    config.write_text("science: explicit\n")
-    result, pig, capture = _run(tmp_path, local_params=True, counts={
-        "ICESEE_PARAMS_FILE": str(config),
-    })
+    config.write_text(yaml.safe_dump({"science": "explicit",
+        "modeling-parameters": {"num_years": 5, "timesteps_per_year": 0.05},
+        "enkf-parameters": {"Nens": 24, "model_nprocs": 2, "execution_mode": 3}}))
+    result, pig, capture = _run(tmp_path, local_params=True, args=["-F", str(config)])
     assert result.returncode == 0, result.stderr
-    assert "--force-params=" + str(config) in json.loads(capture.read_text())
-    assert (pig / "pace_runs/mode3-12345/params.yaml").read_text() == config.read_text()
+    assert "--force-params=" + str(pig / "pace_runs/mode3-12345/params.yaml") in json.loads(capture.read_text())
+    assert yaml.safe_load((pig / "pace_runs/mode3-12345/params.yaml").read_text())["science"] == "explicit"
 
 
 def test_missing_explicit_parameters_fail_before_launch(tmp_path):
-    result, _, capture = _run(tmp_path, counts={
-        "ICESEE_PARAMS_FILE": str(tmp_path / "absent.yaml"),
-    })
+    result, _, capture = _run(tmp_path, args=["-F", str(tmp_path / "absent.yaml")])
     assert result.returncode == 2
     assert not capture.exists()
 
 
 @pytest.mark.parametrize('dt,columns', [('0.1', 51), ('0.025', 201)])
 def test_chosen_dt_reaches_driver_and_history_column_report(tmp_path, dt, columns):
-    result, _, capture = _run(tmp_path, counts={'ICESEE_DT': dt})
+    result, _, capture = _run(tmp_path, config_updates={'modeling-parameters': {'timesteps_per_year': dt}})
     assert result.returncode == 0, result.stderr
-    assert '--dt=' + dt in json.loads(capture.read_text())
+    assert '--dt=' + str(float(dt)) in json.loads(capture.read_text())
     assert f'history_columns={columns}' in result.stdout
 
 
 @pytest.mark.parametrize('dt', ['0', '-0.1', 'nan', 'inf', 'invalid'])
 def test_invalid_dt_is_rejected_before_launch(tmp_path, dt):
-    result, _, capture = _run(tmp_path, counts={'ICESEE_DT': dt})
+    result, _, capture = _run(tmp_path, config_updates={'modeling-parameters': {'timesteps_per_year': dt}})
     assert result.returncode == 2
     assert not capture.exists()
 
@@ -187,3 +199,53 @@ def test_successful_step_does_not_run_failure_recovery(tmp_path):
     assert result.returncode == 0
     assert not (tmp_path / "finalizer-argv.json").exists()
     assert not (pig / "pace_runs/mode3-12345/finalizer-exit-status").exists()
+
+
+def test_old_environment_overrides_do_not_replace_selected_yaml(tmp_path):
+    result, pig, capture = _run(tmp_path, local_params=True, counts={
+        "ICESEE_PARAMS_FILE": "/not/the/config.yaml", "ICESEE_NENS": "99", "ICESEE_DT": "0.9"})
+    assert result.returncode == 0, result.stderr
+    args = json.loads(capture.read_text())
+    assert "--Nens=24" in args and "--dt=0.05" in args
+    assert "Ignoring ICESEE_PARAMS_FILE" in result.stderr
+    assert yaml.safe_load((pig / "pace_runs/mode3-12345/params.yaml").read_text())["science"] == "tracked"
+
+
+@pytest.mark.parametrize("args", [["-F"], ["--unknown"], ["--Nens=99"]])
+def test_bad_arguments_fail_before_launch(tmp_path, args):
+    result, _, capture = _run(tmp_path, args=args)
+    assert result.returncode == 2 and not capture.exists()
+
+
+@pytest.mark.parametrize("mode", [1, 2])
+def test_yaml_selects_execution_mode_without_a_hidden_mode3_override(tmp_path, mode):
+    result, pig, capture = _run(tmp_path, config_updates={"enkf-parameters": {"execution_mode": mode}})
+    assert result.returncode == 0, result.stderr
+    assert f"--execution_mode={mode}" in json.loads(capture.read_text())
+    assert (pig / f"pace_runs/mode{mode}-12345/params.yaml").is_file()
+
+
+def test_yaml_observation_and_profile_changes_are_preserved(tmp_path):
+    result, pig, capture = _run(tmp_path, config_updates={
+        "enkf-parameters": {"obs_start_time": 0.25, "obs_max_time": 0.75, "freq_obs": 0.25},
+        "modeling-parameters": {"save_steps": [0.25, 0.75], "num_years": 1}})
+    assert result.returncode == 0, result.stderr
+    cfg = yaml.safe_load((pig / "pace_runs/mode3-12345/params.yaml").read_text())
+    assert cfg["enkf-parameters"]["obs_start_time"] == 0.25
+    assert cfg["enkf-parameters"]["obs_max_time"] == 0.75
+    assert cfg["modeling-parameters"]["save_steps"] == [0.25, 0.75]
+    assert cfg["modeling-parameters"]["nt"] == 20
+    assert not any(a.startswith(("--obs_", "--freq_obs", "--save_steps")) for a in json.loads(capture.read_text()))
+
+
+def test_forced_yaml_inheritance_is_resolved_in_the_saved_snapshot(tmp_path):
+    base = tmp_path / "base.yaml"
+    base.write_text(yaml.safe_dump({"modeling-parameters": {"num_years": 5, "timesteps_per_year": 0.05},
+        "enkf-parameters": {"Nens": 24, "model_nprocs": 2, "execution_mode": 3}}))
+    selected = tmp_path / "variant.yaml"
+    selected.write_text("extends: base.yaml\nenkf-parameters:\n  Nens: 32\n")
+    result, pig, capture = _run(tmp_path, args=["-F", str(selected)])
+    assert result.returncode == 0, result.stderr
+    cfg = yaml.safe_load((pig / "pace_runs/mode3-12345/params.yaml").read_text())
+    assert "extends" not in cfg and cfg["enkf-parameters"]["Nens"] == 32
+    assert "--Nens=32" in json.loads(capture.read_text())
