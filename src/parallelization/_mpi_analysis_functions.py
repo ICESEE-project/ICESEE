@@ -6,6 +6,7 @@
 #               - this formulation supports our need for mpi parallelization and no need for localizations
 # =============================================================================
 
+from ICESEE.src.utils.analysis_bounds import bound_analysis_rows
 import gc
 import os
 import copy
@@ -177,6 +178,11 @@ def apply_analysis_controls_local(
 
     local_mean = np.mean(controlled, axis=1, keepdims=True)
     controlled = local_mean + inflation_vec[:, None] * (controlled - local_mean)
+    controlled = bound_analysis_rows(
+        controlled, global_rows,
+        {key:(index*hdim,(index+1)*hdim) for index,key in enumerate(vec_inputs)},
+        icesee_kwargs.get("analysis_bounds"),
+    )
     controlled = restore_frozen_analysis_vars(
         controlled,
         forecast_vec,

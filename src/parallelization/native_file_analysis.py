@@ -6,6 +6,7 @@ members keep their model-owned state and stable member identities. One spatial
 rank/member is required; the spatially partitioned native policy is separate.
 """
 import numpy as np
+from ICESEE.src.utils.process_noise import process_noise_coefficients
 from .EnKF_parallel_io import EnKF_fully_parallel_IO
 from ._mpi_ensemble_intialization import apply_initial_spread_filebacked
 from .distributed_runtime import LocalMemberEnsemble
@@ -21,13 +22,9 @@ class FileBackedNativeAnalysis:
         kw.update(comm_world=world, subcomm=topology.spatial_comm,
                   rank_world=world.rank, sub_rank=0, color=topology.ensemble_slot,
                   global_shape=int(kw['nd']), dim_list=[int(kw['nd'])]*world.size)
-        dt = float(kw['dt']); nt = int(kw['nt'])
-        tau = max(500, max(200, dt))
-        alpha = 1-dt/tau
-        if alpha <= 0 or alpha > 1:
-            alpha = 0.5
-        kw['alpha'] = alpha
-        kw['rho'] = np.sqrt((1/dt)*((1-alpha)**2)/(nt-2*alpha-nt*alpha**2+2*alpha**(nt+1)))
+        nt = int(kw['nt'])
+        alpha, rho, _ = process_noise_coefficients(kw)
+        kw.update(alpha=alpha, rho=rho)
         kw.setdefault('time_analysis_file_writing',0.0)
         kw.setdefault('time_analysis_ensemble_mean_generation',0.0)
         self.io = EnKF_fully_parallel_IO(

@@ -871,5 +871,560 @@
     "config_sha256": "91442cdda54b8324b40272d89313fc186700329a317b9a9a8511121b42477f7d",
     "h5py_parallel": false,
     "scope": "Serial tutorial completion, complete member/mean shapes, clock and finite integrity; no real multi-rank validation. The local MPI singleton emitted a sandbox transport bind warning, then the serial run completed."
+  },
+  "parallelization_walkthrough": {
+    "source_runtime_baseline": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+    "documentation_start": "f0f04e23ded7be0d5f49258f8a0d68c9e88d691a",
+    "configuration": "experiments/lorenz-endpoint.yaml",
+    "scope": "Two local MPI ranks, eight members, 50 forecast cycles, five observations including the terminal state. Modes1/2 member parity; Mode3 completion and integrity only.",
+    "modes": {
+      "1": {
+        "mode": 1,
+        "exit_code": 0,
+        "ranks": 2,
+        "ensemble_shape": [
+          3,
+          8,
+          51
+        ],
+        "finite": true,
+        "mean_consistent": true,
+        "analysis_events": [
+          {
+            "cycle": 9,
+            "model_time": 0.2,
+            "observation_column": 0,
+            "observation_state_column": 10,
+            "state_column": 10
+          },
+          {
+            "cycle": 19,
+            "model_time": 0.4,
+            "observation_column": 1,
+            "observation_state_column": 20,
+            "state_column": 20
+          },
+          {
+            "cycle": 29,
+            "model_time": 0.6,
+            "observation_column": 2,
+            "observation_state_column": 30,
+            "state_column": 30
+          },
+          {
+            "cycle": 39,
+            "model_time": 0.8,
+            "observation_column": 3,
+            "observation_state_column": 40,
+            "state_column": 40
+          },
+          {
+            "cycle": 49,
+            "model_time": 1.0,
+            "observation_column": 4,
+            "observation_state_column": 50,
+            "state_column": 50
+          }
+        ]
+      },
+      "2": {
+        "mode": 2,
+        "exit_code": 0,
+        "ranks": 2,
+        "ensemble_shape": [
+          3,
+          8,
+          51
+        ],
+        "finite": true,
+        "mean_consistent": true,
+        "analysis_events": [
+          {
+            "cycle": 9,
+            "model_time": 0.2,
+            "observation_column": 0,
+            "observation_state_column": 10,
+            "state_column": 10
+          },
+          {
+            "cycle": 19,
+            "model_time": 0.4,
+            "observation_column": 1,
+            "observation_state_column": 20,
+            "state_column": 20
+          },
+          {
+            "cycle": 29,
+            "model_time": 0.6,
+            "observation_column": 2,
+            "observation_state_column": 30,
+            "state_column": 30
+          },
+          {
+            "cycle": 39,
+            "model_time": 0.8,
+            "observation_column": 3,
+            "observation_state_column": 40,
+            "state_column": 40
+          },
+          {
+            "cycle": 49,
+            "model_time": 1.0,
+            "observation_column": 4,
+            "observation_state_column": 50,
+            "state_column": 50
+          }
+        ]
+      },
+      "3": {
+        "mode": 3,
+        "exit_code": 0,
+        "ranks": 2,
+        "ensemble_shape": [
+          3,
+          8,
+          51
+        ],
+        "finite": true,
+        "mean_consistent": true,
+        "analysis_events": [],
+        "analysis_events_reported": 5,
+        "analysis_audit_format_emitted": false
+      }
+    },
+    "mode1_mode2_max_abs": 5.3071289585204795e-09,
+    "mode1_mode2_final_max_abs": 9.100062925426755e-10,
+    "status": "pass",
+    "configuration_sha256": "04abf528e4f7486c1a2e63ace926acc89e537013ab94c00a60ba9a2d57683253"
+  },
+  "icepack_coarse_teaching_case": {
+    "date": "2026-11-10",
+    "case": "synthetic_ice_stream/tutorials/coarse_assimilation",
+    "runtime_baseline": "3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+    "scope": "Four-member, ten-cycle teaching fixture, not scientific skill, convergence or scaling evaluation. Native mode3 completion is separate from generic parity.",
+    "local_environment_note": "First attempt refused by PETSc compiler check because inherited mpicc was MPICH. Successful runs used a child PATH selecting the Open MPI compiler matching mpi4py/PETSc/HDF5. No installed environment changed.",
+    "modes": {
+      "0": {
+        "status": "pass",
+        "file": "icesee_ensemble_data.h5",
+        "ensemble_shape": [
+          140,
+          4,
+          11
+        ],
+        "finite": true,
+        "mean_consistent": true,
+        "mean_max_absolute_error": 0.0,
+        "packed_state_min": -4.078911164854825,
+        "packed_state_max": 635.1512555635358,
+        "ranks": 1,
+        "exit_code": 0,
+        "state_blocks": {
+          "h": {
+            "initial_min": 444.8347874517163,
+            "initial_max": 630.7686926027324,
+            "final_min": 413.07273309772836,
+            "final_max": 635.1369621186511
+          },
+          "u": {
+            "initial_min": 19.965797697490867,
+            "initial_max": 435.26394061646005,
+            "final_min": 19.592814184033518,
+            "final_max": 277.15335262526463
+          },
+          "v": {
+            "initial_min": -4.078911164854825,
+            "initial_max": 4.067324073751379,
+            "final_min": -3.237836247728298,
+            "final_max": 3.231512695149982
+          },
+          "smb": {
+            "initial_min": -0.4945839558821219,
+            "initial_max": 0.9133088358180488,
+            "final_min": -0.9860071461328721,
+            "final_max": 1.042494012254138
+          }
+        },
+        "analysis_events": [
+          {
+            "cycle": 4,
+            "model_time": 0.5,
+            "observation_column": 0,
+            "observation_state_column": 5,
+            "state_column": 5
+          },
+          {
+            "cycle": 9,
+            "model_time": 1.0,
+            "observation_column": 1,
+            "observation_state_column": 10,
+            "state_column": 10
+          }
+        ],
+        "performance_run": {
+          "ensemble_size": 4,
+          "active_ranks": 1,
+          "spare_ranks": 0,
+          "model_groups": 1,
+          "ranks_per_model": 1,
+          "rounds": 4,
+          "execution_mode": 0,
+          "model": "icepack",
+          "forecast_steps": 10,
+          "analysis_events": 2
+        },
+        "obs_index": [
+          5,
+          10
+        ],
+        "time_grid": [
+          0.0,
+          0.1,
+          0.2,
+          0.30000000000000004,
+          0.4,
+          0.5,
+          0.6000000000000001,
+          0.7000000000000001,
+          0.8,
+          0.9,
+          1.0
+        ]
+      },
+      "1": {
+        "status": "pass",
+        "file": "icesee_ensemble_data.h5",
+        "ensemble_shape": [
+          140,
+          4,
+          11
+        ],
+        "finite": true,
+        "mean_consistent": true,
+        "mean_max_absolute_error": 0.0,
+        "packed_state_min": -4.079238065082115,
+        "packed_state_max": 637.2067722927716,
+        "ranks": 2,
+        "exit_code": 0,
+        "state_blocks": {
+          "h": {
+            "initial_min": 444.82367979491244,
+            "initial_max": 630.7743688121371,
+            "final_min": 414.7342921329647,
+            "final_max": 637.2067722927716
+          },
+          "u": {
+            "initial_min": 19.964930543351848,
+            "initial_max": 435.2658843767433,
+            "final_min": 19.231110879415425,
+            "final_max": 273.0982911054534
+          },
+          "v": {
+            "initial_min": -4.079238065082115,
+            "initial_max": 4.067724278974499,
+            "final_min": -3.121511294319008,
+            "final_max": 3.193955513641855
+          },
+          "smb": {
+            "initial_min": -0.4950153033535349,
+            "initial_max": 0.9135623535599636,
+            "final_min": -0.4489025514002206,
+            "final_max": 1.0003987286716318
+          }
+        },
+        "analysis_events": [
+          {
+            "cycle": 4,
+            "model_time": 0.5,
+            "observation_column": 0,
+            "observation_state_column": 5,
+            "state_column": 5
+          },
+          {
+            "cycle": 9,
+            "model_time": 1.0,
+            "observation_column": 1,
+            "observation_state_column": 10,
+            "state_column": 10
+          }
+        ],
+        "performance_run": {
+          "ensemble_size": 4,
+          "active_ranks": 2,
+          "spare_ranks": 0,
+          "model_groups": 2,
+          "ranks_per_model": 1,
+          "rounds": 2,
+          "execution_mode": 1,
+          "model": "icepack",
+          "forecast_steps": 10,
+          "analysis_events": 2
+        },
+        "obs_index": [
+          5,
+          10
+        ],
+        "time_grid": [
+          0.0,
+          0.1,
+          0.2,
+          0.30000000000000004,
+          0.4,
+          0.5,
+          0.6000000000000001,
+          0.7000000000000001,
+          0.8,
+          0.9,
+          1.0
+        ]
+      },
+      "2": {
+        "status": "pass",
+        "file": "icesee_ensemble_data.h5",
+        "ensemble_shape": [
+          140,
+          4,
+          11
+        ],
+        "finite": true,
+        "mean_consistent": true,
+        "mean_max_absolute_error": 0.0,
+        "packed_state_min": -4.079238065082115,
+        "packed_state_max": 637.2067722929678,
+        "ranks": 2,
+        "exit_code": 0,
+        "state_blocks": {
+          "h": {
+            "initial_min": 444.82367979491244,
+            "initial_max": 630.7743688121371,
+            "final_min": 414.73429213307736,
+            "final_max": 637.2067722929678
+          },
+          "u": {
+            "initial_min": 19.964930543351848,
+            "initial_max": 435.2658843767433,
+            "final_min": 19.23111087942212,
+            "final_max": 273.09829110552187
+          },
+          "v": {
+            "initial_min": -4.079238065082115,
+            "initial_max": 4.067724278974499,
+            "final_min": -3.1215112943197836,
+            "final_max": 3.19395551364293
+          },
+          "smb": {
+            "initial_min": -0.4950153033535349,
+            "initial_max": 0.9135623535599636,
+            "final_min": -0.4489025514001367,
+            "final_max": 1.0003987286717901
+          }
+        },
+        "analysis_events": [
+          {
+            "cycle": 4,
+            "model_time": 0.5,
+            "observation_column": 0,
+            "observation_state_column": 5,
+            "state_column": 5
+          },
+          {
+            "cycle": 9,
+            "model_time": 1.0,
+            "observation_column": 1,
+            "observation_state_column": 10,
+            "state_column": 10
+          }
+        ],
+        "performance_run": {
+          "ensemble_size": 4,
+          "active_ranks": 2,
+          "spare_ranks": 0,
+          "model_groups": 2,
+          "ranks_per_model": 1,
+          "rounds": 2,
+          "execution_mode": 2,
+          "model": "icepack",
+          "forecast_steps": 10,
+          "analysis_events": 2
+        },
+        "obs_index": [
+          5,
+          10
+        ],
+        "time_grid": [
+          0.0,
+          0.1,
+          0.2,
+          0.30000000000000004,
+          0.4,
+          0.5,
+          0.6000000000000001,
+          0.7000000000000001,
+          0.8,
+          0.9,
+          1.0
+        ]
+      },
+      "3": {
+        "status": "pass",
+        "ensemble_shape": [
+          140,
+          4,
+          11
+        ],
+        "finite": true,
+        "mean_consistency": "not applicable; native state files do not store ensemble_mean",
+        "output_layout": "11 native_analysis_NNNN.h5 states datasets plus sharded history",
+        "ranks": 2,
+        "exit_code": 0,
+        "state_blocks": {
+          "h": {
+            "initial_min": 444.82367979491244,
+            "initial_max": 630.7743688121371,
+            "final_min": 414.73429213307736,
+            "final_max": 637.2067722929678
+          },
+          "u": {
+            "initial_min": 19.964930543351848,
+            "initial_max": 435.2658843767433,
+            "final_min": 19.23111087942212,
+            "final_max": 273.09829110552187
+          },
+          "v": {
+            "initial_min": -4.079238065082115,
+            "initial_max": 4.067724278974499,
+            "final_min": -3.1215112943197836,
+            "final_max": 3.19395551364293
+          },
+          "smb": {
+            "initial_min": -0.4950153033535349,
+            "initial_max": 0.9135623535599636,
+            "final_min": -0.4489025514001367,
+            "final_max": 1.0003987286717901
+          }
+        },
+        "analysis_events": [],
+        "performance_run": {
+          "execution_mode": 3,
+          "model": "icepack",
+          "forecast_steps": 10,
+          "analysis_events": 2,
+          "ensemble_size": 4,
+          "active_ranks": 2,
+          "spare_ranks": 0,
+          "model_groups": 2,
+          "ranks_per_model": 1,
+          "rounds": 2
+        },
+        "obs_index": [
+          5,
+          10
+        ],
+        "time_grid": [
+          0.0,
+          0.1,
+          0.2,
+          0.30000000000000004,
+          0.4,
+          0.5,
+          0.6000000000000001,
+          0.7000000000000001,
+          0.8,
+          0.9,
+          1.0
+        ]
+      }
+    },
+    "configuration_sha256": "a9ce236356a45044590116d3b055e1373fb2dc938dc45b290ee8976b1f635d80",
+    "versions": {
+      "python": "3.12.6",
+      "numpy": "2.4.1",
+      "scipy": "1.17.0",
+      "mpi4py": "4.1.1",
+      "h5py": "3.15.1",
+      "petsc4py": "3.24.0",
+      "firedrake": "2025.10.2",
+      "icepack": "1.1.0",
+      "hdf5": "2.0.0",
+      "mpi_library": "Open MPI v5.0.9, package: Open MPI brew@Sequoia-arm64.local Distribution, ident: 5.0.9, repo rev: v5.0.9, Oct 30, 2025\u0000"
+    },
+    "mode1_mode2_max_abs": 2.007709554163739e-10,
+    "mode1_mode2_final_max_abs": 2.007709554163739e-10,
+    "mode1_mode2_allclose_rtol1e7_atol1e7": true
+  },
+  "issm_basal_teaching_cases": {
+    "record": "issm-basal-results.json",
+    "measurement_table": "issm-basal-measurements.csv",
+    "verification_guide": "issm-basal-verification.md",
+    "runtime_commit": "02ac5496d3d6cacf0ded737cd821e3e6f43c9d42",
+    "variants": [
+      {
+        "variant": "fixed",
+        "completion_status": "passed bounded backend execution and stated output checks",
+        "python_ranks": 1,
+        "requested_model_nprocs": 1,
+        "analysis_events": [
+          {
+            "cycle": 4,
+            "model_time": 1.0,
+            "observation_column": 0,
+            "observation_state_column": 5,
+            "state_column": 5
+          },
+          {
+            "cycle": 9,
+            "model_time": 2.0,
+            "observation_column": 1,
+            "observation_state_column": 10,
+            "state_column": 10
+          }
+        ]
+      },
+      {
+        "variant": "hybrid",
+        "completion_status": "passed bounded backend execution and stated output checks",
+        "python_ranks": 1,
+        "requested_model_nprocs": 1,
+        "analysis_events": [
+          {
+            "cycle": 4,
+            "model_time": 1.0,
+            "observation_column": 0,
+            "observation_state_column": 5,
+            "state_column": 5
+          },
+          {
+            "cycle": 9,
+            "model_time": 2.0,
+            "observation_column": 1,
+            "observation_state_column": 10,
+            "state_column": 10
+          }
+        ]
+      },
+      {
+        "variant": "enkf",
+        "completion_status": "passed bounded backend execution and stated output checks",
+        "python_ranks": 1,
+        "requested_model_nprocs": 1,
+        "analysis_events": [
+          {
+            "cycle": 4,
+            "model_time": 1.0,
+            "observation_column": 0,
+            "observation_state_column": 5,
+            "state_column": 5
+          },
+          {
+            "cycle": 9,
+            "model_time": 2.0,
+            "observation_column": 1,
+            "observation_state_column": 10,
+            "state_column": 10
+          }
+        ]
+      }
+    ],
+    "hybrid_limit": "Four actual inverse calls returned finite coefficient fields and exact published handoff; all stopped on dxmin in line search. No optimizer-convergence, objective-improvement or skill claim."
   }
 }

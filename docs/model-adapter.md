@@ -2,6 +2,8 @@
 
 This page documents the inspected `features_debug` implementation at commit `3748e416d3a8120cc860119bd7224c6f9ad41ff7` (10 November 2026). Read the [detailed integration guide](handbook/model-integration.md), [API index](handbook/api-reference.md) and [accepted native-runtime decision](architecture/0006-native-runtime-and-time-contract.md) before adding an adapter.
 
+The [Icepack](handbook/coupling-icepack.md) and [ISSM](handbook/coupling-issm.md) guides trace actual coupling across Modes 0–3. Use [application onboarding](handbook/application-onboarding.md) and the [templates](handbook/templates/README.md) when adding a case or backend.
+
 ## Legacy hook interface
 
 Modes 0–2 resolve model-specific modules through `applications/supported_models.py` and pass the flat `icesee_kwargs` context. Hooks include `initialize_ensemble`, `forecast_step_single`, truth/unassimilated reference generators, `post_analysis_update`, optional `inverse_step_single`, and observation overrides. The precise spelling, arguments and required results depend on the example; there is no universal class hierarchy to substitute blindly.

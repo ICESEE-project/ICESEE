@@ -22,6 +22,7 @@ import zarr
 import shutil
 import traceback
 import numpy as np
+from ICESEE.src.utils.process_noise import process_noise_coefficients
 from tqdm import tqdm
 import bigmpi4py as BM # BigMPI for large data transfer and communication
 from mpi4py import MPI
@@ -164,7 +165,9 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
     # --- check if the modelrun dataset directory is present ---
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
-    prepare_timestep_contract(comm_world, _modelrun_datasets, time_grid=icesee_kwargs.get("t"))
+    prepare_timestep_contract(comm_world, _modelrun_datasets, time_grid=icesee_kwargs.get("t"),
+                              process_noise_normalization=icesee_kwargs.get("process_noise_normalization", "legacy_run_length"),
+                              scientific_experiment_id=icesee_kwargs.get("scientific_experiment_id"))
     if rank_world == 0 and not os.path.exists(_modelrun_datasets):
         # cretate the directory
         os.makedirs(_modelrun_datasets, exist_ok=True)
@@ -632,21 +635,9 @@ def icesee_model_data_assimilation_full_parallel(**icesee_kwargs):
         time_forecast_ensemble_mean_generation = 0.0
         time_analysis_ensemble_mean_generation = 0.0
 
-        # specified decorrelation length scale, tau,
-        min_tau = 200
-        max_tau = 500
-        dt  = icesee_kwargs.get("dt",icesee_kwargs["dt"])
-        tau = max(max_tau,max(min_tau, dt))
-
-        # tau = max(icesee_kwargs.get("dt",icesee_kwargs["dt"]),10)
-        alpha = 1 - dt/tau
-        # make sure  0=<alpha<1
-        if alpha <= 0 or alpha > 1:
-            alpha = 0.5
-
-        n = icesee_kwargs.get("nt",icesee_kwargs["nt"])
-        # rho = np.sqrt((1-alpha**2)/(dt*(n - 2*alpha - n*alpha**2 + 2*alpha**(n+1))))
-        rho = np.sqrt((1/dt)*((1-alpha)**2)*(1/(n - (2*alpha) - (n*alpha**2) + (2*alpha**(n+1)))))
+        dt = float(icesee_kwargs["dt"])
+        n = int(icesee_kwargs["nt"])
+        alpha, rho, tau = process_noise_coefficients(icesee_kwargs)
         params_analysis_0 = np.zeros((2, Nens))
         # km = 0
 

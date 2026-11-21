@@ -1,0 +1,40 @@
+"""Incomplete application entrypoint, safe to import for inspection.
+
+The filename suffix prevents accidental treatment as an installed example.
+Configuration and its output cleanup occur only when main is executed.
+"""
+from pathlib import Path
+import os
+
+
+def build_runtime_context(options):
+    """Bind the reviewed configuration to the implemented forecast model.
+
+    Resolve nt, dt and t consistently, initialize the chosen model on its
+    communicator, establish state/observation dimensions and return the flat
+    kwargs expected by ICESEE. Respect CLI overrides. For a native policy,
+    register the application-specific runner deliberately; do not first build
+    a conflicting legacy world-communicator model context.
+    """
+    raise NotImplementedError("Implement and validate setup before dispatch")
+
+
+def main():
+    # Set numerical-library thread policy before importing NumPy/model stacks.
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    example_dir = Path(__file__).resolve().parent
+    os.chdir(example_dir)
+
+    # This import parses configuration and can clean a fresh data_path.
+    # Execute only with a unique reviewed output path, not to inspect defaults.
+    from ICESEE.config._utility_imports import icesee_kwargs
+    from ICESEE.src.run_model_da.run_models_da import (
+        icesee_model_data_assimilation,
+    )
+
+    options = build_runtime_context(dict(icesee_kwargs))
+    icesee_model_data_assimilation(**options)
+
+
+if __name__ == "__main__":
+    main()

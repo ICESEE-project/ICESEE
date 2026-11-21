@@ -9,10 +9,11 @@ from ICESEE.src.parallelization.distributed_native_runtime import NativeDistribu
 from ICESEE.src.parallelization.distributed_whole_member_adapter import build_whole_member_field_registry
 
 
-def setup_adapter(monkeypatch):
+def setup_adapter(monkeypatch, *, nt=6, policy="legacy_run_length"):
     monkeypatch.setattr(canonical, 'generate_enkf_field',
                         lambda **kw: kw['rng'].standard_normal(kw['noise_dim']))
-    options = dict(nd=9, nt=6, dt=.05, num_state_vars=2,
+    options = dict(nd=9, nt=nt, dt=.05, num_state_vars=2,
+                   process_noise_normalization=policy,
                    total_state_param_vars=3, joint_estimation=True,
                    localization_flag=False, Lx=100., Ly=20.,
                    sig_Q=[.8,.4,.2], base_seed=42,
@@ -117,3 +118,44 @@ def test_noise_checkpoint_identity_includes_time_contract(monkeypatch):
     assert original.startswith('canonical-noise-v2-')
     monkeypatch.setattr(native,'TIME_GRID_CONTRACT','other-clock')
     assert native.canonical_noise_identity({}) != original
+
+
+@pytest.mark.parametrize("policy", ["legacy_run_length", "per_step"])
+def test_resume_replays_each_noise_policy_exactly(monkeypatch, policy):
+    first, topology, options, _ = setup_adapter(monkeypatch, policy=policy)
+    physical = member()
+    resumed_adapter = None
+    try:
+        first.forecast_native_member(physical, 1, topology=topology, icesee_kwargs=options)
+        saved = physical.pack_owned().copy()
+        first.forecast_native_member(physical, 3, topology=topology, icesee_kwargs=options)
+        resumed_adapter, _, _, _ = setup_adapter(monkeypatch, policy=policy)
+        resumed = member(values=saved)
+        resumed_adapter.forecast_native_member(resumed, 3, topology=topology, icesee_kwargs=options)
+        np.testing.assert_array_equal(resumed.pack_owned(), physical.pack_owned())
+    finally:
+        first.close()
+        if resumed_adapter is not None:
+            resumed_adapter.close()
+
+
+def test_native_per_step_noise_prefix_does_not_depend_on_requested_duration(monkeypatch):
+    short, topology, options, _ = setup_adapter(monkeypatch, nt=100, policy="per_step")
+    long, _, long_options, _ = setup_adapter(monkeypatch, nt=1640, policy="per_step")
+    a, b = member(), member()
+    try:
+        for k in range(6):
+            short.forecast_native_member(a,k,topology=topology,icesee_kwargs=options)
+            long.forecast_native_member(b,k,topology=topology,icesee_kwargs=long_options)
+            np.testing.assert_array_equal(a.pack_owned(), b.pack_owned())
+        assert np.any(a.pack_owned()[:6])
+    finally:
+        short.close()
+        long.close()
+
+
+def test_noise_identity_separates_normalizations_without_changing_legacy_ids():
+    from ICESEE.src.parallelization.native_process_noise import canonical_noise_identity
+    original = canonical_noise_identity({})
+    assert canonical_noise_identity({"process_noise_normalization":"legacy_run_length"}) == original
+    assert canonical_noise_identity({"process_noise_normalization":"per_step"}) != original

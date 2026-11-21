@@ -54,7 +54,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
     output_frequency = 1; % make sure this is set to 1 for coupling with ICESEE
 
     % Set up model for each EnKF stage
-    if strcmp(data_fname, 'true_state.mat')
+    if strcmp(data_fname, 'true_state.mat') || strcmp(data_fname, 'initial_true_state.mat')
         % Special case for true state
         folder = sprintf('./Models/ens_id_%d', ens_id_init);
         if ~exist(folder, 'dir')
@@ -120,6 +120,14 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         x0 = ((0.5 * (min(x) + max(x)))./2.0); % closer to the grounding line
         y0 = 0.5 * (min(y) + max(y));
         gauss = exp(-((x - x0).^2 + (y - y0).^2) ./ (2 * sigma^2));
+
+        % Capture the physical initial state without advancing the clock.
+        initial_data = initialStateData(md, vec_inputs);
+        if strcmp(data_fname, 'initial_true_state.mat')
+            filename = fullfile(icesee_path, data_path, sprintf('ensemble_true_state_%d.h5', ens_id));
+            writeToHDF5(filename, initial_data);
+            return;
+        end
 
         % Time grid
         time_vec = tinitial:dt:tfinal;
@@ -217,7 +225,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             IceVolumeAboveFloatation(k) = sol.IceVolumeAboveFloatation;
         end
 
-        data = data(1:idx-1, :);
+        data = [initial_data; data(1:idx-1, :)];
         % data_scalar = data_scalar(1:idxs-1, :);
 
         filename = fullfile(icesee_path, data_path, sprintf('ensemble_true_state_%d.h5', ens_id));
@@ -233,7 +241,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         h5write(filename, '/IceVolume', IceVolume);
         h5write(filename, '/IceVolumeAboveFloatation', IceVolumeAboveFloatation);
 
-    elseif strcmp(data_fname, 'nurged_state.mat')
+    elseif strcmp(data_fname, 'nurged_state.mat') || strcmp(data_fname, 'initial_nurged_state.mat')
 
         folder = sprintf('./Models/ens_id_%d', ens_id_init);
         if ~exist(folder, 'dir')
@@ -342,6 +350,14 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         md.transient.requested_outputs = {'default', 'FrictionCoefficient', 'Thickness', ...
                                             'Surface','Base','Bed', 'IceVolume', 'IceVolumeAboveFloatation'};
 
+        % Capture the physical initial state without advancing the clock.
+        initial_data = initialStateData(md, vec_inputs);
+        if strcmp(data_fname, 'initial_nurged_state.mat')
+            filename = fullfile(icesee_path, data_path, sprintf('ensemble_nurged_state_%d.h5', ens_id));
+            writeToHDF5(filename, initial_data);
+            return;
+        end
+
         % Solve transient
         md = solve(md, 'Transient','runtimename',false);
             
@@ -376,7 +392,7 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             IceVolumeAboveFloatation(k) = sol.IceVolumeAboveFloatation;
         end
 
-        data = data(1:idx-1, :);
+        data = [initial_data; data(1:idx-1, :)];
         data_scalar = data_scalar(1:idxs-1, :);
 
         writeToHDF5(fullfile(icesee_path, data_path, sprintf('ensemble_nurged_state_%d.h5', ens_id)), data);
@@ -949,6 +965,23 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
 
         
         writeToHDF5(filename, data);
+    end
+end
+
+function data = initialStateData(md, vec_inputs)
+    % Match the exact pre-solve state used to initialize the trajectory.
+    state = struct('Thickness', md.geometry.thickness, ...
+                   'Surface', md.geometry.surface, ...
+                   'Vx', md.initialization.vx, ...
+                   'Vy', md.initialization.vy, ...
+                   'Bed', md.geometry.bed, ...
+                   'FrictionCoefficient', md.friction.coefficient);
+    data = cell(length(vec_inputs), 3);
+    for j = 1:length(vec_inputs)
+        key = vec_inputs{j};
+        data{j, 1} = sprintf('%s_0', key);
+        data{j, 2} = state;
+        data{j, 3} = key;
     end
 end
 

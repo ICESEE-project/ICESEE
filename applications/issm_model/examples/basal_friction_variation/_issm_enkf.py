@@ -72,7 +72,8 @@ def generate_true_state(**icesee_kwargs):
     os.chdir(issm_examples_dir)
 
     # --- filename for data saving
-    fname = 'true_state.mat'
+    initial_state_only = bool(icesee_kwargs.get('initial_state_only', False))
+    fname = 'initial_true_state.mat' if initial_state_only else 'true_state.mat'
     icesee_kwargs.update({'fname': fname})
     ens_id = icesee_kwargs.get('ens_id')
 
@@ -98,10 +99,11 @@ def generate_true_state(**icesee_kwargs):
     input_filename = f'{icesee_path}/{data_path}/ensemble_true_state_{ens_id}.h5'
     with h5py.File(input_filename, 'r') as f:
         # -- fetch state variables
-        for k in range(1, icesee_kwargs.get('nt') + 1):
+        output_count = 0 if initial_state_only else int(icesee_kwargs['nt'])
+        for k in range(output_count + 1):
             for key in icesee_kwargs.get('vec_inputs'):
                 key_name = f'{key}_{k}'
-                statevec_true[indx_map[key], k-1] = f[key_name][0]
+                statevec_true[indx_map[key], k] = f[key_name][0]
 
             # for key in icesee_kwargs.get('scalar_inputs', []):
             #     if key in f:
@@ -109,6 +111,7 @@ def generate_true_state(**icesee_kwargs):
 
     if isinstance(statevec_true, h5py.Dataset):
         statevec_true.flush()
+        os.chdir(icesee_path)
         return None
 
     updated_state = {}
@@ -142,7 +145,8 @@ def generate_nurged_state(**icesee_kwargs):
     rank = comm.Get_rank()
 
     # --- filename for data saving
-    fname = 'nurged_state.mat'
+    initial_state_only = bool(icesee_kwargs.get('initial_state_only', False))
+    fname = 'initial_nurged_state.mat' if initial_state_only else 'nurged_state.mat'
     icesee_kwargs.update({'fname': fname})
     ens_id = icesee_kwargs.get('ens_id')
 
@@ -231,13 +235,15 @@ def generate_nurged_state(**icesee_kwargs):
     # with h5py.File(nurged_filename, 'r', driver='mpio', comm=comm) as f:
     with h5py.File(nurged_filename, 'r') as f:
         # -- fetch state variables
-        for k in range(1, icesee_kwargs.get('nt') + 1):
+        output_count = 0 if initial_state_only else int(icesee_kwargs['nt'])
+        for k in range(output_count + 1):
             for key in icesee_kwargs.get('vec_inputs'):
                 key_name = f'{key}_{k}'
-                statevec_nurged[indx_map[key], k-1] = f[key_name][0]
+                statevec_nurged[indx_map[key], k] = f[key_name][0]
 
     if isinstance(statevec_nurged, h5py.Dataset):
         statevec_nurged.flush()
+        os.chdir(icesee_path)
         return None
 
     updated_state = {}

@@ -244,8 +244,12 @@ def initialize_ensemble(ens, **icesee_kwargs):
     ### INITIALIZE THE ENSEMBLE MEMBERS
 
 
-    # Apply parameter nudging only when joint estimation is enabled.
-    if icesee_kwargs["joint_estimation"]:
+    if melt_forecast_mode(icesee_kwargs) == "estimated_field":
+        nominal, _ = BasalMeltRate(
+            icesee_kwargs, 0, icesee_kwargs["floating"], Q, s0, h0,
+            scenario="control", experiment=EXPERIMENT_WRONG)
+        basal_melt_field = initial_estimated_melt(nominal, ens, icesee_kwargs)
+    elif icesee_kwargs["joint_estimation"]:
         basal_melt_field_nudged = basal_melt_field.dat.data_ro + icesee_kwargs["wrong_basal_melt_field"]
         basal_melt_field = Function(Q)
         basal_melt_field.dat.data[:] = basal_melt_field_nudged

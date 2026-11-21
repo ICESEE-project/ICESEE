@@ -1,0 +1,627 @@
+{
+  "verified_date": "2026-11-10",
+  "reference_count": 26,
+  "scope": "Primary sources cited in the current manuscript; method context is distinct from ICESEE implementation and numerical evidence.",
+  "references": [
+    {
+      "key": "amdahl1967",
+      "authors": [
+        "Amdahl, Gene M."
+      ],
+      "year": 1967,
+      "title": "Validity of the single processor approach to achieving large scale computing capabilities",
+      "venue": "Proceedings of the April 18-20, 1967, Spring Joint Computer Conference",
+      "doi": "10.1145/1465482.1465560",
+      "url": "https://doi.org/10.1145/1465482.1465560",
+      "verification_sources": [
+        "https://doi.org/10.1145/1465482.1465560"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Performance methodology",
+      "supported_idea": "Fixed-work scaling separates parallelizable computation from serial/overhead limits.",
+      "caution": "A model of scaling limits cannot convert unequal-resource concurrent ICESEE wall times into a controlled speedup result.",
+      "type": "inproceedings",
+      "pages": "483--485"
+    },
+    {
+      "key": "bonan2014",
+      "authors": [
+        "Bonan, B.",
+        "Nodet, M.",
+        "Ritz, C.",
+        "Peyaud, V."
+      ],
+      "year": 2014,
+      "title": "An ETKF approach for initial state and parameter estimation in ice sheet modelling",
+      "venue": "Nonlinear Processes in Geophysics",
+      "doi": "10.5194/npg-21-569-2014",
+      "url": "https://doi.org/10.5194/npg-21-569-2014",
+      "verification_sources": [
+        "https://npg.copernicus.org/articles/21/569/2014/"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Ice-sheet DA context",
+      "supported_idea": "Initial-state and parameter estimation in a shallow-ice flowline twin experiment using ETKF.",
+      "caution": "Its ETKF and experiment are prior work, not evidence that ICESEE's current PIG configuration has the same skill.",
+      "volume": "21",
+      "number": "2",
+      "pages": "569--582"
+    },
+    {
+      "key": "burgers1998",
+      "authors": [
+        "Burgers, Gerrit",
+        "van Leeuwen, Peter Jan",
+        "Evensen, Geir"
+      ],
+      "year": 1998,
+      "title": "Analysis Scheme in the Ensemble Kalman Filter",
+      "venue": "Monthly Weather Review",
+      "doi": "10.1175/1520-0493(1998)126<1719:ASITEK>2.0.CO;2",
+      "url": "https://doi.org/10.1175/1520-0493%281998%29126%3C1719%3AASITEK%3E2.0.CO%3B2",
+      "verification_sources": [
+        "https://journals.ametsoc.org/doi/abs/10.1175/1520-0493%281998%29126%3C1719%3AASITEK%3E2.0.CO%3B2"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Stochastic observation treatment",
+      "supported_idea": "Observation perturbations and covariance-consistent stochastic ensemble analysis.",
+      "caution": "Use correct title without adding On the; finite-sample cross terms in ICESEE's factor still need separate treatment.",
+      "volume": "126",
+      "number": "6",
+      "pages": "1719--1724"
+    },
+    {
+      "key": "carrassi2018",
+      "authors": [
+        "Carrassi, Alberto",
+        "Bocquet, Marc",
+        "Bertino, Laurent",
+        "Evensen, Geir"
+      ],
+      "year": 2018,
+      "title": "Data assimilation in the geosciences: An overview of methods, issues, and perspectives",
+      "venue": "WIREs Climate Change",
+      "doi": "10.1002/wcc.535",
+      "url": "https://doi.org/10.1002/wcc.535",
+      "verification_sources": [
+        "https://wires.onlinelibrary.wiley.com/doi/10.1002/wcc.535"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Introduction and student background",
+      "supported_idea": "Broad context connecting state estimation, model uncertainty, observations and common practical DA issues.",
+      "caution": "The title is not Data assimilation in Earth system sciences or a beginners guide; publisher lists volume9 issue5, article e535.",
+      "volume": "9",
+      "number": "5",
+      "pages": "e535"
+    },
+    {
+      "key": "choi2025",
+      "authors": [
+        "Choi, Youngmin",
+        "Petty, Alek",
+        "Felikson, Denis",
+        "Poterjoy, Jonathan"
+      ],
+      "year": 2025,
+      "title": "Estimation of the state and parameters in ice sheet model using an ensemble Kalman filter and Observing System Simulation Experiments",
+      "venue": "The Cryosphere",
+      "doi": "10.5194/tc-19-5423-2025",
+      "url": "https://doi.org/10.5194/tc-19-5423-2025",
+      "verification_sources": [
+        "https://tc.copernicus.org/articles/19/5423/2025/"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Ice-sheet DA context and future validation",
+      "supported_idea": "Two-dimensional twin/OSSE experiments examine state/basal estimation and sensitivity to observational network design.",
+      "caution": "Do not claim observations monotonically improve skill: network density and uncertainty choices matter in the reported experiments.",
+      "volume": "19",
+      "pages": "5423--5444"
+    },
+    {
+      "key": "egusphere2026",
+      "authors": [
+        "Kyanjo, B., Mayo, T. L., and Robel, A. A."
+      ],
+      "year": 2026,
+      "title": "Public discussion and author replies for egusphere-2026-2037",
+      "url": "https://egusphere.copernicus.org/preprints/2026/egusphere-2026-2037/",
+      "verification_sources": [
+        "https://egusphere.copernicus.org/preprints/2026/egusphere-2026-2037/"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary project, journal-policy or official software documentation",
+      "supported_idea": "Public author replies document the overlap with the earlier ICESEE manuscript."
+    },
+    {
+      "key": "evensen2003",
+      "authors": [
+        "Evensen, Geir"
+      ],
+      "year": 2003,
+      "title": "The Ensemble Kalman Filter: theoretical formulation and practical implementation",
+      "venue": "Ocean Dynamics",
+      "doi": "10.1007/s10236-003-0036-9",
+      "url": "https://doi.org/10.1007/s10236-003-0036-9",
+      "verification_sources": [
+        "https://doi.org/10.1007/s10236-003-0036-9"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Numerical formulation and ensemble storage",
+      "supported_idea": "Practical EnKF formulations, numerical implementation and ensemble representation.",
+      "caution": "Disk-resident member storage and ensemble factors have precedents; source inspection is still required for ICESEE's exact factor and pseudoinverse.",
+      "volume": "53",
+      "pages": "343--367"
+    },
+    {
+      "key": "gaspari1999",
+      "authors": [
+        "Gaspari, Gregory",
+        "Cohn, Stephen E."
+      ],
+      "year": 1999,
+      "title": "Construction of correlation functions in two and three dimensions",
+      "venue": "Quarterly Journal of the Royal Meteorological Society",
+      "doi": "10.1002/qj.49712555417",
+      "url": "https://doi.org/10.1002/qj.49712555417",
+      "verification_sources": [
+        "https://rmets.onlinelibrary.wiley.com/doi/10.1002/qj.49712555417"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Localization functions",
+      "supported_idea": "Construction of compactly supported correlation functions used in covariance localization.",
+      "caution": "A taper does not determine a universally valid physical radius or correct every sampling error.",
+      "volume": "125",
+      "number": "554",
+      "pages": "723--757"
+    },
+    {
+      "key": "gilletchaulet2020",
+      "authors": [
+        "Gillet-Chaulet, Fabien"
+      ],
+      "year": 2020,
+      "title": "Assimilation of surface observations in a transient marine ice sheet model using an ensemble Kalman filter",
+      "venue": "The Cryosphere",
+      "doi": "10.5194/tc-14-811-2020",
+      "url": "https://doi.org/10.5194/tc-14-811-2020",
+      "verification_sources": [
+        "https://tc.copernicus.org/articles/14/811/2020/"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Ice-sheet DA context and constraints",
+      "supported_idea": "Transient surface observations constrain state and basal conditions in a synthetic marine flowline experiment.",
+      "caution": "Keep the idealized domain, observations and method-specific assumptions explicit; do not transfer its skill to new ICESEE results.",
+      "volume": "14",
+      "number": "3",
+      "pages": "811--832"
+    },
+    {
+      "key": "gmdpolicy",
+      "authors": [
+        "Geoscientific Model Development"
+      ],
+      "year": 2026,
+      "title": "Model code and data policy",
+      "url": "https://www.geoscientific-model-development.net/policies/code_and_data_policy.html",
+      "verification_sources": [
+        "https://www.geoscientific-model-development.net/policies/code_and_data_policy.html"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary project, journal-policy or official software documentation",
+      "supported_idea": "Exact source and data archive requirements are relevant to later submission.",
+      "year_basis": "access year; not an assertion of software release or policy publication year"
+    },
+    {
+      "key": "h5pympi",
+      "authors": [
+        "h5py developers"
+      ],
+      "year": 2026,
+      "title": "Parallel HDF5",
+      "url": "https://docs.h5py.org/en/3.15.0/mpi.html",
+      "verification_sources": [
+        "https://docs.h5py.org/en/3.15.0/mpi.html"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary project, journal-policy or official software documentation",
+      "supported_idea": "File communicators and function-specific collective requirements.",
+      "year_basis": "access year; not an assertion of software release or policy publication year"
+    },
+    {
+      "key": "hdf5vds",
+      "authors": [
+        "h5py developers"
+      ],
+      "year": 2026,
+      "title": "Virtual Datasets (VDS)",
+      "url": "https://docs.h5py.org/en/3.15.0/vds.html",
+      "verification_sources": [
+        "https://docs.h5py.org/en/3.15.0/vds.html"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary project, journal-policy or official software documentation",
+      "supported_idea": "Virtual layouts map data from source datasets without duplicating their stored values.",
+      "year_basis": "access year; not an assertion of software release or policy publication year"
+    },
+    {
+      "key": "hunt2007",
+      "authors": [
+        "Hunt, Brian R.",
+        "Kostelich, Eric J.",
+        "Szunyogh, Istvan"
+      ],
+      "year": 2007,
+      "title": "Efficient data assimilation for spatiotemporal chaos: A local ensemble transform Kalman filter",
+      "venue": "Physica D: Nonlinear Phenomena",
+      "doi": "10.1016/j.physd.2006.11.008",
+      "url": "https://doi.org/10.1016/j.physd.2006.11.008",
+      "verification_sources": [
+        "https://www.sciencedirect.com/science/article/pii/S0167278906004647"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Local analysis and algorithm distinction",
+      "supported_idea": "LETKF provides a local ensemble-space deterministic analysis formulation.",
+      "caution": "Grouped local stochastic analysis and native distributed execution are not thereby LETKF; retain the selected scientific update.",
+      "volume": "230",
+      "number": "1-2",
+      "pages": "112--126"
+    },
+    {
+      "key": "iceseecode",
+      "authors": [
+        "ICESEE project"
+      ],
+      "year": 2026,
+      "title": "ICESEE development snapshot 3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "url": "https://github.com/ICESEE-project/ICESEE/tree/3748e416d3a8120cc860119bd7224c6f9ad41ff7",
+      "verification_sources": [
+        "https://github.com/ICESEE-project/ICESEE/tree/3748e416d3a8120cc860119bd7224c6f9ad41ff7"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary project, journal-policy or official software documentation",
+      "supported_idea": "Implementation claims refer to the examined code rather than a generic method citation."
+    },
+    {
+      "key": "kyanjo2026",
+      "authors": [
+        "Kyanjo, Brian",
+        "Mayo, Talea L.",
+        "Robel, Alexander A."
+      ],
+      "year": 2026,
+      "title": "The Ice Sheet State and Parameter Estimator (ICESEE) Library (v1.0.0): Ensemble Kalman Filtering for Ice Sheet Models",
+      "venue": "arXiv",
+      "doi": "10.48550/arXiv.2603.26947",
+      "url": "https://doi.org/10.48550/arXiv.2603.26947",
+      "verification_sources": [
+        "https://arxiv.org/abs/2603.26947"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Introduction and relationship to prior work",
+      "supported_idea": "Prior ICESEE model-description article; identify this report as a later implementation and reproducibility development.",
+      "caution": "Cite the paper as prior work, not as validation or archive of the later source SHA; do not repeat its no-localization or Lorenz naming claims.",
+      "type": "misc",
+      "eprint": "2603.26947",
+      "archivePrefix": "arXiv",
+      "version": "v1"
+    },
+    {
+      "key": "larour2012",
+      "authors": [
+        "Larour, Eric",
+        "Seroussi, H\u00e9l\u00e8ne",
+        "Morlighem, Mathieu",
+        "Rignot, Eric"
+      ],
+      "year": 2012,
+      "title": "Continental scale, high order, high spatial resolution, ice sheet modeling using the Ice Sheet System Model (ISSM)",
+      "venue": "Journal of Geophysical Research: Earth Surface",
+      "doi": "10.1029/2011JF002140",
+      "url": "https://doi.org/10.1029/2011JF002140",
+      "verification_sources": [
+        "https://doi.org/10.1029/2011JF002140"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Supported models and inversion context",
+      "supported_idea": "ISSM combines finite-element ice-sheet models, parallel solvers and inverse methods.",
+      "caution": "A registered ICESEE ISSM route is not proof of current native multi-rank state transfer or parity with the PIG adapter.",
+      "volume": "117",
+      "number": "F1",
+      "pages": "F01022"
+    },
+    {
+      "key": "mpiforum2025",
+      "authors": [
+        "{Message Passing Interface Forum}"
+      ],
+      "year": 2025,
+      "title": "MPI: A Message-Passing Interface Standard, Version 5.0",
+      "venue": "Message Passing Interface Forum",
+      "doi": "",
+      "url": "https://www.mpi-forum.org/docs/mpi-5.0/mpi50-report.pdf",
+      "verification_sources": [
+        "https://www.mpi-forum.org/docs/mpi-5.0/mpi50-report.pdf"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Communicators, collective participation and MPI terminology",
+      "supported_idea": "Official MPI5.0 specification, approved5June2025, supplies standard communicator/collective semantics.",
+      "caution": "MPI standard version5.0 is different from Open MPI library version5.0.9; do not claim ICESEE uses newly added MPI5 features.",
+      "type": "techreport",
+      "institution": "Message Passing Interface Forum",
+      "number": "Version 5.0"
+    },
+    {
+      "key": "petsc2025",
+      "authors": [
+        "Balay, Satish",
+        "Abhyankar, Shrirang",
+        "Adams, Mark F.",
+        "Benson, Steven",
+        "Brown, Jed",
+        "Brune, Peter",
+        "Buschelman, Kris",
+        "Constantinescu, Emil",
+        "Dalcin, Lisandro",
+        "Dener, Alp",
+        "Eijkhout, Victor",
+        "Faibussowitsch, Jacob",
+        "Gropp, William D.",
+        "Hapla, V\u00e1clav",
+        "Isaac, Tobin",
+        "Jolivet, Pierre",
+        "Karpeev, Dmitry",
+        "Kaushik, Dinesh",
+        "Knepley, Matthew G.",
+        "Kong, Fande",
+        "Kruger, Scott",
+        "May, Dave A.",
+        "McInnes, Lois Curfman",
+        "Mills, Richard Tran",
+        "Mitchell, Lawrence",
+        "Munson, Todd",
+        "Roman, Jose E.",
+        "Rupp, Karl",
+        "Sanan, Patrick",
+        "Sarich, Jason",
+        "Smith, Barry F.",
+        "Suh, Hansol",
+        "Zampini, Stefano",
+        "Zhang, Hong",
+        "Zhang, Hong",
+        "Zhang, Junchao"
+      ],
+      "year": 2025,
+      "title": "PETSc/TAO Users Manual",
+      "venue": "Argonne National Laboratory",
+      "doi": "10.2172/2565610",
+      "url": "https://doi.org/10.2172/2565610",
+      "verification_sources": [
+        "https://web.cels.anl.gov/projects/petsc/vault/petsc-3.23.7/docs/"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Solver environment, distributed vectors and dependency provenance",
+      "supported_idea": "Version-specific PETSc/TAO manual for revision3.23; cite numerical software separately from ICESEE.",
+      "caution": "Use the run's actual PETSc version. The two Hong Zhang authors are retained as listed in the official citation; do not deduplicate.",
+      "type": "techreport",
+      "number": "ANL-21/39 - Revision 3.23",
+      "institution": "Argonne National Laboratory",
+      "manual_url": "https://web.cels.anl.gov/projects/petsc/vault/petsc-3.23/docs/manual/manual.pdf"
+    },
+    {
+      "key": "rathgeber2016",
+      "authors": [
+        "Rathgeber, Florian",
+        "Ham, David A.",
+        "Mitchell, Lawrence",
+        "Lange, Michael",
+        "Luporini, Fabio",
+        "McRae, Andrew T. T.",
+        "Bercea, Gheorghe-Teodor",
+        "Markall, Graham R.",
+        "Kelly, Paul H. J."
+      ],
+      "year": 2016,
+      "title": "Firedrake: Automating the Finite Element Method by Composing Abstractions",
+      "venue": "ACM Transactions on Mathematical Software",
+      "doi": "10.1145/2998441",
+      "url": "https://doi.org/10.1145/2998441",
+      "verification_sources": [
+        "https://www.firedrakeproject.org/firedrake/publications.html"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Model backend and native finite-element fields",
+      "supported_idea": "Firedrake provides finite-element abstractions underpinning the Icepack backend.",
+      "caution": "This software paper does not establish the correctness of ICESEE's owned/ghost mapping or current Firedrake release compatibility.",
+      "volume": "43",
+      "number": "3",
+      "pages": "24:1--24:27"
+    },
+    {
+      "key": "sakov2008",
+      "authors": [
+        "Sakov, Pavel",
+        "Oke, Peter R."
+      ],
+      "year": 2008,
+      "title": "A deterministic formulation of the ensemble Kalman filter: an alternative to ensemble square root filters",
+      "venue": "Tellus A: Dynamic Meteorology and Oceanography",
+      "doi": "10.1111/j.1600-0870.2007.00299.x",
+      "url": "https://doi.org/10.1111/j.1600-0870.2007.00299.x",
+      "verification_sources": [
+        "https://onlinelibrary.wiley.com/doi/10.1111/j.1600-0870.2007.00299.x"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Alternative filter context",
+      "supported_idea": "DEnKF separates mean and anomalies, applying a half-gain anomaly correction as a small-correction approximation.",
+      "caution": "The DOI contains 2007 but the journal volume/publication year is 2008; do not call DEnKF an exact square-root update.",
+      "volume": "60",
+      "number": "2",
+      "pages": "361--371"
+    },
+    {
+      "key": "shapero2021",
+      "authors": [
+        "Shapero, Daniel R.",
+        "Badgeley, Jessica A.",
+        "Hoffman, Andrew O.",
+        "Joughin, Ian R."
+      ],
+      "year": 2021,
+      "title": "icepack: a new glacier flow modeling package in Python, version 1.0",
+      "venue": "Geoscientific Model Development",
+      "doi": "10.5194/gmd-14-4593-2021",
+      "url": "https://doi.org/10.5194/gmd-14-4593-2021",
+      "verification_sources": [
+        "https://gmd.copernicus.org/articles/14/4593/2021/"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Model backend and coupled example",
+      "supported_idea": "Icepack supplies glacier-flow models built on Firedrake and variational formulations.",
+      "caution": "Cite the backend independently of the later ICESEE adapter; software-paper versions do not identify the installed run environment.",
+      "volume": "14",
+      "number": "7",
+      "pages": "4593--4616"
+    },
+    {
+      "key": "tippett2003",
+      "authors": [
+        "Tippett, Michael K.",
+        "Anderson, Jeffrey L.",
+        "Bishop, Craig H.",
+        "Hamill, Thomas M.",
+        "Whitaker, Jeffrey S."
+      ],
+      "year": 2003,
+      "title": "Ensemble Square Root Filters",
+      "venue": "Monthly Weather Review",
+      "doi": "10.1175/1520-0493(2003)131<1485:ESRF>2.0.CO;2",
+      "url": "https://doi.org/10.1175/1520-0493%282003%29131%3C1485%3AESRF%3E2.0.CO%3B2",
+      "verification_sources": [
+        "https://journals.ametsoc.org/view/journals/mwre/131/7/1520-0493_2003_131_1485_esrf_2.0.co_2.xml"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "primary research paper or official project/standard documentation",
+      "placement": "Alternative filter context",
+      "supported_idea": "Deterministic square-root updates and nonuniqueness of ensemble transforms with matching covariance.",
+      "caution": "An ensemble transform in a storage/runtime implementation is not automatically a deterministic square-root filter.",
+      "volume": "131",
+      "number": "7",
+      "pages": "1485--1490"
+    },
+    {
+      "key": "hdf5collective",
+      "authors": [
+        "The HDF Group"
+      ],
+      "title": "Collective Calling Requirements in Parallel HDF5 Applications",
+      "year": 2026,
+      "year_basis": "access year",
+      "url": "https://support.hdfgroup.org/documentation/hdf5/latest/collective_calls.html",
+      "verification_sources": [
+        "https://support.hdfgroup.org/documentation/hdf5/latest/collective_calls.html"
+      ],
+      "verified_date": "2026-11-10",
+      "source_type": "official software documentation",
+      "supported_idea": "Function-specific collective participation requirements in parallel HDF5."
+    },
+    {
+      "key": "macayeal1993",
+      "authors": [
+        "Douglas R. MacAyeal"
+      ],
+      "year": 1993,
+      "title": "A tutorial on the use of control methods in ice-sheet modeling",
+      "journal": "Journal of Glaciology",
+      "volume": "39",
+      "number": "131",
+      "pages": "91--98",
+      "doi": "10.3189/S0022143000015744",
+      "verification_url": "https://www.cambridge.org/core/journals/journal-of-glaciology/article/tutorial-on-the-use-of-control-methods-in-icesheet-modeling/CD1F93F5EBF26E7CDAADC376CA2BC6DE",
+      "idea": "Foundational control-method context for estimating model parameters from observation misfit; not evidence for the current wrapper.",
+      "verified_date": "2026-11-10",
+      "venue": "Journal of Glaciology",
+      "url": "https://doi.org/10.3189/S0022143000015744",
+      "verification_sources": [
+        "https://www.cambridge.org/core/journals/journal-of-glaciology/article/tutorial-on-the-use-of-control-methods-in-icesheet-modeling/CD1F93F5EBF26E7CDAADC376CA2BC6DE"
+      ],
+      "source_type": "primary research paper",
+      "placement": "Hybrid inversion and parameter inference",
+      "supported_idea": "Foundational control-method context for estimating model parameters from observation misfit; not evidence for the current wrapper.",
+      "caution": "Literature context is distinct from validation of the active ICESEE MATLAB handoff or the installed solver."
+    },
+    {
+      "key": "morlighem2010",
+      "authors": [
+        "M. Morlighem",
+        "E. Rignot",
+        "H. Seroussi",
+        "E. Larour",
+        "H. Ben Dhia",
+        "D. Aubry"
+      ],
+      "year": 2010,
+      "title": "Spatial patterns of basal drag inferred using control methods from a full-Stokes and simpler models for Pine Island Glacier, West Antarctica",
+      "journal": "Geophysical Research Letters",
+      "volume": "37",
+      "number": "14",
+      "pages": "L14502",
+      "doi": "10.1029/2010GL043853",
+      "verification_url": "https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2010GL043853",
+      "idea": "Inferred drag depends on the ice-flow approximation; do not transfer one model comparison to validation of ICESEE.",
+      "verified_date": "2026-11-10",
+      "venue": "Geophysical Research Letters",
+      "url": "https://doi.org/10.1029/2010GL043853",
+      "verification_sources": [
+        "https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2010GL043853"
+      ],
+      "source_type": "primary research paper",
+      "placement": "Hybrid inversion and parameter inference",
+      "supported_idea": "Inferred drag depends on the ice-flow approximation; do not transfer one model comparison to validation of ICESEE.",
+      "caution": "Literature context is distinct from validation of the active ICESEE MATLAB handoff or the installed solver."
+    },
+    {
+      "key": "morlighem2013",
+      "authors": [
+        "M. Morlighem",
+        "H. Seroussi",
+        "E. Larour",
+        "E. Rignot"
+      ],
+      "year": 2013,
+      "title": "Inversion of basal friction in Antarctica using exact and incomplete adjoints of a higher-order model",
+      "journal": "Journal of Geophysical Research: Earth Surface",
+      "volume": "118",
+      "number": "3",
+      "pages": "1746--1753",
+      "doi": "10.1002/jgrf.20125",
+      "verification_url": "https://agupubs.onlinelibrary.wiley.com/doi/10.1002/jgrf.20125",
+      "idea": "Context distinguishing exact and incomplete adjoints in an ISSM inverse setting, not proof of installed solver defaults.",
+      "verified_date": "2026-11-10",
+      "venue": "Journal of Geophysical Research: Earth Surface",
+      "url": "https://doi.org/10.1002/jgrf.20125",
+      "verification_sources": [
+        "https://agupubs.onlinelibrary.wiley.com/doi/10.1002/jgrf.20125"
+      ],
+      "source_type": "primary research paper",
+      "placement": "Hybrid inversion and parameter inference",
+      "supported_idea": "Context distinguishing exact and incomplete adjoints in an ISSM inverse setting, not proof of installed solver defaults.",
+      "caution": "Literature context is distinct from validation of the active ICESEE MATLAB handoff or the installed solver."
+    }
+  ]
+}

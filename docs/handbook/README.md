@@ -2,17 +2,22 @@
 
 This handbook explains how to operate, investigate, and extend ICESEE while the principal developer is away. Start with a small reproducible run, retain the exact source and environment used for every experiment, and treat a completed calculation and a scientifically acceptable calculation as separate decisions. Students should be able to identify the code responsible for a result, reproduce a failure on a small case, and recover a stopped run without reconstructing the developer's working environment.
 
-The implementation baseline is the published `features_debug` commit `3748e416d3a8120cc860119bd7224c6f9ad41ff7`, inspected on 10 November 2026. A branch name can move. Record the full commit and any local diff. The repository package metadata declares version `0.1.9`; the earlier paper and archive use `v1.0.0`. These identifiers have not been reconciled into a new release. Use the commit as the unambiguous identifier until maintainers resolve release metadata. The handbook is documentation of an inspected implementation, not certification of every model/configuration combination.
+The implementation baseline is the published `features_debug` commit `3748e416d3a8120cc860119bd7224c6f9ad41ff7`, inspected on 10 November 2026. A branch name can move. Record the full commit and any local diff. The repository package metadata declares version `0.1.9`; the earlier paper and archive use `v1.0.0`. These identifiers have not been reconciled into a new release. Use the commit as the unambiguous identifier until maintainers resolve release metadata. The handbook is documentation of an inspected implementation, not certification of every model/configuration combination. Later [ISSM corrections](https://github.com/ICESEE-project/ICESEE/pull/74) identified during the compact runs fix missing-result propagation, directory restoration and initial/terminal reference output; retain the exact published source and sample record when using them.
 
 ## Reading routes
 
 | Reader and immediate task | Read in this order |
 |---|---|
-| New student running a first case | [Student tutorial](student-tutorial.md), [configuration](configuration.md), [operations](operations.md) |
+| New student running a first case | [Student tutorial](student-tutorial.md), [sample runs](sample-runs.md), [configuration](configuration.md), [operations](operations.md) |
+| Understand the four execution modes | [Parallelization modes](parallelization-modes.md), [architecture](architecture.md), [numerics](numerics.md) |
+| Understand inversion and parameter inference | [Inversion and inference](inversion-and-inference.md), [current developments](current-developments.md), [ISSM coupling](coupling-issm.md) |
+| Read the scientific background | [Annotated literature](literature.md), [numerics](numerics.md) |
 | Student submitting an ice-sheet calculation | [Deployment](deployment.md), the example README, [operations](operations.md), [numerics](numerics.md) |
 | Developer diagnosing a hang or unexpected state | [Architecture](architecture.md), [testing](testing-and-contributing.md), [module and API index](api-reference.md) |
+| Couple Icepack or ISSM | [Icepack coupling](coupling-icepack.md), [ISSM coupling](coupling-issm.md), [mode-by-mode execution](parallelization-modes.md) |
+| Bring a new application on board | [Application onboarding](application-onboarding.md), [copyable templates](templates/README.md), [model integration](model-integration.md) |
 | Developer integrating another model | [Model integration](model-integration.md), [state ownership](architecture.md#state-ownership), [configuration](configuration.md) |
-| Researcher interpreting the updated developments | [Numerics](numerics.md), [architecture](architecture.md), the technical-report manuscript and its evidence registry |
+| Researcher interpreting the updated developments | [Current developments](current-developments.md), [numerics](numerics.md), [architecture](architecture.md), the technical-report manuscript and its evidence registry |
 | Local team deciding whether a case can proceed | [Handover status and acceptance checklist](production-readiness.md), [operations](operations.md), the selected application's evidence |
 
 The existing [PIG README](../../applications/icepack_model/examples/idealized_pig/README.md) describes that application's input data, submit scripts, profiles, and inspected runtime results. Read it together with this handbook. A generic parameter default does not establish that an application implements the requested feature.

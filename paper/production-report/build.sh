@@ -2,8 +2,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p build
-pdflatex -interaction=nonstopmode -halt-on-error -output-directory=build main.tex
-pdflatex -interaction=nonstopmode -halt-on-error -output-directory=build main.tex
+for pass in 1 2 3; do
+  pdflatex -interaction=nonstopmode -halt-on-error -output-directory=build main.tex
+done
 if grep -Eq 'undefined references|Citation .* undefined|Reference .* undefined' build/main.log; then
   echo 'Unresolved manuscript references remain.' >&2
   exit 1

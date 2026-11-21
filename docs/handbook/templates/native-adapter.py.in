@@ -1,0 +1,51 @@
+"""Incomplete native adapter methods; no import-time registration or physics.
+
+These signatures follow NativeDistributedModelAdapter. They do not establish
+that the model is spatially distributed, restartable, localized or invertible.
+The class is intentionally unusable until its mandatory physics is supplied.
+"""
+
+
+class NativeAdapter:
+    def initialize_native_member(self, member_id, *, topology, icesee_kwargs):
+        """Return a NativeDistributedMember on topology.spatial_comm.
+
+        Retain real model fields/context. Supply a DistributedFieldRegistry
+        whose block ranges contain owned entries only and cover the declared
+        global layout exactly once. Member identity must survive scheduling.
+        """
+        raise NotImplementedError("Construct persistent model-native fields")
+
+    def forecast_native_member(self, member, timestep, *, topology, icesee_kwargs):
+        """Advance the same native member by one interval in place."""
+        raise NotImplementedError("Implement communicator-aware model physics")
+
+    def observe_native_member(self, member, observation_rows, *, topology, icesee_kwargs):
+        """Return one value per requested locally owned observation row.
+
+        Preserve canonical ordering and translate physical-node numbering when
+        a reference mesh and a distributed mesh use different numerical IDs.
+        """
+        raise NotImplementedError("Implement and validate observation mapping")
+
+    def finalize_native_analysis(self, member, forecast_owned, timestep, *, topology, icesee_kwargs):
+        """Apply the declared post-analysis policy and halo synchronization.
+
+        Some wrappers only synchronize halos unless an application-specific
+        physics finalizer is configured. A new application must state whether
+        geometry/diagnostic projection happens now or in its next forecast.
+        """
+        raise NotImplementedError("Choose and validate post-analysis consistency")
+
+
+# Optional methods are deliberately absent, because callable discovery can
+# advertise them as capabilities. Add only with matching lifecycle and tests:
+# inverse_native_member(member, timestep, *, topology, icesee_kwargs)
+# restore_native_checkpoint(member, checkpoint, *, topology, icesee_kwargs)
+# reactivate_native_member(member_id, packed_state, *, topology, icesee_kwargs)
+# allocate_native_member(member_id, *, topology, icesee_kwargs)
+#
+# Registration is a separate, explicit step after implementation. A shared
+# whole-member policy requires one spatial rank and has its own feature and
+# restart restrictions. A spatial policy needs a validated application runner;
+# changing a model name or adding a registration does not supply that runner.

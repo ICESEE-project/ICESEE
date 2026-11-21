@@ -103,7 +103,9 @@ def run_native_application(*, adapter, setup, analysis_cycle=run_native_global_a
 
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
-    prepare_timestep_contract(world, _modelrun_datasets, time_grid=icesee_kwargs.get("t"))
+    prepare_timestep_contract(world, _modelrun_datasets, time_grid=icesee_kwargs.get("t"),
+                              process_noise_normalization=icesee_kwargs.get("process_noise_normalization", "legacy_run_length"),
+                              scientific_experiment_id=icesee_kwargs.get("scientific_experiment_id"))
     if world_rank == 0 and not os.path.exists(_modelrun_datasets):
         os.makedirs(_modelrun_datasets, exist_ok=True)
     world.Barrier()

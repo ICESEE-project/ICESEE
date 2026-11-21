@@ -202,7 +202,7 @@ def test_inverse_member_delegates_to_run_model_inverse(monkeypatch):
     assert "Thickness" not in result
 
 
-def test_inverse_member_none_result_is_passed_through(monkeypatch):
+def test_inverse_member_missing_result_raises_with_member_and_timestep(monkeypatch):
     state = WholeMemberState(
         variables={
             "Thickness": np.array([1.0]),
@@ -216,11 +216,51 @@ def test_inverse_member_none_result_is_passed_through(monkeypatch):
     monkeypatch.setattr(
         native, "run_model_inverse", lambda ensemble, **kw: None
     )
-    result = native.inverse_member(
-        state, 0, topology=_topology(), icesee_kwargs=_base_kwargs(km=0)
-    )
-    assert result is None
+    with pytest.raises(RuntimeError, match="member 0 at timestep 7"):
+        native.inverse_member(
+            state, 7, topology=_topology(), icesee_kwargs=_base_kwargs(km=0)
+        )
 
 
 def test_adapter_exposes_inversion_capability():
     assert hasattr(native.ISMIP_CHOI_NATIVE_ADAPTER, "inverse_native_member")
+
+
+def test_native_adapter_propagates_missing_inverse_result(monkeypatch):
+    """A failed legacy inverse must not become valid in-place completion."""
+    from ICESEE.src.parallelization.distributed_native_runtime import NativeDistributedMember
+
+    state = WholeMemberState(
+        variables={name: np.array([1.0, 2.0]) for name in _VEC_INPUTS},
+        vec_inputs=_VEC_INPUTS,
+        model_context={"ens_id": 3},
+    )
+    member = NativeDistributedMember(3, state.registry, state)
+    before = member.pack_owned().copy()
+    monkeypatch.setattr(native, "run_model_inverse", lambda ensemble, **kw: None)
+    with pytest.raises(RuntimeError, match="member 3 at timestep 2"):
+        native.ISMIP_CHOI_NATIVE_ADAPTER.inverse_native_member(
+            member, 2, topology=_topology(), icesee_kwargs=_base_kwargs(km=1)
+        )
+    np.testing.assert_array_equal(member.pack_owned(), before)
+
+
+def test_native_adapter_applies_successful_inverse_mapping(monkeypatch):
+    """Keep the healthy mapping path and untouched fields unchanged."""
+    from ICESEE.src.parallelization.distributed_native_runtime import NativeDistributedMember
+
+    state = WholeMemberState(
+        variables={name: np.array([1.0, 2.0]) for name in _VEC_INPUTS},
+        vec_inputs=_VEC_INPUTS,
+        model_context={"ens_id": 3},
+    )
+    member = NativeDistributedMember(3, state.registry, state)
+    monkeypatch.setattr(native, "run_model_inverse", lambda ensemble, **kw: {
+        "Vx": np.array([10.0, 20.0]), "Vy": np.array([30.0, 40.0])
+    })
+    native.ISMIP_CHOI_NATIVE_ADAPTER.inverse_native_member(
+        member, 2, topology=_topology(), icesee_kwargs=_base_kwargs(km=1)
+    )
+    np.testing.assert_array_equal(state.registry.field("Vx").read_owned(), [10.0, 20.0])
+    np.testing.assert_array_equal(state.registry.field("Vy").read_owned(), [30.0, 40.0])
+    np.testing.assert_array_equal(state.registry.field("Thickness").read_owned(), [1.0, 2.0])

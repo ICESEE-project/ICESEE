@@ -1,0 +1,31 @@
+# Short legacy basal-friction exercise using the tracked reference model.
+extends: ../../params.yaml
+
+modeling-parameters:
+  num_years: 2.0
+  tinitial: 0.0
+  timesteps_per_year: 0.2
+
+enkf-parameters:
+  # Existing resource policy: retain requested model_nprocs; this is not a benchmark claim.
+  ICESEE_PERFORMANCE_TEST: true
+  Nens: 4
+  model_nprocs: 1
+  ranks_per_model: 1
+  execution_mode: 1
+  freq_obs: 1.0
+  obs_start_time: 1.0
+  obs_max_time: 2
+  # Regenerate data in the new directory; do not assume old outputs exist.
+  generate_true_state: true
+  generate_nurged_state: true
+  generate_synthetic_obs: true
+  initialize_ensemble: true
+  bed_obs_snapshot: []
+  ensemble_history_mode: full
+  ensemble_storage_dtype: float64
+  batch_size: 2
+  restart_enabled: false
+  resume_from_checkpoint: false
+  force_fresh_start: true
+  data_path: _modelrun_tutorials/short_assimilation

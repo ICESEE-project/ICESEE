@@ -1,0 +1,28 @@
+# Short teaching protocol. Reuses the existing Choi mesh and model inputs.
+extends: ../../params.yaml
+
+modeling-parameters:
+  num_years: 2.0
+  tinitial: 0.0
+  timesteps_per_year: 0.2
+
+enkf-parameters:
+  # Existing resource policy: retain requested model_nprocs; this is not a benchmark claim.
+  ICESEE_PERFORMANCE_TEST: true
+  Nens: 4
+  model_nprocs: 1
+  ranks_per_model: 1
+  execution_mode: 1
+  freq_obs: 1.0
+  obs_start_time: 1.0
+  obs_max_time: 2
+  # The existing survey schedule is intersected with the short time window.
+  bed_obs_snapshot: [2]
+  ensemble_history_mode: full
+  ensemble_storage_dtype: float64
+  batch_size: 2
+  restart_enabled: false
+  resume_from_checkpoint: false
+  force_fresh_start: true
+  # The runner supplies unique example_name/data_path values per variant.
+  data_path: _modelrun_tutorials/short_assimilation

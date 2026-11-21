@@ -1375,6 +1375,9 @@ def generate_initial_member_increment(
     agnostic) lets every mode share one correct implementation instead of
     maintaining parallel ones.
 
+    ``initial_perturbation_vars`` can restrict draws to named blocks. An empty
+    list disables these generic draws; omitted/null retains every block.
+
     The ensemble-wide ``initial_spread_factor`` is deliberately *not*
     applied here; callers apply that factor later about the realized
     ensemble mean.
@@ -1430,6 +1433,16 @@ def generate_initial_member_increment(
         block_sizes = [int(hdim)] * (vector_size // int(hdim))
 
     nvars = len(block_sizes)
+    selected = icesee_kwargs.get("initial_perturbation_vars")
+    if selected is not None:
+        if not isinstance(selected, (list, tuple)) or not all(isinstance(name, str) for name in selected):
+            raise ValueError("initial_perturbation_vars must be a list of variable names or null")
+        names = ([] if vec_inputs is None else list(vec_inputs))[:nvars]
+        if len(set(selected)) != len(selected) or set(selected) - set(names):
+            raise ValueError("initial_perturbation_vars contains duplicate or unknown variables")
+        if selected and len(names) != nvars:
+            raise ValueError("initial_perturbation_vars requires a name for every variable block")
+        selected = set(selected)
     sig_q = list(icesee_kwargs.get("sig_Q", []))
     lx = float(icesee_kwargs.get("Lx", 1.0))
     ly = float(icesee_kwargs.get("Ly", 1.0))
@@ -1437,6 +1450,10 @@ def generate_initial_member_increment(
     raw_blocks = []
     for variable_index in range(nvars):
         this_block_size = int(block_sizes[variable_index])
+        if selected is not None and (not selected or names[variable_index] not in selected):
+            blocks.append(np.zeros(this_block_size, dtype=np.float64))
+            raw_blocks.append(np.zeros(this_block_size, dtype=np.float64))
+            continue
         seed = initialization_seed(
             icesee_kwargs.get("base_seed", 42),
             ensemble_id,

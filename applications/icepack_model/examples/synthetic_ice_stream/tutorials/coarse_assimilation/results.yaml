@@ -1,0 +1,11 @@
+schema: icesee-results/1
+model_name: icepack
+outputs:
+  data_dir: _coarse_assimilation_data
+  results_dir: _coarse_assimilation_data
+  ensemble: auto
+views:
+  - da.error_and_spread
+not_reproduced:
+  - cell: 0
+    reason: Mesh maps and parent notebooks are separate views; this configured case declares the generic error/spread view only.

@@ -40,8 +40,11 @@ def completed_observations(indices, state_column):
     return int(np.searchsorted(np.asarray(indices, dtype=np.int64), int(state_column), side="right"))
 
 
-def prepare_timestep_contract(comm, data_path, *, time_grid=None):
+def prepare_timestep_contract(comm, data_path, *, time_grid=None,
+                              process_noise_normalization="legacy_run_length",
+                              scientific_experiment_id=None):
     """Record the clock before creating state; reject incompatible old state."""
+    from ICESEE.src.utils.process_noise import process_noise_normalization as resolve_noise_policy
     import hashlib
     import json
     import os
@@ -51,6 +54,7 @@ def prepare_timestep_contract(comm, data_path, *, time_grid=None):
     error = None
     if comm.Get_rank() == 0:
         try:
+            noise_policy = resolve_noise_policy({"process_noise_normalization": process_noise_normalization})
             root = Path(data_path)
             root.mkdir(parents=True, exist_ok=True)
             marker = root / "time_grid_contract.json"
@@ -62,6 +66,10 @@ def prepare_timestep_contract(comm, data_path, *, time_grid=None):
                 signature = hashlib.sha256(times.tobytes()).hexdigest()
             if marker.exists():
                 recorded = json.loads(marker.read_text())
+                if recorded.get("scientific_experiment_id") != scientific_experiment_id:
+                    raise ValueError("output belongs to a different scientific experiment; preserve it and choose a fresh data_path")
+                if recorded.get("process_noise_normalization", "legacy_run_length") != noise_policy:
+                    raise ValueError("output uses incompatible process-noise normalization; preserve it and choose a fresh data_path")
                 if recorded.get("time_grid_contract") != TIME_GRID_CONTRACT or signature is not None and recorded.get("time_grid_signature") != signature:
                     raise ValueError("output uses an incompatible time-grid contract; preserve it and choose a fresh data_path")
             else:
@@ -72,7 +80,7 @@ def prepare_timestep_contract(comm, data_path, *, time_grid=None):
                 fd, name = tempfile.mkstemp(prefix=".time-grid-", suffix=".tmp", dir=root)
                 try:
                     with os.fdopen(fd, "w") as stream:
-                        json.dump({"time_grid_contract": TIME_GRID_CONTRACT, "time_grid_signature": signature}, stream)
+                        json.dump({"time_grid_contract": TIME_GRID_CONTRACT, "time_grid_signature": signature, "process_noise_normalization": noise_policy, "scientific_experiment_id": scientific_experiment_id}, stream)
                         stream.write("\n")
                         stream.flush()
                         os.fsync(stream.fileno())

@@ -10,6 +10,7 @@ from src.parallelization.distributed_analysis import (
     DistributedObservationLayout,
     StochasticAnalysisProducts,
     contiguous_observation_layout,
+    collapsed_spread_message,
     ensemble_transform_from_products,
     iter_local_ensemble_row_blocks,
     validate_observation_partition,
@@ -200,3 +201,37 @@ def test_products_reduce_only_fixed_ensemble_matrices():
     np.testing.assert_array_equal(reduced.gram, np.full((3, 3), 4.0))
     np.testing.assert_array_equal(reduced.rhs, np.full((3, 3), 6.0))
     assert reduced.observation_rows == 14
+
+
+def test_spread_floor_reports_threshold_without_claiming_roundoff():
+    products = StochasticAnalysisProducts.zeros(32)
+    products.observation_rows = 54123
+    products.max_abs_anomaly = 8.914734053178108e-6
+    products.max_abs_forecast = 2632.7575744179258
+    message = collapsed_spread_message(products)
+    assert "required anomaly > 2.633e-05" in message
+    assert "does not establish" in message
+    assert "members are identical" not in message
+    # A lower floor changes admission only; it leaves the measured spread intact.
+    assert collapsed_spread_message(products, relative_tolerance=1e-9) is None
+    assert products.max_abs_anomaly == 8.914734053178108e-6
+
+
+@pytest.mark.parametrize("sigma", [.1,1.,10.,100.])
+def test_stochastic_observation_factor_matches_scalar_kalman_oracle(sigma):
+    forecast=np.array([[-1.,0.,1.]])
+    errors=sigma*np.array([[-1.,2.,-1.]])/np.sqrt(3.)
+    products=StochasticAnalysisProducts.zeros(3)
+    products.add_chunk(forecast,np.array([4.]),error_mode="stochastic_R",observation_errors=errors)
+    analyzed=forecast@ensemble_transform_from_products(products)
+    np.testing.assert_allclose(analyzed.mean(),4/(1+sigma**2),atol=1e-11)
+    np.testing.assert_allclose(analyzed.var(ddof=1),sigma**2/(1+sigma**2),atol=1e-11)
+
+
+def test_legacy_prior_factor_is_not_a_configured_observation_covariance():
+    forecast=np.array([[-1.,0.,1.]])
+    products=StochasticAnalysisProducts.zeros(3)
+    products.add_chunk(forecast,np.array([4.]),error_mode="legacy_prior_anomalies")
+    analyzed=forecast@ensemble_transform_from_products(products)
+    np.testing.assert_allclose(analyzed.mean(),1.,atol=1e-12)
+    np.testing.assert_allclose(analyzed.var(ddof=1),.75**2,atol=1e-12)

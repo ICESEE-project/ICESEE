@@ -1,0 +1,7 @@
+# Existing basal_friction_variation fields and callbacks, not Choi aliases.
+extends: common.yaml
+
+enkf-parameters:
+  inversion_flag: true
+  inversion_start_time: 2.0
+  frozen_analysis_vars: ['FrictionCoefficient']

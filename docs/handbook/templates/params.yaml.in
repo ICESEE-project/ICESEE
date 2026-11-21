@@ -1,0 +1,52 @@
+# Interface scaffold only: not a registered/runnable scientific application.
+# Values illustrate dimensions, not accepted units, uncertainty or timesteps.
+# Replace the family/example and implement the hooks/driver before any run.
+physical-parameters: {}
+
+modeling-parameters:
+  example_name: onboarding_case
+  num_years: 1
+  timesteps_per_year: 10
+  nt: 10
+  # The new driver must explicitly resolve dt/t and the meaning of this key.
+  # PIG uses a step length; several other examples use a count per year.
+
+enkf-parameters:
+  model_name: onboarding_model
+  execution_mode: 0
+  model_nprocs: 1
+  state_distribution: replicated
+  Nens: 4
+  num_state_vars: 1
+  num_param_vars: 0
+  vec_inputs: [state]
+  observed_vars: [state]
+  observed_params: []
+  sig_model: [1.0]
+  sig_Q: [0.1]
+  sig_obs: [1.0]
+  length_scale: [1.0]
+  base_seed: 42
+  seed: 1
+  enkf_observation_error_mode: stochastic_R
+  process_noise_schedule: observations
+  freq_obs: 0.2
+  obs_start_time: 0.2
+  obs_max_time: 1.0
+  generate_true_state: true
+  generate_synthetic_obs: true
+  generate_nurged_state: false
+  joint_estimation: false
+  state_estimation: true
+  parameter_estimation: false
+  filter_type: EnKF
+  inflation_factor: 1.0
+  localization_flag: false
+  inference_plugin_enabled: false
+  inversion_flag: false
+  restart_enabled: false
+  resume_from_checkpoint: false
+  force_fresh_start: false
+  # Replace this with a UNIQUE reviewed run path; loader fresh-run cleanup
+  # means it must never identify an accepted old experiment.
+  data_path: runs/REPLACE_WITH_UNIQUE_RUN_ID/data

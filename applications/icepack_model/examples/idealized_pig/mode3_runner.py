@@ -213,6 +213,8 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     """Drive idealized_pig's full mode-3 DA cycle. Registered under ``"icepack"``."""
 
     icesee_kwargs = normalize_icesee_kwargs(icesee_kwargs)
+    from ._melt_forcing import configure_melt_experiment
+    configure_melt_experiment(icesee_kwargs)
     normalize_execution_mode(icesee_kwargs, expected=3)
 
     world = MPI.COMM_WORLD
@@ -250,7 +252,9 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
 
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
-    prepare_timestep_contract(world, _modelrun_datasets, time_grid=icesee_kwargs.get("t"))
+    prepare_timestep_contract(world, _modelrun_datasets, time_grid=icesee_kwargs.get("t"),
+                              process_noise_normalization=icesee_kwargs.get("process_noise_normalization", "legacy_run_length"),
+                              scientific_experiment_id=icesee_kwargs.get("scientific_experiment_id"))
     if world_rank == 0 and not os.path.exists(_modelrun_datasets):
         os.makedirs(_modelrun_datasets, exist_ok=True)
     trace_init("mode3 runner entered", Nens=Nens, nt=nt,
@@ -348,6 +352,8 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     )
 
     run_id = str(icesee_kwargs.get("run_id", _DEFAULT_RUN_ID)) + ":time-grid-v2:native-controls-v1:" + canonical_noise_identity(icesee_kwargs)
+    if icesee_kwargs.get("scientific_experiment_id"):
+        run_id += ":" + icesee_kwargs["scientific_experiment_id"]
     checkpoints = Mode3CheckpointManager(
         os.path.join(_modelrun_datasets, HISTORY_DIRNAME),
         run_id=run_id,
