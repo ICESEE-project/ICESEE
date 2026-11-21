@@ -14,6 +14,7 @@ import icepack
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_model import (
     EXPERIMENT_WRONG,
     BasalMeltRate,
+    estimated_melt_forecast, initial_estimated_melt, melt_forecast_mode,
     Icepack,
     initializeMesh,
     initializeRun,
@@ -298,7 +299,9 @@ def initialize_member(
     # own docstring). Independent of whether basal_melt_field exists in
     # this state -- if joint_estimation is on, the field always exists too
     # (it IS the jointly-estimated parameter), so no ordering hazard here.
-    if icesee_kwargs.get("joint_estimation"):
+    if melt_forecast_mode(icesee_kwargs) == "estimated_field":
+        basal_melt_field = initial_estimated_melt(basal_melt_field, member_id, icesee_kwargs)
+    elif icesee_kwargs.get("joint_estimation"):
         basal_melt_field = _nudge_basal_melt(basal_melt_field, icesee_kwargs, ctx.Q)
 
     h = h_p
@@ -331,10 +334,14 @@ def forecast_member(
     step = int(timestep)
 
     floating = _recompute_floating(ctx, state.surface)
-    basal_melt_field = _basal_melt_for_step(
-        icesee_kwargs, step, floating, ctx.Q, state.surface, state.thickness,
-        experiment=EXPERIMENT_WRONG,
-    )
+    if melt_forecast_mode(icesee_kwargs) == "estimated_field":
+        basal_melt_field = estimated_melt_forecast(
+            state.basal_melt, floating, ctx.Q, icesee_kwargs)
+    else:
+        basal_melt_field = _basal_melt_for_step(
+            icesee_kwargs, step, floating, ctx.Q, state.surface, state.thickness,
+            experiment=EXPERIMENT_WRONG,
+        )
     run_kwargs = _icepack_run_kwargs(ctx, icesee_kwargs)
     h, u, s, _floating, _grounded = Icepack(
         ctx.forward_solver,

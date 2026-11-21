@@ -75,6 +75,7 @@ def test_generic_pig_initialization_copies_physical_fields_without_forecasting(t
     h=Field([30,40,50]);u=Field([[1,2],[3,4],[5,6]]);surface=Field([10,20,30]);melt=Field([0,10,20])
     def forbidden(*a,**k):raise AssertionError('initialization advanced the model')
     ns=dict(np=np,h5py=h5py,os=os,Icepack=forbidden,
+            melt_forecast_mode=lambda options:"prescribed_wrong",
             initial_flowline_profile=lambda kw:(h.dat.data_ro,surface.dat.data_ro,np.zeros((3,2)),np.arange(3),np.zeros(3)))
     exec(compile(ast.Module(body=[node],type_ignores=[]),str(source),'exec'),ns)
     result=ns['initialize_ensemble'](0,joint_estimation=False,h0=h,u=u,s0=surface,
@@ -137,3 +138,13 @@ def test_output_contract_refuses_mixed_noise_policies_collectively(tmp_path):
     prepare_timestep_contract(comm, fresh, process_noise_normalization="per_step")
     with pytest.raises(ValueError, match="incompatible process-noise"):
         prepare_timestep_contract(comm, fresh)
+
+
+def test_new_scientific_policy_cannot_reuse_existing_experiment(tmp_path):
+    comm=Comm()
+    prepare_timestep_contract(comm,tmp_path,scientific_experiment_id="forcing-prior-a")
+    prepare_timestep_contract(comm,tmp_path,scientific_experiment_id="forcing-prior-a")
+    with pytest.raises(ValueError,match="different scientific experiment"):
+        prepare_timestep_contract(comm,tmp_path,scientific_experiment_id="forcing-prior-b")
+    with pytest.raises(ValueError,match="different scientific experiment"):
+        prepare_timestep_contract(comm,tmp_path)

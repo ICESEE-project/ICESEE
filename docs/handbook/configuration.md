@@ -36,6 +36,8 @@ The loader also prepares `data_path` before applying all generic overrides. Its 
 |---|---|---|
 | `base_seed` | `42` | Reproducible stream namespace; a model's `seed` can separately affect its own initialization. |
 | `sig_model`, `sig_obs`, `sig_Q` | Loader-generated arrays when omitted | Initial/model uncertainty, observation factor scale, process noise; units and block order must be explained. |
+| `initial_perturbation_vars` | Omitted/null selects all generic initial-noise blocks | An empty list disables generic initial draws; named blocks preserve member-keyed seeds. Model-specific forcing priors are separate. |
+| `analysis_bounds` | `{}` | Optional variable intervals applied after analysis inflation; changes are scientific constraints. |
 | `initial_spread_factor` | `1.0` | Generic initialization scaling; does not imply every native adapter perturbs the same fields. |
 | `random_field_method` | `fft`, alias fallback `enkf_field_method` | `fft` or `graph`; graph requires physical coordinates. |
 | `length_scale`, `Q_rho` | `[]`, `1.0` | Spatial/temporal noise behavior, interpreted by the selected generator. |

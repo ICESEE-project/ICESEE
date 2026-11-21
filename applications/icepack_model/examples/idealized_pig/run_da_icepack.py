@@ -20,6 +20,8 @@ import numpy as np
 # command-line arguments, so PETSc (initialized by the Firedrake import)
 # only sees PETSc options. ---
 from ICESEE.config._utility_imports import icesee_kwargs
+from ICESEE.applications.icepack_model.examples.idealized_pig._melt_forcing import configure_melt_experiment
+configure_melt_experiment(icesee_kwargs)
 
 # --- firedrake imports ---
 import firedrake

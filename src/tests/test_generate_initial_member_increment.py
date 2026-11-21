@@ -98,3 +98,31 @@ def test_rejects_vector_size_not_a_multiple_of_hdim():
 
     with pytest.raises(ValueError):
         generate_initial_member_increment(hdim, kwargs, ensemble_id=0, vector_size=hdim + 1)
+
+
+def test_initial_noise_selection_preserves_unperturbed_physical_blocks():
+    options = dict(_base_kwargs([.8,.4,.1]), vec_inputs=["h","u","forcing"])
+    baseline, raw = generate_initial_member_increment(8, options, 3)
+    selected, selected_raw = generate_initial_member_increment(8, dict(options,initial_perturbation_vars=["forcing"]), 3)
+    np.testing.assert_array_equal(selected[:16], np.zeros(16))
+    np.testing.assert_array_equal(selected_raw[:16], np.zeros(16))
+    np.testing.assert_array_equal(selected[16:], baseline[16:])
+    np.testing.assert_array_equal(selected_raw[16:], raw[16:])
+
+
+def test_empty_initial_noise_selection_does_not_generate_fields(monkeypatch):
+    from ICESEE.src.run_model_da import _error_generation as module
+    def forbidden(**kw):
+        raise AssertionError("disabled initial noise generated a random field")
+    monkeypatch.setattr(module,"generate_enkf_field",forbidden)
+    options = dict(_base_kwargs([.8,.4]), initial_perturbation_vars=[])
+    increment, raw = generate_initial_member_increment(8, options, 2)
+    np.testing.assert_array_equal(increment,np.zeros(16))
+    np.testing.assert_array_equal(raw,np.zeros(16))
+
+
+@pytest.mark.parametrize("selection", ["h",["missing"],["h","h"],[4]])
+def test_invalid_initial_noise_selection_is_refused(selection):
+    options = dict(_base_kwargs([.8]), vec_inputs=["h"], initial_perturbation_vars=selection)
+    with pytest.raises(ValueError,match="initial_perturbation_vars"):
+        generate_initial_member_increment(8,options,0)

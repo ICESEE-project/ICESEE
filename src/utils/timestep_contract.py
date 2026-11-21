@@ -41,7 +41,8 @@ def completed_observations(indices, state_column):
 
 
 def prepare_timestep_contract(comm, data_path, *, time_grid=None,
-                              process_noise_normalization="legacy_run_length"):
+                              process_noise_normalization="legacy_run_length",
+                              scientific_experiment_id=None):
     """Record the clock before creating state; reject incompatible old state."""
     from ICESEE.src.utils.process_noise import process_noise_normalization as resolve_noise_policy
     import hashlib
@@ -65,6 +66,8 @@ def prepare_timestep_contract(comm, data_path, *, time_grid=None,
                 signature = hashlib.sha256(times.tobytes()).hexdigest()
             if marker.exists():
                 recorded = json.loads(marker.read_text())
+                if recorded.get("scientific_experiment_id") != scientific_experiment_id:
+                    raise ValueError("output belongs to a different scientific experiment; preserve it and choose a fresh data_path")
                 if recorded.get("process_noise_normalization", "legacy_run_length") != noise_policy:
                     raise ValueError("output uses incompatible process-noise normalization; preserve it and choose a fresh data_path")
                 if recorded.get("time_grid_contract") != TIME_GRID_CONTRACT or signature is not None and recorded.get("time_grid_signature") != signature:
@@ -77,7 +80,7 @@ def prepare_timestep_contract(comm, data_path, *, time_grid=None,
                 fd, name = tempfile.mkstemp(prefix=".time-grid-", suffix=".tmp", dir=root)
                 try:
                     with os.fdopen(fd, "w") as stream:
-                        json.dump({"time_grid_contract": TIME_GRID_CONTRACT, "time_grid_signature": signature, "process_noise_normalization": noise_policy}, stream)
+                        json.dump({"time_grid_contract": TIME_GRID_CONTRACT, "time_grid_signature": signature, "process_noise_normalization": noise_policy, "scientific_experiment_id": scientific_experiment_id}, stream)
                         stream.write("\n")
                         stream.flush()
                         os.fsync(stream.fileno())

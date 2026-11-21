@@ -12,6 +12,9 @@ import os
 import h5py
 
 from ICESEE.src.utils.init_trace import traced_init
+from ICESEE.applications.icepack_model.examples.idealized_pig._melt_forcing import (
+    melt_forecast_mode, initial_melt_values, bounded_melt_values,
+)
 
 os.environ["OMP_NUM_THREADS"] = "1"
 
@@ -281,6 +284,23 @@ def BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', ex
 
 
 
+
+def initial_estimated_melt(nominal, member_id, options):
+    """Draw member forcing uncertainty without changing physical initial fields."""
+    result = nominal.copy(deepcopy=True)
+    result.dat.data[:] = initial_melt_values(nominal.dat.data_ro, options, member_id)
+    return result
+
+
+def estimated_melt_forecast(analyzed_melt, floating, Q, options):
+    """Persist the analyzed forcing field on the current floating-ice support."""
+    if analyzed_melt is None:
+        raise ValueError("estimated melt forecast requires a restored basal_melt_field")
+    bounded = Function(Q)
+    bounded.dat.data[:] = bounded_melt_values(analyzed_melt.dat.data_ro, options)
+    return Function(Q).interpolate(bounded * floating)
+
+
 def profile_path(data_path, name):
     """Path of the flowline-profile file ``<data_path>/<name>.h5``. Runs made
     before the .h5 extension was added wrote ``<data_path>/<name>``; that
@@ -528,52 +548,58 @@ def run_model(ensemble, **icesee_kwargs):
     basal_melt_field.dat.data[:] = basal_melt_vec
 
 
-    ### Conditionals for depth-dependent basal melt rate function
-    ### Select forcing scenario between 1935 - 2017
-    if step < (6/dt):
-        basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 1935 - 1941
+    if melt_forecast_mode(icesee_kwargs) == "estimated_field":
+        zF = mf.flotationHeight(bed, Q)
+        floating, _ = mf.flotationMask(s, zF, Q)
+        basal_melt_field = estimated_melt_forecast(
+            basal_melt_field, floating, Q, icesee_kwargs)
+    else:
+        ### Conditionals for depth-dependent basal melt rate function
+        ### Select forcing scenario between 1935 - 2017
+        if step < (6/dt):
+            basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 1935 - 1941
 
-    elif (6 / dt) <= step < (15/dt):
-        basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='warm', experiment=EXPERIMENT_WRONG) # 1941 - 1950
+        elif (6 / dt) <= step < (15/dt):
+            basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='warm', experiment=EXPERIMENT_WRONG) # 1941 - 1950
 
-    elif (15 / dt) <= step < (18/dt):
-        basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 1950 - 1953
+        elif (15 / dt) <= step < (18/dt):
+            basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 1950 - 1953
 
-    elif (18/ dt) <= step < (20/dt):
-        basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='warm', experiment=EXPERIMENT_WRONG) # 1953 - 1955
+        elif (18/ dt) <= step < (20/dt):
+            basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='warm', experiment=EXPERIMENT_WRONG) # 1953 - 1955
 
-    elif (20/ dt) <= step < (25/dt):
-        basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 1955 - 1960
+        elif (20/ dt) <= step < (25/dt):
+            basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 1955 - 1960
 
-    elif (25/ dt) <= step < (27/dt):
-        basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='warm', experiment=EXPERIMENT_WRONG) # 1960 - 1962
+        elif (25/ dt) <= step < (27/dt):
+            basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='warm', experiment=EXPERIMENT_WRONG) # 1960 - 1962
 
-    elif (27/ dt) <= step < (31/dt):
-        basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 1962 - 1966
+        elif (27/ dt) <= step < (31/dt):
+            basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 1962 - 1966
 
-    elif (31/ dt) <= step < (40/dt):
-        basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='warm', experiment=EXPERIMENT_WRONG) # 1966 - 1975
+        elif (31/ dt) <= step < (40/dt):
+            basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='warm', experiment=EXPERIMENT_WRONG) # 1966 - 1975
 
-    elif (40/ dt) <= step < (48/dt):
-        basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 1975 - 1983
+        elif (40/ dt) <= step < (48/dt):
+            basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 1975 - 1983
 
-    elif (48/dt) <= step < (50/dt):
-        basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='warm', experiment=EXPERIMENT_WRONG) # 1983 - 1985
+        elif (48/dt) <= step < (50/dt):
+            basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='warm', experiment=EXPERIMENT_WRONG) # 1983 - 1985
 
-    elif (50/ dt) <= step < (59/dt):
-        basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 1985 - 1994
+        elif (50/ dt) <= step < (59/dt):
+            basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 1985 - 1994
 
-    elif (59/ dt) <= step < (64/dt):
-        basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='warm', experiment=EXPERIMENT_WRONG) # 1994 - 2000
+        elif (59/ dt) <= step < (64/dt):
+            basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='warm', experiment=EXPERIMENT_WRONG) # 1994 - 2000
 
-    elif (64/ dt) <= step < (69/dt):
-        basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 2000 - 2005
+        elif (64/ dt) <= step < (69/dt):
+            basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 2000 - 2005
 
-    elif (69/ dt) <= step < (76/dt):
-        basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='warm', experiment=EXPERIMENT_WRONG) # 2005 - 2012
+        elif (69/ dt) <= step < (76/dt):
+            basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='warm', experiment=EXPERIMENT_WRONG) # 2005 - 2012
 
-    elif (76/ dt) <= step:
-        basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 2012 - 2017
+        elif (76/ dt) <= step:
+            basal_melt_field, melt_max = BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', experiment=EXPERIMENT_WRONG) # 2012 - 2017
 
 
 
