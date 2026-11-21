@@ -39,6 +39,7 @@ The loader also prepares `data_path` before applying all generic overrides. Its 
 | `initial_spread_factor` | `1.0` | Generic initialization scaling; does not imply every native adapter perturbs the same fields. |
 | `random_field_method` | `fft`, alias fallback `enkf_field_method` | `fft` or `graph`; graph requires physical coordinates. |
 | `length_scale`, `Q_rho` | `[]`, `1.0` | Spatial/temporal noise behavior, interpreted by the selected generator. |
+| `process_noise_normalization` | `legacy_run_length` | `per_step` removes dependence on total run length; changing policy requires a fresh output directory. |
 | `process_noise_schedule` | `observations` | `observations`, `every_step`, or `none`; the schedule refers to forecast cycles ending at state columns. |
 | `enkf_observation_error_mode` | Derived from `use_ensemble_pertubations` | Set explicitly to avoid changing scientific semantics when a legacy boolean changes. |
 | `global_analysis`, `local_analysis` | `true`, `false` | Identify actual branches in the selected runner. They are not universal capability declarations. |

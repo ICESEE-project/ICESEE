@@ -43,3 +43,24 @@ def test_forecast_only_cycle_does_not_analyze_or_restore(monkeypatch):
     assert result.local_analysis is forecast
     assert result.observation_rows == 0
     np.testing.assert_equal(result.transform,np.eye(1))
+
+
+def test_whole_member_initialization_uses_duration_independent_noise(monkeypatch):
+    from ICESEE.src.parallelization import native_file_analysis as module
+    world = SimpleNamespace(rank=0,size=1,Barrier=lambda:None)
+    topology = SimpleNamespace(spatial_ranks=1,world=world,spatial_comm=object(),ensemble_slot=0)
+    initial = SimpleNamespace(members={0:np.zeros(2)})
+    pool = SimpleNamespace(snapshot_owned=lambda:initial)
+    io = SimpleNamespace(H_matrix=lambda **kw:None, _ensure_batch=lambda step:None,
+                         write_forecast=lambda *args:None)
+    monkeypatch.setattr(module, "EnKF_fully_parallel_IO", lambda *args,**kw:io)
+    monkeypatch.setattr(module, "apply_initial_spread_filebacked", lambda *args:None)
+    results = []
+    for nt in (100,1640):
+        policy = FileBackedNativeAnalysis()
+        monkeypatch.setattr(policy, "_restore", lambda *args:initial)
+        options = dict(nd=2,Nens=1,nt=nt,dt=.05,data_path="unused",
+                       process_noise_normalization="per_step")
+        policy.initialize(pool,object(),topology=topology,icesee_kwargs=options)
+        results.append((options["alpha"],options["rho"]))
+    assert results[0] == results[1] == (.9999,1.)

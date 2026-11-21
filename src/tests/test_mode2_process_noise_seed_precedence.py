@@ -93,3 +93,11 @@ def test_reseeding_works_even_when_base_seed_is_explicitly_configured(tmp_path):
     add_member_process_noise(result_a, 0, _base_kwargs(tmp_path / "a", base_seed=123))
     add_member_process_noise(result_b, 1, _base_kwargs(tmp_path / "b", base_seed=123))
     assert not np.allclose(result_a, result_b)
+
+
+def test_saved_ar_state_cannot_cross_noise_policies(tmp_path):
+    legacy = _base_kwargs(tmp_path)
+    add_member_process_noise(np.zeros(8), 0, legacy)
+    changed = dict(legacy, k=1, process_noise_normalization="per_step")
+    with pytest.raises(RuntimeError, match="incompatible process-noise"):
+        add_member_process_noise(np.zeros(8), 0, changed)

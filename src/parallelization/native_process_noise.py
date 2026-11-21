@@ -19,6 +19,9 @@ import tempfile
 import numpy as np
 
 from ICESEE.src.utils.timestep_contract import TIME_GRID_CONTRACT
+from ICESEE.src.utils.process_noise import (
+    process_noise_coefficients, process_noise_normalization,
+)
 from ICESEE.src.parallelization._mpi_forecast_functions import (
     add_member_process_noise, process_noise_is_due,
 )
@@ -32,6 +35,9 @@ def canonical_noise_identity(options):
             "k_neighbors", "num_passes", "blend",
             "process_noise_schedule", "obs_index")
     payload = {name:options.get(name) for name in keys}
+    policy = process_noise_normalization(options)
+    if policy != "legacy_run_length":
+        payload["process_noise_normalization"] = policy
     payload["time_grid_contract"] = TIME_GRID_CONTRACT
     encoded = json.dumps(payload,sort_keys=True,
                          default=lambda value:np.asarray(value).tolist())
@@ -66,12 +72,7 @@ class NativeProcessNoiseAdapter:
         self.options = dict(icesee_kwargs)
         self.options['mesh_coords'] = np.asarray(reference_coords)
         self.options['sub_rank'] = 0
-        dt, nt = float(self.options['dt']), int(self.options['nt'])
-        tau = max(500, max(200, dt))
-        alpha = 1 - dt / tau
-        if alpha <= 0 or alpha > 1:
-            alpha = .5
-        rho = np.sqrt((1/dt)*((1-alpha)**2)*(1/(nt-2*alpha-nt*alpha**2+2*alpha**(nt+1))))
+        alpha, rho, _ = process_noise_coefficients(self.options)
         self.options.update(alpha=alpha, rho=rho)
         self._last = {}
         self._scratch = None

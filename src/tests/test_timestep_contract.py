@@ -115,3 +115,25 @@ def test_process_noise_and_analysis_use_the_same_completed_state_column():
     assert due(dict(process_noise_schedule='every_step'),0)
     assert not due(dict(process_noise_schedule='none'),9)
     with pytest.raises(ValueError):due(dict(obs_index=[0]),0)
+
+
+def test_output_contract_refuses_mixed_noise_policies_collectively(tmp_path):
+    comm = Comm()
+    prepare_timestep_contract(comm, tmp_path)
+    marker = tmp_path / "time_grid_contract.json"
+    # Markers written before normalization was recorded mean legacy policy.
+    recorded = json.loads(marker.read_text())
+    recorded.pop("process_noise_normalization")
+    marker.write_text(json.dumps(recorded))
+    before = marker.read_bytes()
+    prepare_timestep_contract(comm, tmp_path)
+    with pytest.raises(ValueError, match="incompatible process-noise"):
+        prepare_timestep_contract(comm, tmp_path, process_noise_normalization="per_step")
+    with pytest.raises(ValueError, match="incompatible process-noise"):
+        prepare_timestep_contract(Comm(1, comm.payload), tmp_path, process_noise_normalization="per_step")
+    assert marker.read_bytes() == before
+    fresh = tmp_path / "new"
+    prepare_timestep_contract(comm, fresh, process_noise_normalization="per_step")
+    prepare_timestep_contract(comm, fresh, process_noise_normalization="per_step")
+    with pytest.raises(ValueError, match="incompatible process-noise"):
+        prepare_timestep_contract(comm, fresh)

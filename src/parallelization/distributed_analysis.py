@@ -349,29 +349,28 @@ def collapsed_spread_message(
     *,
     relative_tolerance: float = 1e-8,
 ) -> str | None:
-    """Describe why an analysis must be refused, or return ``None``.
+    """Report a failed relative-spread check without inferring its cause.
 
-    The stochastic transform regresses innovations onto the forecast
-    observation anomalies with a pseudo-inverse whose cutoff is relative to
-    the largest anomaly eigenvalue. When the members are identical up to
-    round-off, that cutoff keeps the round-off directions and the update is
-    innovation / round-off. Refuse instead: the ensemble carries no
-    observed-space spread to assimilate with.
+    This configurable floor measures anomalies against forecast magnitude.
+    Crossing it does not establish that differences are floating-point noise.
     """
 
     if products.observation_rows <= 0:
         return None
     if products.max_abs_anomaly > float(relative_tolerance) * products.max_abs_forecast:
         return None
+    threshold = float(relative_tolerance) * products.max_abs_forecast
     return (
         "ensemble spread in observation space has collapsed: "
+        "the configured relative-spread check failed. "
         f"max |forecast anomaly| = {products.max_abs_anomaly:.3e} for forecast "
         f"values up to {products.max_abs_forecast:.3e} over "
-        f"{products.observation_rows} observations (relative tolerance "
-        f"{float(relative_tolerance):.1e}). The members are identical up to "
-        "round-off, so the analysis would divide innovations by round-off. "
-        "Give the ensemble a spread source (initial perturbation or process "
-        "noise) before assimilating."
+        f"{products.observation_rows} observations; required anomaly > "
+        f"{threshold:.3e} (relative tolerance {float(relative_tolerance):.1e}). "
+        "This check does not establish that the differences are round-off. "
+        "Check process-noise scaling, uncertainty sources and analysis weights "
+        "before lowering analysis_min_relative_spread. Lowering this floor "
+        "does not increase ensemble spread."
     )
 
 

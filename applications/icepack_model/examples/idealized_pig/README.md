@@ -224,6 +224,7 @@ Important experiment settings include:
 - `initialize_ensemble` controls fresh ensemble initialization. Resume restores saved members instead.
 - `save_steps` specifies requested profile years; the initial profile is saved separately.
 - `seed`, `sig_Q`, `sig_obs`, inflation and localization are scientific choices.
+- The supplied YAML selects `process_noise_normalization: per_step`, which removes total-run-length normalization from forecast noise. Older YAML files that omit this key retain `legacy_run_length` for historical reproducibility. Use a fresh data directory when changing it; see [noise scaling and restart rules](../../../../docs/handbook/numerics.md#initialization-and-process-noise).
 - Initial native PIG thickness is unperturbed. Basal-melt forcing is the intended experiment discrepancy. Do not add thickness noise as a performance fix.
 
 Do not change solver caps, timesteps, forcing, initial uncertainty or analysis

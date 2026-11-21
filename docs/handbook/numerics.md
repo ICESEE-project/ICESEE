@@ -90,6 +90,29 @@ Initialization uncertainty and forecast uncertainty serve different purposes. `s
 
 The noise schedule defaults to `observations`: apply noise in the forecast cycle immediately preceding that state's analysis. `every_step` applies at all forecast cycles; `none` disables it. The canonical bridge replays deterministic AR history up to a restored step to reconstruct stochastic state without changing restored physical fields. Its checkpoint policy identity includes time-grid and noise configuration. A changed seed, schedule, amplitudes, coordinates, or time grid is a different experiment and can invalidate restart.
 
+Process-noise normalization is explicit. `process_noise_normalization: per_step`
+sets `rho=1`, retaining the existing zero-start AR process and the increment
+`sqrt(dt) * sig_Q * z`. Its coefficients do not depend on the requested number
+of forecast steps. `sig_Q` is an amplitude coefficient: on the first active
+noise event, a unit-variance random field gives increment standard deviation
+`sqrt(dt) * sig_Q * sqrt(1-alpha**2)`, not `sig_Q` itself. The AR state advances
+only when noise is scheduled; the temporal correlation therefore refers to
+those events, not necessarily every model step.
+
+Omitting the setting retains `legacy_run_length` for compatibility. That policy
+normalizes using the full requested `nt`: changing the final model time changes
+earlier increments. Select `per_step` explicitly for a duration-independent
+noise experiment; record the choice with the seed, schedule and amplitudes.
+The coefficient resolver is shared by the generic Modes 0–2 and the native Icepack bridge and whole-member file-backed analysis used by Mode 3. Other native adapters retain their own noise policies. Changing normalization does
+not perturb initial fields, move noise events, or change the observation-error
+mode. It also does not ensure adequate spread or a stable analysis.
+
+Output contracts and native checkpoint identities distinguish the policies.
+An old marker without a normalization field means `legacy_run_length`.
+Continuing an existing output directory under another policy is refused;
+preserve it and use a fresh data directory. Changing normalization defines a
+new stochastic experiment, not a continuation of the old one.
+
 Native PIG initialization intentionally differs from the generic initial perturbation policy in the inspected validations. Shared forecast noise and a common mode number therefore do not establish member-wise equivalence across all three modes. Same-input parity requires the same realized prior, observations, stochastic policy, physical setup, and numerical settings.
 
 ## Physical inference and hybrid inversion

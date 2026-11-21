@@ -27,6 +27,7 @@ from ICESEE.src.utils.tools import icesee_get_index
 from ICESEE.src.run_model_da._error_generation import generate_enkf_field
 from ICESEE.src.utils.utils import UtilsFunctions
 from ICESEE.src.utils.random_streams import process_noise_seed as _process_noise_seed
+from ICESEE.src.utils.process_noise import process_noise_normalization
 
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 # rank_seed, rng = ParallelManager().initialize_seed(MPI.COMM_WORLD)
@@ -124,6 +125,7 @@ def _read_member_process_noise(icesee_kwargs, ens_id, size, timestep):
         with h5py.File(path, "r") as handle:
             last_k = int(handle.attrs.get("last_timestep", -1))
             stored_seed = int(handle.attrs.get("base_seed", -1))
+            stored_policy = str(handle.attrs.get("process_noise_normalization", "legacy_run_length"))
             values = np.asarray(handle["noise"], dtype=np.float64)
         # A state from the same or a later cycle belongs to an older fresh run.
         if (
@@ -132,6 +134,8 @@ def _read_member_process_noise(icesee_kwargs, ens_id, size, timestep):
             or stored_seed != int(icesee_kwargs.get("base_seed", 42))
         ):
             return np.zeros(int(size), dtype=np.float64)
+        if stored_policy != process_noise_normalization(icesee_kwargs):
+            raise RuntimeError("saved AR state uses incompatible process-noise normalization; choose a fresh data_path")
         return values
     except (OSError, KeyError, ValueError):
         return np.zeros(int(size), dtype=np.float64)
@@ -151,6 +155,7 @@ def _write_member_process_noise(icesee_kwargs, ens_id, values, timestep):
             handle.create_dataset("noise", data=np.asarray(values, dtype=np.float64))
             handle.attrs["last_timestep"] = int(timestep)
             handle.attrs["base_seed"] = int(icesee_kwargs.get("base_seed", 42))
+            handle.attrs["process_noise_normalization"] = process_noise_normalization(icesee_kwargs)
             handle.flush()
         os.replace(temporary, path)
     except Exception:
