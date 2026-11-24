@@ -63,7 +63,7 @@ def advance_with_recovery(*, start_time, interval, policy, capture, restore,
     start_time, interval = float(start_time), float(interval)
     if not math.isfinite(start_time) or not math.isfinite(interval) or interval <= 0:
         raise ValueError("forecast interval must be finite and positive")
-    if interval < policy.min_dt:
+    if interval < policy.min_dt and not math.isclose(interval, policy.min_dt, rel_tol=1e-12):
         raise ValueError("forecast interval is smaller than recovery min_dt")
     signature = (start_time, interval, tuple(sorted(policy.describe().items())), stable_dt is not None)
     if comm is not None and any(value != signature for value in comm.allgather(signature)):
@@ -103,7 +103,7 @@ def advance_with_recovery(*, start_time, interval, policy, capture, restore,
     for level in range(first_level, policy.max_halvings + 1):
         subdivisions = 2**level
         dt = interval / subdivisions
-        if subdivisions > policy.max_substeps or dt < policy.min_dt:
+        if subdivisions > policy.max_substeps or (dt < policy.min_dt and not math.isclose(dt, policy.min_dt, rel_tol=1e-12)):
             break
         rollback()
         attempts += 1

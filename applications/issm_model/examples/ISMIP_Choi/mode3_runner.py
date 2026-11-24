@@ -5,115 +5,12 @@
 # @date: 2026-08-26
 # @author: Brian Kyanjo
 # ==============================================================================
-"""Production ``execution_mode: 3`` DA-cycle runner for ISSM's ISMIP_Choi.
+"""Whole-member Mode-3 execution for the ISMIP_Choi application.
 
-Why this is a round-robin, ``P_e``-bounded design, not the strict mode-3
-memory invariant
-------------------------------------------------------------------------
-``ISMIP_CHOI_NATIVE_ADAPTER`` (``_issm_native.py``) is a
-``WholeMemberNativeAdapter``: ISSM's Python/MATLAB boundary only ever
-exchanges a complete ensemble member (see that module's docstring for the
-full investigation trail -- ``run_model.m``'s internal MATLAB/PETSc solve
-gathers to a single complete-member HDF5 write inside ISSM's own compiled
-core, invisible to and unmodifiable from ICESEE). A whole-member adapter
-therefore cannot satisfy mode-3's strict "no rank holds a complete member"
-invariant regardless of how it is scheduled.
-
-What this runner adds beyond simply registering the whole-member adapter
-one-member-per-rank (which is all modes 0-2 already do) is genuine
-**round-robin ensemble scheduling**: with ``P_e`` mode-3 ensemble groups
-(one ICESEE rank each, ``spatial_ranks=1`` since ISSM exposes no
-ICESEE-visible spatial decomposition -- ``model_nprocs`` is entirely
-internal to one MATLAB ``run_model`` command) and ``Nens`` members,
-``members_for_ensemble_slot`` (``src/parallelization/distributed_runtime.py``)
-assigns each rank ``ceil(Nens / P_e)`` members instead of modes 0-2's
-mandatory one rank per member. Concurrently resident complete members are
-therefore bounded by ``P_e`` (a configurable, typically HPC-node-scale
-number), not ``Nens`` (which may be much larger for a well-sampled
-ensemble). Each rank reuses one persistent ``MatlabServer`` subprocess
-across all of its round-robin-assigned members: ``initialize_ensemble``,
-``forecast_step_single``, and ``run_model_inverse`` (``_issm_enkf.py``) are
-already parameterized by an explicit ``ens_id``/``member_id`` argument, not
-implicitly bound to MPI rank, and contain no collective MPI operation --
-confirmed safe to invoke repeatedly per rank for different members with no
-additional synchronization. This is real, additional parallel+memory
-scalability over modes 0-2 for a model whose native boundary cannot expose
-finer-grained ownership -- honestly bounded by ``P_e``, not claiming mode-3's
-full scalability. Per ``docs/execution-mode-3-design.md``: "Adapters that
-cannot expose distributed state remain supported by modes 0--2, but cannot
-claim mode-3 scalability" -- this runner does not claim that stronger
-invariant; ``execution_mode: 3`` selection for ISSM claims only the
-``P_e``-bounded property documented here.
-
-Collective-barrier safety -- the one real hazard investigated and avoided
----------------------------------------------------------------------------
-``_issm_model.initialize_model`` embeds two *collective*
-``MPI.COMM_WORLD.Barrier()`` calls (inside ``setup_reference_data`` and
-``setup_ensemble_data``, both in
-``issm_utils/matlab2python/mat2py_utils.py``): every rank must call them the
-same number of times, in lockstep, or the run deadlocks.  This runner calls
-``initialize_model`` **exactly once per rank** (for that rank's first/primary
-round-robin member, ``ens_id = ensemble_slot``) during setup -- mirroring
-modes 0-2's existing exactly-once-per-rank call pattern precisely, just with
-``ens_id = ensemble_slot`` instead of ``ens_id = rank_world``. That single
-collective call bootstraps *all* ``Nens`` members' ``./Models/ens_id_N``
-directories and ``icesee_kwargs_N.mat`` files (``setup_ensemble_data`` loops
-``for ens in range(Nens)`` internally, on rank 0 only, once). Every
-subsequent per-member call this runner makes
-(``ISMIP_CHOI_NATIVE_ADAPTER.initialize_native_member`` /
-``forecast_native_member`` / ``inverse_native_member``, for both a rank's
-primary and any additional round-robin members) goes through
-``_issm_native.py``'s existing, unmodified callbacks, which call only
-``initialize_ensemble`` / ``forecast_step_single`` / ``run_model_inverse`` --
-none of which touch ``setup_reference_data``/``setup_ensemble_data`` or any
-other collective operation. No new ISSM-side helper was needed; the existing
-adapter callbacks are already round-robin-safe as written.
-
-Setup-phase reuse and divergence from icepack's runner
---------------------------------------------------------
-Unlike idealized_pig (whose ``nd`` is a genuine per-rank Firedrake mesh
-partition size when computed on ``MPI.COMM_WORLD``), ISSM never partitions
-state across ICESEE ranks at all -- every member's global vertex count is
-identical regardless of which/how many ICESEE ranks call
-``initialize_model``. No ``COMM_SELF`` reference-context rebuild is needed
-here for that reason.
-
-Unlike idealized_pig's lightweight, purely-Python/Firedrake true/nurged
-generation, ISSM's ``generate_true_state``/``generate_nurged_state``
-(``_issm_enkf.py``) run a real, complete MATLAB transient simulation through
-a live ``MatlabServer`` and are therefore not something a lightweight
-per-call reference context can replicate. This runner instead follows modes
-0-2's own pattern exactly: only the real MPI world root (whose ensemble slot
-is always 0 when ``spatial_ranks=1``, so its own persistent server already
-has ``ens_id=0``) calls them, reusing its own already-built server --
-``src/EnKF/_generate_true_wrong_state.py`` itself always forces
-``ens_id=rank_world=0`` internally, so this requires no extra parameterization.
-
-``run_da_issm.py``'s own unconditional top-level setup (its own
-one-member-per-rank ``MatlabServer`` and ``initialize_model`` call, before
-dispatching to ``icesee_model_data_assimilation``) still runs even when
-``execution_mode: 3`` is selected, exactly mirroring the accepted tradeoff
-already documented in idealized_pig's ``mode3_runner.py`` for its own
-pre-dispatch Firedrake mesh init: some redundant setup work (here, one extra
-MATLAB subprocess per rank that this runner's own independent server
-supersedes) rather than risk regressing modes 0-2 by restructuring that
-script.  ``run_da_issm.py``'s own ``server.shutdown()`` shuts down only that
-unused pre-dispatch server; this runner is responsible for shutting down the
-servers it builds itself.
-
-Output writing
-----------------
-Like idealized_pig, this runner uses the mode-3-native, rank-sharded,
-no-gather checkpoint primitive (``save_distributed_checkpoint`` /
-``load_distributed_checkpoint``) instead of modes 0-2's single
-``icesee_ensemble_data.h5`` schema. Directory layout under
-``<data_path>/_mode3_state_history/``:
-
-- ``initial_condition/step_00000000/`` -- the native pool's initial
-  (pre-forecast) ensemble, written once before the timestep loop.
-- ``steps/step_<k:08d>/`` for ``k`` in ``[0, nt)`` -- the analyzed (or, on
-  non-observed/non-inverted steps, forecast-only) ensemble after native
-  cycle ``k``.
+Python ranks reuse MATLAB servers across scheduled members. ISSM controls its
+internal FEM parallelism; Python state remains complete-member storage.
+Managed continuation commits full MATLAB backend snapshots before their vector
+checkpoints and restores them without regenerating ensemble initial conditions.
 """
 
 from __future__ import annotations
@@ -333,22 +230,15 @@ def _build_static_config(icesee_kwargs: dict, *, icesee_cwd: str,
 def _initialize_rank_server_and_mesh(icesee_kwargs: dict, *, icesee_cwd: str,
                                       issm_examples_dir: str,
                                       ensemble_slot: int) -> tuple[object, int]:
-    """Build this rank's persistent server and bootstrap the global mesh setup.
-
-    Mirrors ``run_da_issm.py`` lines 211-246 exactly, with ``ens_id =
-    ensemble_slot`` in place of ``ens_id = rank_world`` -- the only
-    substantive difference from modes 0-2's own per-rank setup. Every rank
-    calls this exactly once (see module docstring for why that is required
-    for ``initialize_model``'s embedded collective barriers).
-    """
+    """Build this rank's server and initialize the shared mesh setup once."""
 
     ens_id = int(ensemble_slot)
     icesee_kwargs_file = f'icesee_kwargs_{ens_id}.mat'
-    sio.savemat(icesee_kwargs_file, matlab_icesee_kwargs(icesee_kwargs))
+    sio.savemat(os.path.join(issm_examples_dir, icesee_kwargs_file),
+                matlab_icesee_kwargs(icesee_kwargs))
 
     shutil.copy(os.path.join(icesee_cwd, '..', '..', 'issm_utils', 'matlab2python', 'issm_env.m'), issm_examples_dir)
     shutil.copy(os.path.join(icesee_cwd, '..', '..', 'issm_utils', 'matlab2python', 'matlab_server.m'), issm_examples_dir)
-    shutil.copy(os.path.join(icesee_cwd, icesee_kwargs_file), issm_examples_dir)
     shutil.copy(os.path.join(icesee_cwd, 'Domain.exp'), issm_examples_dir)
     shutil.copy(os.path.join(icesee_cwd, icesee_kwargs.get('ParamFile')), issm_examples_dir)
 
@@ -378,6 +268,12 @@ def run_issm_execution_mode_3(**icesee_kwargs):
 
     icesee_kwargs = normalize_icesee_kwargs(icesee_kwargs)
     normalize_execution_mode(icesee_kwargs, expected=3)
+    if icesee_kwargs.get("model_module") is None:
+        from ICESEE.applications.issm_model.examples.ISMIP_Choi import _issm_enkf
+        icesee_kwargs["model_module"] = _issm_enkf
+    icesee_kwargs["vec_inputs_old"] = list(icesee_kwargs.get("vec_inputs", []))
+    icesee_kwargs["observed_vars_params"] = list(icesee_kwargs.get("observed_vars", [])) + list(icesee_kwargs.get("observed_params", []))
+    icesee_kwargs["all_observed"] = icesee_kwargs["observed_vars_params"]
 
     world = MPI.COMM_WORLD
     world_rank = int(world.Get_rank())
@@ -390,6 +286,9 @@ def run_issm_execution_mode_3(**icesee_kwargs):
     ensemble_slot = int(topology.ensemble_slot)
 
     icesee_cwd = os.getcwd()
+    if os.path.isabs(icesee_kwargs.get("data_path", "")):
+        # The MATLAB bridge joins this value to the scientific source directory.
+        icesee_kwargs["data_path"] = os.path.relpath(icesee_kwargs["data_path"],icesee_cwd)
     issm_dir = os.environ.get('ISSM_DIR')
     add_issm_dir_to_sys_path(issm_dir)
     issm_examples_dir = setup_example_directory(issm_dir, icesee_kwargs.get('example_name'))
@@ -423,6 +322,21 @@ def run_issm_execution_mode_3(**icesee_kwargs):
     Nens = int(icesee_kwargs["Nens"])
     nt = int(icesee_kwargs["nt"])
 
+    from ICESEE.src.parallelization.forecast_recovery import ForecastRecoveryPolicy
+    from ICESEE.src.parallelization.run_control import CycleStopController, atomic_json
+    from ICESEE.src.parallelization.mode3_checkpointing import Mode3CheckpointManager, CheckpointPolicy
+    from ICESEE.src.parallelization.distributed_native_runtime import restore_native_member_pool
+    from ICESEE.applications.issm_model.issm_utils.recovery import commit_backend, recovery_identity, prune_backend
+    recovery_policy = ForecastRecoveryPolicy.from_options(icesee_kwargs)
+    managed = (recovery_policy is not None or bool(icesee_kwargs.get("issm_native_continuation", False))
+               or bool(icesee_kwargs.get("resume_from_checkpoint", False))
+               or icesee_kwargs.get("run_segment_cycles") is not None
+               or icesee_kwargs.get("run_walltime_seconds") is not None)
+    resume = bool(icesee_kwargs.get("resume_from_checkpoint", False))
+    configured_recovery_id = recovery_identity(icesee_kwargs) if managed else None
+    if managed and (icesee_kwargs.get("use_member_streaming") or icesee_kwargs.get("use_store_streaming_analysis")):
+        raise NotImplementedError("ISSM backend recovery currently requires resident whole-member state")
+
     _modelrun_datasets = icesee_kwargs.get("data_path") or "_modelrun_datasets"
     os.environ["ICESEE_RESULTS_DIR"] = str(_modelrun_datasets)
     prepare_timestep_contract(world, _modelrun_datasets, time_grid=icesee_kwargs.get("t"))
@@ -441,7 +355,7 @@ def run_issm_execution_mode_3(**icesee_kwargs):
     # exactly the identity generate_true_wrong_state forces internally. ---
     true_wrong_time = 0.0
     observation_time = 0.0
-    if world_rank == 0:
+    if world_rank == 0 and not resume:
         _t = MPI.Wtime()
         icesee_kwargs = generate_true_wrong_state(**icesee_kwargs)
         true_wrong_time = MPI.Wtime() - _t
@@ -456,7 +370,7 @@ def run_issm_execution_mode_3(**icesee_kwargs):
     icesee_kwargs["error_R"] = error_R
 
     adapter = ISMIP_CHOI_NATIVE_ADAPTER
-    pool = initialize_native_member_pool(adapter, topology, icesee_kwargs)
+    pool = None if managed else initialize_native_member_pool(adapter, topology, icesee_kwargs)
 
     obs_indices = np.asarray(
         UtilsFunctions(icesee_kwargs).JObs_indices(nd), dtype=np.int64
@@ -482,103 +396,154 @@ def run_issm_execution_mode_3(**icesee_kwargs):
     steps_root = os.path.join(history_root, "steps")
 
     init_file_time = 0.0
-    _t = MPI.Wtime()
-    save_distributed_checkpoint(
-        initial_root,
-        0,
-        pool.snapshot_owned(),
-        topology,
-        run_id=run_id,
-        metadata={"Nens": Nens, "description": "initial (pre-forecast) ensemble"},
-    )
-    init_file_time = MPI.Wtime() - _t
+    start_step = 0
+    manager = None
+    if managed:
+        run_id += ":" + configured_recovery_id
+        manager = Mode3CheckpointManager(history_root,run_id=run_id,topology=topology,
+            number_of_members=Nens,nt=nt,
+            analysis_steps=(np.asarray(obs_idx[:num_observations],dtype=int)-1).tolist()
+                if icesee_kwargs.get("analysis_enabled", True) else [],
+            policy=CheckpointPolicy.from_kwargs(icesee_kwargs),time_grid=icesee_kwargs["t"])
+        if int(manager.policy.every) != 1:
+            raise ValueError("ISSM managed continuation requires checkpoint_every=1")
+        if resume:
+            plan = manager.prepare_resume()
+            from ICESEE.src.parallelization.distributed_native_cycle import _collective_native_call
+            pool, restored = _collective_native_call(topology,
+                lambda:restore_native_member_pool(adapter,topology,icesee_kwargs,
+                    plan.checkpoint_path,expected_run_id=run_id),phase="ISSM backend restore")
+            start_step, km = plan.start_step, plan.analyses_completed
+        else:
+            pool = initialize_native_member_pool(adapter,topology,icesee_kwargs)
+            backend = commit_backend(pool,topology,icesee_kwargs,-1)
+            manager.write_initial(pool.snapshot_owned(),extra={"issm_backend":backend})
+    else:
+        init_file_time = 0.0
+        _t = MPI.Wtime()
+        save_distributed_checkpoint(
+            initial_root,
+            0,
+            pool.snapshot_owned(),
+            topology,
+            run_id=run_id,
+            metadata={"Nens": Nens, "description": "initial (pre-forecast) ensemble"},
+        )
+        init_file_time = MPI.Wtime() - _t
 
     obs_index = icesee_kwargs["obs_index"]
     m_obs = icesee_kwargs["number_obs_instants"]
 
-    for k in range(nt):
-        icesee_kwargs.update({"k": k, "km": km})
-        do_analysis = observation_is_due(k, km, obs_index[:m_obs])
-        batches = []
-        apply_inversion = False
-        if do_analysis:
-            y_full = np.asarray(hu_obs[:, km], dtype=np.float64).copy()
-            y_full[np.isnan(y_full)] = 0.0
-            d = y_full[obs_indices]
-            member_errors = None
-            if error_mode == "stochastic_r":
-                sigma = active_observation_std(icesee_kwargs, km, obs_indices)
-                obs_seed = base_seed + 1000003 * (km + 1)
-                rng = np.random.default_rng(obs_seed)
-                eta = rng.standard_normal((obs_indices.size, Nens)) * sigma[:, None]
-                eta -= np.mean(eta, axis=1, keepdims=True)
-                member_errors = {
-                    member_id: eta[:, member_id] for member_id in pool.member_ids
-                }
-            batches.append(
-                NativeObservationBatch(
-                    observation_ids=obs_indices,
-                    values=d,
-                    member_errors=member_errors,
-                )
-            )
-
-            cycle_time, model_cycle_time = resolve_analysis_cycle_time(
-                icesee_kwargs, k, km
-            )
-            apply_inversion = (
-                inversion_enabled
-                and cycle_time + 1.0e-12 >= inversion_start_time
-            )
-            icesee_kwargs["inversion_flag"] = apply_inversion
-            if world_rank == 0 and inversion_enabled and not apply_inversion:
-                print(
-                    "[ICESEE] Deferring friction inversion at "
-                    f"observation t={cycle_time:g} yr "
-                    f"(model t={model_cycle_time:g} yr); configured start is "
-                    f"{inversion_start_time:g} yr."
-                )
-            elif world_rank == 0 and apply_inversion:
-                print(
-                    "[ICESEE] Friction inversion enabled at "
-                    f"observation t={cycle_time:g} yr "
-                    f"(model t={model_cycle_time:g} yr)."
+    completed_step = start_step
+    with CycleStopController(icesee_kwargs, world, elapsed=MPI.Wtime()-global_start_time) as control:
+        for k in range(start_step, nt):
+            icesee_kwargs.update({"k": k, "km": km})
+            do_analysis = bool(icesee_kwargs.get("analysis_enabled", True)) and observation_is_due(k, km, obs_index[:m_obs])
+            batches = []
+            apply_inversion = False
+            if do_analysis:
+                y_full = np.asarray(hu_obs[:, km], dtype=np.float64).copy()
+                y_full[np.isnan(y_full)] = 0.0
+                d = y_full[obs_indices]
+                member_errors = None
+                if error_mode == "stochastic_r":
+                    sigma = active_observation_std(icesee_kwargs, km, obs_indices)
+                    obs_seed = base_seed + 1000003 * (km + 1)
+                    rng = np.random.default_rng(obs_seed)
+                    eta = rng.standard_normal((obs_indices.size, Nens)) * sigma[:, None]
+                    eta -= np.mean(eta, axis=1, keepdims=True)
+                    member_errors = {
+                        member_id: eta[:, member_id] for member_id in pool.member_ids
+                    }
+                batches.append(
+                    NativeObservationBatch(
+                        observation_ids=obs_indices,
+                        values=d,
+                        member_errors=member_errors,
+                        observation_variances=(sigma**2 if error_mode == "stochastic_r" else None),
+                    )
                 )
 
-        _t = MPI.Wtime()
-        result = run_native_global_analysis_cycle(
-            pool,
-            adapter,
-            k,
-            batches,
-            number_of_batches=(1 if do_analysis else 0),
-            topology=topology,
-            icesee_kwargs=icesee_kwargs,
-            error_mode=error_mode,
-            apply_inversion=apply_inversion,
-        )
-        time_forecast_step += MPI.Wtime() - _t
-        if do_analysis:
-            km += 1
+                cycle_time, model_cycle_time = resolve_analysis_cycle_time(
+                    icesee_kwargs, k, km
+                )
+                apply_inversion = (
+                    inversion_enabled
+                    and cycle_time + 1.0e-12 >= inversion_start_time
+                )
+                icesee_kwargs["inversion_flag"] = apply_inversion
+                if world_rank == 0 and inversion_enabled and not apply_inversion:
+                    print(
+                        "[ICESEE] Deferring friction inversion at "
+                        f"observation t={cycle_time:g} yr "
+                        f"(model t={model_cycle_time:g} yr); configured start is "
+                        f"{inversion_start_time:g} yr."
+                    )
+                elif world_rank == 0 and apply_inversion:
+                    print(
+                        "[ICESEE] Friction inversion enabled at "
+                        f"observation t={cycle_time:g} yr "
+                        f"(model t={model_cycle_time:g} yr)."
+                    )
 
-        _t = MPI.Wtime()
-        save_distributed_checkpoint(
-            steps_root,
-            k,
-            result.local_analysis,
-            topology,
-            run_id=run_id,
-            metadata={
-                "Nens": Nens,
-                "observation_rows": result.observation_rows,
-                "error_mode": error_mode,
-                "did_analysis": do_analysis,
-                "did_inversion": apply_inversion,
-            },
-        )
-        time_forecast_file_writing += MPI.Wtime() - _t
+            _t = MPI.Wtime()
+            result = run_native_global_analysis_cycle(
+                pool,
+                adapter,
+                k,
+                batches,
+                number_of_batches=(1 if do_analysis else 0),
+                topology=topology,
+                icesee_kwargs=icesee_kwargs,
+                error_mode=error_mode,
+                apply_inversion=apply_inversion,
+            )
+            time_forecast_step += MPI.Wtime() - _t
+            if do_analysis:
+                km += 1
 
+            _t = MPI.Wtime()
+            if manager is not None:
+                backend = commit_backend(pool,topology,icesee_kwargs,k)
+                manager.commit_step(k,result.local_analysis,did_analysis=do_analysis,
+                    analyses_completed=km,extra={"issm_backend":backend,"did_inversion":apply_inversion})
+                prune_backend(manager,topology,icesee_kwargs)
+            else:
+                save_distributed_checkpoint(
+                    steps_root,
+                    k,
+                    result.local_analysis,
+                    topology,
+                    run_id=run_id,
+                    metadata={
+                        "Nens": Nens,
+                        "observation_rows": result.observation_rows,
+                        "error_mode": error_mode,
+                        "did_analysis": do_analysis,
+                        "did_inversion": apply_inversion,
+                    },
+                )
+            time_forecast_file_writing += MPI.Wtime() - _t
+
+            completed_step = k+1
+            if managed and control.enabled and control.after_commit(completed_step-start_step):
+                break
     world.Barrier()
+
+    if managed:
+        report_error = None
+        if world_rank == 0:
+            try:
+                atomic_json(os.path.join(_modelrun_datasets,"_continuation","segment.json"),
+                    dict(run_id=run_id,next_step=completed_step,nt=nt,
+                         model_time=float(icesee_kwargs["t"][completed_step]),
+                         analyses_completed=km,complete=completed_step==nt,
+                         reason=control.reason or "complete"))
+            except Exception as exc:
+                report_error = f"{type(exc).__name__}: {exc}"
+        report_error = world.bcast(report_error,root=0)
+        if report_error:
+            raise RuntimeError("ISSM continuation report failed: " + report_error)
 
     analysis_file_time = 0.0
     if world_rank == 0:
@@ -616,7 +581,7 @@ def run_issm_execution_mode_3(**icesee_kwargs):
     register_run_metadata(
         execution_mode=icesee_kwargs.get("execution_mode"),
         model=icesee_kwargs.get("model_name"),
-        forecast_steps=nt,
+        forecast_steps=completed_step-start_step,
         analysis_events=km,
     )
     register_topology_run_metadata(topology, Nens)
@@ -626,7 +591,7 @@ def run_issm_execution_mode_3(**icesee_kwargs):
         world,
         elapsed_s=global_elapsed_time,
         phases={"true_wrong_state": true_wrong_time, "observation_generation": observation_time, "forecast_step": time_forecast_step, "init_file_io": init_file_time, "forecast_file_io": time_forecast_file_writing, "analysis_file_io": analysis_file_time, "analysis_step": None if km else 0.0},
-        counts={"forecast_step": nt, "analysis_step": km},
+        counts={"forecast_step": completed_step-start_step, "analysis_step": km},
         output_dir=_modelrun_datasets,
     )
 

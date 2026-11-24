@@ -106,12 +106,18 @@ def ISSM_model(**icesee_kwargs):
         cmd = (
             f"run('issm_env'); run_model('{filename}', {ens_id}, {rank}, {nprocs}, {k}, {dt}, {tinitial}, {tfinal}); "
         )
+        if icesee_kwargs.get('_issm_recovery_active'):
+            from ICESEE.applications.issm_model.issm_utils.recovery import run_checked_forecast_command
+            run_checked_forecast_command(cmd, icesee_kwargs)
+            return
         if not server.send_command(cmd):
             raise RuntimeError(
                 "ISSM MATLAB command failed; refusing to reuse the stale "
                 f"ensemble output for member {ens_id}, timestep {k}"
             )
     except Exception as e:
+        if icesee_kwargs.get('_issm_recovery_active'):
+            raise
         print(f"[ICESEE DEBUG] Error sending command: {e}")
         server.shutdown()
         server.reset_terminal()
@@ -188,6 +194,8 @@ def run_model(ensemble, **icesee_kwargs):
     try:
         ISSM_model(**icesee_kwargs)
     except Exception as e:
+        if icesee_kwargs.get('_issm_recovery_active'):
+            raise
         print(f"[ICESEE run_model Error] Error running the ISSM model: {e}")
         server.kill_matlab_processes()
         raise RuntimeError(

@@ -32,6 +32,11 @@ from ICESEE.applications.issm_model.issm_utils.matlab2python.server_utils import
 # --- Register execution_mode 3 support (import-time side effect) ---
 from ICESEE.applications.issm_model.examples.ISMIP_Choi import mode3_runner  # noqa: F401
 
+if int(icesee_kwargs.get("execution_mode", 1)) == 3:
+    # The native runner owns server creation, topology and checkpoint restore.
+    icesee_model_data_assimilation(**icesee_kwargs)
+    raise SystemExit(0)
+
 # --- Initialize MPI ---
 icesee_rank, icesee_size, icesee_comm, ens_id = ParallelManager().icesee_mpi_init(icesee_kwargs)
 

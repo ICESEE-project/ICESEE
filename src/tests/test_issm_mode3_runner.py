@@ -59,6 +59,22 @@ def test_issm_registers_its_mode3_runner():
     assert registration.runner is runner.run_issm_execution_mode_3
 
 
+def test_rank_configuration_is_written_only_in_its_run_workspace(tmp_path,monkeypatch):
+    workspace = tmp_path/'workspace';workspace.mkdir()
+    writes = []
+    monkeypatch.setattr(runner.sio,'savemat',lambda path,value:writes.append(Path(path)))
+    monkeypatch.setattr(runner.shutil,'copy',lambda *args:None)
+    monkeypatch.setattr(runner,'MatlabServer',lambda **kwargs:'server')
+    monkeypatch.setattr(runner,'initialize_model',lambda **kwargs:4)
+    monkeypatch.chdir(tmp_path)
+    options = dict(Nens=2,icesee_comm=None,total_state_param_vars=6,ParamFile='Test.par')
+    server,nd = runner._initialize_rank_server_and_mesh(options,icesee_cwd=str(tmp_path),
+        issm_examples_dir=str(workspace),ensemble_slot=0)
+    assert writes == [workspace/'icesee_kwargs_0.mat']
+    assert server == 'server' and nd == 24
+    assert Path.cwd() == tmp_path
+
+
 def _base_kwargs(tmp_path, **overrides):
     kwargs = dict(
         model_name="issm",

@@ -1,53 +1,9 @@
-"""Mode-3 native adapter wiring for the ISSM ISMIP_Choi hybrid application.
+"""Whole-member ISSM state, forecast and inversion callbacks.
 
-## Why this is a whole-member adapter, not a spatially partitioned one
-
-Investigated 2026-08-24 before writing any code here (see the ICESEE
-mode-3-review memory notes for the full trail). ISSM's Python/MATLAB boundary
-has no per-rank ownership concept at all today, and this file does not add
-one:
-
-- Ensemble parallelism is one ICESEE MPI rank per member (``ens_id = rank``,
-  enforced by ``MatlabServer._check_conditions`` in
-  ``issm_utils/matlab2python/mat2py_utils.py``); each rank drives its own
-  persistent MATLAB subprocess.
-- ``model_nprocs`` (``md.cluster = generic(..., 'np', nprocs)`` in
-  ``run_model.m``) is ISSM's own *internal* MATLAB/PETSc parallel FEM solve.
-  It is invoked and torn down entirely inside one MATLAB command and is never
-  exposed to Python as a spatial ownership range.
-- Every Python<->MATLAB state exchange is a complete-member HDF5 file: the
-  MATLAB side gathers its internal parallel solution and does one
-  ``h5create``/``h5write`` of the full ``md.mesh.numberofvertices``-sized
-  array per variable (``run_model.m:1731-1754``); the Python side always
-  reads the whole array back (``_issm_model.py``, ``_issm_enkf.py``). No
-  ``io_gather``-style partitioned-output setting is used anywhere in this
-  repository's ISSM MATLAB scripts.
-
-Per explicit project direction, this work must not modify ISSM's own model
-code (``run_model.m``, or any other MATLAB script) to manufacture ownership
-metadata that does not already exist, and must not change ICESEE's core
-architecture. The model-agnostic answer is therefore
-``WholeMemberNativeAdapter``
-(``src/parallelization/distributed_whole_member_adapter.py``): a reusable,
-already-unit-tested adapter for exactly this situation -- a model whose only
-unmodified Python-visible boundary is a complete ensemble member. This file
-wires it to ISSM's *existing, unmodified* ``initialize_ensemble``,
-``forecast_step_single``, and ``run_model_inverse`` functions.
-
-## What this does and does not achieve
-
-This satisfies the ``NativeDistributedModelAdapter``/
-``NativeDistributedInversionAdapter`` protocols, so ISSM gains restart/
-checkpoint/member-wise-inversion lifecycle reuse from
-``distributed_native_runtime.py`` without touching MATLAB or core ICESEE
-code. It does **not** satisfy mode-3's "no rank holds a complete member"
-memory-scaling invariant: every field's owned interval is the entire
-variable, exactly as it already is in modes 0-2. Per
-``docs/execution-mode-3-design.md``, this is the explicitly permitted
-state-only category ("Adapters that cannot expose distributed state remain
-supported by modes 0--2, but cannot claim mode-3 scalability") -- ISSM
-cannot claim mode-3 scalability through this adapter, and ``execution_mode:
-3`` remains non-selectable regardless.
+Each Python rank controls a MATLAB server and exchanges complete member fields.
+ISSM's internal FEM ranks do not expose spatial ownership to this adapter.
+Optional recovery restores full MATLAB model files and RNG state as well as
+Python fields; it does not claim spatially partitioned state scalability.
 """
 
 from __future__ import annotations
@@ -169,7 +125,23 @@ def inverse_member(
     }
 
 
-ISMIP_CHOI_NATIVE_ADAPTER = WholeMemberNativeAdapter(
+class _RecoverableIssmAdapter(WholeMemberNativeAdapter):
+    def allocate_native_member(self, member_id, *, topology, icesee_kwargs):
+        from ICESEE.src.parallelization.distributed_native_runtime import NativeDistributedMember
+        names = _vec_inputs(icesee_kwargs)
+        nd = int(icesee_kwargs["nd"])
+        if nd % len(names):
+            raise ValueError("ISSM checkpoint fields must share the native vertex count")
+        state = WholeMemberState(variables={name:np.zeros(nd//len(names)) for name in names},
+            vec_inputs=names,model_context={"ens_id":int(member_id)})
+        return NativeDistributedMember(int(member_id),state.registry,state)
+
+    def restore_native_checkpoint(self, member, checkpoint, *, topology, icesee_kwargs):
+        from ICESEE.applications.issm_model.issm_utils.recovery import restore_backend_member
+        restore_backend_member(member.member_id,checkpoint,topology,icesee_kwargs)
+
+
+ISMIP_CHOI_NATIVE_ADAPTER = _RecoverableIssmAdapter(
     initialize_member=initialize_member,
     forecast_member=forecast_member,
     inverse_member=inverse_member,

@@ -45,7 +45,7 @@ def source_fingerprint(root):
     return digest.hexdigest()
 
 
-def latest_progress(data_dir, *, nt, members, dt, expected_run_id=None):
+def latest_progress(data_dir, *, nt, members, dt, expected_run_id=None, time_origin=0.0):
     """Inspect committed manifests only; native restore validates HDF5 contents."""
     steps = Path(data_dir) / "_mode3_state_history" / "steps"
     paths = sorted(steps.glob("checkpoint_[0-9]" + "[0-9]" * 7))
@@ -62,7 +62,7 @@ def latest_progress(data_dir, *, nt, members, dt, expected_run_id=None):
                 or path.name != f"checkpoint_{next_step-1:08d}"
                 or int(meta.get("nt", -1)) != nt
                 or int(value.get("number_of_members", -1)) != members
-                or abs(float(meta.get("model_time", -1)) - next_step * dt) > 1e-8
+                or abs(float(meta.get("model_time", -1)) - (time_origin + next_step * dt)) > 1e-8
                 or not value.get("run_id")
                 or (expected_run_id is not None and value["run_id"] != expected_run_id)):
             raise ValueError(f"incompatible continuation checkpoint: {path}")
@@ -139,7 +139,8 @@ def tick(directory, *, scheduler=None, fingerprint=source_fingerprint):
         if hashlib.sha256(parameters.read_bytes()).hexdigest() != spec["parameters_sha256"]:
             raise RuntimeError("parameters changed since this case was pinned; no job submitted")
         progress = latest_progress(spec["data"], nt=spec["nt"], members=spec["members"],
-                                   dt=spec["dt"], expected_run_id=state.get("run_id"))
+                                   dt=spec["dt"], expected_run_id=state.get("run_id"),
+                                   time_origin=spec.get("time_origin",0.0))
         if state["phase"] in {"submitting", "waiting"}:
             job = scheduler.find(state["job_name"], state["since"])
             if job is None:

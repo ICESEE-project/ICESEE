@@ -97,3 +97,11 @@ def test_policy_rejects_unbounded_or_ambiguous_settings(raw):
 def test_recovery_is_disabled_unless_declared():
     assert ForecastRecoveryPolicy.from_options({}) is None
     assert ForecastRecoveryPolicy.from_options({"forecast_recovery":False}) is None
+
+
+def test_rounded_external_interval_accepts_equal_minimum_dt():
+    result = advance_with_recovery(start_time=.4, interval=.6-.4,
+        policy=ForecastRecoveryPolicy(2,.05,4),stable_dt=.05,
+        capture=lambda:None,restore=lambda saved:None,
+        advance=lambda time,dt:None,validate=lambda:None)
+    assert result['substeps']==4

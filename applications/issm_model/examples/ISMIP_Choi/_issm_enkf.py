@@ -51,6 +51,10 @@ def forecast_step_single(ensemble=None, **icesee_kwargs):
     """ensemble: packs the state variables and parameters of a single ensemble member
     Returns: ensemble: updated ensemble member
     """
+    from ICESEE.src.parallelization.forecast_recovery import ForecastRecoveryPolicy
+    if ForecastRecoveryPolicy.from_options(icesee_kwargs) is not None:
+        from ICESEE.applications.issm_model.issm_utils.recovery import advance_issm_forecast
+        return advance_issm_forecast(ensemble, forecast=run_model, options=icesee_kwargs)
     #  -- control time stepping
     time = icesee_kwargs.get('t')
     k    = icesee_kwargs.get('k')

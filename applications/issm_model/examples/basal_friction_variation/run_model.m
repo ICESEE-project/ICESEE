@@ -1,5 +1,5 @@
 
-function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
+function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal, varargin)
     % Run ISSM model for transient simulation with ensemble support
     % Inputs: data_fname (output file name), ens_id (ensemble ID), rank, nprocs (MPI settings),
     %         k (time step index), dt (time step), tinitial, tfinal (time bounds)
@@ -7,6 +7,14 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
     % Read icesee_kwargs from .mat file
     icesee_kwargs_file = sprintf('icesee_kwargs_%d.mat', ens_id);
     icesee_kwargs       = load(icesee_kwargs_file);
+    recovery_active = false;
+    recovery_execution = '';
+    if ~isempty(varargin)
+        recovery_options = load(varargin{1});
+        recovery_active = logical(recovery_options.recovery_active);
+        recovery_execution = char(recovery_options.recovery_execution);
+    end
+
     cluster_name = char(icesee_kwargs.cluster_name);
     steps        = double(icesee_kwargs.steps);
     icesee_path  = char(icesee_kwargs.icesee_path);
@@ -163,7 +171,35 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.timestepping.final_time = t_next;
             md.timestepping.time_step  = t_next - t_now;
 
+            if recovery_active
+
+                md.cluster.executionpath = recovery_execution;
+
+                md.miscellaneous.name = sprintf('recovery_color_%d', ens_id);
+
+            end
+
             md = solve(md, 'Transient', 'runtimename', false);
+
+            if recovery_active
+
+                last = md.results.TransientSolution(end);
+
+                if any(~isfinite(last.Thickness)) || any(~isfinite(last.Surface)) || ...
+
+                        any(~isfinite(last.Vx)) || any(~isfinite(last.Vy)) || ...
+
+                        max(hypot(last.Vx, last.Vy)) > 5.0e3 || ...
+
+                        ~isfield(last, 'time') || abs(last.time - tfinal) > 1.0e-9 * max(1, abs(tfinal))
+
+                    error('ICESEE:ISSM:ForecastRejected', ...
+
+                        'ISSM physical forecast was non-finite, exceeded the speed guard or missed its time boundary');
+
+                end
+
+            end
 
             % Save final state of this interval
             sol = md.results.TransientSolution(end);
@@ -359,7 +395,21 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
         end
 
         % Solve transient
+        if recovery_active
+            md.cluster.executionpath = recovery_execution;
+            md.miscellaneous.name = sprintf('recovery_color_%d', ens_id);
+        end
         md = solve(md, 'Transient','runtimename',false);
+        if recovery_active
+            last = md.results.TransientSolution(end);
+            if any(~isfinite(last.Thickness)) || any(~isfinite(last.Surface)) || ...
+                    any(~isfinite(last.Vx)) || any(~isfinite(last.Vy)) || ...
+                    max(hypot(last.Vx, last.Vy)) > 5.0e3 || ...
+                    ~isfield(last, 'time') || abs(last.time - tfinal) > 1.0e-9 * max(1, abs(tfinal))
+                error('ICESEE:ISSM:ForecastRejected', ...
+                    'ISSM physical forecast was non-finite, exceeded the speed guard or missed its time boundary');
+            end
+        end
             
         filename = fullfile(folder, data_fname);
         save(filename, 'md', '-v7.3');
@@ -525,7 +575,24 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
                                             'Surface','Base','Bed', 'IceVolume', 'IceVolumeAboveFloatation'};
 
             % Solve transient
+            if recovery_active
+                md.timestepping.time_step = dt;
+                md.timestepping.start_time = tinitial;
+                md.timestepping.final_time = tfinal;
+                md.cluster.executionpath = recovery_execution;
+                md.miscellaneous.name = sprintf('recovery_color_%d', ens_id);
+            end
             md = solve(md, 'Transient','runtimename',false);
+            if recovery_active
+                last = md.results.TransientSolution(end);
+                if any(~isfinite(last.Thickness)) || any(~isfinite(last.Surface)) || ...
+                        any(~isfinite(last.Vx)) || any(~isfinite(last.Vy)) || ...
+                        max(hypot(last.Vx, last.Vy)) > 5.0e3 || ...
+                        ~isfield(last, 'time') || abs(last.time - tfinal) > 1.0e-9 * max(1, abs(tfinal))
+                    error('ICESEE:ISSM:ForecastRejected', ...
+                        'ISSM physical forecast was non-finite, exceeded the speed guard or missed its time boundary');
+                end
+            end
              
             % save updated model to every ensemble folder
             folder = sprintf('./Models/ens_id_%d', ens_id);
@@ -585,6 +652,9 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % filename = fullfile(icesee_path, 'data', wrong_reference_data);
 
             % filename = fullfile(folder, 'initialize_ensemble.mat');
+            if recovery_active && exist(fullfile(folder, data_fname), 'file')
+                filename = fullfile(folder, data_fname);
+            end
             md = loadmodel(filename);
             
             % md.inversion.iscontrol            = 0;
@@ -677,7 +747,24 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             md.verbose = verbose('convergence', false, 'solution', true);
 
             % % Solve transient
-            md = solve(md, 'Transient','runtimename',false); %TODO: instead of solving just take th initial solution
+            if recovery_active
+                md.timestepping.time_step = dt;
+                md.timestepping.start_time = tinitial;
+                md.timestepping.final_time = tfinal;
+                md.cluster.executionpath = recovery_execution;
+                md.miscellaneous.name = sprintf('recovery_color_%d', ens_id);
+            end
+            md = solve(md, 'Transient','runtimename',false);
+            if recovery_active
+                last = md.results.TransientSolution(end);
+                if any(~isfinite(last.Thickness)) || any(~isfinite(last.Surface)) || ...
+                        any(~isfinite(last.Vx)) || any(~isfinite(last.Vy)) || ...
+                        max(hypot(last.Vx, last.Vy)) > 5.0e3 || ...
+                        ~isfield(last, 'time') || abs(last.time - tfinal) > 1.0e-9 * max(1, abs(tfinal))
+                    error('ICESEE:ISSM:ForecastRejected', ...
+                        'ISSM physical forecast was non-finite, exceeded the speed guard or missed its time boundary');
+                end
+            end %TODO: instead of solving just take th initial solution
 
             % Save model
             filename = fullfile(folder, data_fname);
@@ -789,7 +876,24 @@ function run_model(data_fname, ens_id, rank, nprocs, k, dt, tinitial, tfinal)
             % md.transient.requested_outputs = {'default','Thickness','Surface','Base','Bed'};
 
             % Solve transient
+            if recovery_active
+                md.timestepping.time_step = dt;
+                md.timestepping.start_time = tinitial;
+                md.timestepping.final_time = tfinal;
+                md.cluster.executionpath = recovery_execution;
+                md.miscellaneous.name = sprintf('recovery_color_%d', ens_id);
+            end
             md = solve(md, 'Transient','runtimename',false);
+            if recovery_active
+                last = md.results.TransientSolution(end);
+                if any(~isfinite(last.Thickness)) || any(~isfinite(last.Surface)) || ...
+                        any(~isfinite(last.Vx)) || any(~isfinite(last.Vy)) || ...
+                        max(hypot(last.Vx, last.Vy)) > 5.0e3 || ...
+                        ~isfield(last, 'time') || abs(last.time - tfinal) > 1.0e-9 * max(1, abs(tfinal))
+                    error('ICESEE:ISSM:ForecastRejected', ...
+                        'ISSM physical forecast was non-finite, exceeded the speed guard or missed its time boundary');
+                end
+            end
 
             % Save model
             filename = fullfile(folder, data_fname);

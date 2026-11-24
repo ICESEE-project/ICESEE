@@ -153,6 +153,16 @@ def test_missing_shard_is_never_selected(case):
         latest_progress(case / "data",nt=1640,members=32,dt=.05)
 
 
+def test_checkpoint_time_can_start_at_nonzero_model_time(case):
+    path = checkpoint(case,19)
+    value = json.loads((path/'manifest.json').read_text())
+    value['metadata']['model_time'] += 10
+    (path/'manifest.json').write_text(json.dumps(value))
+    assert latest_progress(case/'data',nt=1640,members=32,dt=.05,time_origin=10)['next_step']==20
+    with pytest.raises(ValueError,match='incompatible'):
+        latest_progress(case/'data',nt=1640,members=32,dt=.05)
+
+
 def test_truncated_shard_is_never_selected(case):
     path = checkpoint(case,19)
     manifest = json.loads((path / "manifest.json").read_text())

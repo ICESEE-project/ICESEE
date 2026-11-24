@@ -170,6 +170,50 @@ The `-B` flag maps host directories into the container:
 
 ## Outputs
 
+### Optional forecast recovery and native restart
+
+Native Mode 3 can stop after committed cycles and restore the complete MATLAB
+backend along with its Python-visible state. Add these keys under
+`enkf-parameters` in a separate run configuration:
+
+```yaml
+execution_mode: 3
+issm_native_continuation: true
+checkpoint_every: 1
+checkpoint_keep_last: 3
+run_segment_cycles: 2
+forecast_recovery:
+  max_halvings: 2
+  min_dt: 0.05
+  max_substeps: 4
+```
+
+Here `min_dt` is in model years. Choose it for the configured external timestep;
+the example above permits subdivisions of a 0.2-year forecast. Recovery is off
+by default. It retries only identified numerical forecast rejections and never
+changes the filter, solver tolerances, observations or external output times.
+Reference generation and analysis failures are outside its scope.
+
+Run from this example directory with `python run_da_issm.py -F /path/to/run.yaml`.
+For a continuation, keep the same source, science settings, data directory and
+Python rank count, set `resume_from_checkpoint: true`, and disable ensemble,
+truth and observation regeneration. Remove the cycle budget for an uninterrupted
+continuation or retain it for another bounded segment. `num_years` and dt retain
+their original values. Historical vector-only checkpoints cannot resume this
+backend path.
+
+The data directory contains `_mode3_state_history/` and `_issm_backend/`.
+Keep both together: each vector manifest references checksummed MATLAB model,
+output and RNG snapshots. Do not delete backend bundles by hand. Member streaming
+and a changed Python rank count are currently unsupported for this path.
+
+A local two-member, two-cycle MATLAB/ISSM validation matched the original
+forecast and a stopped/resumed forecast bitwise. An injected post-solve failure
+matched explicit half-steps and restored MATLAB RNG. This test disabled analysis
+and inversion and used a local bed fixture; it does not establish long-run
+assimilation accuracy. See the [recovery guide](../../../../docs/forecast-recovery-and-continuation.md#issm-whole-member-recovery)
+for the tested scope and failure rules.
+
 Results are written to `_modelrun_datasets/` and `results/`, named by filter type:
 
 ```

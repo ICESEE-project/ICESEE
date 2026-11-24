@@ -109,9 +109,15 @@ def ISSM_model(**icesee_kwargs):
         cmd = (
             f"run('issm_env'); run_model('{filename}', {ens_id}, {rank}, {nprocs}, {k}, {dt}, {tinitial}, {tfinal}); "
         )
+        if icesee_kwargs.get('_issm_recovery_active'):
+            from ICESEE.applications.issm_model.issm_utils.recovery import run_checked_forecast_command
+            run_checked_forecast_command(cmd, icesee_kwargs)
+            return
         if not server.send_command(cmd):
             print("[ICESEE DEBUG] Error sending command: {cmd}")
     except Exception as e:
+        if icesee_kwargs.get('_issm_recovery_active'):
+            raise
         print("[ICESEE DEBUG] Error sending command: {e}")
         server.shutdown()
         server.reset_terminal()
@@ -176,6 +182,8 @@ def run_model(ensemble, **icesee_kwargs):
     try:
         ISSM_model(**icesee_kwargs)
     except Exception as e:
+        if icesee_kwargs.get('_issm_recovery_active'):
+            raise
         print(f"[ICESEE run_model Error] Error running the ISSM model: {e}")
         server.kill_matlab_processes()
         return None
@@ -198,6 +206,10 @@ def run_model(ensemble, **icesee_kwargs):
                 updated_state[key] = f[key][:].reshape(-1, order='F')
             else:
                 print(f"[ICESEE run_model Warning] Key '{key}' not found in output file: {output_filename}")
+
+    if icesee_kwargs.get('_issm_recovery_active'):
+        os.chdir(icesee_path)
+        return updated_state
 
     # --- compute the mean of the scalar inputs across all ensemble members and save in a separate file
     comm = MPI.COMM_WORLD

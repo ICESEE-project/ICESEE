@@ -31,8 +31,9 @@ exceptions are fatal. A model stuck inside MPI cannot participate in rejection
 agreement and cannot be repaired by this controller.
 
 The policy is off by default. Selecting it changes checkpoint identity. PIG
-currently integrates it only in native Mode 3. Other models, reference generation
-and Modes 1–2 need their own verified rollback integration. An analysis rejection
+integrates it only in native Mode 3. The ISSM integration is described below;
+other adapters and reference generation need their own verified rollback
+integration. An analysis rejection
 is not retried as a forecast: recovery does not redraw observations, repeat
 assimilation, damp an analysis, lower a physical threshold or change tolerances.
 It preserves the last committed state for a reviewed correction.
@@ -108,6 +109,52 @@ analysis/noise equivalence through every event. The launcher comparison ended
 at year 0.1, retained the original 82-year reference horizon and encountered no
 analysis events. Evaluate all members, physical bounds, observations, diagnostics
 and long uninterrupted/resumed histories before accepting a scientific result.
+
+## ISSM whole-member recovery
+
+The `ISMIP_Choi` and `basal_friction_variation` forecast callbacks accept an
+explicit `forecast_recovery` policy. A transaction preserves the packed member,
+mutable MATLAB model caches, per-member output files and MATLAB RNG. A rejected
+trial restores them before retrying the entire external interval with smaller
+internal steps. Each trial uses a private ISSM execution directory. Process
+noise and analysis remain outside the physical forecast transaction.
+
+The MATLAB bridge reports identified numerical rejections through
+`ICESEE:ISSM:ForecastRejected`. The checked forecast rejects non-finite fields,
+speeds above the existing 5000 m/year guard, or a returned time that differs from
+the requested interval end. Undefined functions, missing files, command timeouts
+and unclassified ISSM errors are fatal. They do not trigger repeated solves or
+consume stale HDF5 output. Solver tolerances, iteration settings and physical
+bounds are unchanged. A MATLAB process that crashes or remains blocked cannot be
+repaired by this numerical transaction.
+
+`ISMIP_Choi` native Mode 3 additionally supports committed boundary stops and
+complete backend resume. Select `issm_native_continuation: true`, or a recovery
+policy, with `checkpoint_every: 1`. Backend MAT files, output snapshots and RNG
+are committed before the vector checkpoint that references their checksums.
+Resume restores both; a vector-only historical checkpoint is refused. Resident
+whole-member execution and the original Python rank count are required. This
+does not expose ISSM's internal mesh partition to Python, validate streaming
+members or provide rank-topology migration.
+
+On 24 November 2026 a local MATLAB R2025b/ISSM 4.24 check used the packaged Choi
+mesh (3347 vertices, 6319 elements), two members, one Python rank and one internal
+ISSM rank. The configured reference horizon was two years with dt=0.2 years;
+the forecast comparison advanced two cycles to year 0.4. A local-only bed fixture
+duplicated the packaged reference bed for the two members; it was not a calibrated
+prior. Analysis and inversion were disabled to isolate forecast/restart behavior.
+
+| Check | Result |
+|---|---|
+| Recovery enabled, no rejected solve | All six fields of both members matched the baseline bitwise. |
+| Stop at year 0.2, restart in a fresh MATLAB process, advance to 0.4 | All six fields of both members matched the uninterrupted case bitwise. |
+| Inject a numerical rejection after a real solve and MATLAB RNG draw | Retried two 0.1-year substeps matched an explicit half-step reference bitwise; saved MATLAB RNG states matched. |
+
+These are local physical forecast checks, not assimilation/inversion acceptance,
+HPC scaling or long-run scientific validation. The common continuation supervisor
+can inspect the checkpoint metadata, but an ISSM-specific Slurm preparation and
+resubmission workflow has not been validated. The PIG launcher must not be used
+to submit an ISSM case.
 
 ## Related model practices
 

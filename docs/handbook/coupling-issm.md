@@ -172,6 +172,13 @@ For a genuinely spatial ISSM adapter, the Python boundary would need stable owne
 
 ## Source reading map
 
+For opt-in physical forecast rollback and Choi native backend restart, see
+[forecast recovery and continuation](../forecast-recovery-and-continuation.md#issm-whole-member-recovery).
+The local two-member MATLAB check covers unchanged forecasts, an injected
+post-solve rejection and stop/resume consistency. It does not validate analysis,
+inversion, changed rank layouts or the separate basal application's full restart
+path. The default ISSM workflow remains unchanged when these options are absent.
+
 - `applications/issm_model/examples/ISMIP_Choi/run_da_issm.py`, `_issm_model.py`, `_issm_enkf.py`, `_issm_native.py`, `mode3_runner.py`, `initialize_model.m`, `run_model.m` and `params.yaml`
 - `applications/issm_model/examples/basal_friction_variation/` for the separate driver, field names and diagnostics
 - `applications/issm_model/issm_utils/matlab2python/mat2py_utils.py`, `matlab_server.m`, `issm_env.m` and `server_utils.py`
