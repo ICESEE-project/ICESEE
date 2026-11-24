@@ -137,6 +137,7 @@
 | `process_noise_schedule` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `random_field_method` | Re-apply normalized and command-line-resolved values after the raw YAML update.  Without this step, e.g. ``--Nens=40`` is silently replaced by the YAML value while constructing the canonical dictionary. | Unknown | Computed(random_field_method) | No | None | Dictionary |
 | `ranks_per_model` | The application may declare nt explicitly because timesteps_per_year has application-specific units. Otherwise retain the historical loader default, num_years * timesteps_per_year. Application drivers resolve their own time grid before forecasting. | Unknown | Computed | No | None | Dictionary |
+| `reference_data_path` | YAML configuration parameter for reference data path | Unknown | None | No | None | YAML |
 | `rel_vel_weight` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `restart_enabled` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
 | `resume_from_checkpoint` | Add model and analysis options to the canonical runtime context. | Unknown | Computed | No | None | Dictionary |
