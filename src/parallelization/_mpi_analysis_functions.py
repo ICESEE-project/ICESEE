@@ -7,6 +7,7 @@
 # =============================================================================
 
 from ICESEE.src.utils.analysis_bounds import bound_analysis_rows
+from ICESEE.src.utils.ensemble_spread import relax_analysis_spread
 import gc
 import os
 import copy
@@ -178,9 +179,12 @@ def apply_analysis_controls_local(
 
     local_mean = np.mean(controlled, axis=1, keepdims=True)
     controlled = local_mean + inflation_vec[:, None] * (controlled - local_mean)
+    intervals = {key: (index*hdim, (index+1)*hdim) for index, key in enumerate(vec_inputs)}
+    controlled = relax_analysis_spread(
+        controlled, forecast_vec, global_rows, intervals, icesee_kwargs)
     controlled = bound_analysis_rows(
         controlled, global_rows,
-        {key:(index*hdim,(index+1)*hdim) for index,key in enumerate(vec_inputs)},
+        intervals,
         icesee_kwargs.get("analysis_bounds"),
     )
     controlled = restore_frozen_analysis_vars(
@@ -206,9 +210,15 @@ def apply_analysis_controls_local(
 
 # ============================ EnKF functions ============================
 def EnKF_X5(k_obs, ensemble_vec, Nens, hu_obs, icesee_kwargs, UtilsFunctions):
+    from ICESEE.src.parallelization.distributed_analysis import (
+        resolve_gain_formulation, prescribed_r_transform,
+    )
+    gain_formulation = resolve_gain_formulation(icesee_kwargs)
     comm_world = icesee_kwargs.get("comm_world")
 
     if icesee_kwargs.get("partitioned_io_flag", False):
+        if gain_formulation == "prescribed_r":
+            raise NotImplementedError("prescribed_r requires partitioned_io_flag=False in Mode 1")
         if str(icesee_kwargs.get("bed_update_domain", "all")).lower() != "all":
             raise ValueError(
                 "a restricted bed_update_domain currently requires "
@@ -305,6 +315,9 @@ def EnKF_X5(k_obs, ensemble_vec, Nens, hu_obs, icesee_kwargs, UtilsFunctions):
             "enkf_observation_error_mode must be 'stochastic_R', "
             "'legacy_prior_anomalies', or 'generated_R'"
         )
+
+    if gain_formulation == "prescribed_r":
+        return prescribed_r_transform(HAprime, Dprime, sigma ** 2), None
 
     m = d.shape[0]
     nrmin = min(m, Nens)

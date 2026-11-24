@@ -45,7 +45,7 @@ Found 138 distinct `_enkf_section.get` keys. Repeated lookups are retained when 
 | `checkpoint_keep_last` | `2` | [L438](../../config/_utility_imports.py#L438) |
 | `chunk_size` | `5000` | [L317](../../config/_utility_imports.py#L317) |
 | `collective_threshold` | `16` | [L321](../../config/_utility_imports.py#L321) |
-| `commandlinerun` | `False` | [L631](../../config/_utility_imports.py#L631) |
+| `commandlinerun` | `False` | [L634](../../config/_utility_imports.py#L634) |
 | `coupled_model_datasets` | `'data'` | [L319](../../config/_utility_imports.py#L319) |
 | `create_ensemble_dataset` | `True` | [L417](../../config/_utility_imports.py#L417) |
 | `data_path` | `'_modelrun_datasets'` | [L281](../../config/_utility_imports.py#L281) |
@@ -120,9 +120,9 @@ Found 138 distinct `_enkf_section.get` keys. Repeated lookups are retained when 
 | `scalar_inputs` | `[]` | [L471](../../config/_utility_imports.py#L471) |
 | `sequential_ensemble_initialization` | `False` | [L414](../../config/_utility_imports.py#L414) |
 | `serial_file_creation` | `True` | [L316](../../config/_utility_imports.py#L316) |
-| `sig_Q` | `np.array([0.01]) * icesee_kwargs['total_state_param_vars']` | [L604](../../config/_utility_imports.py#L604) |
-| `sig_model` | `np.array([0.01]) * icesee_kwargs['total_state_param_vars']` | [L602](../../config/_utility_imports.py#L602) |
-| `sig_obs` | `np.array([0.01]) * icesee_kwargs['total_state_param_vars']` | [L603](../../config/_utility_imports.py#L603) |
+| `sig_Q` | `np.array([0.01]) * icesee_kwargs['total_state_param_vars']` | [L607](../../config/_utility_imports.py#L607) |
+| `sig_model` | `np.array([0.01]) * icesee_kwargs['total_state_param_vars']` | [L605](../../config/_utility_imports.py#L605) |
+| `sig_obs` | `np.array([0.01]) * icesee_kwargs['total_state_param_vars']` | [L606](../../config/_utility_imports.py#L606) |
 | `smb_blend_factor` | `0.35` | [L494](../../config/_utility_imports.py#L494) |
 | `smb_blend_ramp_time` | `0.0` | [L497](../../config/_utility_imports.py#L497) |
 | `smb_divergence_neighbors` | `24` | [L490](../../config/_utility_imports.py#L490) |

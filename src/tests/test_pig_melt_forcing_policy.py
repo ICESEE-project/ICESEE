@@ -52,6 +52,24 @@ def test_prescribed_policy_preserves_legacy_experiment_identity():
     assert melt_experiment_identity(settings())!=melt_experiment_identity(dict(settings(),enkf_observation_error_mode="stochastic_R"))
 
 
+def test_spread_policy_changes_restart_identity_only_when_enabled():
+    base = settings()
+    old = melt_experiment_identity(base)
+    assert melt_experiment_identity(dict(base, analysis_spread_relaxation=0.)) == old
+    assert melt_experiment_identity(dict(base, analysis_stage_diagnostics=True)) == old
+    half = melt_experiment_identity(dict(base, analysis_spread_relaxation=.5))
+    assert half != old
+    assert half != melt_experiment_identity(dict(base, analysis_spread_relaxation=.7))
+    assert half == melt_experiment_identity(dict(base, analysis_spread_relaxation_factors={name:.5 for name in base['vec_inputs']}))
+
+
+def test_diagnostics_refuse_unimplemented_runtime_paths():
+    from ICESEE.applications.icepack_model.examples.idealized_pig._melt_forcing import configure_melt_experiment
+    for override in ({'execution_mode':1}, {'execution_mode':3,'use_store_streaming_analysis':True}):
+        with pytest.raises(NotImplementedError, match='persistent native'):
+            configure_melt_experiment(dict(settings(), analysis_stage_diagnostics=True, **override))
+
+
 def test_restart_identity_includes_error_weights_and_analysis_settings():
     from ICESEE.applications.icepack_model.examples.idealized_pig._melt_forcing import configure_melt_experiment
     original=configure_melt_experiment(settings(sig_obs=[5,.5,.1,.1,.1],inflation_factor=1.15))
@@ -60,3 +78,38 @@ def test_restart_identity_includes_error_weights_and_analysis_settings():
     assert configure_melt_experiment(changed)['scientific_experiment_id']!=identity
     changed=dict(original,inflation_factor=1.1)
     assert configure_melt_experiment(changed)['scientific_experiment_id']!=identity
+
+
+def test_balanced_analysis_is_explicit_and_restart_incompatible():
+    from ICESEE.applications.icepack_model.examples.idealized_pig._melt_forcing import configure_melt_experiment
+    old=configure_melt_experiment(settings())
+    new=configure_melt_experiment(dict(settings(),pig_analysis_state_policy='diagnostic_balance',hThresh=30,execution_mode=3))
+    assert new['frozen_analysis_vars']==['s','u','v']
+    assert new['scientific_experiment_id']!=old['scientific_experiment_id']
+    changed=configure_melt_experiment(dict(new,hThresh=31))
+    assert changed['scientific_experiment_id']!=new['scientific_experiment_id']
+    with pytest.raises(ValueError,match='execution_mode=3'):
+        configure_melt_experiment(dict(new,execution_mode=2))
+
+
+def test_depth_law_has_explicit_predictor_and_changes_restart_identity():
+    from ICESEE.applications.icepack_model.examples.idealized_pig._melt_forcing import configure_melt_experiment, advance_melt_amplitude, melt_scenario
+    options=dict(settings(),basal_melt_forecast='estimated_depth_law',execution_mode=3,
+        pig_analysis_state_policy='diagnostic_balance',hThresh=30,basal_melt_amplitude_trend=.5)
+    configured=configure_melt_experiment(options)
+    assert advance_melt_amplitude(400.,20.,2.,configured)==21.
+    assert advance_melt_amplitude(4000.,20.,2.,configured)==120.
+    with pytest.raises(ValueError,match='unidentifiable'):advance_melt_amplitude(0.,0.,.05,configured)
+    assert melt_scenario(5.95)=='control' and melt_scenario(6.)=='warm' and melt_scenario(15.)=='control'
+    changed=configure_melt_experiment(dict(configured,basal_melt_amplitude_trend=.2))
+    assert changed['scientific_experiment_id']!=configured['scientific_experiment_id']
+    with pytest.raises(ValueError,match='explicit'):configure_melt_experiment(dict(configured,basal_melt_amplitude_trend=None))
+
+
+def test_stop_time_preserves_full_forcing_horizon():
+    from ICESEE.applications.icepack_model.examples.idealized_pig._melt_forcing import resolve_stop_step
+    options=dict(nt=1640,dt=.05,num_years=82,run_stop_time=19.,checkpoint_every=1)
+    assert resolve_stop_step(options)==380
+    assert options['num_years']==82 and options['nt']==1640
+    for invalid in (0,19.01,83,np.nan):
+        with pytest.raises(ValueError):resolve_stop_step(dict(options,run_stop_time=invalid))

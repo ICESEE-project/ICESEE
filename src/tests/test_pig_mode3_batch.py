@@ -60,6 +60,8 @@ def _run(tmp_path, *, counts=None, existing=False, step_exit=0, finalizer_exit=0
     if existing:
         data.mkdir()
         (data / "keep.txt").write_text("previous results")
+        if cfg['enkf-parameters'].get('resume_from_checkpoint'):
+            (data/'_mode3_state_history').mkdir()
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("SLURM_", "ICESEE_"))}
     env.update(ICESEE_SOURCE_ROOT=str(source), ICESEE_SPACK_ROOT=str(deps),
@@ -73,7 +75,11 @@ def _run(tmp_path, *, counts=None, existing=False, step_exit=0, finalizer_exit=0
         env.pop("ICESEE_SOURCE_ROOT")
         env.pop("ICESEE_SPACK_ROOT")
         env["SLURM_SUBMIT_DIR"] = str(pig)
-    env.update(counts or {})
+    for key, value in (counts or {}).items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
     # GNU time is specific to PACE; mock only its wrapper on other hosts.
     launcher = tmp_path / "launcher.sbatch"
     launcher.write_text(SCRIPT.read_text().replace('/usr/bin/time -v', 'env'))
@@ -97,6 +103,43 @@ def test_validated_allocation_has_16_ranks_and_32_members(tmp_path):
     assert not any("overlap" in arg or "overcommit" in arg for arg in args)
     assert (pig / "pace_runs/mode3-12345/exit-status").read_text().strip() == "0"
     assert not (pig / "_modelrun_datasets.launch-lock").exists()
+
+
+@pytest.mark.parametrize('nodes,ranks,per_node', [('1','1','1'), ('2','40','20')])
+def test_missing_tasks_per_node_is_derived_from_allocation(tmp_path, nodes, ranks, per_node):
+    result, _, capture = _run(tmp_path, counts={
+        'SLURM_JOB_NUM_NODES':nodes, 'SLURM_NTASKS':ranks,
+        'SLURM_NTASKS_PER_NODE':None,
+    }, config_updates={'enkf-parameters':{'Nens':40, 'model_nprocs':1}})
+    assert result.returncode == 0, result.stderr
+    args = json.loads(capture.read_text())
+    assert '--ntasks='+ranks in args
+    assert '--ntasks-per-node='+per_node in args
+
+
+def test_missing_tasks_per_node_rejects_nonuniform_allocation(tmp_path):
+    result, _, capture = _run(tmp_path, counts={
+        'SLURM_JOB_NUM_NODES':'2', 'SLURM_NTASKS':'3',
+        'SLURM_NTASKS_PER_NODE':None,
+    }, config_updates={'enkf-parameters':{'model_nprocs':1}})
+    assert result.returncode == 2 and not capture.exists()
+    assert 'uniform tasks/node' in result.stderr
+
+
+def test_case_specific_log_path_keeps_the_original_allocation(tmp_path):
+    logs = tmp_path/'paired case/logs'
+    result, _, capture = _run(tmp_path, counts={"ICESEE_LOG_PATH": str(logs)})
+    assert result.returncode == 0, result.stderr
+    assert (logs/'params.yaml').is_file() and (logs/'exit-status').read_text().strip() == '0'
+    args = json.loads(capture.read_text())
+    assert '--nodes=2' in args and '--ntasks=16' in args
+
+
+def test_log_path_inside_recreated_data_is_refused_before_launch(tmp_path):
+    logs = tmp_path/'lab space/ICESEE-Spack-source/ICESEE/applications/icepack_model/examples/idealized_pig/_modelrun_datasets/logs'
+    result, _, capture = _run(tmp_path, counts={"ICESEE_LOG_PATH": str(logs)})
+    assert result.returncode != 0 and not capture.exists()
+    assert 'Logs must be outside' in result.stderr
 
 
 def test_reference_24_member_eight_rank_allocation_uses_mode_selector_only(tmp_path):
@@ -127,6 +170,26 @@ def test_existing_scientific_results_are_preserved(tmp_path):
     assert result.returncode == 2
     assert not capture.exists()
     assert (pig / "_modelrun_datasets/keep.txt").read_text() == "previous results"
+
+
+def test_explicit_native_resume_preserves_existing_data(tmp_path):
+    result, pig, capture = _run(tmp_path, existing=True,
+        config_updates={'enkf-parameters':{'resume_from_checkpoint':True}})
+    assert result.returncode == 0, result.stderr
+    assert capture.exists() and (pig/'_modelrun_datasets/keep.txt').read_text()=='previous results'
+
+
+def test_resume_without_history_is_refused(tmp_path):
+    result, _, capture = _run(tmp_path,
+        config_updates={'enkf-parameters':{'resume_from_checkpoint':True}})
+    assert result.returncode == 2 and not capture.exists()
+
+
+def test_disabled_history_does_not_export_after_failure(tmp_path):
+    result, _, capture = _run(tmp_path, step_exit=17,
+        config_updates={'enkf-parameters':{'mode3_export_ensemble_history':False}})
+    assert result.returncode == 17 and capture.exists()
+    assert not (tmp_path/'finalizer-argv.json').exists()
 
 
 def test_srun_failure_propagates_and_releases_launch_lock(tmp_path):

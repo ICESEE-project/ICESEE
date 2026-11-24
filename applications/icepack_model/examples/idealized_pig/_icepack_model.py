@@ -13,7 +13,7 @@ import h5py
 
 from ICESEE.src.utils.init_trace import traced_init
 from ICESEE.applications.icepack_model.examples.idealized_pig._melt_forcing import (
-    melt_forecast_mode, initial_melt_values, bounded_melt_values,
+    melt_forecast_mode, initial_melt_values, bounded_melt_values, melt_spatial_policy,
 )
 
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -216,6 +216,14 @@ def BasalMeltRate(icesee_kwargs, step, floating, Q, s, h, scenario='control', ex
             f"{EXPERIMENT_WRONG!r}, got {experiment!r}"
         )
 
+    if melt_spatial_policy(icesee_kwargs) == "fixed_initial_depth":
+        if icesee_kwargs.get("s0") is None or icesee_kwargs.get("h0") is None:
+            raise ValueError("fixed_initial_depth requires the model's immutable initial s0 and h0")
+        s, h = icesee_kwargs["s0"], icesee_kwargs["h0"]
+        if s.function_space() != Q or h.function_space() != Q:
+            raise ValueError("fixed_initial_depth reference geometry must use the current model space")
+        scenario = "control"
+
     # Draft depth (negative below sea level): z = s - h
     draft = firedrake.Function(Q)
     draft.interpolate(s - h)
@@ -301,6 +309,23 @@ def estimated_melt_forecast(analyzed_melt, floating, Q, options):
     return Function(Q).interpolate(bounded * floating)
 
 
+def depth_law_melt(amplitude, floating, Q, surface, thickness, step, options):
+    from ._melt_forcing import melt_scenario
+    nominal, _ = BasalMeltRate(options, step, floating, Q, surface, thickness,
+        scenario=melt_scenario(float(step) * float(options["dt"])), experiment=EXPERIMENT_WRONG)
+    return Function(Q).interpolate((float(amplitude) / 20.0) * nominal)
+
+
+def project_depth_law_melt(analyzed_melt, floating, Q, surface, thickness, step, options, *, advance_dt=0.0):
+    """Recover an estimated amplitude from owned fields using collective integrals."""
+    from ._melt_forcing import advance_melt_amplitude
+    basis = depth_law_melt(1.0, floating, Q, surface, thickness, step, options)
+    numerator = float(assemble(analyzed_melt * basis * dx))
+    denominator = float(assemble(basis * basis * dx))
+    amplitude = advance_melt_amplitude(numerator, denominator, advance_dt, options)
+    return depth_law_melt(amplitude, floating, Q, surface, thickness, step, options), amplitude
+
+
 def profile_path(data_path, name):
     """Path of the flowline-profile file ``<data_path>/<name>.h5``. Runs made
     before the .h5 extension was added wrote ``<data_path>/<name>``; that
@@ -384,7 +409,7 @@ def initialize_model(**icesee_kwargs):
 
     # ---- Initial basal melt  ----
     k = 0 # time step (ICESEE uses 'k' as the time-stepping index)
-    basal_melt_field, melt_max0 = BasalMeltRate(icesee_kwargs, step=k, floating=floating, Q=Q, s=s0, h=h0, scenario="control", experiment=EXPERIMENT_TRUE)
+    basal_melt_field, melt_max0 = BasalMeltRate(dict(icesee_kwargs, h0=h0, s0=s0), step=k, floating=floating, Q=Q, s=s0, h=h0, scenario="control", experiment=EXPERIMENT_TRUE)
 
 
 

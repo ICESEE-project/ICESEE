@@ -1,5 +1,17 @@
 #!/bin/bash
 set -euo pipefail
+if [[ -n "${ICESEE_JIT_GCC_MODULE:-}" ]]; then
+  if type module >/dev/null 2>&1; then
+    module load "$ICESEE_JIT_GCC_MODULE"
+  elif [[ -x "${LMOD_CMD:-}" ]]; then
+    eval "$("$LMOD_CMD" bash load "$ICESEE_JIT_GCC_MODULE")"
+  else
+    echo 'The requested JIT compiler requires the PACE module environment' >&2
+    exit 2
+  fi
+  export OMPI_CC="$(command -v gcc)"
+  printf '#include <stddef.h>\nint main(void){return 0;}\n' | mpicc -x c -fsyntax-only -
+fi
 local_tmp="${TMPDIR:-/tmp}"
 # PACE's measured working layout used /tmp. Reject shared scratch for caches.
 fs_type="$(stat -f -c %T "$local_tmp" 2>/dev/null || true)"

@@ -361,3 +361,42 @@ def test_forecast_only_step_is_not_affected_by_spread_guard():
         icesee_kwargs={"Nens": 2}, error_mode="legacy_prior_anomalies",
     )
     np.testing.assert_array_equal(result.transform, np.eye(2))
+
+@pytest.mark.parametrize('grouped', [False, True])
+def test_cycle_returns_and_checkpoints_finalized_physical_state(tmp_path, grouped):
+    import h5py
+    class Constrained(_Adapter):
+        def finalize_native_analysis(self, member, forecast_owned, timestep, **kwargs):
+            member.unpack_owned(np.maximum(30., member.pack_owned()))
+    pool = NativeDistributedMemberPool({0:_member(0),1:_member(1)})
+    arguments=dict(topology=_topology(),icesee_kwargs={'Nens':2},
+                   error_mode='legacy_prior_anomalies',
+                   checkpoint_request=NativeCheckpointRequest(tmp_path,'constrained-cycle'))
+    if grouped:
+        target=DistributedAnalysisTargets('state',np.array([1,3]),np.array([1,3]),np.array([[.25],[.75]]),('state',))
+        observations=DistributedObservationCoordinates('state',np.array([0,4]),np.array([[.2],[.8]]))
+        result=run_native_grouped_local_analysis_cycle(pool,Constrained(),1,
+            [NativeLocalAnalysisRequest(target,observations,np.array([2.,7.]),.1)],**arguments)
+    else:
+        result=run_native_global_analysis_cycle(pool,Constrained(),1,
+            [NativeObservationBatch(np.array([0,4]),np.array([2.,7.]))],
+            number_of_batches=1,state_row_chunk_size=2,**arguments)
+    with h5py.File(result.checkpoint.path/'shard_00000000.h5','r') as f:
+        for mid in pool.member_ids:
+            np.testing.assert_array_equal(result.local_analysis.members[mid],pool.member(mid).pack_owned())
+            assert result.local_analysis.members[mid].min()>=30
+            np.testing.assert_array_equal(f[f'member_{mid}/state'][:],result.local_analysis.members[mid])
+
+
+def test_prescribed_r_cycle_matches_dense_Kalman_update(tmp_path):
+    pool=NativeDistributedMemberPool({i:_member(i) for i in (0,1)})
+    observed=np.array([2.,7.]);errors={0:np.array([-.2,.3]),1:np.array([.2,-.3])}
+    batch=NativeObservationBatch(np.array([0,4]),observed,errors,np.array([.5,.8]))
+    result=run_native_global_analysis_cycle(pool,_Adapter(),1,[batch],number_of_batches=1,
+        topology=_topology(),icesee_kwargs=dict(Nens=2,enkf_gain_formulation='prescribed_r',
+        enkf_observation_error_mode='stochastic_R'),error_mode='stochastic_R',state_row_chunk_size=2)
+    x=np.column_stack([np.arange(5.)+1,np.arange(5.)+11])
+    p=np.cov(x);rows=[0,4]
+    gain=np.linalg.solve(p[np.ix_(rows,rows)]+np.diag([.5,.8]),p[rows,:]).T
+    expected=x+gain@(observed[:,None]+np.column_stack(list(errors.values()))-x[rows,:])
+    for i in (0,1):np.testing.assert_allclose(result.local_analysis.members[i],expected[:,i],atol=1e-12)

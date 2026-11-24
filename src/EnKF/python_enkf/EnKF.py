@@ -21,6 +21,10 @@ from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import 
 from ICESEE.src.utils.tools import icesee_get_index
 from ICESEE.src.run_model_da._error_generation import generate_enkf_field
 from ICESEE.src.utils.random_streams import process_noise_seed
+from ICESEE.src.utils.process_noise import (
+    process_noise_event_coefficients, process_noise_variable_mask, process_noise_normalization,
+    process_noise_spatial_mode,
+)
 
 
 # Move `worker` to global scope
@@ -92,6 +96,13 @@ class EnsembleKalmanFilter:
         rho           = icesee_kwargs.get("rho", 1.0)
         base_seed      = icesee_kwargs.get("base_seed", 42)
         k              = int(icesee_kwargs.get("k", 0))
+        noise_due = True
+        if process_noise_normalization(icesee_kwargs) == "physical_ar1":
+            from ICESEE.src.parallelization._mpi_forecast_functions import process_noise_is_due
+            noise_due = process_noise_is_due(icesee_kwargs, k)
+        if noise_due:
+            alpha, rho = process_noise_event_coefficients(icesee_kwargs, k)
+        variable_mask = process_noise_variable_mask(icesee_kwargs)
 
 
         if re.match(r"\Aserial\Z", self.analysis_backend, re.IGNORECASE):
@@ -127,6 +138,9 @@ class EnsembleKalmanFilter:
                 for key,value in updated_state.items():
                     ensemble[indx_map[key],ens] = value
 
+                if not noise_due:
+                    continue
+
                 # add process noise
                 noise_all = []
                 q0 = []
@@ -147,9 +161,15 @@ class EnsembleKalmanFilter:
                                     # that ambiguity entirely, matching generate_initial_member_increment's
                                     # own pattern in _error_generation.py.
                                     icesee_kwargs.update({"ii_sig": ii, "seed": seed, "rng": np.random.default_rng(seed), "Lx_dim": np.sqrt(Lx*Ly), "noise_dim": len(indx_map[key]), "hdim":hdim, "num_vars":icesee_kwargs["total_state_param_vars"]})
-                                    W = generate_enkf_field(**icesee_kwargs)
+                                    if not variable_mask[ii]:
+                                        W = np.zeros(len(indx_map[key]))
+                                    elif process_noise_spatial_mode(icesee_kwargs, ii) == "global_scalar":
+                                        W = np.full(len(indx_map[key]), np.random.default_rng(seed).standard_normal())
+                                    else:
+                                        W = generate_enkf_field(**icesee_kwargs)
                                     previous = self._process_noise_state[indx_map[key], ens]
-                                    noise_ = alpha*previous + np.sqrt(1 - alpha**2)*W
+                                    noise_ = (alpha*previous + np.sqrt(1 - alpha**2)*W
+                                              if variable_mask[ii] else np.zeros_like(W))
                                     q0.append(noise_)
 
                                     Z = np.sqrt(dt)*sig*rho*noise_

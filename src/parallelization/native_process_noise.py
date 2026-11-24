@@ -38,6 +38,10 @@ def canonical_noise_identity(options):
     policy = process_noise_normalization(options)
     if policy != "legacy_run_length":
         payload["process_noise_normalization"] = policy
+    for key in ("process_noise_correlation_time", "process_noise_start", "process_noise_vars",
+                "graph_physical_length", "graph_max_neighbors", "process_noise_start_step", "process_noise_spatial_policy"):
+        if key in options:
+            payload[key] = options[key]
     payload["time_grid_contract"] = TIME_GRID_CONTRACT
     encoded = json.dumps(payload,sort_keys=True,
                          default=lambda value:np.asarray(value).tolist())
@@ -93,7 +97,7 @@ class NativeProcessNoiseAdapter:
         # Reconstruct AR state at the saved checkpoint using exactly the same
         # generator and update order. Replay never changes physical fields.
         if member_id not in self._last:
-            for k in range(timestep):
+            for k in range(int(options.get("process_noise_start_step", 0)), timestep):
                 options['k'] = k
                 if process_noise_is_due(options, k):
                     add_member_process_noise(np.zeros(self.nd), member_id, options)
@@ -123,7 +127,15 @@ class NativeProcessNoiseAdapter:
         owned = member.pack_owned()
         if owned.shape != local_increment.shape:
             raise ValueError('native noise map does not match the owned field layout')
-        member.unpack_owned(owned + local_increment)
+        apply_noise = getattr(self.adapter, "apply_native_process_noise", None)
+        if apply_noise is None:
+            member.unpack_owned(owned + local_increment)
+        else:
+            apply_noise(member, owned, local_increment, timestep,
+                        topology=topology, icesee_kwargs=icesee_kwargs)
+        finalize_noise = getattr(self.adapter, "finalize_forecast_noise", None)
+        if finalize_noise is not None:
+            finalize_noise(member, timestep, topology=topology, icesee_kwargs=icesee_kwargs)
 
     def close(self):
         if self._scratch is not None:

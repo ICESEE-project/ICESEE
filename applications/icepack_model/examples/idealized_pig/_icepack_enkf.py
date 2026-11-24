@@ -313,7 +313,10 @@ def generate_nurged_state(**icesee_kwargs):
     statevec_nurged[indx_map['u'], 0] = u0.dat.data_ro[:, 0]
     statevec_nurged[indx_map['v'], 0] = u0.dat.data_ro[:, 1]
     statevec_nurged[indx_map['s'], 0] = s0.dat.data_ro
-    if icesee_kwargs['joint_estimation']:
+    if melt_spatial_policy(icesee_kwargs) == 'fixed_initial_depth':
+        basal_melt_field, _ = BasalMeltRate(
+            icesee_kwargs, 0, floating, Q, s0, h0, experiment=EXPERIMENT_WRONG)
+    elif icesee_kwargs['joint_estimation']:
         nudged = basal_melt_field.dat.data_ro + icesee_kwargs['wrong_basal_melt_field']
         basal_melt_field = Function(Q)
         basal_melt_field.dat.data[:] = nudged

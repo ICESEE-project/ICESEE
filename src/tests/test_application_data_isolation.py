@@ -37,7 +37,8 @@ def _example_with_existing_dataset(tmp_path):
 
 def _import_config(cwd, *argv):
     env = dict(os.environ)
-    env["PYTHONPATH"] = f"{_REPO_ROOT.parent}:{_REPO_ROOT}"
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, (
+        str(_REPO_ROOT.parent), str(_REPO_ROOT), env.get("PYTHONPATH"))))
     for name in ("OMPI_COMM_WORLD_RANK", "PMIX_RANK", "PMI_RANK", "MV2_COMM_WORLD_RANK"):
         env.pop(name, None)
     return subprocess.run(

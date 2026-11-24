@@ -63,7 +63,7 @@ def generate_true_wrong_state(**icesee_kwargs):
         gen_true   = bool(icesee_kwargs.get("generate_true_state", True))
         gen_nurged = bool(icesee_kwargs.get("generate_nurged_state", True))
 
-        if not gen_true and not os.path.exists(_true_nurged):
+        if not (gen_true or gen_nurged) and not os.path.exists(_true_nurged):
             raise FileNotFoundError(f"{_true_nurged} not found, but generation is disabled.")
 
         # If neither is requested, do nothing (assume existing file/datasets are already there)

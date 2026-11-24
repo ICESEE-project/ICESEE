@@ -16,6 +16,7 @@ def test_segmented_native_and_store_controls_match_dense_reference():
     transform=np.array([[.8,.1,.2],[.1,.7,.2],[.1,.2,.6]])
     options=dict(nd=10,Nens=3,vec_inputs=["h","parameter"],num_state_vars=1,
                  state_inflation_factor=1.3,param_inflation_factor=1.1,
+                 analysis_spread_relaxation_factors={"h":.4,"parameter":.7},
                  analysis_relaxation_factor=.8,bed_update_policy="always")
     global_rows=layout.local_to_global_rows(np.arange(6))
     expected=apply_analysis_controls_local(

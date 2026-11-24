@@ -102,7 +102,8 @@ steps = round(years / dt)
 if steps < 1:
     raise ValueError("Duration and dt must produce at least one forecast step")
 Path(sys.argv[3]).write_text(yaml.safe_dump(cfg, sort_keys=False))
-for value in (mode, nens, spatial, years, dt, steps, enkf.get("data_path", "_modelrun_datasets")):
+for value in (mode, nens, spatial, years, dt, steps, enkf.get("data_path", "_modelrun_datasets"),
+              int(bool(enkf.get('resume_from_checkpoint', False))), int(bool(enkf.get('mode3_export_ensemble_history',False)))):
     print(value)
 PYTHON
 )" || exit 2
@@ -113,10 +114,15 @@ NUM_YEARS="${VALUES[3]}" DT="${VALUES[4]}" STEP_COUNT="${VALUES[5]}"
 printf 'Source: %s\nDependencies: %s\nParameters: %s\nExecution mode: %s\n' "$ICESEE_ROOT" "$SPACK_REPO" "$RUN_PARAMETERS" "$MODE"
 NODES="${SLURM_JOB_NUM_NODES:?Run this script with sbatch}"
 NP="${SLURM_NTASKS:?Missing Slurm task count}"
-TPN="${ICESEE_TASKS_PER_NODE:-${SLURM_NTASKS_PER_NODE:-8}}"
-for value in "$NENS" "$MODEL_NPROCS" "$NODES" "$NP" "$TPN"; do
+TPN="${ICESEE_TASKS_PER_NODE:-${SLURM_NTASKS_PER_NODE:-}}"
+for value in "$NENS" "$MODEL_NPROCS" "$NODES" "$NP"; do
   [[ "$value" =~ ^[1-9][0-9]*$ ]] || { echo "Counts must be positive integers" >&2; exit 2; }
 done
+if [[ -z "$TPN" ]]; then
+  (( NP % NODES == 0 )) || { echo "Use a uniform tasks/node allocation" >&2; exit 2; }
+  TPN=$((NP / NODES))
+fi
+[[ "$TPN" =~ ^[1-9][0-9]*$ ]] || { echo "Tasks/node must be a positive integer" >&2; exit 2; }
 (( ${SLURM_CPUS_PER_TASK:-1} == 1 )) || { echo "Use one CPU per MPI rank" >&2; exit 2; }
 (( NP == NODES * TPN && (MODE != 3 || TPN % MODEL_NPROCS == 0) )) || {
   echo "Use a uniform tasks/node allocation divisible by the YAML model_nprocs" >&2; exit 2;
@@ -126,11 +132,22 @@ GROUPS_COUNT=$((NP / MODEL_NPROCS))
 # Native groups use the allocated MPI ranks without extra coordinators.
 if (( MODE != 3 )); then GROUPS_COUNT="n/a"; fi
 
-OUTDIR="$PIG_DIR/pace_runs/mode${MODE}-${SLURM_JOB_ID:?}"
+DEFAULT_OUTDIR="$PIG_DIR/pace_runs/mode${MODE}-${SLURM_JOB_ID:?}"
+OUTDIR="${ICESEE_LOG_PATH:-$DEFAULT_OUTDIR}"
 [[ ! -e "$OUTDIR" ]] || { echo "Log directory exists: $OUTDIR" >&2; exit 2; }
 DATA_DIR="${ICESEE_DATA_PATH:-${VALUES[6]}}"
+RESUME="${VALUES[7]}" EXPORT_HISTORY="${VALUES[8]}"
 [[ "$DATA_DIR" == /* ]] || DATA_DIR="$PIG_DIR/$DATA_DIR"
-if [[ -e "$DATA_DIR" || -L "$DATA_DIR" ]]; then
+python - "$OUTDIR" "$DATA_DIR" <<'PYTHON'
+from pathlib import Path
+import sys
+logs, data = (Path(value).resolve() for value in sys.argv[1:])
+if logs == data or data in logs.parents:
+    raise SystemExit("Logs must be outside the dataset directory that configuration may recreate")
+PYTHON
+if [[ "$RESUME" == 1 ]]; then
+  [[ "$MODE" == 3 && -d "$DATA_DIR/_mode3_state_history" && ! -L "$DATA_DIR" ]] || { echo 'Resume requires a Mode-3 checkpoint history in a real dataset directory' >&2; exit 2; }
+elif [[ -e "$DATA_DIR" || -L "$DATA_DIR" ]]; then
   echo "Preserve existing results first, or set a new ICESEE_DATA_PATH: $DATA_DIR" >&2
   exit 2
 fi
@@ -139,7 +156,9 @@ DATA_LOCK="${DATA_DIR}.launch-lock"
 mkdir "$DATA_LOCK" || { echo "Output is locked: $DATA_LOCK" >&2; exit 2; }
 LOCK_HELD=1
 # Recheck after acquiring the lock in case another launcher just finished.
-[[ ! -e "$DATA_DIR" && ! -L "$DATA_DIR" ]] || { echo "Output appeared: $DATA_DIR" >&2; exit 2; }
+if [[ "$RESUME" == 0 ]]; then
+  [[ ! -e "$DATA_DIR" && ! -L "$DATA_DIR" ]] || { echo "Output appeared: $DATA_DIR" >&2; exit 2; }
+fi
 mkdir -p "$OUTDIR"
 { git -C "$ICESEE_ROOT" rev-parse HEAD; git -C "$ICESEE_ROOT" status --short; } > "$OUTDIR/source.txt"
 
@@ -179,7 +198,7 @@ set +e
 RESULT=$?
 set -e
 printf '%s\n' "$RESULT" > "$OUTDIR/exit-status"
-if (( RESULT != 0 && MODE == 3 )); then
+if (( RESULT != 0 && MODE == 3 && EXPORT_HISTORY == 1 )); then
   # MPI has stopped: recover only snapshots with committed manifests.
   set +e
   python "$ICESEE_ROOT/src/parallelization/distributed_history_export.py" \

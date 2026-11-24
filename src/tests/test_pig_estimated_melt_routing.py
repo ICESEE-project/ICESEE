@@ -8,7 +8,7 @@ import pytest
 
 from ICESEE.applications.icepack_model.examples.idealized_pig._melt_forcing import (
     melt_forecast_mode, initial_melt_values, bounded_melt_values,
-    configure_melt_experiment,
+    configure_melt_experiment, bind_melt_reference,
 )
 
 PIG=Path(__file__).resolve().parents[2]/'applications/icepack_model/examples/idealized_pig'
@@ -31,6 +31,7 @@ def field(values):
 
 
 def load_functions(filename,names,namespace):
+    namespace["bind_melt_reference"] = bind_melt_reference
     tree=ast.parse((PIG/filename).read_text())
     nodes=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name in names]
     assert len(nodes)==len(names)

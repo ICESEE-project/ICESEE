@@ -1,5 +1,9 @@
 # Production operations and six month handover
 
+For numerical retries, committed boundary stops and bounded Slurm continuation,
+see [forecast recovery and continuation](../forecast-recovery-and-continuation.md)
+and the [PIG commands](../../applications/icepack_model/examples/idealized_pig/README.md#bounded-recovery-and-automatic-continuation).
+
 Operate ICESEE as a collection of reproducible scientific cases. Keep an approved source/environment baseline available, submit new work into separate run directories, and record who accepts its physical results. A long successful queue run should not require access to the principal developer's shell history, private home directory, or unpublished local files.
 
 ## Responsibilities and decisions

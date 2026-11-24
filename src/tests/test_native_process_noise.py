@@ -9,7 +9,7 @@ from ICESEE.src.parallelization.distributed_native_runtime import NativeDistribu
 from ICESEE.src.parallelization.distributed_whole_member_adapter import build_whole_member_field_registry
 
 
-def setup_adapter(monkeypatch, *, nt=6, policy="legacy_run_length"):
+def setup_adapter(monkeypatch, *, nt=6, policy="legacy_run_length", **controls):
     monkeypatch.setattr(canonical, 'generate_enkf_field',
                         lambda **kw: kw['rng'].standard_normal(kw['noise_dim']))
     options = dict(nd=9, nt=nt, dt=.05, num_state_vars=2,
@@ -18,6 +18,7 @@ def setup_adapter(monkeypatch, *, nt=6, policy="legacy_run_length"):
                    localization_flag=False, Lx=100., Ly=20.,
                    sig_Q=[.8,.4,.2], base_seed=42,
                    obs_index=np.array([1,3,5]), number_obs_instants=3)
+    options.update(controls)
     topology = SimpleNamespace(spatial_comm=MPI.COMM_SELF)
     underlying = SimpleNamespace(forecast_native_member=lambda *a,**kw:None,
                                  restore_native_checkpoint=object())
@@ -159,3 +160,21 @@ def test_noise_identity_separates_normalizations_without_changing_legacy_ids():
     original = canonical_noise_identity({})
     assert canonical_noise_identity({"process_noise_normalization":"legacy_run_length"}) == original
     assert canonical_noise_identity({"process_noise_normalization":"per_step"}) != original
+
+
+def test_physical_noise_resume_replays_same_selected_controls(monkeypatch):
+    settings=dict(policy="physical_ar1",process_noise_correlation_time=1.,
+        process_noise_start="stationary",vec_inputs=['h','u','parameter'],process_noise_vars=['h'])
+    first,topology,options,_=setup_adapter(monkeypatch,**settings)
+    second,_,_,_=setup_adapter(monkeypatch,**settings)
+    a=member()
+    try:
+        for k in range(3):first.forecast_native_member(a,k,topology=topology,icesee_kwargs=options)
+        b=member(values=a.pack_owned().copy())
+        for k in range(3,6):
+            first.forecast_native_member(a,k,topology=topology,icesee_kwargs=options)
+            second.forecast_native_member(b,k,topology=topology,icesee_kwargs=options)
+        np.testing.assert_array_equal(a.pack_owned(),b.pack_owned())
+        np.testing.assert_array_equal(a.pack_owned()[3:],np.zeros(6))
+    finally:
+        first.close();second.close()

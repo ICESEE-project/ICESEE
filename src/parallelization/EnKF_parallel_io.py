@@ -35,6 +35,10 @@ from typing import Callable, Optional, TypeVar, Any
 from ICESEE.src.utils.tools import icesee_get_index
 from ICESEE.src.utils.localization import iter_generated_observation_columns
 from ICESEE.src.utils.utils import cross_flow_track_mask
+from ICESEE.src.parallelization.distributed_analysis import (
+    resolve_gain_formulation, StochasticAnalysisProducts,
+    ensemble_transform_from_products as native_transform_from_products,
+)
 
 T = TypeVar("T")
 
@@ -2214,6 +2218,7 @@ class EnKF_fully_parallel_IO:
             error_mode = str(icesee_kwargs.get(
                 "enkf_observation_error_mode", "stochastic_R"
             )).lower()
+            gain_formulation = resolve_gain_formulation(icesee_kwargs)
             if error_mode not in {
                 "stochastic_r", "legacy_prior_anomalies", "generated_r"
             }:
@@ -2341,9 +2346,19 @@ class EnKF_fully_parallel_IO:
                             eta = _read_rows_preserve_order(eta_dset, positions)
                             innovations = observations[:, None] + eta - forecast
                         factor = yprime + eta
-                        cross_local += yprime.T @ factor
-                        gram_local += factor.T @ factor
-                        rhs_local += factor.T @ innovations
+                        if gain_formulation == "prescribed_r":
+                            if "obs_std" not in obs_handle:
+                                raise ValueError("prescribed_r requires obs_std metadata")
+                            sigma = np.asarray(obs_handle["obs_std"][positions], dtype=float)
+                            if not np.all(np.isfinite(sigma)) or np.any(sigma <= 0):
+                                raise ValueError("prescribed_r requires positive observation std")
+                            white = yprime / sigma[:, None]
+                            gram_local += white.T @ white
+                            rhs_local += white.T @ (innovations / sigma[:, None])
+                        else:
+                            cross_local += yprime.T @ factor
+                            gram_local += factor.T @ factor
+                            rhs_local += factor.T @ innovations
                         if local_terms is not None:
                             local_terms.append((
                                 rows.copy(), yprime.copy(), eta.copy(),
@@ -2374,10 +2389,14 @@ class EnKF_fully_parallel_IO:
             cross, gram, rhs, local_terms, icesee_kwargs = self.compute_X5_utils_(
                 state_dset=state_dset, **icesee_kwargs
             )
-            X5 = ensemble_transform_from_products(
-                cross, gram, rhs,
-                float(icesee_kwargs.get("analysis_svd_energy", 0.999)),
-            )
+            if resolve_gain_formulation(icesee_kwargs) == "prescribed_r":
+                X5 = native_transform_from_products(StochasticAnalysisProducts(
+                    cross, gram, rhs, gain_formulation="prescribed_r"))
+            else:
+                X5 = ensemble_transform_from_products(
+                    cross, gram, rhs,
+                    float(icesee_kwargs.get("analysis_svd_energy", 0.999)),
+                )
             if not np.allclose(np.sum(X5, axis=0), 1.0, rtol=1e-8, atol=1e-8):
                 print(f"\n[ICESEE] X5 column sums differ from 1: {np.sum(X5, axis=0)}\n")
 

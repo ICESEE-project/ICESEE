@@ -547,6 +547,9 @@ if not flag_jupyter:
     # home directory, or the filesystem root, to guard against an
     # accidental catastrophic delete from a misconfigured data_path.
     _data_path_abs = os.path.abspath(data_path)
+    from ICESEE.src.utils.reference_data import validate_reference_paths
+    validate_reference_paths(data_path, _parse_generic_cli_overrides(_cli_extra_argv).get(
+        'reference_data_path', icesee_kwargs.get('reference_data_path')))
     _unsafe_data_paths = {os.path.abspath(p) for p in (os.getcwd(), os.path.expanduser('~'), '/')}
     if _data_path_abs in _unsafe_data_paths:
         raise ValueError(

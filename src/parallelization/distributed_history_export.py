@@ -322,12 +322,13 @@ def export_ensemble_history(data_path, *, row_chunk_size=8192, allow_partial=Fal
     return target
 
 
-def finalize_ensemble_history(world, data_path, *, row_chunk_size=8192):
+def finalize_ensemble_history(world, data_path, *, row_chunk_size=8192, allow_partial=False):
     """Export on world root and broadcast failure before any rank proceeds."""
     result, error = None, None
     if int(world.Get_rank()) == 0:
         try:
-            result = str(export_ensemble_history(data_path, row_chunk_size=row_chunk_size))
+            result = str(export_ensemble_history(data_path, row_chunk_size=row_chunk_size,
+                                                allow_partial=allow_partial))
         except Exception as exc:
             error = f'{type(exc).__name__}: {exc}'
     result, error = world.bcast((result, error), root=0)

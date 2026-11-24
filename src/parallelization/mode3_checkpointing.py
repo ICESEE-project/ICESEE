@@ -544,6 +544,7 @@ class Mode3CheckpointManager:
         files_per_checkpoint: int,
         include_initial: bool,
         warn_fraction: float = 0.5,
+        end_step: int | None = None,
     ) -> dict[str, int] | None:
         """Print the projected checkpoint footprint; warn if it is excessive.
 
@@ -554,7 +555,7 @@ class Mode3CheckpointManager:
             return None
         estimate = estimate_checkpoint_storage(
             self.policy,
-            nt=self.nt,
+            nt=self.nt if end_step is None else min(self.nt, int(end_step)),
             start_step=start_step,
             analysis_steps=self.analysis_steps,
             bytes_per_checkpoint=bytes_per_checkpoint,

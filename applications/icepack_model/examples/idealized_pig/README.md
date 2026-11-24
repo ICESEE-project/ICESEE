@@ -674,10 +674,14 @@ mpirun -np 8 python run_da_icepack.py \
   --resume_from_checkpoint=True
 ```
 
-For Slurm, create a dedicated resume launcher retaining the same environment,
-resource binding and provenance, with an existing-data check appropriate for
-resume. **Do not reuse the common fresh-run launcher unchanged:** it correctly
-refuses an existing data target. Do not remove its guards for routine fresh runs.
+For Slurm, use the common launcher with a separate copy of the original YAML.
+Set `resume_from_checkpoint: true` and the original absolute `data_path` in
+`enkf-parameters`; disable ensemble initialization and truth/observation/background
+generation in that copy. Keep the original duration, dt, ensemble, observations,
+noise, forcing, input paths and physical policies. Then submit
+`sbatch run_idealized_1.sbatch -F /absolute/path/to/resume.yaml` from this example.
+The launcher requires an existing native history for resume and retains the
+fresh-run existing-target guard.
 
 The generic native policy can retain only the newest two step checkpoints;
 the PIG plotting workflow instead sets `checkpoint_every=1` and
@@ -685,6 +689,71 @@ the PIG plotting workflow instead sets `checkpoint_every=1` and
 export for an older rolling archive with missing times. These settings affect
 storage and restart availability. Arbitrary mesh/topology migration is not established by
 the short same-topology restart test.
+
+### Bounded recovery and automatic continuation
+
+The native PIG adapter supports optional forecast subcycling. A shared controller
+is reusable by adapters that can restore their full model state. It retries
+explicitly identified nonlinear forecast failures with smaller internal steps,
+without changing external `dt`, observation times or history columns. Failed
+attempts are rolled back; process noise is applied once after a successful
+external forecast. PIG profiles are written after the accepted forecast. Solver
+settings, thickness floor, analysis acceptance limit and filter are unchanged.
+
+For external `dt=0.05`, this sensitivity configuration permits three halvings:
+
+```yaml
+enkf-parameters:
+  forecast_recovery:
+    max_halvings: 3
+    min_dt: 0.00625
+    max_substeps: 8
+```
+
+These values illustrate the controls, rather than prescribing a validated PIG
+configuration. Recovery is disabled when the key is absent. Selecting or changing
+it changes checkpoint identity; an incompatible existing run is refused. Validate
+it in a fresh case. Analysis rejections, compiler/input errors and process loss
+are not numerical forecast retries. PIG integration currently requires Mode 3;
+other adapters must supply their own complete rollback and substep callbacks.
+
+For long runs, `run_segment_cycles` or `run_walltime_seconds` requests a stop after
+an accepted cycle and its checkpoint. Initialization counts against the wall-time
+budget. Reserve scheduler time for the slowest cycle, checkpoint, cleanup and final
+aggregate. `checkpoint_every: 1` is required. Signals `SIGUSR1` and `SIGTERM` request
+the same stop while the controller is active; a blocked collective or hard kill
+still needs a later restart. Intermediate segments retain shards and defer the
+full aggregate until completion.
+
+The continuation tool freezes expanded YAML and source identity. It preserves the
+forcing horizon and scientific settings, records each submission before contacting
+Slurm, reconciles uncertain outcomes and enforces an explicit submission budget.
+Scientific failure stops the chain. Transient scheduler failures are eligible for
+continuation only if a new committed cycle exists. `prepare` submits nothing;
+`tick` may submit one segment and `watch` submits permitted successors:
+
+```bash
+# Run in this example, using the normal activated dependency environment.
+# The YAML must select Mode 3 and checkpoint_every=1.
+python tools/continue_case.py prepare pace_runs/continued-case \
+  -F /absolute/path/to/experiment.yaml \
+  --data "$PWD/pace_runs/continued-case-data" \
+  --dependencies "$HOME/r-arobel3-0/ICESEE-Spack" \
+  --nodes 1 --ranks 8 --memory 48G --walltime 02:00:00 \
+  --run-seconds 5400 --segment-cycles 100 --max-submissions 20
+
+python tools/continue_case.py tick pace_runs/continued-case
+python tools/continue_case.py watch pace_runs/continued-case
+```
+
+Choose budgets from measured cycle/output costs and site allocation rules. The
+example permits twenty two-hour allocations; this is not a default budget.
+Keep one supervisor per case. If its terminal closes, invoking `watch` again
+reconciles the recorded job. Inspect a stale `.supervisor-lock/owner.json` and
+confirm no supervisor is alive before removing that lock manually. Unknown
+submission outcomes are held for reconciliation. Do not edit active-case source.
+
+See the [recovery contracts and validation limits](../../../../docs/forecast-recovery-and-continuation.md).
 
 ## 10. Plot and compare runs
 
@@ -720,9 +789,52 @@ plt.xlabel("Time (years)")
 plt.legend()
 ```
 
-The existing notebook's ensemble-loading cells can use those same dataset names.
-Mesh-map cells must use the actual PIG mesh and compatible row ordering; a
-rectangular template mesh is not evidence of a correct physical map.
+Open `read_results.ipynb` from this example directory. In its configuration cell,
+set `results_dir` to the completed run's `data` directory, then restart the kernel
+and run all cells. `ICESEE_DATA_PATH`, if set in the notebook environment, overrides
+that default. No simulation configuration import, MPI initialization or Firedrake
+mesh reconstruction is needed. The notebook provides:
+
+- Member time series, means and 10–90% member ranges for thickness, surface,
+  velocity components, speed and basal melt.
+- Local absolute error versus sample ensemble standard deviation. These are
+  point diagnostics, not domain-wide or area-weighted RMSE.
+- Bed, surface, base and thickness profiles at actual saved flowline years.
+- Spatial snapshots on verified PIG coordinates, with an explicitly labelled
+  DOF-index fallback if coordinates are unavailable.
+
+Use `point_index` for a scalar-space DOF or `point_xy_m=(x, y)` for the nearest
+physical location in metres. `time_stride=1` uses every saved timestep; increase
+it for quicker exploration of long histories. Snapshot and profile years are
+selected from the available saved times. Missing backgrounds are omitted, and
+observation markers appear only for variables identified as observed in the
+run's saved `params.yaml`. Surface elevation is measured in metres, not SMB units.
+The default point is a reproducible active-melt example; it is not selected by
+agreement with truth and does not represent the whole domain.
+
+The reader in `ICESEE.src.postprocessing.pig` keeps state/ensemble arrays as
+HDF5 datasets. Its `extract_datasets_from_h5` convenience function is for small
+metadata files and rejects large histories before allocating them. Existing
+custom plots can use `results.point(...)`, `results.snapshot(...)`, or explicit
+slices of `ensemble_vec_full` and `ensemble_vec_mean`. Do not apply `[:]` to a
+complete ensemble or truth history. `reference_dir` can locate shared truth and
+observations if a copied run's original `reference_data_path` is unavailable.
+
+Physical maps require `dof_coordinates.h5` in `serial_reference` order. For
+native PIG checkpoints whose stored coordinate fingerprint matches the compact
+initial checkpoint, export these coordinates without starting a model:
+
+```python
+from ICESEE.src.postprocessing.pig import export_reference_coordinates
+export_reference_coordinates(data, "data/extended_beta1000yrs_compact_idx20000.h5")
+```
+
+The exporter verifies the native coordinate fingerprint and all field row maps,
+refuses incompatible layouts and never replaces an existing coordinate file.
+Its verification currently requires the full native coordinate vector to match
+the saved shard fingerprints; an arbitrary repartitioned layout can be refused.
+The maps show node samples rather than inventing rectangular cells or filling
+domain holes. A rectangular template mesh is not a correct PIG map.
 
 The standalone comparison utility needs NumPy, h5py and Matplotlib, not
 Firedrake. Run it on **completed** native outputs:
@@ -1006,3 +1118,168 @@ plt.fill_between(times, lower, upper, alpha=0.25, label="10–90% member range")
 The quantile band describes ensemble members, not a confidence interval for the
 mean. Native PIG deliberately starts from identical physical fields, so zero
 initial physical spread is expected before the configured uncertainty evolves.
+
+### Physically constrained native analyses
+
+The opt-in `pig_analysis_state_policy: diagnostic_balance` (Mode 3) analyzes
+thickness and the basal-melt field, freezes direct analysis increments to
+`u`, `v`, and `s`, enforces the existing `hThresh` after every observation update,
+then derives surface, flotation/friction and diagnostic velocity from that
+geometry. Estimated melt is bounded and masked on the resulting geometry.
+Solver settings and initial physical fields are unchanged. Checkpoints/history
+record the finalized state, rather than the unconstrained analysis array.
+
+This changes the scientific analysis and requires a fresh experiment identity.
+The default `independent_fields` preserves existing runs. A 32-member, 30-year
+PACE diagnostic completed all eight analyses and finalized its history. However,
+its unweighted nodal thickness RMSE at year 30 was 14.07 m with RMS member spread
+only 0.00244 m; speed RMSE was 49.50 m/year. This is runtime and output evidence,
+not scientific acceptance. Physical consistency, uncertainty calibration and
+forcing-model error require separate checks.
+
+### Short stochastic EnKF comparisons
+
+The [stochastic EnKF validation guide](../../../../docs/pig-stochastic-enkf-validation.md)
+describes the prescribed-covariance gain, physical noise controls, depth-law melt
+predictor, immutable reference reuse and short diagnostic forks. The filter remains
+the stochastic EnKF. These policies are explicit experiment choices; the local
+checks do not establish a successful 82-year scientific trajectory.
+
+Use `pace/prepare_diagnostic_config.py --help` to prepare separate configurations.
+The `gain`, `balance`, `forcing` and `noise` variants apply changes cumulatively.
+`--no-analysis` prepares a matched forecast control. Noise amplitudes, correlation
+time, coordinate length, drift and projection limits have no calibrated defaults.
+The tool does not submit jobs or overwrite the example's `params.yaml`.
+
+
+### Local basal melt versus the prescribed maximum
+
+The truth simulation ramps the **maximum amplitude** from 20 to 100 m/year over
+the configured forcing horizon. This does not prescribe a straight-line melt
+history at every point. `BasalMeltRate` also uses the evolving ice-base draft
+`z = surface - thickness`, a depth-dependent factor and a floating-ice mask:
+
+```text
+local_melt = maximum_amplitude * depth_factor(draft, scenario) * floating_mask
+```
+
+For the `control` scenario, melt is zero for drafts at or above -450 m and reaches
+the full amplitude at or below -500 m, with a linear transition between them.
+The `warm` thresholds are -400 m and -450 m. The truth generator switches between
+these scenarios at its prescribed times. Consequently, local melt can jump when
+scenario thresholds change and can fall to zero as thinning raises the ice base
+above the shallow cutoff, even if the point remains floating. Zero melt alone
+cannot establish that a point has grounded. Plotting a fixed physical point does
+not prevent its grounding state or draft from evolving.
+
+Melt enters the thickness equation through net accumulation
+`(surface_mass_balance - basal_melt) * water_to_ice`. Removing local melt reduces
+that direct thinning contribution, while ice-flux divergence and surface mass
+balance can still change thickness. Thickness/surface changes also affect the
+diagnostic velocity solution. These feedbacks are distinct from numerical blow-up;
+check extrema, conservation and timestep sensitivity before drawing that conclusion.
+
+For early-stop diagnostics, `run_stop_time` does not shorten the original forcing
+horizon or accelerate its amplitude ramp. A saved post-step truth column contains
+the melt used over the preceding integration interval, evaluated from that
+interval's starting geometry. Compare forcing, geometry and times accordingly.
+If the intended experiment requires strictly linear local melt, removing the depth
+cutoff or changing scenario switches is a scientific change requiring a separate
+truth/observation dataset. A curve matching the implemented law does not by itself
+establish that the law matches the intended experiment.
+
+### Fixed initial melt pattern
+
+`basal_melt_spatial_policy: evolving_depth` is the default behavior described
+above. The optional `fixed_initial_depth` policy freezes the initial **control**
+depth factor and applies the current floating-ice mask:
+
+```text
+local_melt(t) = maximum_amplitude(t) * initial_control_depth_factor * floating_mask(t)
+```
+
+For an 82-year forcing horizon, the truth amplitude increases from 20 to 100
+m/year; the wrong-forcing reference retains amplitude 20 m/year. Both use the
+same initial spatial pattern. Scenario switches and subsequent draft changes
+do not change that pattern. Local melt increases linearly while the point stays
+floating, but grounding still sets it to zero. Locations with zero initial depth
+factor retain zero melt.
+
+Changing this policy requires new truth and synthetic observations in a separate
+output directory. Restarting an old trajectory at year 60 retains the first 60
+years of response to the old forcing; that is a forcing-intervention experiment,
+not the fixed-pattern baseline from year zero. Reuse the existing spin-up and
+installed dependencies, but regenerate the reference trajectories from their
+initial state. Independent truth and unassimilated wrong-forcing/background
+trajectories can run concurrently in separate processes and output directories;
+neither may overwrite the other's open HDF5 files. The new policy is under
+validation; its availability does not establish long-run scientific acceptance.
+
+To prepare independent jobs without allocating an ensemble, resolve a base YAML
+into separate fresh configurations:
+
+```bash
+python pace/prepare_reference_jobs.py params.yaml /absolute/path/to/new-reference-run
+sbatch pace/run_reference.sbatch -F /absolute/path/to/new-reference-run/truth/params.yaml
+sbatch pace/run_reference.sbatch -F /absolute/path/to/new-reference-run/background/params.yaml
+```
+
+Set `ICESEE_SOURCE_ROOT` to the source checkout containing this implementation
+and `ICESEE_SPACK_ROOT` to the installed dependency environment. The prepared
+configs retain the base duration, timestep, physical and observation settings;
+they select the fixed initial melt pattern. Each job uses the direct
+`tools/generate_reference.py` driver on one MPI rank, without assimilation
+dispatch or ensemble allocation. The truth job also
+generates observations; the background job generates only `nurged_state`.
+Their output directories are independent. A `reference_manifest.json` is
+published only after generation returns and its trajectory shape is checked.
+It records generation completion, not scientific acceptance. Check exit status,
+all time columns, finite values and physical ranges before using new references.
+
+### Optional relaxation to prior spread
+
+`analysis_spread_relaxation` and `analysis_spread_relaxation_factors` control RTPS
+within the existing stochastic EnKF. They are separate from
+`analysis_relaxation_factor`, which damps analysis increments. RTPS preserves the
+row's analyzed mean before subsequent bounds/model finalization and targets
+`SD_new = (1-alpha)*SD_analysis + alpha*SD_forecast`. Coefficients must be in
+`[0, 1]`; the default is zero, preserving existing behavior. Per-field settings
+are available through the shared bounded-row analysis controls in Modes 1–3.
+
+For a **sensitivity test**, not a calibrated production configuration:
+
+```yaml
+enkf-parameters:
+  analysis_spread_relaxation: 0.0
+  analysis_spread_relaxation_factors:
+    h: 0.5
+    basal_melt_field: 0.5
+  analysis_stage_diagnostics: true
+```
+
+The spread step follows existing multiplicative inflation, then existing bounds,
+frozen-field rules and physical finalization remain authoritative. Thus the final
+physical ensemble can have different moments from the unconstrained RTPS result.
+If analyzed spread is exactly zero, the centered forecast direction supplies the
+requested spread; if the forecast also has none, no artificial noise is created.
+No RNG draws or rank/member reassignments occur. Enabling/changing RTPS changes
+the PIG scientific experiment identity and cannot silently resume an old run.
+
+`analysis_stage_diagnostics` currently requires persistent native Mode 3. It
+records `forecast`, `raw_analysis`, `controlled_analysis` and `balanced_analysis`
+for each analysis at the **same model time**, under
+`<data_path>/_analysis_diagnostics/analysis_<cycle>.json`. Reports contain per-field
+nodal RMSE against cached truth, RMS sample member spread, extrema and nonfinite
+counts. They read one truth snapshot on ensemble roots and use bounded member
+rows; no full ensemble history is loaded. These are uniform owned-row summaries,
+not area-weighted ice-sheet metrics. The balanced stage precedes any optional
+inversion. Pair a report with its committed checkpoint; a report alone does not
+prove the cycle was committed.
+
+Use `pace/prepare_diagnostic_config.py --spread-relaxation 0.5
+--spread-fields h basal_melt_field --stage-diagnostics` with the other required
+arguments to create a separate test configuration. For paired short runs sharing
+one Slurm allocation, `ICESEE_LOG_PATH` selects a fresh per-case log directory;
+its default remains `pace_runs/mode<mode>-<jobid>`. Logs must sit outside the
+recreated dataset directory. No existing YAML or running source is changed by
+preparing a diagnostic configuration.

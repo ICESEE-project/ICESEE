@@ -105,7 +105,8 @@ def test_reference_profiles_preserve_initial_state_and_include_final_step(
     h, u, s, melt = FakeField([10., 11.]), FakeField([[1., 2.], [3., 4.]]), FakeField([20., 21.]), FakeField([0., 0.])
     mapping = {name: np.arange(i * 2, i * 2 + 2)
                for i, name in enumerate(('h', 'u', 'v', 's', 'basal_melt_field'))}
-    env = {'np': np, 'os': os, 'h5py': h5py,
+    from ICESEE.applications.icepack_model.examples.idealized_pig._melt_forcing import melt_spatial_policy
+    env = {'np': np, 'os': os, 'h5py': h5py, 'melt_spatial_policy': melt_spatial_policy,
            'profile_columns': profiles.profile_columns,
            'icesee_get_index': lambda **kw: (None, mapping, None),
            'initial_flowline_profile': lambda kw: (np.array([[10., 11.]]), np.array([[20., 21.]]), np.zeros((2, 2)), [0., 1.], [-1., -2.]),

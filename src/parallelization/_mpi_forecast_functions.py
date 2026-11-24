@@ -27,7 +27,11 @@ from ICESEE.src.utils.tools import icesee_get_index
 from ICESEE.src.run_model_da._error_generation import generate_enkf_field
 from ICESEE.src.utils.utils import UtilsFunctions
 from ICESEE.src.utils.random_streams import process_noise_seed as _process_noise_seed
-from ICESEE.src.utils.process_noise import process_noise_normalization
+from ICESEE.src.utils.process_noise import (
+    process_noise_normalization, process_noise_event_coefficients,
+    process_noise_variable_mask,
+    process_noise_spatial_mode,
+)
 
 from ICESEE.src.parallelization.parallel_mpi.icesee_mpi_parallel_manager import ParallelManager
 # rank_seed, rng = ParallelManager().initialize_seed(MPI.COMM_WORLD)
@@ -40,6 +44,10 @@ def process_noise_is_due(icesee_kwargs, k=None):
     Observation column j belongs to the state after forecast cycle j-1.
     All parallel modes apply configured noise before that state's analysis.
     """
+    if k is None:
+        k = int(icesee_kwargs.get("k", 0))
+    if int(k) < int(icesee_kwargs.get("process_noise_start_step", 0)):
+        return False
     schedule = str(
         icesee_kwargs.get("process_noise_schedule", "observations")
     ).strip().lower()
@@ -126,6 +134,7 @@ def _read_member_process_noise(icesee_kwargs, ens_id, size, timestep):
             last_k = int(handle.attrs.get("last_timestep", -1))
             stored_seed = int(handle.attrs.get("base_seed", -1))
             stored_policy = str(handle.attrs.get("process_noise_normalization", "legacy_run_length"))
+            stored_controls = str(handle.attrs.get("physical_noise_controls", ""))
             values = np.asarray(handle["noise"], dtype=np.float64)
         # A state from the same or a later cycle belongs to an older fresh run.
         if (
@@ -136,6 +145,8 @@ def _read_member_process_noise(icesee_kwargs, ens_id, size, timestep):
             return np.zeros(int(size), dtype=np.float64)
         if stored_policy != process_noise_normalization(icesee_kwargs):
             raise RuntimeError("saved AR state uses incompatible process-noise normalization; choose a fresh data_path")
+        if stored_controls != _physical_noise_controls(icesee_kwargs):
+            raise RuntimeError("saved AR state uses incompatible physical noise controls; choose a fresh data_path")
         return values
     except (OSError, KeyError, ValueError):
         return np.zeros(int(size), dtype=np.float64)
@@ -156,6 +167,7 @@ def _write_member_process_noise(icesee_kwargs, ens_id, values, timestep):
             handle.attrs["last_timestep"] = int(timestep)
             handle.attrs["base_seed"] = int(icesee_kwargs.get("base_seed", 42))
             handle.attrs["process_noise_normalization"] = process_noise_normalization(icesee_kwargs)
+            handle.attrs["physical_noise_controls"] = _physical_noise_controls(icesee_kwargs)
             handle.flush()
         os.replace(temporary, path)
     except Exception:
@@ -164,6 +176,13 @@ def _write_member_process_noise(icesee_kwargs, ens_id, values, timestep):
         except OSError:
             pass
         raise
+
+
+def _physical_noise_controls(options):
+    keys = ("process_noise_correlation_time", "process_noise_start", "process_noise_vars",
+            "graph_physical_length", "graph_max_neighbors", "process_noise_start_step", "process_noise_spatial_policy")
+    return json.dumps({key: options[key] for key in keys if key in options}, sort_keys=True) if any(
+        key in options for key in keys) else ""
 
 
 def add_member_process_noise(ensemble_vec, ens_id, icesee_kwargs):
@@ -189,8 +208,8 @@ def add_member_process_noise(ensemble_vec, ens_id, icesee_kwargs):
     previous = _read_member_process_noise(
         icesee_kwargs, ens_id, state_block_size, k
     )
-    alpha = float(icesee_kwargs.get("alpha", 0.0))
-    rho = float(icesee_kwargs.get("rho", 1.0))
+    alpha, rho = process_noise_event_coefficients(icesee_kwargs, k)
+    variable_mask = process_noise_variable_mask(icesee_kwargs)
     dt = float(icesee_kwargs.get("dt", 1.0))
     Lx = float(icesee_kwargs.get("Lx", 1.0))
     Ly = float(icesee_kwargs.get("Ly", 1.0))
@@ -203,6 +222,12 @@ def add_member_process_noise(ensemble_vec, ens_id, icesee_kwargs):
     try:
         for ii in range(num_state_vars):
             start, stop = ii * hdim, (ii + 1) * hdim
+            sigma = float(sig_q[ii]) if ii < len(sig_q) else 0.0
+            if not variable_mask[ii] or (
+                    process_noise_normalization(icesee_kwargs) == "physical_ar1" and sigma == 0):
+                updated_noise[start:stop] = 0.0
+                noise_increment[start:stop] = 0.0
+                continue
             seed = _process_noise_seed(base_seed, k, ens_id, ii)
             np.random.seed(seed)
             noise_kwargs = dict(icesee_kwargs)
@@ -226,14 +251,16 @@ def add_member_process_noise(ensemble_vec, ens_id, icesee_kwargs):
                     "num_vars": total_vars,
                 }
             )
-            white = np.asarray(generate_enkf_field(**noise_kwargs), dtype=np.float64)
+            if process_noise_spatial_mode(icesee_kwargs, ii) == "global_scalar":
+                white = np.full(hdim, noise_kwargs["rng"].standard_normal(), dtype=float)
+            else:
+                white = np.asarray(generate_enkf_field(**noise_kwargs), dtype=np.float64)
             white = white.reshape(-1)[:hdim]
             current = (
                 alpha * previous[start:stop]
                 + np.sqrt(max(0.0, 1.0 - alpha**2)) * white
             )
             updated_noise[start:stop] = current
-            sigma = float(sig_q[ii]) if ii < len(sig_q) else 0.0
             noise_increment[start:stop] = np.sqrt(dt) * sigma * rho * current
     finally:
         np.random.set_state(old_rng_state)

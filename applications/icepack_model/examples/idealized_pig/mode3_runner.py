@@ -57,6 +57,9 @@ from ICESEE.src.EnKF._generate_synthetic_observations import (
 )
 from ICESEE.src.EnKF._generate_true_wrong_state import generate_true_wrong_state
 from ICESEE.src.parallelization._mpi_analysis_functions import apply_analysis_controls_local
+from ICESEE.src.parallelization.analysis_diagnostics import (
+    prepare_analysis_diagnostics, publish_analysis_diagnostics,
+)
 from ICESEE.src.parallelization.native_process_noise import (
     NativeProcessNoiseAdapter, canonical_noise_identity,
 )
@@ -65,6 +68,7 @@ from ICESEE.src.parallelization.mode3_checkpointing import (
     CheckpointPolicy,
     Mode3CheckpointManager,
     fresh_start_plan,
+    ResumePlan,
 )
 from ICESEE.src.parallelization.distributed_history_export import (
     finalize_ensemble_history,
@@ -213,12 +217,14 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     """Drive idealized_pig's full mode-3 DA cycle. Registered under ``"icepack"``."""
 
     icesee_kwargs = normalize_icesee_kwargs(icesee_kwargs)
-    from ._melt_forcing import configure_melt_experiment
+    from ._melt_forcing import configure_melt_experiment, resolve_stop_step, validate_reference_config, diagnostic_fork_info
     configure_melt_experiment(icesee_kwargs)
     normalize_execution_mode(icesee_kwargs, expected=3)
 
     world = MPI.COMM_WORLD
     world_rank = int(world.Get_rank())
+    from ._reference_generation import validate_reference_only, finish_reference_generation
+    reference_only = validate_reference_only(icesee_kwargs, world.Get_size())
 
     global_start_time = MPI.Wtime()
     time_forecast_step = 0.0
@@ -227,6 +233,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     model = icesee_kwargs.get("model_name")
     Nens = int(icesee_kwargs["Nens"])
     nt = int(icesee_kwargs["nt"])
+    stop_step = resolve_stop_step(icesee_kwargs)
     export_history = bool(icesee_kwargs.get("mode3_export_ensemble_history", False))
     export_rows = int(icesee_kwargs.get("mode3_export_row_chunk_size", 8192))
     checkpoint_policy = CheckpointPolicy.from_kwargs(icesee_kwargs)
@@ -262,8 +269,9 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     with traced_init("mode3 barrier (data_path ready)"):
         world.Barrier()
 
-    _true_nurged = f"{_modelrun_datasets}/true_nurged_states.h5"
-    _synthetic_obs = f"{_modelrun_datasets}/synthetic_obs.h5"
+    reference_root = icesee_kwargs.get("reference_data_path") or _modelrun_datasets
+    _true_nurged = f"{reference_root}/true_nurged_states.h5"
+    _synthetic_obs = f"{reference_root}/synthetic_obs.h5"
     icesee_kwargs.update(
         {"true_nurged_file": _true_nurged, "synthetic_obs_file": _synthetic_obs}
     )
@@ -276,40 +284,61 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     observation_time = 0.0
     nd = None
     reference_coords = None
+    setup_error = None
     if world_rank == 0:
-        # The single-rank reference model the truth is generated with is set
-        # up here; it is reported as its own phase so that True/Wrong State
-        # Time covers trajectory generation only, as in modes 0-2.
-        _t = MPI.Wtime()
-        with traced_init("truth model setup (COMM_SELF reference)"):
-            nd = _build_reference_setup_context(icesee_kwargs)
-            # Truth and observation rows use this serial numbering.
-            reference_coords = node_coordinates(icesee_kwargs["Q"])
-        record_phase("truth_model_setup", MPI.Wtime() - _t)
-
-        if resume and _setup_artifacts_reusable(icesee_kwargs, nd):
-            print(
-                "[ICESEE] resume: reusing existing "
-                f"{_true_nurged} and {_synthetic_obs}",
-                flush=True,
-            )
-            record_phase("truth_generation", 0.0, operations=0)
-            record_phase("wrong_reference_generation", 0.0, operations=0)
-        else:
+        try:
+            # The single-rank reference model the truth is generated with is set
+            # up here; it is reported as its own phase so that True/Wrong State
+            # Time covers trajectory generation only, as in modes 0-2.
             _t = MPI.Wtime()
-            with traced_init("truth generation", nd=nd):
-                icesee_kwargs = generate_true_wrong_state(**icesee_kwargs)
-            true_wrong_time = MPI.Wtime() - _t
+            with traced_init("truth model setup (COMM_SELF reference)"):
+                nd = _build_reference_setup_context(icesee_kwargs)
+                # Truth and observation rows use this serial numbering.
+                reference_coords = node_coordinates(icesee_kwargs["Q"])
+            record_phase("truth_model_setup", MPI.Wtime() - _t)
 
-            _t = MPI.Wtime()
-            with traced_init("observation generation"):
-                icesee_kwargs = generate_synthetic_observations(**icesee_kwargs)
-            observation_time = MPI.Wtime() - _t
+            if icesee_kwargs.get("reference_data_path"):
+                validate_reference_config(icesee_kwargs)
+                with h5py.File(_true_nurged, "r") as source:
+                    if source["true_state"].shape != (nd, nt + 1):
+                        raise ValueError("cached truth does not match the full configured time grid")
+                if not _setup_artifacts_reusable(icesee_kwargs, nd):
+                    raise ValueError("cached observation dimensions disagree with this experiment")
+                print(f"[ICESEE] read-only references: {reference_root}", flush=True)
+            elif resume and _setup_artifacts_reusable(icesee_kwargs, nd):
+                print(
+                    "[ICESEE] resume: reusing existing "
+                    f"{_true_nurged} and {_synthetic_obs}",
+                    flush=True,
+                )
+                record_phase("truth_generation", 0.0, operations=0)
+                record_phase("wrong_reference_generation", 0.0, operations=0)
+            else:
+                _t = MPI.Wtime()
+                with traced_init("truth generation", nd=nd):
+                    icesee_kwargs = generate_true_wrong_state(**icesee_kwargs)
+                true_wrong_time = MPI.Wtime() - _t
+
+                _t = MPI.Wtime()
+                with traced_init("observation generation"):
+                    if not reference_only or icesee_kwargs.get('generate_synthetic_obs', False):
+                        icesee_kwargs = generate_synthetic_observations(**icesee_kwargs)
+                observation_time = MPI.Wtime() - _t
+
+        except Exception as exc:
+            import traceback
+            setup_error = traceback.format_exc()
+    setup_error = world.bcast(setup_error, root=0)
+    if setup_error:
+        raise RuntimeError(f"reference setup failed: {setup_error}")
 
     with traced_init("mode3 barrier (truth/observations ready)"):
         world.Barrier()
 
     icesee_kwargs["model_nprocs"] = _model_nprocs_before_true_wrong_state
+
+    if reference_only:
+        return finish_reference_generation(icesee_kwargs, h5py)
 
     nd = int(world.bcast(nd, root=0))
     icesee_kwargs["nd"] = nd
@@ -351,7 +380,28 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         {"obs_t": obs_t, "obs_index": ind_m, "number_obs_instants": m_obs, "m_obs": m_obs}
     )
 
+    fork = None
+    fork_error = None
+    if world_rank == 0:
+        try:
+            fork = diagnostic_fork_info(icesee_kwargs)
+        except Exception as exc:
+            fork_error = f"{type(exc).__name__}: {exc}"
+    fork, fork_error = world.bcast((fork, fork_error), root=0)
+    if fork_error:
+        raise ValueError(fork_error)
+    if fork:
+        icesee_kwargs["process_noise_start_step"] = fork["next_step"]
     run_id = str(icesee_kwargs.get("run_id", _DEFAULT_RUN_ID)) + ":time-grid-v2:native-controls-v1:" + canonical_noise_identity(icesee_kwargs)
+    from ICESEE.src.parallelization.forecast_recovery import ForecastRecoveryPolicy
+    recovery_policy = ForecastRecoveryPolicy.from_options(icesee_kwargs)
+    if recovery_policy is not None:
+        import hashlib
+        import json
+        recovery_digest = hashlib.sha256(json.dumps(recovery_policy.describe(), sort_keys=True).encode()).hexdigest()[:16]
+        run_id += ":forecast-recovery:" + recovery_digest
+    if fork:
+        run_id += ":diagnostic-fork:" + fork["manifest_sha256"]
     if icesee_kwargs.get("scientific_experiment_id"):
         run_id += ":" + icesee_kwargs["scientific_experiment_id"]
     checkpoints = Mode3CheckpointManager(
@@ -360,12 +410,17 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
         topology=topology,
         number_of_members=Nens,
         nt=nt,
-        analysis_steps=observation_cycle_steps(np.asarray(ind_m)[:m_obs], nt).tolist(),
+        analysis_steps=(observation_cycle_steps(np.asarray(ind_m)[:m_obs], nt).tolist()
+                        if icesee_kwargs.get("analysis_enabled", True) else []),
         policy=checkpoint_policy,
         time_grid=icesee_kwargs.get("t"),
         layout_fingerprint=native_layout_fingerprint(adapter, topology, icesee_kwargs),
     )
     plan = checkpoints.prepare_resume() if resume else fresh_start_plan()
+    if fork and not resume:
+        from pathlib import Path
+        plan = ResumePlan(True, Path(fork["path"]), fork["completed_step"], fork["next_step"], 0,
+                          notes=("diagnostic fork; new scientific policies start from the recorded parent state",))
     checkpoints.report_plan(plan)
 
     ensemble_init_time = 0.0
@@ -381,7 +436,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
                 topology,
                 icesee_kwargs,
                 plan.checkpoint_path,
-                expected_run_id=run_id,
+                expected_run_id=None if fork and not resume else run_id,
             )
 
         restart_restore_time = MPI.Wtime() - _t
@@ -498,12 +553,16 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
 
     checkpoints.storage_preflight(
         start_step=plan.start_step,
+        end_step=stop_step,
         bytes_per_checkpoint=int(pool.layout.global_size) * Nens * np.dtype(np.float64).itemsize,
         files_per_checkpoint=int(world.Get_size()) + 1,
         include_initial=True,
     )
 
     init_file_time = 0.0
+    if fork and not resume:
+        checkpoints.commit_step(plan.completed_step, pool.snapshot_owned(), did_analysis=False,
+                                analyses_completed=0, extra={"diagnostic_parent": fork})
     if not plan.resumed:
         _initial_snapshot = pool.snapshot_owned()
         _t = MPI.Wtime()
@@ -521,94 +580,142 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     time_analysis_cycle_steps = 0.0
     analyses_this_run = 0
 
-    for k in range(plan.start_step, nt):
-        do_analysis = observation_is_due(k, km, ind_m[:m_obs])
-        batches = []
-        if do_analysis:
-            # `d`/`sigma`/`eta` are computed over the FULL, world-identical
-            # `obs_indices` (as before the spatial-decomposition fix) so the
-            # deterministic RNG stream and scientific values are unchanged
-            # for any spatial-rank count; only the final batch handed to
-            # run_native_global_analysis_cycle is subset to this rank's
-            # owned observations (`obs_positions`/`obs_local_indices`,
-            # routed once above).
-            y_full = np.asarray(hu_obs[:, km], dtype=np.float64).copy()
-            y_full[np.isnan(y_full)] = 0.0
-            d = y_full[obs_indices][obs_positions]
-            member_errors = None
-            if error_mode == "stochastic_r":
-                sigma = active_observation_std(icesee_kwargs, km, obs_indices)
-                obs_seed = base_seed + 1000003 * (km + 1)
-                rng = np.random.default_rng(obs_seed)
-                eta = rng.standard_normal((obs_indices.size, Nens)) * sigma[:, None]
-                eta -= np.mean(eta, axis=1, keepdims=True)
-                member_errors = {
-                    member_id: eta[obs_positions, member_id]
-                    for member_id in pool.member_ids
-                }
-            batches.append(
-                NativeObservationBatch(
-                    observation_ids=obs_local_indices,
-                    values=d,
-                    member_errors=member_errors,
+    if stop_step < plan.start_step:
+        raise ValueError("run_stop_time precedes the restored state")
+    from ICESEE.src.parallelization.run_control import CycleStopController, atomic_json
+    with CycleStopController(icesee_kwargs, world, elapsed=MPI.Wtime() - global_start_time) as segment:
+        for k in range(plan.start_step, stop_step):
+            do_analysis = bool(icesee_kwargs.get("analysis_enabled", True)) and observation_is_due(k, km, ind_m[:m_obs])
+            batches = []
+            if do_analysis:
+                # `d`/`sigma`/`eta` are computed over the FULL, world-identical
+                # `obs_indices` (as before the spatial-decomposition fix) so the
+                # deterministic RNG stream and scientific values are unchanged
+                # for any spatial-rank count; only the final batch handed to
+                # run_native_global_analysis_cycle is subset to this rank's
+                # owned observations (`obs_positions`/`obs_local_indices`,
+                # routed once above).
+                y_full = np.asarray(hu_obs[:, km], dtype=np.float64).copy()
+                y_full[np.isnan(y_full)] = 0.0
+                d = y_full[obs_indices][obs_positions]
+                member_errors = None
+                if error_mode == "stochastic_r":
+                    sigma = active_observation_std(icesee_kwargs, km, obs_indices)
+                    if not np.all(np.isfinite(sigma)) or np.any(sigma <= 0):
+                        raise ValueError("stochastic_R requires finite positive active observation std")
+                    obs_seed = base_seed + 1000003 * (km + 1)
+                    rng = np.random.default_rng(obs_seed)
+                    eta = rng.standard_normal((obs_indices.size, Nens)) * sigma[:, None]
+                    eta -= np.mean(eta, axis=1, keepdims=True)
+                    member_errors = {
+                        member_id: eta[obs_positions, member_id]
+                        for member_id in pool.member_ids
+                    }
+                batches.append(
+                    NativeObservationBatch(
+                        observation_ids=obs_local_indices,
+                        values=d,
+                        member_errors=member_errors,
+                        observation_variances=(sigma[obs_positions] ** 2
+                                               if error_mode == "stochastic_r" else None),
+                    )
                 )
+
+            diagnostic = None
+            if do_analysis and icesee_kwargs.get("analysis_stage_diagnostics", False):
+                diagnostic = prepare_analysis_diagnostics(
+                    pool.layout, Nens, topology, truth_file=_true_nurged,
+                    reference_rows=canonical_rows, column=k+1,
+                    field_lower_bounds={'h':float(icesee_kwargs['hThresh'])})
+
+            # Report individual step wall times when verbose output is enabled.
+            _t = MPI.Wtime()
+            cycle_fn = (
+                run_native_store_streaming_analysis_cycle
+                if icesee_kwargs.get("use_store_streaming_analysis")
+                else run_native_global_analysis_cycle
             )
+            diagnostic_options = {"analysis_diagnostics": diagnostic} if diagnostic is not None else {}
+            try:
+                result = cycle_fn(
+                    pool, adapter, k, batches,
+                    number_of_batches=(1 if do_analysis else 0),
+                    topology=topology, icesee_kwargs=icesee_kwargs,
+                    error_mode=error_mode, analysis_row_controls=apply_analysis_controls_local,
+                    **diagnostic_options,
+                )
+            except RuntimeError as exc:
+                if diagnostic is not None and str(exc).startswith('native analysis finalization failed:'):
+                    rejected = diagnostic.finish()
+                    rejected.update(status='rejected_uncommitted', failure=str(exc))
+                    publish_analysis_diagnostics(
+                        os.path.join(_modelrun_datasets, '_analysis_rejections'), rejected,
+                        topology=topology, run_id=run_id, timestep=k,
+                        model_time=float(icesee_kwargs['t'][k+1]))
+                raise
+            _step_wall = MPI.Wtime() - _t
+            if diagnostic is not None:
+                publish_analysis_diagnostics(
+                    os.path.join(_modelrun_datasets, "_analysis_diagnostics"), result.diagnostics,
+                    topology=topology, run_id=run_id, timestep=k,
+                    model_time=float(icesee_kwargs["t"][k+1]))
+            time_forecast_step += _step_wall
+            if do_analysis:
+                time_analysis_cycle_steps += _step_wall
+            # Report individual step wall times when verbose output is enabled.
+            if icesee_kwargs.get("verbose") and world_rank == 0:
+                print(f"[ICESEE] mode3 forecast step {k}: wall={_step_wall:.4f}s did_analysis={do_analysis}", flush=True)
+            if do_analysis:
+                if world_rank == 0:
+                    print(format_analysis_event(k, km, icesee_kwargs), flush=True)
+                km += 1
+                analyses_this_run += 1
 
-        # Report individual step wall times when verbose output is enabled.
-        _t = MPI.Wtime()
-        cycle_fn = (
-            run_native_store_streaming_analysis_cycle
-            if icesee_kwargs.get("use_store_streaming_analysis")
-            else run_native_global_analysis_cycle
-        )
-        result = cycle_fn(
-            pool,
-            adapter,
-            k,
-            batches,
-            number_of_batches=(1 if do_analysis else 0),
-            topology=topology,
-            icesee_kwargs=icesee_kwargs,
-            error_mode=error_mode,
-            analysis_row_controls=apply_analysis_controls_local,
-        )
-        _step_wall = MPI.Wtime() - _t
-        time_forecast_step += _step_wall
-        if do_analysis:
-            time_analysis_cycle_steps += _step_wall
-        # Report individual step wall times when verbose output is enabled.
-        if icesee_kwargs.get("verbose") and world_rank == 0:
-            print(f"[ICESEE] mode3 forecast step {k}: wall={_step_wall:.4f}s did_analysis={do_analysis}", flush=True)
-        if do_analysis:
-            if world_rank == 0:
-                print(format_analysis_event(k, km, icesee_kwargs), flush=True)
-            km += 1
-            analyses_this_run += 1
+            # Restart checkpoint of the finalized physical state after cycle k.
+            # The native cycle refreshes result.local_analysis after finalization; it is
+            # exactly the pool's live state. Retention prunes older rolling
+            # checkpoints only after this one has committed.
+            _t = MPI.Wtime()
+            _written = checkpoints.commit_step(
+                k,
+                result.local_analysis,
+                did_analysis=do_analysis,
+                analyses_completed=km,
+                extra={"observation_rows": result.observation_rows, "error_mode": error_mode,
+                       "gain_formulation": icesee_kwargs.get("enkf_gain_formulation", "sampled_factor"),
+                       "diagnostic_parent": fork},
+            )
+            if _written is not None:
+                _checkpoint_s = MPI.Wtime() - _t
+                time_forecast_file_writing += _checkpoint_s
+                _record_checkpoint(result.local_analysis, _checkpoint_s)
 
-        # Restart checkpoint of the state after cycle k. idealized_pig has no
-        # state-modifying analysis finalizer, so result.local_analysis is
-        # exactly the pool's live state. Retention prunes older rolling
-        # checkpoints only after this one has committed.
-        _t = MPI.Wtime()
-        _written = checkpoints.commit_step(
-            k,
-            result.local_analysis,
-            did_analysis=do_analysis,
-            analyses_completed=km,
-            extra={"observation_rows": result.observation_rows, "error_mode": error_mode},
-        )
-        if _written is not None:
-            _checkpoint_s = MPI.Wtime() - _t
-            time_forecast_file_writing += _checkpoint_s
-            _record_checkpoint(result.local_analysis, _checkpoint_s)
-
+            if segment.enabled and segment.after_commit(k + 1 - plan.start_step):
+                stop_step = k + 1
+                break
     world.Barrier()
 
     history_export_time = 0.0
-    if export_history:
+    if segment.enabled:
+        report_error = None
+        if world_rank == 0:
+            try:
+                atomic_json(os.path.join(_modelrun_datasets, "_continuation", "segment.json"),
+                    dict(run_id=run_id, next_step=stop_step, nt=nt, model_time=float(icesee_kwargs["t"][stop_step]),
+                         complete=stop_step == nt, reason=segment.reason or "requested_stop",
+                         analyses_completed=km))
+            except Exception as exc:
+                report_error = f"{type(exc).__name__}: {exc}"
+        report_error = world.bcast(report_error, root=0)
+        if report_error:
+            raise RuntimeError("continuation report failed: " + report_error)
+
+    # Intermediate segments retain committed shards; aggregate only on completion.
+    if export_history and (not segment.enabled or stop_step == nt):
         _t = MPI.Wtime()
         with traced_init("native ensemble history finalization"):
-            finalize_ensemble_history(world, _modelrun_datasets, row_chunk_size=export_rows)
+            finalize_ensemble_history(world, _modelrun_datasets, row_chunk_size=export_rows,
+                                      allow_partial=stop_step < nt)
         if world_rank == 0:
             history_export_time = MPI.Wtime() - _t
 
@@ -677,7 +784,7 @@ def run_icepack_execution_mode_3(**icesee_kwargs):
     # ─────────────────────────────────────────────────────────────
     global_elapsed_time = MPI.Wtime() - global_start_time
 
-    steps_run = nt - plan.start_step
+    steps_run = stop_step - plan.start_step
     register_run_metadata(
         execution_mode=icesee_kwargs.get("execution_mode"),
         model=icesee_kwargs.get("model_name"),

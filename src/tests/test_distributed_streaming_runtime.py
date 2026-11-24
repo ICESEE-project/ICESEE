@@ -327,3 +327,17 @@ def test_store_streaming_cycle_skips_transform_pass_when_no_batches_scheduled():
             result_reference.local_analysis.members[member_id],
             result_streaming.local_analysis.members[member_id],
         )
+
+
+def test_prescribed_R_resident_and_store_streaming_cycles_agree():
+    adapter=_CycleFakeAdapter();topology=_single_rank_topology()
+    options=dict(Nens=2,enkf_gain_formulation='prescribed_r',enkf_observation_error_mode='stochastic_R')
+    outputs=[]
+    for function in (run_native_global_analysis_cycle,run_native_store_streaming_analysis_cycle):
+        pool=StreamingNativeDistributedMemberPool(adapter,topology,options,(0,1))
+        batch=NativeObservationBatch(np.array([0,4]),np.array([2.,7.]),
+            {0:np.array([-.2,.3]),1:np.array([.2,-.3])},np.array([.5,.8]))
+        result=function(pool,adapter,1,[batch],number_of_batches=1,topology=topology,
+            icesee_kwargs=options,error_mode='stochastic_R',state_row_chunk_size=2)
+        outputs.append(result.local_analysis.members)
+    for mid in (0,1):np.testing.assert_array_equal(outputs[0][mid],outputs[1][mid])

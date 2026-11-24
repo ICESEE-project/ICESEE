@@ -10,11 +10,13 @@ import numpy as np
 from firedrake import Function, SpatialCoordinate
 
 import icepack
+from ._melt_forcing import bind_melt_reference
 
 from ICESEE.applications.icepack_model.examples.idealized_pig._icepack_model import (
     EXPERIMENT_WRONG,
     BasalMeltRate,
     estimated_melt_forecast, initial_estimated_melt, melt_forecast_mode,
+    depth_law_melt, project_depth_law_melt,
     Icepack,
     initializeMesh,
     initializeRun,
@@ -245,13 +247,17 @@ def _icepack_run_kwargs(
     ``Icepack()``'s internal ``icesee_kwargs["h"] = h`` side effect.
     """
 
+    from firedrake import Constant
+    threshold = icesee_kwargs["uThresh"]
+    if not hasattr(threshold, "ufl_shape"):
+        threshold = Constant(threshold)
     return {
         "Q": ctx.Q,
         "s0": ctx.s0,
         "beta0": ctx.beta0,
         "A0": ctx.A0,
         "bed": ctx.bed,
-        "uThresh": icesee_kwargs["uThresh"],
+        "uThresh": threshold,
         "GLThresh": icesee_kwargs["GLThresh"],
         "hThresh": icesee_kwargs["hThresh"],
         "water_to_ice": icesee_kwargs.get("water_to_ice", 1.0),
@@ -276,6 +282,7 @@ def initialize_member(
     """Copy the unperturbed physical fields at the initial model time."""
 
     ctx = _shared_context(topology, icesee_kwargs)
+    icesee_kwargs = bind_melt_reference(icesee_kwargs, ctx)
 
     h_perturbed = ctx.h0.dat.data_ro.copy()
 
@@ -299,7 +306,7 @@ def initialize_member(
     # own docstring). Independent of whether basal_melt_field exists in
     # this state -- if joint_estimation is on, the field always exists too
     # (it IS the jointly-estimated parameter), so no ordering hazard here.
-    if melt_forecast_mode(icesee_kwargs) == "estimated_field":
+    if melt_forecast_mode(icesee_kwargs) in {"estimated_field", "estimated_depth_law"}:
         basal_melt_field = initial_estimated_melt(basal_melt_field, member_id, icesee_kwargs)
     elif icesee_kwargs.get("joint_estimation"):
         basal_melt_field = _nudge_basal_melt(basal_melt_field, icesee_kwargs, ctx.Q)
@@ -323,6 +330,7 @@ def forecast_member(
     *,
     topology: Any,
     icesee_kwargs: Mapping[str, Any],
+    _local_dt: float | None = None,
 ) -> IcepackForecastFields:
     """Advance persistent native fields by one step.
 
@@ -330,11 +338,22 @@ def forecast_member(
     floating mask from the member's current surface and bed each step; this
     diagnostic mask is not independently checkpointed assimilation state."""
 
+    from ICESEE.src.parallelization.forecast_recovery import ForecastRecoveryPolicy
+    policy = ForecastRecoveryPolicy.from_options(icesee_kwargs)
+    if policy is not None and _local_dt is None:
+        return _recover_forecast_member(state, timestep, topology=topology,
+                                        icesee_kwargs=icesee_kwargs, policy=policy)
     ctx = _shared_context(topology, icesee_kwargs)
-    step = int(timestep)
+    icesee_kwargs = bind_melt_reference(icesee_kwargs, ctx)
+    step = int(timestep) if _local_dt is None else float(timestep)
+    local_dt = float(icesee_kwargs["dt"]) if _local_dt is None else float(_local_dt)
 
     floating = _recompute_floating(ctx, state.surface)
-    if melt_forecast_mode(icesee_kwargs) == "estimated_field":
+    mode = melt_forecast_mode(icesee_kwargs)
+    if mode == "estimated_depth_law":
+        basal_melt_field, amplitude = project_depth_law_melt(
+            state.basal_melt, floating, ctx.Q, state.surface, state.thickness, step, icesee_kwargs)
+    elif mode == "estimated_field":
         basal_melt_field = estimated_melt_forecast(
             state.basal_melt, floating, ctx.Q, icesee_kwargs)
     else:
@@ -350,17 +369,67 @@ def forecast_member(
         ctx.smb,
         basal_melt_field,
         ctx.bed,
-        float(icesee_kwargs["dt"]),
+        local_dt,
         ctx.h0,
         run_kwargs,
     )
 
+    if mode == "estimated_depth_law":
+        from ._melt_forcing import advance_melt_amplitude
+        amplitude = advance_melt_amplitude(amplitude, 1.0, local_dt, icesee_kwargs)
+        next_floating = _recompute_floating(ctx, s)
+        basal_melt_field = depth_law_melt(amplitude, next_floating, ctx.Q, s, h,
+            step + local_dt / float(icesee_kwargs["dt"]), icesee_kwargs)
     return IcepackForecastFields(
         thickness=h,
         velocity=u,
         surface=s,
         basal_melt=basal_melt_field if state.basal_melt is not None else None,
     )
+
+
+def _recover_forecast_member(state, timestep, *, topology, icesee_kwargs, policy):
+    """Retry physical solves before process noise, profiles or analysis run."""
+    import json
+    from firedrake.exceptions import ConvergenceError
+    from ICESEE.src.parallelization.forecast_recovery import (
+        advance_with_recovery, RecoverableForecastError,
+    )
+    ctx = _shared_context(topology, icesee_kwargs)
+    result = [None]
+    macro_dt = float(icesee_kwargs["dt"])
+
+    def restore(snapshot):
+        state.registry.unpack_owned(snapshot, synchronize=True)
+        # Solver contexts can retain failed iterates; rebuild with the same options.
+        model = icepack.models.IceStream(friction=schoofFriction, viscosity=regViscosity)
+        ctx.forward_solver = icepack.solvers.FlowSolver(model, dirichlet_ids=[1],
+            diagnostic_solver_parameters={"max_iterations": 150, "tolerance": 1e-6})
+
+    def advance(time, dt):
+        try:
+            substep = round((time - int(timestep) * macro_dt) / dt)
+            forcing_step = int(timestep) + substep * (dt / macro_dt)
+            result[0] = forecast_member(state, forcing_step, topology=topology,
+                icesee_kwargs=icesee_kwargs, _local_dt=dt)
+            state.update_from_forecast(result[0])
+        except ConvergenceError as exc:
+            raise RecoverableForecastError(str(exc)) from exc
+
+    def validate():
+        if not np.isfinite(state.registry.pack_owned()).all():
+            raise RecoverableForecastError("non-finite physical forecast")
+
+    def report(event):
+        if topology.spatial_comm.rank == 0:
+            print("[ICESEE] forecast_recovery " + json.dumps(dict(event,
+                timestep=int(timestep), ensemble_slot=topology.ensemble_slot)), flush=True)
+
+    advance_with_recovery(start_time=int(timestep) * macro_dt, interval=macro_dt,
+        policy=policy, capture=lambda: state.registry.pack_owned().copy(),
+        restore=restore, advance=advance, validate=validate,
+        comm=topology.spatial_comm, report=report)
+    return result[0]
 
 
 def reactivate_member(
@@ -435,6 +504,55 @@ def layout_fingerprint(*, topology: Any, icesee_kwargs: Mapping[str, Any]) -> st
 class _IdealizedPigAdapter(IcepackNativeAdapter):
     """Keep application diagnostics outside the model-agnostic runtime."""
 
+    def apply_native_process_noise(self, member, owned, increment, timestep, *, topology, icesee_kwargs):
+        if icesee_kwargs.get("basal_melt_noise_basis", "field") == "depth_amplitude":
+            state = self._state(member)
+            ctx = _shared_context(topology, icesee_kwargs)
+            icesee_kwargs = bind_melt_reference(icesee_kwargs, ctx)
+            floating = _recompute_floating(ctx, state.surface)
+            basis = depth_law_melt(1., floating, ctx.Q, state.surface,
+                                   state.thickness, int(timestep)+1, icesee_kwargs)
+            increment = np.asarray(increment).copy()
+            for name, rows, _ in member.fields.layout.iter_owned_global_intervals():
+                if name == "basal_melt_field":
+                    increment[rows] *= basis.dat.data_ro
+        member.unpack_owned(owned + increment)
+
+    def finalize_native_analysis(self, member, forecast_owned, timestep, *, topology, icesee_kwargs):
+        options = dict(icesee_kwargs, analysis_member_id=member.member_id)
+        return super().finalize_native_analysis(member, forecast_owned, timestep,
+            topology=topology, icesee_kwargs=options)
+
+    def finalize_forecast_noise(self, member, timestep, *, topology, icesee_kwargs):
+        from ._melt_forcing import analysis_state_policy
+        if analysis_state_policy(icesee_kwargs) != "diagnostic_balance":
+            return
+        state = self._state(member)
+        names = list(icesee_kwargs["vec_inputs"])[:int(icesee_kwargs["num_state_vars"])]
+        selected = icesee_kwargs.get("process_noise_vars", names)
+        sigmas = icesee_kwargs["sig_Q"]
+        geometry_changed = any(name in selected and name in {"h", "s", "u", "v"}
+                               and i < len(sigmas) and float(sigmas[i]) != 0
+                               for i, name in enumerate(names))
+        if geometry_changed:
+            finalize_analysis_state(state, None, timestep,
+                topology=topology, icesee_kwargs=dict(icesee_kwargs, analysis_member_id=member.member_id), force=True)
+        else:
+            # Melt-only noise does not change the diagnostic velocity problem.
+            ctx = _shared_context(topology, icesee_kwargs)
+            icesee_kwargs = bind_melt_reference(icesee_kwargs, ctx)
+            floating = _recompute_floating(ctx, state.surface)
+            melt = state.basal_melt
+            mode = melt_forecast_mode(icesee_kwargs)
+            if mode == "estimated_depth_law":
+                melt, _ = project_depth_law_melt(melt, floating, ctx.Q, state.surface,
+                    state.thickness, int(timestep) + 1, icesee_kwargs)
+            elif mode == "estimated_field":
+                melt = estimated_melt_forecast(melt, floating, ctx.Q, icesee_kwargs)
+            state.update_from_forecast(IcepackForecastFields(thickness=state.thickness,
+                velocity=state.velocity, surface=state.surface, basal_melt=melt))
+        state.registry.synchronize_ghosts()
+
     def initialize_native_member(self, member_id, *, topology, icesee_kwargs):
         member = super().initialize_native_member(
             member_id, topology=topology, icesee_kwargs=icesee_kwargs
@@ -461,9 +579,63 @@ class _IdealizedPigAdapter(IcepackNativeAdapter):
         )
 
 
+def finalize_analysis_state(state, forecast_owned, timestep, *, topology, icesee_kwargs, force=False):
+    """Restore admissible geometry and diagnostic velocity after an analysis."""
+    from ._melt_forcing import analysis_state_policy
+    from ICESEE.src.utils.timestep_contract import observation_cycle_steps
+    if analysis_state_policy(icesee_kwargs) != "diagnostic_balance":
+        return
+    indices = np.asarray(icesee_kwargs.get("obs_index", []), dtype=np.int64)
+    count = int(icesee_kwargs.get("number_obs_instants", indices.size))
+    if not force and int(timestep) not in observation_cycle_steps(indices[:count]):
+        return
+    ctx = _shared_context(topology, icesee_kwargs)
+    icesee_kwargs = bind_melt_reference(icesee_kwargs, ctx)
+    raw = state.thickness.dat.data_ro
+    floor = float(icesee_kwargs["hThresh"])
+    local = (bool(np.isfinite(raw).all()), float(raw.min()) if raw.size else np.inf,
+             float(np.maximum(floor - raw, 0).max()) if raw.size else 0.)
+    comm = topology.spatial_comm if topology is not None else None
+    metrics = comm.allgather(local) if comm is not None else [local]
+    if not all(item[0] for item in metrics):
+        raise FloatingPointError("non-finite analyzed thickness")
+    correction = max(item[2] for item in metrics)
+    limit = icesee_kwargs.get("pig_max_thickness_projection")
+    if limit is not None and correction > float(limit):
+        raise RuntimeError(f"thickness projection {correction:g} exceeds pig_max_thickness_projection={limit}")
+    h = state.thickness.copy(deepcopy=True)
+    h.dat.data[:] = np.maximum(float(icesee_kwargs["hThresh"]), h.dat.data_ro)
+    s = icepack.compute_surface(thickness=h, bed=ctx.bed)
+    zF = mf.flotationHeight(ctx.bed, ctx.Q)
+    floating, grounded = mf.flotationMask(s, zF, ctx.Q)
+    scale = mf.reduceNearGLBeta(s, ctx.s0, zF, grounded, ctx.Q, icesee_kwargs["GLThresh"])
+    beta = icepack.interpolate(ctx.beta0 * scale, ctx.Q)
+    u = ctx.forward_solver.diagnostic_solve(
+        velocity=state.velocity.copy(deepcopy=True), thickness=h, surface=s,
+        beta=beta, fluidity=ctx.A0, uThresh=icesee_kwargs["uThresh"],
+        floating=floating, grounded=grounded)
+    melt = state.basal_melt
+    if melt_forecast_mode(icesee_kwargs) == "estimated_depth_law":
+        melt, _ = project_depth_law_melt(melt, floating, ctx.Q, s, h, int(timestep) + 1, icesee_kwargs)
+    elif melt_forecast_mode(icesee_kwargs) == "estimated_field":
+        melt = estimated_melt_forecast(melt, floating, ctx.Q, icesee_kwargs)
+    if icesee_kwargs.get("pig_report_analysis", False):
+        import json
+        from firedrake import assemble, dx
+        volume_added = float(assemble((h - state.thickness) * dx))
+        if comm is None or comm.rank == 0:
+            print("[ICESEE] physical_analysis " + json.dumps(dict(
+                member=icesee_kwargs.get("analysis_member_id"), timestep=int(timestep),
+                boundary="noise" if force else "analysis", min_thickness_before=min(item[1] for item in metrics),
+                max_thickness_projection=correction, projection_volume_added=volume_added)), flush=True)
+    state.update_from_forecast(IcepackForecastFields(
+        thickness=h, velocity=u, surface=s, basal_melt=melt))
+
+
 IDEALIZED_PIG_NATIVE_ADAPTER = _IdealizedPigAdapter(
     initialize_member=initialize_member,
     forecast_member=forecast_member,
+    finalize_analysis=finalize_analysis_state,
     reactivate_member=reactivate_member,
     allocate_member=allocate_member,
     layout_fingerprint=layout_fingerprint,

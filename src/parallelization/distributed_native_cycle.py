@@ -1,14 +1,7 @@
-"""Model-agnostic bounded-memory cycle for execution-mode-3 development.
+"""Model-native forecast, stochastic EnKF, physical finalization and checkpointing.
 
-This module composes already parity-tested mode-3 primitives while runtime
-selection remains disabled.  Forecasts and model consistency operate on
-persistent model-native distributed fields.  Observations are consumed in
-spatially local batches, analysis products remain ``Nens x Nens``, and state
-transforms operate on bounded owned-row chunks.  No step reconstructs a full
-member or the full observation table.
-
-The stochastic analysis is ICESEE's existing analysis.  This module changes
-ownership and communication, not the filter or its scientific semantics.
+Observations arrive in spatially owned batches. The selected stochastic gain
+uses ensemble-space products and applies transforms to bounded owned-row slabs.
 """
 
 from __future__ import annotations
@@ -25,6 +18,7 @@ from .distributed_analysis import (
     assemble_selected_ensemble_rows,
     ensemble_transform_from_products,
     collapsed_spread_message,
+    resolve_gain_formulation,
 )
 from .distributed_checkpoint import (
     DistributedCheckpoint,
@@ -60,6 +54,7 @@ class NativeObservationBatch:
     observation_ids: np.ndarray
     values: np.ndarray
     member_errors: Mapping[int, np.ndarray] | None = None
+    observation_variances: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         raw_ids = np.asarray(self.observation_ids)
@@ -83,6 +78,12 @@ class NativeObservationBatch:
         )
         object.__setattr__(self, "values", np.ascontiguousarray(values))
         object.__setattr__(self, "member_errors", errors)
+        if self.observation_variances is not None:
+            variance = np.asarray(self.observation_variances, dtype=np.float64)
+            if (variance.shape != values.shape or not np.all(np.isfinite(variance))
+                    or np.any(variance <= 0)):
+                raise ValueError("observation variances must be finite, positive and aligned")
+            object.__setattr__(self, "observation_variances", np.ascontiguousarray(variance))
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,7 @@ class NativeCycleResult:
     transform: np.ndarray
     observation_rows: int
     checkpoint: DistributedCheckpoint | None = None
+    diagnostics: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +183,8 @@ def _batch_fingerprint(batch: NativeObservationBatch) -> bytes:
     digest = hashlib.blake2b(digest_size=20)
     digest.update(np.asarray(batch.observation_ids, dtype="<i8").tobytes())
     digest.update(np.asarray(batch.values, dtype="<f8").tobytes())
+    digest.update(b"none" if batch.observation_variances is None else
+                  np.asarray(batch.observation_variances, dtype="<f8").tobytes())
     return digest.digest()
 
 
@@ -237,7 +241,10 @@ def _assemble_observation_errors(
     number_of_members: int,
     ensemble_comm: Any,
 ) -> np.ndarray | None:
-    if batch.member_errors is None:
+    presence = ensemble_comm.allgather(batch.member_errors is not None)
+    if not all(presence):
+        # A missing perturbation source is reported with the products after
+        # all spatial owners finish their (possibly unequal) batch counts.
         return None
     rows = np.arange(batch.observation_ids.size, dtype=np.int64)
     return assemble_selected_ensemble_rows(
@@ -246,6 +253,19 @@ def _assemble_observation_errors(
         number_of_members,
         ensemble_comm,
     ).astype(np.float64, copy=False)
+
+
+def _collective_native_call(topology, function, phase):
+    """Propagate a model-group failure before the next world-wide phase."""
+    result, error = None, None
+    try:
+        result = function()
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+    failures = [item for item in topology.world.allgather(error) if item]
+    if failures:
+        raise RuntimeError(f"native {phase} failed: " + "; ".join(failures))
+    return result
 
 
 def run_native_global_analysis_cycle(
@@ -263,6 +283,7 @@ def run_native_global_analysis_cycle(
     checkpoint_request: NativeCheckpointRequest | None = None,
     apply_inversion: bool = False,
     analysis_row_controls=None,
+    analysis_diagnostics=None,
 ) -> NativeCycleResult:
     """Advance, analyze, finalize, and optionally checkpoint native members.
 
@@ -284,15 +305,14 @@ def run_native_global_analysis_cycle(
         raise ValueError("ensemble slots disagree on local observation batch count")
 
     number_of_members = int(icesee_kwargs.get("Nens", 1))
-    local_forecast = pool.forecast_with_adapter(
-        timestep,
-        adapter,
-        topology=topology,
-        icesee_kwargs=icesee_kwargs,
-    )
-    products = StochasticAnalysisProducts.zeros(number_of_members)
+    local_forecast = _collective_native_call(topology,
+        lambda: pool.forecast_with_adapter(timestep, adapter, topology=topology,
+                                          icesee_kwargs=icesee_kwargs), "forecast")
+    products = StochasticAnalysisProducts.zeros(number_of_members,
+        gain_formulation=resolve_gain_formulation(icesee_kwargs))
     batches = iter(observation_batches)
     local_observation_rows = 0
+    product_error = None
     for batch_index in range(number_of_batches):
         try:
             batch = next(batches)
@@ -322,12 +342,11 @@ def run_native_global_analysis_cycle(
             ensemble_comm=topology.ensemble_comm,
         )
         if topology.is_ensemble_root:
-            products.add_chunk(
-                forecast_matrix,
-                batch.values,
-                error_mode=error_mode,
-                observation_errors=error_matrix,
-            )
+            try:
+                products.add_chunk(forecast_matrix, batch.values, error_mode=error_mode,
+                    observation_errors=error_matrix, observation_variances=batch.observation_variances)
+            except Exception as exc:
+                product_error = f"{type(exc).__name__}: {exc}"
             local_observation_rows += int(batch.values.size)
 
     try:
@@ -339,14 +358,17 @@ def run_native_global_analysis_cycle(
 
     if topology.is_ensemble_root:
         global_products = products.reduced(topology.spatial_comm)
-        refusal = collapsed_spread_message(
+        product_errors = [error for error in topology.spatial_comm.allgather(product_error) if error]
+        refusal = "; ".join(product_errors) or collapsed_spread_message(
             global_products,
             relative_tolerance=icesee_kwargs.get("analysis_min_relative_spread", 1e-8),
         )
-        transform = None if refusal else ensemble_transform_from_products(
-            global_products,
-            energy_fraction=energy_fraction,
-        )
+        transform = None
+        if not refusal:
+            try:
+                transform = ensemble_transform_from_products(global_products, energy_fraction=energy_fraction)
+            except Exception as exc:
+                refusal = f"{type(exc).__name__}: {exc}"
         observation_rows = int(global_products.observation_rows)
     else:
         refusal = None
@@ -377,15 +399,18 @@ def run_native_global_analysis_cycle(
         icesee_kwargs,
         row_chunk_size=state_row_chunk_size,
         row_transform=row_transform,
+        block_observer=(analysis_diagnostics.observe if analysis_diagnostics is not None else None),
     )
-    pool.restore_and_finalize(
-        local_analysis,
-        local_forecast,
-        timestep,
-        adapter,
-        topology=topology,
-        icesee_kwargs=icesee_kwargs,
-    )
+    _collective_native_call(topology,
+        lambda: pool.restore_and_finalize(local_analysis, local_forecast, timestep,
+            adapter, topology=topology, icesee_kwargs=icesee_kwargs), "analysis finalization")
+    # Finalizers may change physical fields; return the state actually forecast next.
+    local_analysis = pool.snapshot_owned()
+    diagnostics = None
+    if analysis_diagnostics is not None:
+        analysis_diagnostics.observe_snapshot("balanced_analysis", local_analysis,
+                                              row_chunk_size=state_row_chunk_size)
+        diagnostics = analysis_diagnostics.finish()
     if apply_inversion:
         local_analysis = apply_native_memberwise_inversion(
             pool,
@@ -402,6 +427,7 @@ def run_native_global_analysis_cycle(
             "cycle_timestep": timestep,
             "observation_rows": observation_rows,
             "error_mode": str(error_mode),
+            "gain_formulation": products.gain_formulation,
         })
         checkpoint = save_distributed_checkpoint(
             checkpoint_request.root,
@@ -418,6 +444,7 @@ def run_native_global_analysis_cycle(
         transform=transform,
         observation_rows=observation_rows,
         checkpoint=checkpoint,
+        diagnostics=diagnostics,
     )
 
 
@@ -494,6 +521,8 @@ def run_native_grouped_local_analysis_cycle(
         topology=topology,
         icesee_kwargs=icesee_kwargs,
     )
+    # Finalizers may change physical fields; return the state actually forecast next.
+    local_analysis = pool.snapshot_owned()
     if apply_inversion:
         local_analysis = apply_native_memberwise_inversion(
             pool,

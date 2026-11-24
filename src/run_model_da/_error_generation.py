@@ -24,6 +24,57 @@ from ICESEE.src.utils.random_streams import initialization_seed
 _GRAPH_TRANSITION_CACHE = OrderedDict()
 _GRAPH_TRANSITION_CACHE_BYTES = 0
 _GRAPH_TRANSITION_CACHE_LIMIT = 64 * 1024**2
+_PHYSICAL_GRAPH_CACHE = OrderedDict()
+
+
+def physical_graph_field(coords, length, seed, *, max_neighbors=256, tolerance=1e-6):
+    """Gaussian kernel smoothing in coordinate units, with bounded sparse storage.
+
+    On a uniform unbounded mesh the convolution has e-folding covariance
+    length ``length``. Boundaries and nonuniform node density change that
+    covariance; empirical calibration is still required.
+    """
+    from scipy.spatial import cKDTree
+    points = np.asarray(coords, dtype=float)
+    if points.ndim == 1:
+        points = points[:, None]
+    length = float(length)
+    cap = int(max_neighbors)
+    if (points.ndim != 2 or len(points) < 2 or not np.isfinite(points).all()
+            or not np.isfinite(length) or length <= 0 or cap < 1):
+        raise ValueError("physical graph noise requires finite coordinates, positive length and neighbor budget")
+    digest = hashlib.blake2b(np.ascontiguousarray(points).view(np.uint8), digest_size=16).digest()
+    key = (points.shape, digest, length, cap)
+    matrix = _PHYSICAL_GRAPH_CACHE.pop(key, None)
+    if matrix is None:
+        tree = cKDTree(points)
+        counts = tree.query_ball_point(points, 2 * length, return_length=True)
+        if counts.max() > cap:
+            raise MemoryError("physical graph radius exceeds graph_max_neighbors; review length and workspace")
+        if int(counts.sum()) * 12 + (len(points) + 1) * 8 > _GRAPH_TRANSITION_CACHE_LIMIT:
+            raise MemoryError("physical graph kernel exceeds its 64 MiB sparse workspace budget")
+        indptr = np.concatenate(([0], np.cumsum(counts))).astype(np.int32)
+        indices = np.empty(int(counts.sum()), dtype=np.int32)
+        weights = np.empty(indices.size, dtype=float)
+        for row, point in enumerate(points):
+            neighbors = np.asarray(tree.query_ball_point(point, 2 * length), dtype=int)
+            distance2 = np.sum((points[neighbors] - point) ** 2, axis=1)
+            values = np.exp(-2 * distance2 / length ** 2)
+            values /= np.linalg.norm(values)
+            owned = slice(indptr[row], indptr[row + 1])
+            indices[owned] = neighbors
+            weights[owned] = values
+        matrix = sp.csr_matrix((weights, indices, indptr), shape=(len(points), len(points)), copy=False)
+        # Only one geometry is retained, so changing variable scales cannot
+        # accumulate an unbounded collection of sparse operators.
+        _PHYSICAL_GRAPH_CACHE.clear()
+    _PHYSICAL_GRAPH_CACHE[key] = matrix
+    values = matrix @ coordinate_keyed_white_noise(points, seed, coord_tolerance=tolerance)
+    values -= values.mean()
+    std = values.std()
+    if not np.isfinite(std) or std <= np.finfo(float).eps:
+        raise ValueError("physical graph field has no resolved spatial variation")
+    return values / std
 
 
 def _cached_graph_transition(coords, neighbors, tolerance, builder):
@@ -545,6 +596,12 @@ def generate_pseudo_random_field_1d(N=None, Lx=None, rh=None, grid_extension=2, 
             method = "fft"
 
     if method == "graph":
+        if icesee_kwargs.get("graph_physical_length", False):
+            if coords is None or rh is None:
+                raise ValueError("physical graph noise requires coords and an explicit length_scale")
+            return physical_graph_field(coords, rh, seed,
+                max_neighbors=icesee_kwargs.get("graph_max_neighbors", 256),
+                tolerance=icesee_kwargs.get("coord_key_tolerance", 1e-6))
         return _graph_field_1d(N, x=coords, conn=connectivity)
 
     # ------------------------------------------------------------------
@@ -848,6 +905,12 @@ def generate_pseudo_random_field_2D(nx=None, ny=None, Lx=None, Ly=None, rh=None,
             method = "fft"
 
     if method == "graph":
+        if icesee_kwargs.get("graph_physical_length", False):
+            if coords is None or rh is None:
+                raise ValueError("physical graph noise requires coords and an explicit length_scale")
+            return physical_graph_field(_reshape_coords_2d(coords, nx, ny), rh, seed,
+                max_neighbors=icesee_kwargs.get("graph_max_neighbors", 256),
+                tolerance=icesee_kwargs.get("coord_key_tolerance", 1e-6))
         return _graph_field_2d(nx, ny, xy=coords, conn=connectivity)
 
     # ------------------------------------------------------------------
@@ -1100,6 +1163,8 @@ def generate_enkf_field(**icesee_kwargs):
         raise ValueError(
             f"Unsupported random-field method {method!r}; expected 'fft' or 'graph'"
         )
+    if icesee_kwargs.get("graph_physical_length", False) and (method != "graph" or rh is None):
+        raise ValueError("graph_physical_length requires graph mode and an explicit length_scale")
     icesee_kwargs["method"] = method
 
     # Use the caller's member-keyed generator in every sampling branch.  The

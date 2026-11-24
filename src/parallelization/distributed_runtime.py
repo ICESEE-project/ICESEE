@@ -141,6 +141,7 @@ def transform_local_members(
     *,
     row_chunk_size: int,
     row_transform=None,
+    block_observer=None,
 ) -> LocalMemberEnsemble:
     """Right-multiply locally owned member slabs by an ensemble transform.
 
@@ -169,8 +170,13 @@ def transform_local_members(
         row_chunk_size=row_chunk_size,
     ):
         analysis_block = forecast_block @ transform
+        if block_observer is not None:
+            block_observer("forecast", rows, forecast_block)
+            block_observer("raw_analysis", rows, analysis_block)
         if row_transform is not None:
             analysis_block = row_transform(rows, forecast_block, analysis_block)
+        if block_observer is not None:
+            block_observer("controlled_analysis", rows, analysis_block)
         for member_id in local_forecast.member_ids:
             output[member_id][rows] = analysis_block[:, member_id]
 

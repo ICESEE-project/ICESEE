@@ -70,6 +70,7 @@ from .distributed_analysis import (
     StochasticAnalysisProducts,
     assemble_selected_ensemble_rows,
     ensemble_transform_from_products,
+    resolve_gain_formulation,
     collapsed_spread_message,
 )
 from .distributed_checkpoint import save_distributed_checkpoint
@@ -81,6 +82,7 @@ from .distributed_native_cycle import (
     NativeObservationBatch,
     _assemble_observation_errors,
     _validate_batch_alignment,
+    _collective_native_call,
 )
 from .distributed_native_runtime import (
     NativeDistributedMember,
@@ -372,12 +374,9 @@ class StreamingNativeDistributedMemberPool:
         forecast value (e.g. a positivity clamp referencing the forecast).
         Since the streaming path never keeps that forecast snapshot
         resident once written to the store, this passes an empty array as a
-        placeholder. Icepack's own ``finalize_analysis`` callback is
-        ``None`` (unused, confirmed dead code for this argument), so this is
-        safe for icepack today; a future model whose finalizer genuinely
-        needs the forecast value would need a second, forecast-snapshot
-        store namespace -- flagged, not implemented, since no current
-        model needs it.
+        placeholder. PIG's physical finalizer uses the restored fields and
+        does not consume that argument. An adapter needing the prior forecast
+        must use the resident cycle instead.
         """
 
         placeholder_forecast = np.empty(0, dtype=np.float64)
@@ -583,12 +582,13 @@ def run_native_store_streaming_analysis_cycle(
         raise ValueError("ensemble slots disagree on local observation batch count")
 
     number_of_members = int(icesee_kwargs.get("Nens", 1))
-    pool.forecast_streaming(
-        timestep, adapter, topology=topology, icesee_kwargs=icesee_kwargs
-    )
+    _collective_native_call(topology, lambda: pool.forecast_streaming(
+        timestep, adapter, topology=topology, icesee_kwargs=icesee_kwargs), "forecast")
 
-    products = StochasticAnalysisProducts.zeros(number_of_members)
+    products = StochasticAnalysisProducts.zeros(number_of_members,
+        gain_formulation=resolve_gain_formulation(icesee_kwargs))
     batches = iter(observation_batches)
+    product_error = None
     for batch_index in range(number_of_batches):
         try:
             batch = next(batches)
@@ -618,12 +618,11 @@ def run_native_store_streaming_analysis_cycle(
             ensemble_comm=topology.ensemble_comm,
         )
         if topology.is_ensemble_root:
-            products.add_chunk(
-                forecast_matrix,
-                batch.values,
-                error_mode=error_mode,
-                observation_errors=error_matrix,
-            )
+            try:
+                products.add_chunk(forecast_matrix, batch.values, error_mode=error_mode,
+                    observation_errors=error_matrix, observation_variances=batch.observation_variances)
+            except Exception as exc:
+                product_error = f"{type(exc).__name__}: {exc}"
 
     try:
         next(batches)
@@ -634,13 +633,17 @@ def run_native_store_streaming_analysis_cycle(
 
     if topology.is_ensemble_root:
         global_products = products.reduced(topology.spatial_comm)
-        refusal = collapsed_spread_message(
+        product_errors = [error for error in topology.spatial_comm.allgather(product_error) if error]
+        refusal = "; ".join(product_errors) or collapsed_spread_message(
             global_products,
             relative_tolerance=icesee_kwargs.get("analysis_min_relative_spread", 1e-8),
         )
-        transform = None if refusal else ensemble_transform_from_products(
-            global_products, energy_fraction=energy_fraction
-        )
+        transform = None
+        if not refusal:
+            try:
+                transform = ensemble_transform_from_products(global_products, energy_fraction=energy_fraction)
+            except Exception as exc:
+                refusal = f"{type(exc).__name__}: {exc}"
         observation_rows = int(global_products.observation_rows)
     else:
         refusal = None
@@ -675,9 +678,8 @@ def run_native_store_streaming_analysis_cycle(
             row_chunk_size=state_row_chunk_size,
             row_transform=row_transform,
         )
-    pool.finalize_all_from_store(
-        adapter, timestep, topology=topology, icesee_kwargs=icesee_kwargs
-    )
+    _collective_native_call(topology, lambda: pool.finalize_all_from_store(
+        adapter, timestep, topology=topology, icesee_kwargs=icesee_kwargs), "analysis finalization")
 
     local_analysis = pool.snapshot_owned()
 
@@ -688,6 +690,7 @@ def run_native_store_streaming_analysis_cycle(
             "cycle_timestep": timestep,
             "observation_rows": observation_rows,
             "error_mode": str(error_mode),
+            "gain_formulation": products.gain_formulation,
         })
         checkpoint = save_distributed_checkpoint(
             checkpoint_request.root,

@@ -1,10 +1,7 @@
-"""Bounded-memory stochastic-analysis primitives for execution mode 3.
+"""Bounded stochastic EnKF products for sampled-factor or prescribed-R gains.
 
-The routines in this module preserve ICESEE's existing stochastic EnKF
-analysis.  They change data ownership and communication only; they do not
-introduce an LETKF, EnSRF, or another filter.  A spatial rank may assemble a
-small row block across all ensemble members, but no operation reconstructs a
-complete model member.
+Both policies retain perturbed observations. Spatial ranks accumulate bounded
+observation slabs and reduce ensemble-space matrices without gathering a member.
 """
 
 from __future__ import annotations
@@ -13,6 +10,38 @@ from dataclasses import dataclass
 from typing import Any, Iterator, Mapping
 
 import numpy as np
+
+
+def resolve_gain_formulation(options):
+    """Select the stochastic gain without changing historical defaults."""
+    policy = str(options.get("enkf_gain_formulation", "sampled_factor")).lower()
+    if policy not in {"sampled_factor", "prescribed_r"}:
+        raise ValueError("enkf_gain_formulation must be sampled_factor or prescribed_r")
+    if policy == "prescribed_r":
+        if "Nens" in options and int(options["Nens"]) < 2:
+            raise ValueError("prescribed_r requires at least two members")
+        if str(options.get("enkf_observation_error_mode", "")).lower() != "stochastic_r":
+            raise ValueError("prescribed_r requires enkf_observation_error_mode=stochastic_R")
+        if options.get("local_analysis") or options.get("localization_flag"):
+            raise NotImplementedError("prescribed_r currently supports global stochastic analysis only")
+    return policy
+
+
+def prescribed_r_transform(yprime, innovations, variances):
+    """Stochastic EnKF transform for known, positive diagonal R."""
+    yprime = np.asarray(yprime, dtype=np.float64)
+    innovations = np.asarray(innovations, dtype=np.float64)
+    variances = np.asarray(variances, dtype=np.float64)
+    if (yprime.ndim != 2 or innovations.shape != yprime.shape
+            or variances.shape != (yprime.shape[0],)
+            or not np.all(np.isfinite(variances)) or np.any(variances <= 0)
+            or not np.all(np.isfinite(yprime)) or not np.all(np.isfinite(innovations))):
+        raise ValueError("invalid prescribed-R observation terms")
+    products = StochasticAnalysisProducts.zeros(yprime.shape[1], gain_formulation="prescribed_r")
+    white = yprime / np.sqrt(variances)[:, None]
+    products.gram[:] = white.T @ white
+    products.rhs[:] = white.T @ (innovations / np.sqrt(variances)[:, None])
+    return ensemble_transform_from_products(products)
 
 
 @dataclass(frozen=True)
@@ -274,13 +303,19 @@ class StochasticAnalysisProducts:
     # see collapsed_spread_message.
     max_abs_anomaly: float = 0.0
     max_abs_forecast: float = 0.0
+    gain_formulation: str = "sampled_factor"
 
     @classmethod
-    def zeros(cls, number_of_members: int) -> "StochasticAnalysisProducts":
+    def zeros(cls, number_of_members: int, *, gain_formulation="sampled_factor") -> "StochasticAnalysisProducts":
         shape = (int(number_of_members), int(number_of_members))
         if shape[0] <= 0:
             raise ValueError("number_of_members must be positive")
-        return cls(*(np.zeros(shape, dtype=np.float64) for _ in range(3)))
+        if gain_formulation not in {"sampled_factor", "prescribed_r"}:
+            raise ValueError("enkf_gain_formulation must be sampled_factor or prescribed_r")
+        if gain_formulation == "prescribed_r" and shape[0] < 2:
+            raise ValueError("prescribed_r requires at least two members")
+        return cls(*(np.zeros(shape, dtype=np.float64) for _ in range(3)),
+                   gain_formulation=gain_formulation)
 
     def add_chunk(
         self,
@@ -289,6 +324,7 @@ class StochasticAnalysisProducts:
         *,
         error_mode: str,
         observation_errors: np.ndarray | None = None,
+        observation_variances: np.ndarray | None = None,
     ) -> None:
         """Accumulate one observation-row chunk using current ICESEE modes."""
 
@@ -318,15 +354,31 @@ class StochasticAnalysisProducts:
         if forecast.size:
             self.max_abs_anomaly = max(self.max_abs_anomaly, float(np.abs(yprime).max()))
             self.max_abs_forecast = max(self.max_abs_forecast, float(np.abs(forecast).max()))
-        factor = yprime + eta
-        self.cross += yprime.T @ factor
-        self.gram += factor.T @ factor
-        self.rhs += factor.T @ innovations
+        if self.gain_formulation == "prescribed_r":
+            if mode != "stochastic_r":
+                raise ValueError("prescribed_r requires stochastic_R and diagonal observation variances")
+            variances = np.asarray(observation_variances, dtype=np.float64)
+            if (variances.shape != observed.shape or not np.all(np.isfinite(variances))
+                    or np.any(variances <= 0)):
+                raise ValueError("prescribed_r requires finite positive variances for every observation")
+            if not (np.all(np.isfinite(forecast)) and np.all(np.isfinite(innovations))):
+                raise ValueError("non-finite stochastic analysis inputs")
+            whitened = yprime / np.sqrt(variances)[:, None]
+            self.gram += whitened.T @ whitened
+            self.rhs += whitened.T @ (innovations / np.sqrt(variances)[:, None])
+        else:
+            factor = yprime + eta
+            self.cross += yprime.T @ factor
+            self.gram += factor.T @ factor
+            self.rhs += factor.T @ innovations
         self.observation_rows += observed.size
 
     def reduced(self, communicator: Any) -> "StochasticAnalysisProducts":
         """Sum products over observation owners with fixed memory use."""
 
+        policies = communicator.allgather(self.gain_formulation)
+        if any(policy != self.gain_formulation for policy in policies):
+            raise ValueError("observation owners disagree on gain formulation")
         reduced_arrays = []
         for local in (self.cross, self.gram, self.rhs):
             target = np.empty_like(local)
@@ -341,6 +393,7 @@ class StochasticAnalysisProducts:
             observation_rows=sum(int(value) for value in row_counts),
             max_abs_anomaly=max(value[0] for value in extremes),
             max_abs_forecast=max(value[1] for value in extremes),
+            gain_formulation=self.gain_formulation,
         )
 
 
@@ -379,13 +432,26 @@ def ensemble_transform_from_products(
     *,
     energy_fraction: float = 0.999,
 ) -> np.ndarray:
-    """Compute ICESEE's existing stochastic transform from streamed products."""
+    """Compute the selected stochastic transform from streamed products."""
 
     cross = np.asarray(products.cross, dtype=np.float64)
     gram = np.asarray(products.gram, dtype=np.float64)
     rhs = np.asarray(products.rhs, dtype=np.float64)
     if cross.shape != gram.shape or gram.shape != rhs.shape:
         raise ValueError("analysis products must have identical square shapes")
+    if products.gain_formulation == "prescribed_r":
+        # Woodbury form of K(D-HX), with perturbed observations in rhs.
+        # Only Nens x Nens matrices are factored, regardless of observation count.
+        n = gram.shape[0]
+        if n < 2 or not (np.all(np.isfinite(gram)) and np.all(np.isfinite(rhs))):
+            raise ValueError("invalid prescribed-R analysis products")
+        center = np.eye(n) - np.ones((n, n)) / n
+        gram = center @ (0.5 * (gram + gram.T)) @ center
+        correction = np.linalg.solve((n - 1) * np.eye(n) + gram, center @ rhs)
+        transform = np.eye(n) + center @ correction
+        if not np.all(np.isfinite(transform)):
+            raise FloatingPointError("non-finite prescribed-R transform")
+        return transform
     gram = 0.5 * (gram + gram.T)
     values, vectors = np.linalg.eigh(gram)
     order = np.argsort(values)[::-1]
